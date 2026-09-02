@@ -1,5 +1,6 @@
 """Standalone control plane: read-only monitoring plus process health."""
 from __future__ import annotations
+import ast
 import hashlib
 import hmac
 import json
@@ -8,6 +9,7 @@ import re
 import subprocess
 import sys
 import time
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +20,8 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from pydantic import BaseModel, Field
@@ -42,7 +45,7 @@ from r20_gateway.publisher import DB_PATH as GATEWAY_DB_PATH
 from r20_gateway.plugins import plugin_statuses
 from r20_gateway import __version__ as GATEWAY_VERSION
 from r20_gateway.scheduler import scheduler_snapshot
-from r20_gateway.secrets import delete_secrets, save_secrets, status as secret_store_status
+from r20_gateway.secrets import save_secrets, status as secret_store_status
 from r20_gateway.store import GatewayStore
 from r20_gateway.supervisor import start_supervisor as start_gateway_supervisor, stop_supervisor as stop_gateway_supervisor
 from scripts.instrument_pool import from_okx_instrument, load_instruments, save_instruments
@@ -61,9 +64,12 @@ REQUEST_SESSION: ContextVar[str] = ContextVar("r20_admin_session", default="")
 async def lifespan(_: FastAPI):
     refresh_settings()
     admin_auth.initialize_from_legacy(settings.admin_token or settings.setup_token)
-    start_gateway_supervisor()
+    embedded_gateway = os.getenv("R20_GATEWAY_MODE", "embedded").strip().lower() == "embedded"
+    if embedded_gateway:
+        start_gateway_supervisor()
     yield
-    stop_gateway_supervisor()
+    if embedded_gateway:
+        stop_gateway_supervisor()
 
 
 app = FastAPI(title="R20 Quantum Trader Standalone Backend", version="6.0.0-preview", lifespan=lifespan)
@@ -80,7 +86,9 @@ async def admin_session_context(request: Request, call_next):
 
 okx = OKXClient()
 admin_auth = AdminAuthStore()
-ADMIN_HTML = ROOT / "r20_backend" / "admin.html"
+LEGACY_DASHBOARD_HTML = ROOT / "dashboard" / "templates" / "index.html"
+FRONTEND_DIST = ROOT / "r20_frontend" / "dist"
+FRONTEND_INDEX = FRONTEND_DIST / "index.html"
 
 
 class AdminLoginRequest(BaseModel):
@@ -299,6 +307,19 @@ def require_superadmin(x_r20_session: str | None = None) -> dict[str, Any]:
     return user
 
 
+@lru_cache(maxsize=8)
+def read_literal_string_constant(path: Path, constant_name: str) -> str:
+    """Read a top-level string constant without importing platform-specific script modules."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in tree.body:
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target] if isinstance(node, ast.AnnAssign) else []
+        if any(isinstance(target, ast.Name) and target.id == constant_name for target in targets):
+            value = ast.literal_eval(node.value)
+            if isinstance(value, str):
+                return value
+    raise RuntimeError(f"Prompt constant {constant_name} not found in {path.name}")
+
+
 def read_json(filename: str, default: Any) -> Any:
     path = DATA_DIR / filename
     try:
@@ -376,6 +397,19 @@ def git(command: list[str]) -> str:
 
 
 def update_status() -> dict[str, Any]:
+    deployment_mode = os.getenv("R20_DEPLOYMENT_MODE", "local").strip().lower()
+    if deployment_mode == "docker" or not (ROOT / ".git").exists():
+        return {
+            "deployment_mode": "docker",
+            "branch": "container-image",
+            "local": os.getenv("R20_BUILD_REVISION", "local-build"),
+            "remote": "",
+            "behind": 0,
+            "ahead": 0,
+            "dirty": False,
+            "managed_by": "docker-compose",
+            "update_hint": "docker compose build --pull && docker compose up -d",
+        }
     try:
         local = git(["rev-parse", "--short", "HEAD"])
         branch = git(["branch", "--show-current"])
@@ -394,9 +428,22 @@ def update_status() -> dict[str, Any]:
 
 
 
+def vue_index(fallback: Path | None = None) -> FileResponse:
+    if FRONTEND_INDEX.exists():
+        return FileResponse(FRONTEND_INDEX)
+    if fallback is not None:
+        return FileResponse(fallback)
+    raise HTTPException(status_code=503, detail="Vue 管理后台尚未构建，请运行 cd r20_frontend && npm run build")
+
+
 @app.get("/admin", include_in_schema=False)
 def admin_page() -> FileResponse:
-    return FileResponse(ADMIN_HTML)
+    return vue_index()
+
+
+@app.get("/admin/legacy", include_in_schema=False)
+def legacy_admin_page() -> RedirectResponse:
+    return RedirectResponse(url="/admin", status_code=307)
 
 
 @app.get("/api/v1/admin/auth/status")
@@ -735,9 +782,15 @@ def admin_about(x_r20_admin_token: str | None = Header(default=None)) -> dict[st
         "components": [
             {"name": "FastAPI Control Plane", "version": "6.0.0-preview"},
             {"name": "Gateway Event Runtime", "version": GATEWAY_VERSION},
+            {"name": "Tencent iLink Protocol", "version": "2.4.8"},
             {"name": "SQLite", "version": __import__("sqlite3").sqlite_version},
         ],
-        "repository": {"url": "https://github.com/555cute/r20-quantum-trader", "branch": git(["branch", "--show-current"]), "commit": git(["rev-parse", "--short", "HEAD"])},
+        "repository": {
+            "url": "https://github.com/555cute/r20-quantum-trader",
+            "branch": update_status().get("branch", ""),
+            "commit": update_status().get("local", ""),
+            "deployment_mode": update_status().get("deployment_mode", "local"),
+        },
         "update": update_status(),
         "security": {"authentication": "PBKDF2-SHA256 + server-side sessions", "session_hours": 12, "plugin_policy": "builtin-only", "prompt_transport": "python-direct"},
     }
@@ -757,6 +810,8 @@ def update_application(payload: UpdateRequest, x_r20_admin_token: str | None = H
     if payload.confirmation.strip().upper() != "UPDATE R20":
         raise HTTPException(status_code=400, detail="确认短语必须精确为：UPDATE R20")
     status_before = update_status()
+    if status_before.get("deployment_mode") == "docker":
+        raise HTTPException(status_code=409, detail="Docker 部署不支持容器内 git pull；请在宿主机执行 docker compose build --pull && docker compose up -d")
     if status_before.get("error"):
         raise HTTPException(status_code=502, detail=status_before["error"])
     if status_before["dirty"]:
@@ -783,35 +838,35 @@ def update_application(payload: UpdateRequest, x_r20_admin_token: str | None = H
 def prompt_library(x_r20_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
     refresh_settings()
     require_admin_header(x_r20_admin_token)
-    from scripts.ai_brain_trader import SYSTEM_PROMPT
-    from scripts.self_improvement_engine import EVOLUTION_SYSTEM_PROMPT
+    system_prompt = read_literal_string_constant(SCRIPTS_DIR / "ai_brain_trader.py", "SYSTEM_PROMPT")
+    evolution_system_prompt = read_literal_string_constant(SCRIPTS_DIR / "self_improvement_engine.py", "EVOLUTION_SYSTEM_PROMPT")
     library = load_library()
     profile = active_profile()
     return {
         "active_style": library["active_style"],
         "active_profile_id": library["active_profile_id"],
         "profiles": [{**item, "pipeline_views": {
-            "trading_system": pipeline_view(SYSTEM_PROMPT, item, "trading_system"),
+            "trading_system": pipeline_view(system_prompt, item, "trading_system"),
             "trading_user": pipeline_view(TRADING_USER_TEMPLATE, item, "trading_user"),
-            "evolution_system": pipeline_view(EVOLUTION_SYSTEM_PROMPT, item, "evolution_system"),
+            "evolution_system": pipeline_view(evolution_system_prompt, item, "evolution_system"),
             "evolution_user": pipeline_view(EVOLUTION_USER_TEMPLATE, item, "evolution_user"),
         }} for item in all_profiles()],
         "base_templates": {
-            "trading_system": SYSTEM_PROMPT,
+            "trading_system": system_prompt,
             "trading_user": TRADING_USER_TEMPLATE,
-            "evolution_system": EVOLUTION_SYSTEM_PROMPT,
+            "evolution_system": evolution_system_prompt,
             "evolution_user": EVOLUTION_USER_TEMPLATE,
         },
         "pipelines": {
-            "trading_system": pipeline_view(SYSTEM_PROMPT, profile, "trading_system"),
+            "trading_system": pipeline_view(system_prompt, profile, "trading_system"),
             "trading_user": pipeline_view(TRADING_USER_TEMPLATE, profile, "trading_user"),
-            "evolution_system": pipeline_view(EVOLUTION_SYSTEM_PROMPT, profile, "evolution_system"),
+            "evolution_system": pipeline_view(evolution_system_prompt, profile, "evolution_system"),
             "evolution_user": pipeline_view(EVOLUTION_USER_TEMPLATE, profile, "evolution_user"),
         },
         "effective_templates": {
-            "trading_system": apply_module_layout(SYSTEM_PROMPT, profile, "trading_system", "交易 System"),
+            "trading_system": apply_module_layout(system_prompt, profile, "trading_system", "交易 System"),
             "trading_user": apply_module_layout(TRADING_USER_TEMPLATE, profile, "trading_user", "交易 User"),
-            "evolution_system": apply_module_layout(EVOLUTION_SYSTEM_PROMPT, profile, "evolution_system", "自进化 System"),
+            "evolution_system": apply_module_layout(evolution_system_prompt, profile, "evolution_system", "自进化 System"),
             "evolution_user": apply_module_layout(EVOLUTION_USER_TEMPLATE, profile, "evolution_user", "自进化 User"),
         },
         "snapshots": rendered_snapshots(),
@@ -919,13 +974,13 @@ def import_prompt_profile_api(payload: PromptImportRequest, x_r20_session: str |
 def prompt_override(x_r20_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
     refresh_settings()
     require_admin_header(x_r20_admin_token)
-    from scripts.ai_brain_trader import SYSTEM_PROMPT
+    system_prompt = read_literal_string_constant(SCRIPTS_DIR / "ai_brain_trader.py", "SYSTEM_PROMPT")
     content = PROMPT_OVERRIDE_FILE.read_text(encoding="utf-8") if PROMPT_OVERRIDE_FILE.exists() else ""
-    effective = SYSTEM_PROMPT if not content.strip() else f"{SYSTEM_PROMPT}\n\n【管理员提示词覆盖层（同样必须遵守上述风控和 JSON 约束）】\n{content.strip()}"
+    effective = system_prompt if not content.strip() else f"{system_prompt}\n\n【管理员提示词覆盖层（同样必须遵守上述风控和 JSON 约束）】\n{content.strip()}"
     return {
         "content": content,
         "enabled": bool(content.strip()),
-        "base_prompt": SYSTEM_PROMPT,
+        "base_prompt": system_prompt,
         "effective_prompt": effective,
         "path": str(PROMPT_OVERRIDE_FILE),
     }
@@ -1372,9 +1427,24 @@ def positions(x_r20_admin_token: str | None = Header(default=None)) -> dict[str,
         raise HTTPException(status_code=502, detail=f"OKX account request failed: {exc}") from exc
 
 
-# Preserve the existing public dashboard and its relative-path API contract at /.
-# Admin and /api/v1 routes above are evaluated before this catch-all mount.
+# Serve the Vue production bundle while preserving the legacy dashboard API contract.
+if (FRONTEND_DIST / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="vue-assets")
+
+
+@app.get("/", include_in_schema=False)
+def vue_root() -> FileResponse:
+    return vue_index()
+
+
+@app.get("/terminal", include_in_schema=False)
+@app.get("/terminal/{page}", include_in_schema=False)
+def vue_terminal(page: str = "trading") -> FileResponse:
+    return vue_index()
+
+
 from dashboard.app import app as dashboard_app
+app.mount("/legacy", dashboard_app)
 app.mount("/", dashboard_app)
 
 

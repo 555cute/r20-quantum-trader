@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
+from r20_backend.env_path import configured_env_file
 
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWED_ENVIRONMENTS = {"demo", "live"}
@@ -12,7 +13,7 @@ ALLOWED_ENVIRONMENTS = {"demo", "live"}
 
 def _load_dotenv() -> dict[str, str]:
     values: dict[str, str] = {}
-    path = ROOT / ".env"
+    path = configured_env_file(ROOT)
     if path.exists():
         for line in path.read_text(encoding="utf-8").splitlines():
             line = line.strip()

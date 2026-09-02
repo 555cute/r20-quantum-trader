@@ -66,6 +66,12 @@ backups/
 *.tar.gz
 *.zip
 *.pid
+
+# Vue frontend build workspace
+r20_frontend/node_modules/
+r20_frontend/.vite/
+r20_frontend/*.tsbuildinfo
+docker/config/.env
 *_TODO.md
 R20_V600_PREVIEW_TODO.md
 .github_device_pending.json

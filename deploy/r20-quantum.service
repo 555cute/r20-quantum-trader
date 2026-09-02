@@ -7,6 +7,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/opt/r20-quantum-trader
 EnvironmentFile=/opt/r20-quantum-trader/.env
+Environment=R20_GATEWAY_MODE=external
 ExecStart=/usr/bin/env python3 -m uvicorn r20_backend.app:app --host 0.0.0.0 --port 8080
 Restart=always
 RestartSec=5

@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 import os
 from pathlib import Path
+from r20_backend.env_path import configured_env_file
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -14,6 +15,9 @@ def load_encrypted_secrets() -> None:
         pass
 
 
+RUNTIME_OVERRIDE_KEYS = {"R20_ENV_FILE", "R20_DEPLOYMENT_MODE", "R20_BUILD_REVISION", "R20_GATEWAY_MODE"}
+
+
 def load_dotenv(path: Path) -> None:
     if not path.exists():
         return
@@ -22,10 +26,13 @@ def load_dotenv(path: Path) -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        os.environ[key.strip()] = value.strip().strip('"').strip("'")
+        normalized_key = key.strip()
+        if normalized_key in RUNTIME_OVERRIDE_KEYS and normalized_key in os.environ:
+            continue
+        os.environ[normalized_key] = value.strip().strip('"').strip("'")
 
 
-load_dotenv(ROOT / ".env")
+load_dotenv(configured_env_file(ROOT))
 load_encrypted_secrets()
 
 
@@ -53,7 +60,7 @@ class Settings:
 
 
 def refresh_settings() -> Settings:
-    load_dotenv(ROOT / ".env")
+    load_dotenv(configured_env_file(ROOT))
     load_encrypted_secrets()
     settings.host = os.getenv("DASHBOARD_HOST", "0.0.0.0")
     settings.port = int(os.getenv("DASHBOARD_PORT", "8080"))

@@ -148,7 +148,18 @@ R20_MANUAL_CLOSE_ENABLED=0
 
 首次部署推荐只配置 LLM 与 OKX DEMO。通知、提示词方案、灾备位置和管理员账号可在 `/admin` 中继续完成。
 
-### 3. 启动控制面
+### 3. 构建 Vue 前端
+
+```bash
+cd r20_frontend
+npm install
+npm run build
+cd ..
+```
+
+开发模式可运行 `npm run dev`，Vite 会将 `/api` 请求代理到本地 FastAPI。正式运行时无需 Node.js 常驻，FastAPI 会直接托管 `r20_frontend/dist`。
+
+### 4. 启动控制面
 
 ```bash
 source .venv/bin/activate
@@ -161,21 +172,150 @@ python3 -m uvicorn r20_backend.app:app --host 0.0.0.0 --port 8080
 - 管理后台：`http://127.0.0.1:8080/admin`
 - 健康检查：`http://127.0.0.1:8080/api/v1/health`
 
-### 4. 启动唯一 Gateway Worker
+### 5. Gateway 运行模式
 
-另开终端：
+默认配置 `R20_GATEWAY_MODE=embedded`：启动 FastAPI 后端时会自动监督并启动唯一的 `r20_gateway.worker`，**本地开发无需再开第二个终端**。
+
+只有 systemd 等需要独立进程管理的环境才使用：
+
+```dotenv
+R20_GATEWAY_MODE=external
+```
+
+随后分别启动：
 
 ```bash
-source .venv/bin/activate
+python3 -m uvicorn r20_backend.app:app --host 0.0.0.0 --port 8080
 python3 -m r20_gateway.worker
 ```
 
 生产环境可使用：
 
-- [`deploy/r20-quantum.service`](deploy/r20-quantum.service)
+- [`deploy/r20-quantum.service`](deploy/r20-quantum.service)（已固定为 external）
 - [`deploy/r20-gateway.service`](deploy/r20-gateway.service)
 
-完整迁移与 systemd 操作见 [`STANDALONE.md`](STANDALONE.md)。
+不要同时启动 embedded Gateway、独立 Gateway、旧 QwenPaw Cron 或 `r20_backend.scheduler`，否则会产生重复调度竞争。完整迁移与 systemd 操作见 [`STANDALONE.md`](STANDALONE.md)。
+
+## Docker Compose 部署
+
+项目提供多阶段 [`Dockerfile`](Dockerfile) 和 [`compose.yaml`](compose.yaml)：Node 构建阶段编译 Vue 前端，最终镜像只保留 Python/FastAPI 运行环境。容器内使用 embedded Gateway，因此只需要一个应用服务。
+
+### 1. 准备持久化配置
+
+Linux / macOS：
+
+```bash
+mkdir -p docker/config
+cp env.example docker/config/.env
+chmod 600 docker/config/.env
+```
+
+Windows PowerShell：
+
+```powershell
+New-Item -ItemType Directory -Force docker/config
+Copy-Item env.example docker/config/.env
+```
+
+至少检查以下配置：
+
+```dotenv
+R20_OKX_ENV=demo
+R20_SETUP_TOKEN=replace_with_a_long_random_setup_token
+R20_MANUAL_CLOSE_ENABLED=0
+```
+
+若 `R20_SETUP_TOKEN` 仍为空或为模板值，容器首次启动时会自动生成随机 Token。查看生成结果：
+
+```bash
+docker compose exec r20 sh -lc "grep '^R20_SETUP_TOKEN=' /app/config/.env"
+```
+
+### 2. 构建并启动
+
+```bash
+docker compose up -d --build
+```
+
+自定义宿主机端口：
+
+```bash
+R20_HTTP_PORT=18080 docker compose up -d --build
+```
+
+PowerShell：
+
+```powershell
+$env:R20_HTTP_PORT = "18080"
+docker compose up -d --build
+```
+
+默认访问地址：
+
+- 交易终端：`http://127.0.0.1:8080/terminal/trading`
+- 管理后台：`http://127.0.0.1:8080/admin`
+- 健康检查：`http://127.0.0.1:8080/api/v1/health`
+
+### 3. 查看状态与日志
+
+```bash
+docker compose ps
+docker compose logs -f r20
+docker compose exec r20 python scripts/verify_frontend_contracts.py
+```
+
+### 4. 持久化目录
+
+| 容器目录 | Compose 存储 | 内容 |
+|---|---|---|
+| `/app/config` | `./docker/config` | 可由管理后台原子更新的 `.env` |
+| `/app/data` | `r20_data` | 管理员、Gateway、台账与策略数据库 |
+| `/app/logs` | `r20_logs` | 后端、Gateway 与交易日志 |
+| `/app/backups` | `r20_backups` | 本地灾备归档 |
+
+备份命名卷：
+
+```bash
+docker run --rm -v r20-quantum-trader_r20_data:/data -v "$PWD":/backup alpine tar czf /backup/r20-data.tar.gz -C /data .
+```
+
+### 5. 更新镜像
+
+Docker 部署不会在容器内部执行 `git pull`。更新代码后，在宿主机执行：
+
+```bash
+git pull --ff-only
+docker compose build --pull
+docker compose up -d
+```
+
+停止服务但保留数据：
+
+```bash
+docker compose down
+```
+
+删除服务和全部命名卷（会永久删除本地数据库与日志）：
+
+```bash
+docker compose down -v
+```
+
+## 前后端接口契约检查
+
+Vue 前端实际使用的 API、FastAPI 路由、管理配置字段和 SPA 深链接可以通过以下命令统一检查：
+
+```bash
+python scripts/verify_frontend_contracts.py
+```
+
+检查范围包括：
+
+- `/api/all` 终端聚合数据；
+- 管理员登录、退出和 Session；
+- 总览、Gateway、Agent、插件、配置、审计、标的、通知、灾备和更新状态；
+- `PUT /api/v1/admin/config` 请求字段；
+- `/terminal/*`、`/admin` 和 Vue 构建产物。
 
 ## 配置原则
 

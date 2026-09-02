@@ -4,7 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>R20 Quantum Trader | Institutional Terminal</title>
-    <meta name="theme-color" content="#080B10">
+    <meta name="theme-color" content="#080B10" id="theme-color-meta">
+    <script>
+        (() => {
+            let savedTheme = null;
+            try { savedTheme = localStorage.getItem('r20-theme'); } catch (error) {}
+            const systemPrefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+            document.documentElement.dataset.theme = savedTheme || (systemPrefersLight ? 'light' : 'dark');
+        })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
@@ -48,14 +56,35 @@
     </script>
     <style>
         :root {
+            color-scheme: dark;
             --term-bg: #080B10;
             --term-surface: #0E121B;
+            --term-subtle: #0A0D14;
+            --term-hover: #141A26;
             --term-border: #1A2232;
+            --term-border-soft: #161D2B;
             --term-text: #EAECEF;
             --term-muted: #707E94;
             --term-profit: #0ECB81;
             --term-loss: #F6465D;
             --term-brand: #3875F6;
+            --term-chart-grid: rgba(255, 255, 255, 0.04);
+        }
+
+        html[data-theme="light"] {
+            color-scheme: light;
+            --term-bg: #F3F6FA;
+            --term-surface: #FFFFFF;
+            --term-subtle: #F8FAFC;
+            --term-hover: #EEF2F7;
+            --term-border: #D8E0EB;
+            --term-border-soft: #E5EAF1;
+            --term-text: #172033;
+            --term-muted: #64748B;
+            --term-profit: #07875A;
+            --term-loss: #D9364E;
+            --term-brand: #2563EB;
+            --term-chart-grid: rgba(15, 23, 42, 0.08);
         }
 
         * {
@@ -63,12 +92,13 @@
         }
 
         body {
-            background-color: #080B10;
-            color: #EAECEF;
+            background-color: var(--term-bg);
+            color: var(--term-text);
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
             min-height: 100vh;
+            transition: background-color 0.2s ease, color 0.2s ease;
         }
 
         .font-mono, td.font-mono, span.font-mono, div.font-mono {
@@ -78,18 +108,18 @@
         }
 
         .terminal-panel {
-            background: #0E121B;
-            border: 1px solid #1A2232;
+            background: var(--term-surface);
+            border: 1px solid var(--term-border);
             border-radius: 12px;
             transition: border-color 0.15s ease, background-color 0.15s ease;
         }
         .terminal-panel:hover {
-            border-color: #26334D;
+            border-color: color-mix(in srgb, var(--term-brand) 45%, var(--term-border));
         }
 
         .terminal-subpanel {
-            background: #0A0D14;
-            border: 1px solid #161D2B;
+            background: var(--term-subtle);
+            border: 1px solid var(--term-border-soft);
             border-radius: 8px;
         }
 
@@ -101,18 +131,18 @@
             background: transparent;
         }
         .custom-scrollbar::-webkit-scrollbar-thumb {
-            background: #1E293B;
+            background: var(--term-border);
             border-radius: 4px;
         }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-            background: #334155;
+            background: var(--term-muted);
         }
 
         /* Nav Pills (High-End Segmented) */
         .tab-btn-active {
-            background: #1C2436 !important;
-            color: #FFFFFF !important;
-            border: 1px solid #3875F6 !important;
+            background: color-mix(in srgb, var(--term-brand) 12%, var(--term-surface)) !important;
+            color: var(--term-text) !important;
+            border: 1px solid var(--term-brand) !important;
             font-weight: 700 !important;
         }
 
@@ -132,30 +162,76 @@
             width: 100%;
         }
         table thead th {
-            color: #707E94;
+            color: var(--term-muted);
             font-size: 11px;
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.04em;
             padding: 10px 14px;
-            border-bottom: 1px solid #1A2232;
-            background: #0B0F17;
+            border-bottom: 1px solid var(--term-border);
+            background: var(--term-subtle);
         }
         table tbody td {
             padding: 11px 14px;
-            border-bottom: 1px solid #141B26;
+            border-bottom: 1px solid var(--term-border-soft);
             font-size: 12px;
         }
         table tbody tr {
             transition: background-color 0.12s ease;
         }
         table tbody tr:hover {
-            background-color: #121824;
+            background-color: var(--term-hover);
         }
 
         /* Mobile Bottom Nav */
         .mobile-nav-active {
             color: #3875F6 !important;
+        }
+
+
+        /* Light theme compatibility for the existing Tailwind utility palette. */
+        html[data-theme="light"] body,
+        html[data-theme="light"] [class~="bg-[#080B10]"],
+        html[data-theme="light"] [class~="bg-[#080B10]/95"] { background-color: var(--term-bg) !important; }
+
+        html[data-theme="light"] [class~="bg-[#0E121B]"],
+        html[data-theme="light"] [class~="bg-[#101522]"] { background-color: var(--term-surface) !important; }
+
+        html[data-theme="light"] [class~="bg-[#0A0D14]"],
+        html[data-theme="light"] [class~="bg-[#090C12]"],
+        html[data-theme="light"] [class~="bg-[#0B0F17]"],
+        html[data-theme="light"] [class~="bg-[#0D111A]"],
+        html[data-theme="light"] [class~="bg-[#06080C]"] { background-color: var(--term-subtle) !important; }
+
+        html[data-theme="light"] [class~="bg-[#141B26]"],
+        html[data-theme="light"] [class~="bg-[#141A26]"],
+        html[data-theme="light"] [class~="bg-[#1C2436]"] { background-color: var(--term-hover) !important; }
+
+        html[data-theme="light"] [class~="text-white"],
+        html[data-theme="light"] [class~="text-[#EAECEF]"] { color: var(--term-text) !important; }
+        html[data-theme="light"] [class~="text-[#707E94]"],
+        html[data-theme="light"] [class~="text-[#475569]"] { color: var(--term-muted) !important; }
+
+        html[data-theme="light"] [class~="border-[#1A2232]"],
+        html[data-theme="light"] [class~="border-[#161D2B]"],
+        html[data-theme="light"] [class~="border-[#141B26]"] { border-color: var(--term-border) !important; }
+        html[data-theme="light"] [class~="divide-[#1A2232]"] > :not([hidden]) ~ :not([hidden]) { border-color: var(--term-border) !important; }
+
+        html[data-theme="light"] [class~="bg-blue-600"][class~="text-white"],
+        html[data-theme="light"] [class~="bg-blue-500"][class~="text-white"] { color: #FFFFFF !important; }
+
+        .theme-icon-moon,
+        html[data-theme="light"] .theme-icon-sun { display: none; }
+        .theme-icon-sun,
+        html[data-theme="light"] .theme-icon-moon { display: block; }
+
+        .data-status-dot { box-shadow: 0 0 0 3px rgba(14, 203, 129, 0.12); }
+        .data-status-dot.status-offline { background: var(--term-loss) !important; box-shadow: 0 0 0 3px rgba(246, 70, 93, 0.12); animation: none; }
+        .data-status-dot.status-partial,
+        .data-status-dot.status-stale { background: #F0B90B !important; box-shadow: 0 0 0 3px rgba(240, 185, 11, 0.12); }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
         }
     </style>
 </head>
@@ -176,7 +252,7 @@
                     <div>
                         <div class="flex items-center space-x-2">
                             <span class="font-extrabold text-sm sm:text-base tracking-tight text-white font-mono">R20 QUANTUM</span>
-                            <span class="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-[#141B26] text-[#707E94] border border-[#1A2232]">PROD</span>
+                            <span id="environment-badge" class="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-[#141B26] text-[#707E94] border border-[#1A2232]">DEMO</span>
                         </div>
                     </div>
                 </div>
@@ -184,13 +260,13 @@
                 <!-- Live Engine Telemetry Ping -->
                 <div class="hidden xl:flex items-center space-x-3 text-[11px] font-mono text-[#707E94] border-l border-[#1A2232] pl-3.5">
                     <div class="flex items-center space-x-1.5">
-                        <span class="w-2 h-2 rounded-full bg-[#0ECB81] live-ping"></span>
-                        <span class="text-[#EAECEF] font-semibold">OKX V5 API</span>
+                        <span id="engine-status-dot" class="data-status-dot w-2 h-2 rounded-full bg-[#0ECB81] live-ping"></span>
+                        <span id="engine-status-text" class="text-[#EAECEF] font-semibold">数据连接中</span>
                     </div>
                     <span>•</span>
-                    <div>LATENCY <strong class="text-[#0ECB81]">14ms</strong></div>
+                    <div>LATENCY <strong id="engine-latency" class="text-[#0ECB81]">--</strong></div>
                     <span>•</span>
-                    <div>POLL <strong class="text-[#3875F6]">15M CO-T</strong></div>
+                    <div>POLL <strong id="engine-poll" class="text-[#3875F6]">4S UI</strong></div>
                 </div>
             </div>
 
@@ -220,12 +296,17 @@
 
             <!-- Right: Community Modal & Release Version -->
             <div class="flex items-center space-x-2.5 shrink-0">
-                <button onclick="openAboutModal()" class="px-3 py-1.5 rounded-lg bg-[#0E121B] border border-[#1A2232] hover:border-[#3875F6] hover:bg-[#141A26] text-white text-xs font-semibold flex items-center space-x-2 transition group" title="点击查看项目介绍、GitHub开源与社区交流群">
+                <button type="button" id="theme-toggle" onclick="toggleTheme()" class="h-8 px-2.5 rounded-lg bg-[#0E121B] border border-[#1A2232] hover:border-[#3875F6] hover:bg-[#141A26] text-white text-xs font-semibold inline-flex items-center gap-1.5 transition" title="切换亮色/暗色主题" aria-label="切换亮色/暗色主题" aria-pressed="false">
+                    <i data-lucide="sun" class="theme-icon-sun w-3.5 h-3.5"></i>
+                    <i data-lucide="moon" class="theme-icon-moon w-3.5 h-3.5"></i>
+                    <span id="theme-toggle-label" class="hidden xl:inline">亮色</span>
+                </button>
+                <button type="button" onclick="openAboutModal()" class="w-8 h-8 sm:w-auto sm:h-auto sm:px-3 sm:py-1.5 rounded-lg bg-[#0E121B] border border-[#1A2232] hover:border-[#3875F6] hover:bg-[#141A26] text-white text-xs font-semibold flex items-center justify-center sm:justify-start sm:space-x-2 transition group" title="点击查看项目介绍、GitHub开源与社区交流群" aria-label="开源与交流">
                     <svg class="w-3.5 h-3.5 text-white fill-current shrink-0 group-hover:text-blue-400 transition" viewBox="0 0 24 24">
                         <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
                     </svg>
-                    <span class="text-xs font-mono font-bold tracking-wide">开源与交流</span>
-                    <span class="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20">v6.0.0 Preview</span>
+                    <span class="hidden sm:inline text-xs font-mono font-bold tracking-wide">开源与交流</span>
+                    <span class="hidden sm:inline px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20">v6.0.0 Preview</span>
                 </button>
             </div>
         </div>
@@ -1010,7 +1091,85 @@
         let allTrades = [];
         let rawJsonData = null;
         let equityChartInstance = null;
+        let lastChartSignature = '';
+        let refreshTimer = null;
+        let isLoadingData = false;
+        const REFRESH_INTERVAL_MS = 4000;
         window.latestAiPromptText = "";
+
+        function getActiveTheme() {
+            return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+        }
+
+        function getThemePalette() {
+            const light = getActiveTheme() === 'light';
+            return {
+                text: light ? '#172033' : '#EAECEF',
+                muted: light ? '#64748B' : '#707E94',
+                surface: light ? '#FFFFFF' : '#0E121B',
+                border: light ? '#D8E0EB' : '#1A2232',
+                grid: light ? 'rgba(15, 23, 42, 0.08)' : 'rgba(255, 255, 255, 0.04)',
+                profit: light ? '#07875A' : '#0ECB81',
+                loss: light ? '#D9364E' : '#F6465D'
+            };
+        }
+
+        function applyTheme(theme, persist = true) {
+            const nextTheme = theme === 'light' ? 'light' : 'dark';
+            document.documentElement.dataset.theme = nextTheme;
+            if (persist) {
+                try { localStorage.setItem('r20-theme', nextTheme); } catch (error) {}
+            }
+
+            const meta = document.getElementById('theme-color-meta');
+            if (meta) meta.setAttribute('content', nextTheme === 'light' ? '#F3F6FA' : '#080B10');
+
+            const toggle = document.getElementById('theme-toggle');
+            const label = document.getElementById('theme-toggle-label');
+            if (toggle) {
+                toggle.setAttribute('aria-pressed', String(nextTheme === 'light'));
+                toggle.setAttribute('title', nextTheme === 'light' ? '切换到暗色主题' : '切换到亮色主题');
+            }
+            if (label) label.textContent = nextTheme === 'light' ? '暗色' : '亮色';
+
+            lastChartSignature = '';
+            if (rawJsonData) renderChart(rawJsonData.snapshots || []);
+            if (window.lucide) lucide.createIcons();
+        }
+
+        window.toggleTheme = function() {
+            applyTheme(getActiveTheme() === 'light' ? 'dark' : 'light');
+        };
+
+        function renderDataHealth(health = {}, latencyMs = null) {
+            let status = String(health.status || 'OFFLINE').toUpperCase();
+            const hasAccountSnapshot = Object.keys(rawJsonData?.account || {}).length > 0;
+            if (status === 'STALE' && !hasAccountSnapshot) status = 'OFFLINE';
+            const dot = document.getElementById('engine-status-dot');
+            const text = document.getElementById('engine-status-text');
+            const latency = document.getElementById('engine-latency');
+            const labels = { LIVE: 'OKX V5 在线', PARTIAL: '数据部分可用', STALE: '数据已延迟', OFFLINE: '数据离线' };
+
+            if (dot) {
+                dot.classList.remove('status-offline', 'status-partial', 'status-stale');
+                if (status !== 'LIVE') dot.classList.add(`status-${status.toLowerCase()}`);
+                dot.classList.toggle('live-ping', status === 'LIVE');
+            }
+            if (text) text.textContent = labels[status] || status;
+            if (latency) {
+                latency.textContent = Number.isFinite(latencyMs) ? `${Math.round(latencyMs)}ms` : '--';
+                latency.className = status === 'LIVE' ? 'text-[#0ECB81]' : (status === 'OFFLINE' ? 'text-[#F6465D]' : 'text-[#F0B90B]');
+            }
+        }
+
+        function scheduleNextRefresh(delay = REFRESH_INTERVAL_MS) {
+            clearTimeout(refreshTimer);
+            if (document.hidden) return;
+            refreshTimer = setTimeout(async () => {
+                await loadAllData();
+                scheduleNextRefresh();
+            }, delay);
+        }
 
         function escapeHtml(value) {
             if (value === null || value === undefined) return '';
@@ -1025,6 +1184,22 @@
         function escapeDataForHtml(value) {
             if (value === null || value === undefined) return '';
             return escapeHtml(String(value));
+        }
+
+        function setSafeHtml(element, html) {
+            if (!element) return;
+            const template = document.createElement('template');
+            template.innerHTML = String(html || '');
+            template.content.querySelectorAll('script, style, iframe, object, embed, link, meta, form, input, button, textarea, select, option, img, video, audio, source').forEach(node => node.remove());
+            template.content.querySelectorAll('*').forEach(node => {
+                Array.from(node.attributes).forEach(attribute => {
+                    const name = attribute.name.toLowerCase();
+                    if (name.startsWith('on') || ['src', 'srcdoc', 'href', 'xlink:href', 'formaction', 'style'].includes(name)) {
+                        node.removeAttribute(attribute.name);
+                    }
+                });
+            });
+            element.replaceChildren(template.content.cloneNode(true));
         }
 
         function safeExternalUrl(value) {
@@ -1192,11 +1367,15 @@
         };
 
         async function loadAllData() {
+            if (isLoadingData) return;
+            isLoadingData = true;
+            const startedAt = performance.now();
             try {
-                const res = await fetch('/api/all?t=' + Date.now());
+                const res = await fetch('/api/all?t=' + Date.now(), { cache: 'no-store' });
                 if (!res.ok) throw new Error('API HTTP ' + res.status);
                 const data = await res.json();
                 rawJsonData = data;
+                renderDataHealth(data.data_health || {}, performance.now() - startedAt);
 
                 // 1. Account Summary
                 const acc = data.account || {};
@@ -1304,7 +1483,9 @@
 
             } catch (err) {
                 console.error('Failed to load terminal data:', err);
+                renderDataHealth({ status: 'OFFLINE' }, performance.now() - startedAt);
             } finally {
+                isLoadingData = false;
                 if (window.lucide) lucide.createIcons();
             }
         }
@@ -1406,8 +1587,8 @@
                 `;
             });
 
-            if (tbody) tbody.innerHTML = desktopHtml;
-            if (mobileList) mobileList.innerHTML = mobileHtml;
+            setSafeHtml(tbody, desktopHtml);
+            setSafeHtml(mobileList, mobileHtml);
         }
 
         // Render Pending Orders
@@ -1475,8 +1656,8 @@
                 `;
             });
 
-            if (tbody) tbody.innerHTML = desktopHtml;
-            if (mobileList) mobileList.innerHTML = mobileHtml;
+            setSafeHtml(tbody, desktopHtml);
+            setSafeHtml(mobileList, mobileHtml);
         }
 
         // Render Factors Matrix (Decision Grid)
@@ -1562,7 +1743,7 @@
                 const isFatTail = pTh.is_fat_tail || false;
 
                 html += `
-                    <div onclick="openCoinFactorModal('${instName}')" class="terminal-panel p-3.5 hover:border-[#3875F6] cursor-pointer transition flex flex-col justify-between space-y-2.5">
+                    <div data-factor-coin="${escapeDataForHtml(instName)}" role="button" tabindex="0" class="terminal-panel p-3.5 hover:border-[#3875F6] cursor-pointer transition flex flex-col justify-between space-y-2.5">
                         <!-- Top Bar: Asset & Price -->
                         <div class="flex items-center justify-between">
                             <div class="flex items-center space-x-1.5 font-mono">
@@ -1653,7 +1834,7 @@
                     </div>
                 `;
             });
-            grid.innerHTML = html;
+            setSafeHtml(grid, html);
         }
 
         // Render AI Brain History
@@ -1709,7 +1890,7 @@
                     </div>
                 `;
             });
-            container.innerHTML = html;
+            setSafeHtml(container, html);
         }
 
         // Render News Intelligence
@@ -1738,7 +1919,7 @@
                         const badgeClass = isBull ? 'bg-[#0ECB81]/10 text-[#0ECB81] border-[#0ECB81]/30' : (isBear ? 'bg-[#F6465D]/10 text-[#F6465D] border-[#F6465D]/30' : 'bg-[#141B26] text-[#707E94] border-[#1A2232]');
 
                         html += `
-                            <div onclick="openCoinSentimentModal('${c.ccy}')" class="p-2.5 rounded-lg bg-[#080B10] border border-[#161D2B] hover:border-blue-500 cursor-pointer transition flex flex-col justify-between font-mono">
+                            <div data-sentiment-coin="${escapeDataForHtml(c.ccy)}" role="button" tabindex="0" class="p-2.5 rounded-lg bg-[#080B10] border border-[#161D2B] hover:border-blue-500 cursor-pointer transition flex flex-col justify-between font-mono">
                                 <div class="flex items-center justify-between">
                                     <span class="font-bold text-white text-xs">${c.ccy}</span>
                                     <span class="text-[9px] px-1.5 py-0.2 rounded font-bold border ${badgeClass}">${score > 0 ? '+' : ''}${score.toFixed(2)}</span>
@@ -1750,7 +1931,7 @@
                             </div>
                         `;
                     });
-                    coinsGrid.innerHTML = html;
+                    setSafeHtml(coinsGrid, html);
                 }
             }
 
@@ -1765,7 +1946,7 @@
                         const platforms = (n.platforms && n.platforms.length > 0) ? n.platforms.join('·') : 'OKX Feed';
                         const nTime = n.time || timeStr || '--';
                         html += `
-                            <div onclick="openNewsDetailModal(${idx})" class="p-2.5 rounded-lg bg-[#080B10] border border-[#161D2B] hover:border-blue-500 cursor-pointer transition flex flex-col space-y-1">
+                            <div data-news-index="${idx}" role="button" tabindex="0" class="p-2.5 rounded-lg bg-[#080B10] border border-[#161D2B] hover:border-blue-500 cursor-pointer transition flex flex-col space-y-1">
                                 <div class="flex items-center justify-between text-[10px] font-mono">
                                     <span class="text-blue-400 font-semibold">${nTime}</span>
                                     <span class="text-[#707E94]">${platforms}</span>
@@ -1775,7 +1956,7 @@
                             </div>
                         `;
                     });
-                    newsContainer.innerHTML = html;
+                    setSafeHtml(newsContainer, html);
                 }
             }
         }
@@ -1808,7 +1989,7 @@
                             </div>
                         `;
                     });
-                    insContainer.innerHTML = html;
+                    setSafeHtml(insContainer, html);
                 }
             }
         }
@@ -1841,7 +2022,7 @@
                     </tr>
                 `;
             });
-            tbody.innerHTML = html;
+            setSafeHtml(tbody, html);
         }
 
         let currentTradeFilter = 'all';
@@ -1952,7 +2133,7 @@
                     </tr>
                 `;
             });
-            tbody.innerHTML = html;
+            setSafeHtml(tbody, html);
         }
 
         // Render Logs
@@ -1963,7 +2144,7 @@
                 container.innerHTML = '<p class="text-[#707E94]">暂无巡检日志</p>';
                 return;
             }
-            container.innerHTML = logs.map(l => {
+            const logsHtml = logs.map(l => {
                 let colorClass = 'text-[#EAECEF]';
                 if (l.includes('🟢 开多') || l.includes('🎯 移动止盈') || l.includes('买多')) {
                     colorClass = 'text-[#0ECB81]';
@@ -1974,8 +2155,9 @@
                 } else if (l.includes('⚡ R20')) {
                     colorClass = 'text-blue-300 font-semibold';
                 }
-                return `<p class="leading-relaxed text-[11px] ${colorClass}">${l}</p>`;
+                return `<p class="leading-relaxed text-[11px] ${colorClass}">${escapeHtml(l)}</p>`;
             }).join('');
+            setSafeHtml(container, logsHtml);
             container.scrollTop = container.scrollHeight;
         }
 
@@ -2236,6 +2418,7 @@
 
         function setChartMode(mode) {
             currentChartMode = mode;
+            lastChartSignature = '';
             ['equity', 'trades'].forEach(m => {
                 const btn = document.getElementById(`chart-mode-${m}`);
                 if (btn) {
@@ -2257,9 +2440,18 @@
             if (!ctx) return;
 
             const acc = rawJsonData?.account || {};
-            const initialCapital = Number(acc.initial_capital || 4061.04);
+            const configuredCapital = Number(acc.initial_capital);
+            const initialCapital = Number.isFinite(configuredCapital) && configuredCapital > 0 ? configuredCapital : 10000;
             const closedTrades = (allTrades || []).filter(t => t.status !== 'holding');
             const points = (snapshots && snapshots.length > 0) ? snapshots : [];
+            const palette = getThemePalette();
+            const chartSignature = JSON.stringify({
+                mode: currentChartMode,
+                theme: getActiveTheme(),
+                initialCapital,
+                points,
+                closedTrades
+            });
 
             // 1. Calculate peak and max drawdown for HUD stats
             const allEq = points.length > 0 ? points.map(p => Number(p.total_eq || p.equity || initialCapital)) : [initialCapital];
@@ -2278,6 +2470,9 @@
             const statMaxDdEl = document.getElementById('chart-stat-maxdd');
             if (statMaxDdEl) statMaxDdEl.innerText = `-${maxDdPct.toFixed(2)}%`;
 
+            if (chartSignature === lastChartSignature && equityChartInstance) return;
+            lastChartSignature = chartSignature;
+
             if (equityChartInstance) {
                 equityChartInstance.destroy();
                 equityChartInstance = null;
@@ -2289,7 +2484,7 @@
             if (currentChartMode === 'equity') {
                 // Ensure we have data to plot
                 const displayPoints = points.length > 0 ? points : [
-                    { time: '2026-08-31 06:57:38', total_eq: initialCapital }
+                    { time: new Date().toLocaleString('zh-CN', { hour12: false }), total_eq: initialCapital }
                 ];
 
                 const labels = displayPoints.map(p => {
@@ -2324,9 +2519,9 @@
                                 yAxisID: 'y'
                             },
                             {
-                                label: '初始本金基准 (4061.04 U)',
+                                label: `初始本金基准 (${initialCapital.toFixed(2)} U)`,
                                 data: baselineValues,
-                                borderColor: '#707E94',
+                                borderColor: palette.muted,
                                 borderWidth: 1.2,
                                 borderDash: [4, 4],
                                 fill: false,
@@ -2344,8 +2539,8 @@
                         plugins: {
                             legend: { display: false },
                             tooltip: {
-                                backgroundColor: '#0E121B',
-                                borderColor: '#1A2232',
+                                backgroundColor: palette.surface,
+                                borderColor: palette.border,
                                 borderWidth: 1,
                                 padding: 10,
                                 titleFont: { size: 11, family: 'JetBrains Mono' },
@@ -2365,13 +2560,13 @@
                         },
                         scales: {
                             x: {
-                                grid: { color: 'rgba(255, 255, 255, 0.02)' },
-                                ticks: { font: { size: 10, family: 'JetBrains Mono' }, color: '#707E94', maxTicksLimit: 6 }
+                                grid: { color: palette.grid },
+                                ticks: { font: { size: 10, family: 'JetBrains Mono' }, color: palette.muted, maxTicksLimit: 6 }
                             },
                             y: {
                                 min: yMin,
                                 max: yMax,
-                                grid: { color: 'rgba(255, 255, 255, 0.03)' },
+                                grid: { color: palette.grid },
                                 ticks: {
                                     font: { size: 10, family: 'JetBrains Mono' },
                                     color: '#0ECB81',
@@ -2389,11 +2584,11 @@
                 const sortedTrades = [...closedTrades].reverse();
                 if (sortedTrades.length === 0) {
                     sortedTrades.push({
-                        inst: 'BTC',
-                        close_time: '2026-08-31 06:57:38',
+                        inst: '暂无交易',
+                        close_time: '',
                         pnl: 0,
                         roi_pct: 0,
-                        strategy: '初始基准'
+                        strategy: '等待已平仓交易数据'
                     });
                 }
 
@@ -2428,8 +2623,8 @@
                         plugins: {
                             legend: { display: false },
                             tooltip: {
-                                backgroundColor: '#0E121B',
-                                borderColor: '#1A2232',
+                                backgroundColor: palette.surface,
+                                borderColor: palette.border,
                                 borderWidth: 1,
                                 padding: 10,
                                 titleFont: { size: 11, family: 'JetBrains Mono' },
@@ -2448,13 +2643,13 @@
                         scales: {
                             x: {
                                 grid: { display: false },
-                                ticks: { font: { size: 10, family: 'JetBrains Mono' }, color: '#707E94', maxTicksLimit: 6 }
+                                ticks: { font: { size: 10, family: 'JetBrains Mono' }, color: palette.muted, maxTicksLimit: 6 }
                             },
                             y: {
-                                grid: { color: 'rgba(255, 255, 255, 0.03)' },
+                                grid: { color: palette.grid },
                                 ticks: {
                                     font: { size: 10, family: 'JetBrains Mono' },
-                                    color: '#707E94',
+                                    color: palette.muted,
                                     callback: value => (value >= 0 ? '+' : '') + value.toFixed(0) + ' U'
                                 }
                             }
@@ -2464,12 +2659,50 @@
             }
         }
 
-        if (window.lucide) lucide.createIcons();
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async () => {
+            applyTheme(getActiveTheme(), false);
             if (window.lucide) lucide.createIcons();
+            await loadAllData();
+            scheduleNextRefresh();
         });
-        loadAllData();
-        setInterval(loadAllData, 4000);
+
+        function handleDynamicCardActivation(target) {
+            const factorCard = target.closest('[data-factor-coin]');
+            if (factorCard) return openCoinFactorModal(factorCard.dataset.factorCoin);
+
+            const sentimentCard = target.closest('[data-sentiment-coin]');
+            if (sentimentCard) return openCoinSentimentModal(sentimentCard.dataset.sentimentCoin);
+
+            const newsCard = target.closest('[data-news-index]');
+            if (newsCard) return openNewsDetailModal(Number(newsCard.dataset.newsIndex));
+        }
+
+        document.addEventListener('click', event => handleDynamicCardActivation(event.target));
+        document.addEventListener('keydown', event => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            if (!event.target.closest('[data-factor-coin], [data-sentiment-coin], [data-news-index]')) return;
+            event.preventDefault();
+            handleDynamicCardActivation(event.target);
+        });
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                clearTimeout(refreshTimer);
+            } else {
+                loadAllData().finally(() => scheduleNextRefresh());
+            }
+        });
+
+        document.addEventListener('keydown', event => {
+            if (event.key !== 'Escape') return;
+            ['prompt-modal', 'about-modal', 'coin-factor-modal', 'coin-sentiment-modal', 'news-detail-modal'].forEach(id => {
+                const modal = document.getElementById(id);
+                if (modal && !modal.classList.contains('hidden')) {
+                    modal.classList.add('hidden');
+                    modal.style.display = 'none';
+                }
+            });
+        });
     </script>
 </body>
 </html>

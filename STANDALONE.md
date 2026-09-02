@@ -32,7 +32,15 @@ Terminal 1:
 python -m uvicorn r20_backend.app:app --host 0.0.0.0 --port 8080
 ```
 
-Terminal 2:
+默认 `.env` 使用 `R20_GATEWAY_MODE=embedded`，后端会自动监督并启动唯一 Gateway Worker，因此本地运行不需要第二个终端。
+
+只有使用 systemd 独立管理 Gateway 时才设置：
+
+```dotenv
+R20_GATEWAY_MODE=external
+```
+
+并在第二个终端运行：
 
 ```sh
 . .venv/bin/activate
@@ -51,13 +59,25 @@ No HTTP trade-trigger endpoint is exposed except the separately enabled, confirm
 
 ## QwenPaw Container Coexistence
 
-When `www.r20.cn` is already reverse-proxied into a QwenPaw container, keep QwenPaw on its existing port and let the R20 standalone gateway own port `8080`. `r20_backend.app` mounts the existing dashboard at `/`, while `/admin` and `/api/v1/*` remain R20-native routes. This preserves the hostname, reverse-proxy rules, dashboard paths, QwenPaw process, and QwenPaw backup layout.
+When `www.r20.cn` is already reverse-proxied into a QwenPaw container, keep QwenPaw on its existing port and let the R20 standalone backend own port `8080`. `r20_backend.app` serves the compiled Vue application from `r20_frontend/dist`, while `/api/all` and `/api/v1/*` remain R20-native API routes. This preserves the hostname and reverse-proxy rules while providing real `/terminal/*` and `/admin` routes.
 
 Add the `[program:r20-backend]` block from the container supervisor configuration and restart the container during a maintenance window so supervisord adopts it. Do not run the legacy `dashboard.app` Uvicorn process at the same time as `r20_backend.app`.
 
+## Docker Compose
+
+Docker 部署使用项目根目录的 `Dockerfile` 与 `compose.yaml`。配置文件持久化在 `docker/config/.env`，数据库、日志和备份分别使用命名卷。Docker 模式使用 embedded Gateway，不要额外启动 `r20_gateway.worker` 或旧 scheduler。
+
+```sh
+mkdir -p docker/config
+cp env.example docker/config/.env
+docker compose up -d --build
+```
+
+详细端口、卷、更新和备份命令见 [README.md](README.md#docker-compose-部署)。
+
 ## systemd
 
-Copy `deploy/r20-quantum.service` and `deploy/r20-gateway.service` to `/etc/systemd/system/`, update `WorkingDirectory` and `EnvironmentFile`, then:
+Copy `deploy/r20-quantum.service` and `deploy/r20-gateway.service` to `/etc/systemd/system/`, update `WorkingDirectory` and `EnvironmentFile`, then. `r20-quantum.service` 已设置 `R20_GATEWAY_MODE=external`，避免后端 embedded supervisor 与独立 Gateway 服务重复启动：
 
 ```sh
 sudo systemctl daemon-reload
