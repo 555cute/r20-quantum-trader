@@ -43,10 +43,10 @@ function getActionLabel(action?: string) {
 </script>
 
 <template>
-  <div class="space-y-3">
+  <div class="space-y-2.5">
     <!-- Macro Summary Telemetry Strip -->
     <div
-      class="rounded-xl border p-3 sm:p-3.5 flex items-start space-x-2.5 transition-colors shadow-xs"
+      class="rounded-xl border p-3 flex items-start space-x-2.5 transition-colors shadow-xs"
       style="background-color: var(--bg-card); border-color: var(--border-subtle);"
     >
       <div
@@ -83,19 +83,18 @@ function getActionLabel(action?: string) {
       </span>
     </div>
 
-    <!-- 6-Asset Quantitative Ticker Cards Grid (adaptive 1 col on mobile, 2 cols on tablet, 3 cols on desktop, 6 cols on ultra-wide) -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2.5">
+    <!-- 6-Asset Quantitative Ticker Cards Grid: 2 cols on narrow, 3 cols on tablet/desktop -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
       <div
         v-for="item in store.factors"
         :key="item.instId"
         @click="openDetail(item)"
-        class="rounded-xl border p-3.5 transition-all duration-150 flex flex-col justify-between cursor-pointer group shadow-xs"
+        class="rounded-xl border p-2.5 transition-all duration-150 flex flex-col justify-between cursor-pointer group shadow-xs hover:border-[var(--border-medium)] hover:bg-[var(--bg-card-hover)]"
         style="background-color: var(--bg-card); border-color: var(--border-subtle);"
-        :class="'hover:border-[var(--border-medium)] hover:bg-[var(--bg-card-hover)]'"
       >
         <!-- Top: Header Info -->
         <div>
-          <div class="flex items-center justify-between pb-2 border-b" style="border-color: var(--border-subtle);">
+          <div class="flex items-center justify-between pb-1.5 border-b" style="border-color: var(--border-subtle);">
             <div class="flex items-center space-x-1.5">
               <span class="font-mono font-black text-sm tracking-wide" style="color: var(--text-main);">
                 {{ item.name }}
@@ -121,7 +120,7 @@ function getActionLabel(action?: string) {
 
           <!-- Calculus Telemetry Grid -->
           <div
-            class="grid grid-cols-4 gap-1 my-2 py-1.5 px-2 rounded-lg border text-[10px] font-mono"
+            class="grid grid-cols-4 gap-1 my-1.5 py-1 px-1.5 rounded-lg border text-[10px] font-mono"
             style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);"
           >
             <div>
@@ -154,17 +153,17 @@ function getActionLabel(action?: string) {
           </div>
 
           <!-- Microstructure Flow -->
-          <div class="flex items-center justify-between text-[10px] font-mono mb-2 px-0.5" style="color: var(--text-muted);">
+          <div class="flex items-center justify-between text-[10px] font-mono mb-1.5 px-0.5" style="color: var(--text-muted);">
             <span>聪明钱: <strong class="num-tabular" style="color: var(--text-main);">{{ item.smart_money?.weighted_long_pct ?? 50 }}%多</strong></span>
             <span>净流: <strong class="num-tabular" style="color: var(--text-main);">{{ item.smart_money?.net_flow_usdt ?? '0 U' }}</strong></span>
           </div>
         </div>
 
         <!-- Bottom: Decision Status & Drawer Trigger -->
-        <div class="pt-2 border-t" style="border-color: var(--border-subtle);">
+        <div class="pt-1.5 border-t" style="border-color: var(--border-subtle);">
           <div class="flex items-center justify-between">
             <span
-              class="px-2 py-0.5 rounded text-[10px] font-bold font-mono border"
+              class="px-1.5 py-0.2 rounded text-[10px] font-bold font-mono border"
               :style="getActionStyle(item.decision?.action || item.action)"
             >
               {{ getActionLabel(item.decision?.action || item.action) }}
