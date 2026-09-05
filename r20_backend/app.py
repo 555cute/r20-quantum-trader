@@ -95,9 +95,7 @@ async def lifespan(_: FastAPI):
     stop_gateway_supervisor()
 
 
-from fastapi.middleware.gzip import GZipMiddleware
 app = FastAPI(title="R20 Quantum Trader Standalone Backend", version="7.4.1", lifespan=lifespan, docs_url="/api/docs", redoc_url="/api/redoc")
-app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 from r20_backend.lab_api import router as lab_router
 app.include_router(lab_router)

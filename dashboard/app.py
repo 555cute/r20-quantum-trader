@@ -1206,15 +1206,12 @@ async def refresh_cache_if_needed(ttl_seconds: float = 3.0):
 # Auto-start background worker to keep in-memory cache pre-warmed
 start_dashboard_background_worker()
 
-# Next.js 16 Static Export is preferred if present, otherwise fallback to frontend/dist
-NEXT_DIST_DIR = os.path.join(WORKSPACE_DIR, "frontend_next", "out")
-if os.path.isdir(NEXT_DIST_DIR) and os.path.isfile(os.path.join(NEXT_DIST_DIR, "index.html")):
-    VUE_DIST_DIR = NEXT_DIST_DIR
-else:
-    VUE_DIST_DIR = os.path.join(WORKSPACE_DIR, "frontend", "dist")
+# Front-end routing: prioritize frontend/dist (tested stable Vue3 SPA), with Next.js 16 under frontend_next/
+VUE_DIST_DIR = os.path.join(WORKSPACE_DIR, "frontend", "dist")
 
 VUE_ASSETS_DIR = os.path.join(VUE_DIST_DIR, "assets")
-NEXT_ASSETS_DIR = os.path.join(VUE_DIST_DIR, "_next")
+NEXT_DIST_DIR = os.path.join(WORKSPACE_DIR, "frontend_next", "out")
+NEXT_ASSETS_DIR = os.path.join(NEXT_DIST_DIR, "_next")
 DOCS_IMAGES_DIR = os.path.join(WORKSPACE_DIR, "docs", "images")
 
 
