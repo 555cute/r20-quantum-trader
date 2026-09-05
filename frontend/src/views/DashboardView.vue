@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useDashboardStore } from '../stores/dashboard'
-import { useI18n } from '../composables/useI18n'
+import { useI18nStore } from '../stores/i18n'
 import HeaderBar from '../components/HeaderBar.vue'
 import TopHudRibbon from '../components/TopHudRibbon.vue'
 import LiveTradingViewChart from '../components/LiveTradingViewChart.vue'
@@ -26,7 +26,7 @@ import {
 const router = useRouter()
 const route = useRoute()
 const store = useDashboardStore()
-const { t } = useI18n()
+const i18n = useI18nStore()
 
 function syncTabFromRoute() {
   const metaTab = route.meta?.tab as any
@@ -47,11 +47,11 @@ onUnmounted(() => {
 })
 
 const mobileTabs = computed(() => [
-  { id: 'trading', label: '实盘', enLabel: 'Trade', icon: Terminal },
-  { id: 'factors', label: 'AI推演', enLabel: 'Radar', icon: Cpu },
-  { id: 'news', label: '舆情', enLabel: 'News', icon: Newspaper },
-  { id: 'lab', label: '实验室', enLabel: 'Labs', icon: Sparkles },
-  { id: 'history', label: '台账', enLabel: 'Ledger', icon: Receipt },
+  { id: 'trading', label: i18n.locale === 'zh' ? '操盘' : 'Desk', icon: Terminal },
+  { id: 'factors', label: i18n.locale === 'zh' ? '决策' : 'Brain', icon: Cpu },
+  { id: 'news', label: i18n.locale === 'zh' ? '全息' : 'Intel', icon: Newspaper },
+  { id: 'lab', label: i18n.locale === 'zh' ? '实验' : 'Labs', icon: Sparkles },
+  { id: 'history', label: i18n.locale === 'zh' ? '台账' : 'Ledger', icon: Receipt },
 ])
 </script>
 
@@ -68,57 +68,59 @@ const mobileTabs = computed(() => [
 
     <!-- Main Professional Workstation Container -->
     <main class="flex-1 w-full px-2 lg:px-4 pt-2 pb-20 md:pb-6 space-y-2.5">
+      <!-- 统一顶部四大指标卡 -->
+      <TopHudRibbon />
+
       <!-- ================================================================= -->
-      <!-- TAB 1: MASTER TERMINAL (机构级全景交易终端) -->
+      <!-- TAB 1: 综合操盘 (Master Desk) - 70/30 黄金分割专注实盘执行 -->
       <!-- ================================================================= -->
       <div v-show="store.activeTab === 'trading'" class="space-y-2.5">
-        <!-- 1. Top HUD Ribbon (4 Metric Bento Blocks in 1 uniform row) -->
-        <TopHudRibbon />
-
-        <!-- 2. Dual-Wing Integrated Workstation Grid -->
         <div class="grid grid-cols-1 xl:grid-cols-12 gap-2.5 items-start">
-          <!-- Left Wing: Live Professional Chart + Tactical Order Desk (8 Cols on Wide Screens) -->
+          <!-- Left Wing: Live Professional Chart (8 Cols) -->
           <div class="xl:col-span-8 space-y-2.5">
-            <!-- Professional TradingView Chart -->
             <LiveTradingViewChart />
-
-            <!-- Tactical Positions & Orders Workstation -->
-            <TacticalDesk />
           </div>
 
-          <!-- Right Wing: 6-Asset Dynamics Radar & Micro-Calculus (4 Cols on Wide Screens) -->
+          <!-- Right Wing: Tactical Order Desk (4 Cols) -->
           <div class="xl:col-span-4 space-y-2.5">
-            <InstrumentMatrix />
+            <TacticalDesk />
           </div>
         </div>
 
-        <!-- 3. Real-Time Telemetry & Log Console Stream -->
+        <!-- Real-Time Telemetry & Log Console Stream -->
         <LedgerLogs />
       </div>
 
       <!-- ================================================================= -->
-      <!-- TAB 2: RADAR & DYNAMICS (AI 全景推演与微积分) -->
+      <!-- TAB 2: 决策中枢 (Decision Brain) - 投委会深度辩论 + 6 币微积分动能雷达 -->
       <!-- ================================================================= -->
       <div v-show="store.activeTab === 'factors'" class="space-y-2.5">
-        <AiBrainHistory />
+        <div class="grid grid-cols-1 xl:grid-cols-12 gap-2.5 items-start">
+          <div class="xl:col-span-8 space-y-2.5">
+            <AiBrainHistory />
+          </div>
+          <div class="xl:col-span-4 space-y-2.5">
+            <InstrumentMatrix />
+          </div>
+        </div>
       </div>
 
       <!-- ================================================================= -->
-      <!-- TAB 3: NEWS & FLOWS (全网多所舆情与流动性情报) -->
+      <!-- TAB 3: 市场全息 (Market Intel) - 全网多所舆情与宏观异动流 -->
       <!-- ================================================================= -->
       <div v-show="store.activeTab === 'news'" class="space-y-2.5">
         <NewsIntelligence />
       </div>
 
       <!-- ================================================================= -->
-      <!-- TAB 4: QUANTUM LABS (v8.0 OmniMatrix 前沿试验田) -->
+      <!-- TAB 4: 量子实验室 (Quantum Labs) - 合并台账 / 跨所套利 / 本地视觉 -->
       <!-- ================================================================= -->
       <div v-show="store.activeTab === 'lab'" class="space-y-2.5">
         <SelfEvolutionLab />
       </div>
 
       <!-- ================================================================= -->
-      <!-- TAB 5: TRADING LEDGER (实盘审计台账) -->
+      <!-- TAB 5: 审计台账 (Audit Ledger) - 历史已结成交与策略快照闭环 -->
       <!-- ================================================================= -->
       <div v-show="store.activeTab === 'history'" class="space-y-2.5">
         <TradesLedger />
@@ -150,7 +152,7 @@ const mobileTabs = computed(() => [
           class="flex flex-col items-center justify-center flex-1 py-1 transition-all cursor-pointer text-slate-400 hover:text-slate-100"
         >
           <Settings class="w-4 h-4 mb-0.5 text-indigo-400" />
-          <span class="text-[10px] font-bold">后台</span>
+          <span class="text-[10px] font-bold">{{ i18n.t.adminConsole }}</span>
         </a>
       </div>
     </nav>
