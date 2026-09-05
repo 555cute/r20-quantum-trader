@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, watch } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useDashboardStore } from '../stores/dashboard'
 import { useI18nStore } from '../stores/i18n'
@@ -20,7 +20,6 @@ import {
   Newspaper,
   Sparkles,
   Receipt,
-  Settings,
 } from 'lucide-vue-next'
 
 const router = useRouter()
@@ -60,7 +59,7 @@ onUnmounted(() => {
     class="min-h-screen flex flex-col transition-colors select-none font-sans"
     style="background-color: var(--bg-app); color: var(--text-main);"
   >
-    <!-- Clean Single Unified Header Bar (Brand, Heartbeats, Language, Controls) -->
+    <!-- Clean Unified Header Bar (Brand, Heartbeats, Language, Controls, Admin Entry) -->
     <HeaderBar />
 
     <!-- Fixed Header Spacer -->
@@ -71,8 +70,8 @@ onUnmounted(() => {
       <!-- 统一顶部四大财务指标卡 -->
       <TopHudRibbon />
 
-      <!-- 主工作台核心模块切换栏 (Single Dedicated Workstation Tabs Dock) -->
-      <div class="flex items-center justify-between border-b pb-1.5 font-mono" style="border-color: var(--border-subtle);">
+      <!-- 主工作台核心模块切换栏 (桌面端独占居中工作台切换坞) -->
+      <div class="hidden md:flex items-center justify-between border-b pb-1.5 font-mono" style="border-color: var(--border-subtle);">
         <nav class="flex items-center space-x-1 sm:space-x-1.5 overflow-x-auto py-0.5">
           <button
             v-for="tab in tabs"
@@ -89,7 +88,7 @@ onUnmounted(() => {
           </button>
         </nav>
 
-        <span class="hidden md:inline text-[10px] px-2 py-0.5 rounded border text-slate-400 border-slate-700 bg-slate-800">
+        <span class="text-[10px] px-2 py-0.5 rounded border text-slate-400 border-slate-700 bg-slate-800">
           PRO QUANT TERMINAL
         </span>
       </div>
@@ -150,7 +149,7 @@ onUnmounted(() => {
       </div>
     </main>
 
-    <!-- Mobile High-Precision Bottom Docking Navigation Bar (md:hidden) -->
+    <!-- Mobile Bottom Navigation Dock (移动端专属唯一主页面切换，去除了多余的重复后台按钮) -->
     <nav
       class="md:hidden fixed inset-x-0 bottom-0 z-40 px-2 py-1.5 border-t backdrop-blur-xl transition-colors font-mono"
       style="background-color: var(--bg-header); border-color: var(--border-subtle);"
@@ -169,14 +168,6 @@ onUnmounted(() => {
           <component :is="item.icon" class="w-4 h-4 mb-0.5" />
           <span class="text-[10px] font-bold">{{ item.label }}</span>
         </button>
-
-        <a
-          href="/admin/"
-          class="flex flex-col items-center justify-center flex-1 py-1 transition-all cursor-pointer text-slate-400 hover:text-slate-100"
-        >
-          <Settings class="w-4 h-4 mb-0.5 text-indigo-400" />
-          <span class="text-[10px] font-bold">{{ i18n.t.adminConsole }}</span>
-        </a>
       </div>
     </nav>
 

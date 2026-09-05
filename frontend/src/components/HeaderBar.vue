@@ -1,25 +1,14 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useDashboardStore } from '../stores/dashboard'
 import { useTheme } from '../composables/useTheme'
 import { useI18nStore } from '../stores/i18n'
-import AboutModal from './AboutModal.vue'
 import {
   Settings,
-  BookOpen,
   Sun,
   Moon,
-  Clock,
   ShieldAlert,
   Globe,
-  Menu,
-  X,
-  ChevronRight,
-  Terminal,
-  Cpu,
-  Newspaper,
-  Sparkles,
-  Receipt,
 } from 'lucide-vue-next'
 
 const store = useDashboardStore()
@@ -28,7 +17,6 @@ const i18n = useI18nStore()
 
 const currentTimeUtc = ref('')
 const currentTimeLocal = ref('')
-const mobileDrawerOpen = ref(false)
 let timer: any = null
 
 function updateClock() {
@@ -45,19 +33,6 @@ onMounted(() => {
 onUnmounted(() => {
   if (timer) clearInterval(timer)
 })
-
-const tabs = computed(() => [
-  { id: 'trading', label: i18n.t.tabTrading, icon: Terminal },
-  { id: 'factors', label: i18n.t.tabAiBrain, icon: Cpu },
-  { id: 'news', label: i18n.t.tabMarket, icon: Newspaper },
-  { id: 'lab', label: i18n.t.tabLabs, icon: Sparkles },
-  { id: 'history', label: i18n.t.tabLedger, icon: Receipt },
-])
-
-function switchTabMobile(tabId: any) {
-  store.activeTab = tabId
-  mobileDrawerOpen.value = false
-}
 </script>
 
 <template>
@@ -66,19 +41,8 @@ function switchTabMobile(tabId: any) {
     style="background-color: var(--bg-header); border-color: var(--border-subtle); backdrop-filter: blur(16px);"
   >
     <div class="w-full flex items-center justify-between gap-3">
-      <!-- 1. Left: Brand & Venue Indicators (Clean & Compact) -->
+      <!-- Left: 纯粹品牌标识与交易所状态指示 -->
       <div class="flex items-center space-x-2.5 shrink-0">
-        <!-- Mobile Drawer Hamburger -->
-        <button
-          @click="mobileDrawerOpen = !mobileDrawerOpen"
-          class="md:hidden w-7 h-7 rounded-md border flex items-center justify-center cursor-pointer transition-colors"
-          style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-main);"
-          aria-label="Toggle Menu"
-        >
-          <Menu class="w-4 h-4 text-indigo-400" />
-        </button>
-
-        <!-- Brand Identity -->
         <div class="flex items-center space-x-2 cursor-pointer" @click="store.activeTab = 'trading'">
           <div
             class="w-6 h-6 rounded flex items-center justify-center font-mono font-black text-xs border tracking-tighter shadow-xs"
@@ -96,7 +60,7 @@ function switchTabMobile(tabId: any) {
           </div>
         </div>
 
-        <!-- Venue Pulse Status -->
+        <!-- Venue Pulse Status (Desktop Only) -->
         <div class="hidden xl:flex items-center space-x-1.5 pl-2 border-l" style="border-color: var(--border-subtle);">
           <div class="flex items-center space-x-1 px-1.5 py-0.5 rounded border text-[10px] font-mono" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
             <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
@@ -113,7 +77,7 @@ function switchTabMobile(tabId: any) {
         </div>
       </div>
 
-      <!-- 2. Right: Controls, Defense Shield, Language & Clocks -->
+      <!-- Right: 全局功能控制区（双时钟、语言、硬防线、唯一后台入口、亮暗主题） -->
       <div class="flex items-center space-x-1.5 sm:space-x-2 text-xs font-mono">
         <!-- Dual Clocks: UTC & SGT (Bloomberg style, Ultra-wide only) -->
         <div
@@ -125,7 +89,7 @@ function switchTabMobile(tabId: any) {
           <span>BJT <strong class="text-emerald-400 num-tabular">{{ currentTimeLocal }}</strong></span>
         </div>
 
-        <!-- 🌐 Global Language Switch Capsule (Pure ZH / EN) -->
+        <!-- 🌐 语言切换 (纯正双语) -->
         <button
           @click="i18n.toggleLocale"
           class="h-7 px-2.5 rounded border flex items-center space-x-1.5 cursor-pointer transition-all hover:bg-[var(--bg-card-hover)]"
@@ -136,7 +100,7 @@ function switchTabMobile(tabId: any) {
           <span class="font-bold text-[11px]">{{ i18n.locale === 'zh' ? '中 / EN' : 'EN / 中' }}</span>
         </button>
 
-        <!-- Fail-Closed Sentinel Shield -->
+        <!-- 🛡️ Fail-Closed 熔断硬防线状态徽标 -->
         <div
           class="hidden lg:flex items-center h-7 px-2.5 rounded border text-[10px] font-mono font-bold text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
           :title="i18n.t.hardDefense"
@@ -145,10 +109,10 @@ function switchTabMobile(tabId: any) {
           <span>{{ i18n.t.hardDefense }}</span>
         </div>
 
-        <!-- Admin Console Link -->
+        <!-- ⚙️ 全站唯一管理控制台入口 (桌面端显示文字，移动端为小巧图标) -->
         <a
           href="/admin/"
-          class="h-7 px-2.5 rounded border flex items-center space-x-1.5 cursor-pointer hover:bg-[var(--bg-card-hover)] transition-colors"
+          class="h-7 px-2 sm:px-2.5 rounded border flex items-center space-x-1.5 cursor-pointer hover:bg-[var(--bg-card-hover)] transition-colors"
           style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-main);"
           :title="i18n.t.adminConsole"
         >
@@ -156,7 +120,7 @@ function switchTabMobile(tabId: any) {
           <span class="hidden sm:inline font-bold">{{ i18n.t.adminConsole }}</span>
         </a>
 
-        <!-- Theme Toggle Button -->
+        <!-- ☀️/🌙 亮暗主题切换 -->
         <button
           @click="toggleTheme"
           class="w-7 h-7 rounded border flex items-center justify-center cursor-pointer hover:bg-[var(--bg-card-hover)] transition-colors"
@@ -166,98 +130,6 @@ function switchTabMobile(tabId: any) {
           <Sun v-if="theme === 'dark'" class="w-3.5 h-3.5 text-amber-400 hover:rotate-45 transition-transform" />
           <Moon v-else class="w-3.5 h-3.5 text-slate-700 hover:-rotate-12 transition-transform" />
         </button>
-      </div>
-    </div>
-
-    <!-- Mobile Drawer Overlay & Sliding Side Panel -->
-    <div
-      v-if="mobileDrawerOpen"
-      class="md:hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex"
-      @click.self="mobileDrawerOpen = false"
-    >
-      <div
-        class="w-[280px] max-w-[85vw] h-full flex flex-col justify-between border-r shadow-2xl p-4 transition-transform font-mono"
-        style="background-color: var(--bg-card); border-color: var(--border-subtle);"
-      >
-        <div class="space-y-4">
-          <!-- Drawer Header -->
-          <div class="flex items-center justify-between pb-3 border-b" style="border-color: var(--border-subtle);">
-            <div class="flex items-center space-x-2">
-              <div
-                class="w-6 h-6 rounded flex items-center justify-center font-bold text-xs border border-slate-700 bg-slate-800 text-slate-100"
-              >
-                Ω
-              </div>
-              <span class="font-bold text-xs text-slate-100">{{ i18n.t.appName }}</span>
-            </div>
-            <button @click="mobileDrawerOpen = false" class="p-1 rounded text-slate-400 hover:text-slate-100">
-              <X class="w-4 h-4" />
-            </button>
-          </div>
-
-          <!-- All Core Workstation Views -->
-          <div class="space-y-1">
-            <div class="text-[10px] text-slate-400 uppercase tracking-wider font-bold px-2 py-1">
-              {{ i18n.t.menu }}
-            </div>
-            <button
-              v-for="tab in tabs"
-              :key="tab.id"
-              @click="switchTabMobile(tab.id)"
-              class="w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer"
-              :style="store.activeTab === tab.id
-                ? { backgroundColor: 'var(--text-main)', color: 'var(--bg-app)' }
-                : { color: 'var(--text-muted)' }"
-            >
-              <div class="flex items-center space-x-2.5">
-                <component :is="tab.icon" class="w-4 h-4" />
-                <span>{{ tab.label }}</span>
-              </div>
-              <ChevronRight class="w-3.5 h-3.5 opacity-50" />
-            </button>
-          </div>
-
-          <!-- Quick Actions & Governance -->
-          <div class="space-y-1 pt-2 border-t" style="border-color: var(--border-subtle);">
-            <a
-              href="/admin/"
-              class="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs text-slate-300 hover:bg-[#1f222d] transition-colors"
-            >
-              <div class="flex items-center space-x-2.5">
-                <Settings class="w-4 h-4 text-indigo-400" />
-                <span>{{ i18n.t.adminConsole }}</span>
-              </div>
-              <ChevronRight class="w-3.5 h-3.5 opacity-50" />
-            </a>
-            <a
-              href="/docs"
-              class="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs text-slate-300 hover:bg-[#1f222d] transition-colors"
-            >
-              <div class="flex items-center space-x-2.5">
-                <BookOpen class="w-4 h-4 text-emerald-400" />
-                <span>{{ i18n.t.docs }}</span>
-              </div>
-              <ChevronRight class="w-3.5 h-3.5 opacity-50" />
-            </a>
-          </div>
-        </div>
-
-        <!-- Drawer Footer: System Status -->
-        <div class="pt-3 border-t text-[11px] space-y-2" style="border-color: var(--border-subtle); color: var(--text-faint);">
-          <div class="flex items-center justify-between">
-            <span>{{ i18n.t.switchLang }}:</span>
-            <button
-              @click="i18n.toggleLocale"
-              class="px-2 py-0.5 rounded border border-slate-700 bg-slate-800 text-slate-200 font-bold"
-            >
-              {{ i18n.locale === 'zh' ? '中文' : 'English' }}
-            </button>
-          </div>
-          <div class="flex items-center justify-between">
-            <span>{{ i18n.t.hardDefense }}:</span>
-            <span class="text-emerald-400 font-bold">{{ i18n.t.systemStatus }}</span>
-          </div>
-        </div>
       </div>
     </div>
   </header>
