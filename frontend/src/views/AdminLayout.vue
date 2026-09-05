@@ -215,15 +215,15 @@ function handleLogout() {
       </div>
     </aside>
 
-    <!-- Desktop Sidebar -->
+    <!-- Desktop Sidebar (Compact & Refined) -->
     <aside
-      class="hidden md:flex flex-col w-[210px] lg:w-[230px] shrink-0 border-r transition-colors z-30 select-none shadow-sm"
+      class="hidden md:flex flex-col w-[200px] lg:w-[220px] shrink-0 border-r transition-colors z-30 select-none shadow-sm"
       style="background-color: var(--bg-card); border-color: var(--border-subtle);"
     >
-      <div class="h-13 sm:h-14 px-4 flex items-center justify-between border-b" style="border-color: var(--border-subtle);">
-        <div class="flex items-center space-x-2.5">
+      <div class="h-12 px-3.5 flex items-center justify-between border-b" style="border-color: var(--border-subtle);">
+        <div class="flex items-center space-x-2">
           <div
-            class="w-7 h-7 rounded flex items-center justify-center font-mono font-black text-xs border"
+            class="w-6 h-6 rounded flex items-center justify-center font-mono font-black text-xs border"
             style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); color: #f8fafc; border-color: #334155;"
           >
             Ω
@@ -232,7 +232,6 @@ function handleLogout() {
             <div class="text-xs font-black tracking-wide font-mono text-slate-100">
               {{ i18n.t.adminConsole }}
             </div>
-            <span class="text-[10px] font-mono text-indigo-400 font-bold">v7.4.1 PROD</span>
           </div>
         </div>
         <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
@@ -264,7 +263,7 @@ function handleLogout() {
 
       <!-- Sidebar Footer User Profile -->
       <div
-        class="px-3 py-2.5 border-t flex items-center justify-between text-xs font-mono"
+        class="px-3 py-2 border-t flex items-center justify-between text-xs font-mono"
         style="border-color: var(--border-subtle); background-color: var(--bg-card-subtle);"
       >
         <div class="truncate">
@@ -273,7 +272,7 @@ function handleLogout() {
         </div>
         <button
           @click="handleLogout"
-          class="p-1.5 rounded hover:bg-rose-500/10 text-rose-400 transition-colors cursor-pointer"
+          class="p-1 rounded hover:bg-rose-500/10 text-rose-400 transition-colors cursor-pointer"
           :title="i18n.t.logout"
         >
           <LogOut class="w-3.5 h-3.5" />
@@ -283,11 +282,12 @@ function handleLogout() {
 
     <!-- Main Content Shell -->
     <div class="flex-1 flex flex-col min-w-0">
+      <!-- Streamlined Header (No Redundant Menus) -->
       <header
-        class="h-13 sm:h-14 border-b px-3 sm:px-6 flex items-center justify-between z-20 transition-colors shrink-0"
+        class="h-12 border-b px-3 sm:px-5 flex items-center justify-between z-20 transition-colors shrink-0"
         style="background-color: var(--bg-header); border-color: var(--border-subtle); backdrop-filter: blur(12px);"
       >
-        <div class="flex items-center space-x-2.5 text-xs font-mono">
+        <div class="flex items-center space-x-2 text-xs font-mono">
           <button
             @click="mobileDrawerOpen = !mobileDrawerOpen"
             class="md:hidden flex items-center space-x-1.5 px-2 py-1 rounded-lg border transition-all cursor-pointer shadow-xs"
@@ -298,8 +298,6 @@ function handleLogout() {
           </button>
 
           <div class="flex items-center space-x-1.5 sm:space-x-2">
-            <span style="color: var(--text-faint);" class="hidden sm:inline">{{ i18n.t.adminConsole }}</span>
-            <ChevronRight class="w-3 h-3 hidden sm:inline" style="color: var(--text-faint);" />
             <span style="color: var(--text-muted);" class="hidden sm:inline">{{ currentGroupName }}</span>
             <ChevronRight class="w-3 h-3 hidden sm:inline" style="color: var(--text-faint);" />
             <h2 class="text-xs sm:text-sm font-black font-mono uppercase tracking-wide flex items-center space-x-1.5" style="color: var(--text-main);">

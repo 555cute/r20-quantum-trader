@@ -28,6 +28,14 @@ const route = useRoute()
 const store = useDashboardStore()
 const i18n = useI18nStore()
 
+const tabs = computed(() => [
+  { id: 'trading', label: i18n.t.tabTrading, icon: Terminal },
+  { id: 'factors', label: i18n.t.tabAiBrain, icon: Cpu },
+  { id: 'news', label: i18n.t.tabMarket, icon: Newspaper },
+  { id: 'lab', label: i18n.t.tabLabs, icon: Sparkles },
+  { id: 'history', label: i18n.t.tabLedger, icon: Receipt },
+])
+
 function syncTabFromRoute() {
   const metaTab = route.meta?.tab as any
   if (metaTab && ['trading', 'factors', 'news', 'lab', 'history'].includes(metaTab)) {
@@ -45,14 +53,6 @@ onMounted(() => {
 onUnmounted(() => {
   store.stopPolling()
 })
-
-const mobileTabs = computed(() => [
-  { id: 'trading', label: i18n.locale === 'zh' ? '操盘' : 'Desk', icon: Terminal },
-  { id: 'factors', label: i18n.locale === 'zh' ? '决策' : 'Brain', icon: Cpu },
-  { id: 'news', label: i18n.locale === 'zh' ? '全息' : 'Intel', icon: Newspaper },
-  { id: 'lab', label: i18n.locale === 'zh' ? '实验' : 'Labs', icon: Sparkles },
-  { id: 'history', label: i18n.locale === 'zh' ? '台账' : 'Ledger', icon: Receipt },
-])
 </script>
 
 <template>
@@ -60,16 +60,39 @@ const mobileTabs = computed(() => [
     class="min-h-screen flex flex-col transition-colors select-none font-sans"
     style="background-color: var(--bg-app); color: var(--text-main);"
   >
-    <!-- Bloomberg/Terminal Style Unified Header Bar -->
+    <!-- Clean Single Unified Header Bar (Brand, Heartbeats, Language, Controls) -->
     <HeaderBar />
 
     <!-- Fixed Header Spacer -->
-    <div class="h-[48px] shrink-0"></div>
+    <div class="h-[46px] shrink-0"></div>
 
     <!-- Main Professional Workstation Container -->
-    <main class="flex-1 w-full px-2 lg:px-4 pt-2 pb-20 md:pb-6 space-y-2.5">
-      <!-- 统一顶部四大指标卡 -->
+    <main class="flex-1 w-full px-2 lg:px-4 pt-2.5 pb-20 md:pb-6 space-y-2.5">
+      <!-- 统一顶部四大财务指标卡 -->
       <TopHudRibbon />
+
+      <!-- 主工作台核心模块切换栏 (Single Dedicated Workstation Tabs Dock) -->
+      <div class="flex items-center justify-between border-b pb-1.5 font-mono" style="border-color: var(--border-subtle);">
+        <nav class="flex items-center space-x-1 sm:space-x-1.5 overflow-x-auto py-0.5">
+          <button
+            v-for="tab in tabs"
+            :key="tab.id"
+            @click="store.activeTab = tab.id as any"
+            class="h-8 flex items-center space-x-2 px-3.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap"
+            :style="store.activeTab === tab.id
+              ? { backgroundColor: 'var(--text-main)', color: 'var(--bg-app)', boxShadow: '0 1px 3px rgba(0,0,0,0.12)' }
+              : { color: 'var(--text-muted)' }"
+            :class="store.activeTab === tab.id ? 'font-black' : 'hover:text-[var(--text-main)] hover:bg-[var(--bg-card-hover)]'"
+          >
+            <component :is="tab.icon" class="w-3.5 h-3.5 shrink-0" />
+            <span>{{ tab.label }}</span>
+          </button>
+        </nav>
+
+        <span class="hidden md:inline text-[10px] px-2 py-0.5 rounded border text-slate-400 border-slate-700 bg-slate-800">
+          PRO QUANT TERMINAL
+        </span>
+      </div>
 
       <!-- ================================================================= -->
       <!-- TAB 1: 综合操盘 (Master Desk) - 70/30 黄金分割专注实盘执行 -->
@@ -134,7 +157,7 @@ const mobileTabs = computed(() => [
     >
       <div class="max-w-md mx-auto flex items-center justify-around">
         <button
-          v-for="item in mobileTabs"
+          v-for="item in tabs"
           :key="item.id"
           @click="store.activeTab = item.id as any"
           class="flex flex-col items-center justify-center flex-1 py-1 transition-all cursor-pointer rounded-lg"
