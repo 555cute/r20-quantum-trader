@@ -1206,8 +1206,15 @@ async def refresh_cache_if_needed(ttl_seconds: float = 3.0):
 # Auto-start background worker to keep in-memory cache pre-warmed
 start_dashboard_background_worker()
 
-VUE_DIST_DIR = os.path.join(WORKSPACE_DIR, "frontend", "dist")
+# Next.js 16 Static Export is preferred if present, otherwise fallback to frontend/dist
+NEXT_DIST_DIR = os.path.join(WORKSPACE_DIR, "frontend_next", "out")
+if os.path.isdir(NEXT_DIST_DIR) and os.path.isfile(os.path.join(NEXT_DIST_DIR, "index.html")):
+    VUE_DIST_DIR = NEXT_DIST_DIR
+else:
+    VUE_DIST_DIR = os.path.join(WORKSPACE_DIR, "frontend", "dist")
+
 VUE_ASSETS_DIR = os.path.join(VUE_DIST_DIR, "assets")
+NEXT_ASSETS_DIR = os.path.join(VUE_DIST_DIR, "_next")
 DOCS_IMAGES_DIR = os.path.join(WORKSPACE_DIR, "docs", "images")
 
 
@@ -1225,6 +1232,9 @@ class CachedStaticFiles(StaticFiles):
 
 if os.path.isdir(VUE_ASSETS_DIR):
     app.mount("/assets", CachedStaticFiles(directory=VUE_ASSETS_DIR, cache_control="public, max-age=31536000, immutable"), name="vue_assets")
+
+if os.path.isdir(NEXT_ASSETS_DIR):
+    app.mount("/_next", CachedStaticFiles(directory=NEXT_ASSETS_DIR, cache_control="public, max-age=31536000, immutable"), name="next_assets")
 
 if os.path.isdir(DOCS_IMAGES_DIR):
     app.mount("/docs/images", CachedStaticFiles(directory=DOCS_IMAGES_DIR, cache_control="public, max-age=604800, stale-while-revalidate=86400"), name="docs_images")
