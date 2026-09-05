@@ -96,7 +96,7 @@ async def lifespan(_: FastAPI):
 
 
 from fastapi.middleware.gzip import GZipMiddleware
-app = FastAPI(title="R20 Quantum Trader Standalone Backend", version="7.4.0", lifespan=lifespan, docs_url="/api/docs", redoc_url="/api/redoc")
+app = FastAPI(title="R20 Quantum Trader Standalone Backend", version="7.4.1", lifespan=lifespan, docs_url="/api/docs", redoc_url="/api/redoc")
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
@@ -556,7 +556,7 @@ def runtime_overview() -> dict[str, Any]:
     }
     positions_payload = read_json("position_trackers.json", {})
     return {
-        "service": {"version": "7.4.0", "pid": os.getpid(), "uptime_seconds": int(time.time() - STARTED_AT)},
+        "service": {"version": "7.4.1", "pid": os.getpid(), "uptime_seconds": int(time.time() - STARTED_AT)},
         "credentials": {"okx": bool(settings.okx_api_key and settings.okx_secret_key and settings.okx_passphrase), "llm": bool(settings.llm_api_key)},
         "configuration": get_admin_configuration(),
         "data_health": health_payload,
@@ -1554,10 +1554,10 @@ def admin_about(x_r20_admin_token: str | None = Header(default=None)) -> dict[st
     import platform
     store = GatewayStore(GATEWAY_DB_PATH)
     return {
-        "product": {"name": "R20 Quantum Trader", "version": "7.4.0", "control_plane": "R20 Gateway Runtime", "gateway_version": GATEWAY_VERSION},
+        "product": {"name": "R20 Quantum Trader", "version": "7.4.1", "control_plane": "R20 Gateway Runtime", "gateway_version": GATEWAY_VERSION},
         "runtime": {"python": platform.python_version(), "platform": platform.platform(), "backend_pid": os.getpid(), "gateway": gateway_status(x_r20_admin_token)},
         "components": [
-            {"name": "FastAPI Control Plane", "version": "7.4.0"},
+            {"name": "FastAPI Control Plane", "version": "7.4.1"},
             {"name": "Gateway Event Runtime", "version": GATEWAY_VERSION},
             {"name": "SQLite", "version": __import__("sqlite3").sqlite_version},
         ],
@@ -2448,7 +2448,7 @@ def update_admin_memory_all(payload: MemoryUpdateAllRequest, x_r20_admin_token: 
 def health() -> dict[str, Any]:
     return {
         "service": "r20-standalone-backend",
-        "version": "7.4.0",
+        "version": "7.4.1",
         "status": "ok",
         "timestamp": int(time.time()),
         "credentials": {

@@ -113,7 +113,7 @@ const quickNav = [
             class="px-2 py-0.2 rounded text-[10px] font-mono font-bold border"
             style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);"
           >
-            v7.4.0
+            v7.4.1
           </span>
         </div>
         <p class="text-xs font-mono mt-1" style="color: var(--text-muted);">

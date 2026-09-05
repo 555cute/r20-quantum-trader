@@ -65,7 +65,7 @@ async function copyToClipboard(text: string, targetName: string) {
                   class="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold border"
                   style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);"
                 >
-                  v7.4.0
+                  v7.4.1
                 </span>
               </h3>
             </div>

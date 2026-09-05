@@ -72,7 +72,7 @@ const tabs = [
           style="background-color: var(--bg-card-subtle); color: var(--text-muted); border-color: var(--border-subtle);"
           title="查看系统版本与开源主仓信息"
         >
-          v7.4.0
+          v7.4.1
         </button>
         <span
           class="w-1.5 h-1.5 rounded-full shrink-0"

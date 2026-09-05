@@ -190,7 +190,7 @@ function setLayout(mode: 'dual' | 'stacked') {
           class="hover:text-[var(--color-brand)] transition-colors cursor-pointer"
           title="点击查看开源仓库与项目信息"
         >
-          R20 QUANTUM TRADER v7.4.0
+          R20 QUANTUM TRADER v7.4.1
         </button>
         <span>•</span>
         <span>VUE 3 + VITE + TAILWIND CSS</span>

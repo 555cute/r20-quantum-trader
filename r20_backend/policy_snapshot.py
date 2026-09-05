@@ -27,7 +27,7 @@ DATA_DIR = ROOT / "data"
 ARCHIVE_DIR = DATA_DIR / "policy_archives"
 ARCHIVE_INDEX_FILE = ARCHIVE_DIR / "index.json"
 
-DEFAULT_BASE_VERSION = "v7.4.0"
+DEFAULT_BASE_VERSION = "v7.4.1"
 
 
 def compute_layout_hash(profile: Dict[str, Any]) -> str:
