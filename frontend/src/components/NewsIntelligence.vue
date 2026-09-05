@@ -1,58 +1,55 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useDashboardStore } from '../stores/dashboard'
-import { Newspaper, Flame, ExternalLink, ShieldAlert, Layers } from 'lucide-vue-next'
+import { useI18nStore } from '../stores/i18n'
+import {
+  Newspaper,
+  Flame,
+  ExternalLink,
+  ShieldAlert,
+  Layers,
+} from 'lucide-vue-next'
 
 const store = useDashboardStore()
-const intel = computed<any>(() => store.data?.news_intelligence || {})
-const allNewsItems = computed<any[]>(() => intel.value.latest_news || [])
-const coinsSentiment = computed<[string, any][]>(() => Object.entries(intel.value.coins_sentiment || {}))
-const macro = computed<string>(() => intel.value.macro_sentiment || '--')
-const breakerActive = computed<boolean>(() => !!intel.value.circuit_breaker?.active)
-
-// Platform Tab Filter: ALL | OKX | Binance | Gate.io
+const i18n = useI18nStore()
 const selectedPlatform = ref<'ALL' | 'OKX' | 'Binance' | 'Gate.io'>('ALL')
 
+const intel = computed(() => store.data?.news_intelligence || {})
+const allNews = computed(() => intel.value.latest_news || [])
+const coinsSentiment = computed<[string, any][]>(() => Object.entries(intel.value.coins_sentiment || {}))
+const macro = computed(() => intel.value.macro_sentiment || '--')
+const breakerActive = computed(() => !!intel.value.circuit_breaker?.active)
+
 const platformCounts = computed(() => {
-  const counts: Record<string, number> = { ALL: allNewsItems.value.length, OKX: 0, Binance: 0, 'Gate.io': 0 }
-  for (const item of allNewsItems.value) {
+  const counts: Record<string, number> = { ALL: allNews.value.length, OKX: 0, Binance: 0, 'Gate.io': 0 }
+  allNews.value.forEach((item: any) => {
     const p = item.platform || (item.platforms && item.platforms[0]) || 'OKX'
-    if (counts[p] !== undefined) {
-      counts[p]++
-    }
-  }
+    if (p.toLowerCase().includes('okx')) counts.OKX++
+    else if (p.toLowerCase().includes('binance')) counts.Binance++
+    else if (p.toLowerCase().includes('gate')) counts['Gate.io']++
+    else counts.OKX++
+  })
   return counts
 })
 
 const filteredNews = computed(() => {
-  if (selectedPlatform.value === 'ALL') {
-    return allNewsItems.value
-  }
-  return allNewsItems.value.filter(item => {
+  if (selectedPlatform.value === 'ALL') return allNews.value
+  return allNews.value.filter((item: any) => {
     const p = item.platform || (item.platforms && item.platforms[0]) || 'OKX'
     return p.toLowerCase() === selectedPlatform.value.toLowerCase()
   })
 })
 
 function labelClass(label: string) {
-  if (label === 'bullish') return 'color: var(--color-up); background-color: var(--color-up-bg); border-color: var(--color-up-border);'
-  if (label === 'bearish') return 'color: var(--color-down); background-color: var(--color-down-bg); border-color: var(--color-down-border);'
-  if (label === 'mixed') return 'color: var(--color-warn); background-color: var(--color-warn-bg); border-color: var(--color-warn-border);'
-  return 'color: var(--text-muted); background-color: var(--bg-badge); border-color: var(--border-subtle);'
+  if (label === 'bullish') return 'background-color: var(--color-up-bg); color: var(--color-up); border-color: var(--color-up-border);'
+  if (label === 'bearish') return 'background-color: var(--color-down-bg); color: var(--color-down); border-color: var(--color-down-border);'
+  return 'background-color: var(--bg-card-subtle); color: var(--text-muted); border-color: var(--border-subtle);'
 }
 
 function labelCn(label: string) {
-  return { bullish: '偏多', bearish: '偏空', mixed: '多空交织', neutral: '中性' }[label] || label || '中性'
-}
-
-function importanceClass(imp: string) {
-  if (imp === 'high' || imp === 'critical') return 'color: var(--color-down);'
-  if (imp === 'medium') return 'color: var(--color-warn);'
-  return 'color: var(--text-faint);'
-}
-
-function importanceCn(imp: string) {
-  return { critical: '重大', high: '高', medium: '中', low: '低' }[imp] || (imp || '低')
+  if (label === 'bullish') return i18n.locale === 'zh' ? '看多' : 'Bullish'
+  if (label === 'bearish') return i18n.locale === 'zh' ? '看空' : 'Bearish'
+  return i18n.locale === 'zh' ? '中性' : 'Neutral'
 }
 
 function platformBadgeStyle(platform: string) {
@@ -64,32 +61,32 @@ function platformBadgeStyle(platform: string) {
 </script>
 
 <template>
-  <div class="space-y-3.5">
+  <div class="space-y-3.5 font-mono">
     <!-- Header Banner -->
     <div
-      class="rounded-xl border p-4 sm:p-5 flex flex-wrap items-center justify-between gap-3 shadow-xs transition-colors"
+      class="rounded-xl border p-3.5 sm:p-4 flex flex-wrap items-center justify-between gap-3 shadow-xs transition-colors"
       style="background-color: var(--bg-card); border-color: var(--border-subtle);"
     >
       <div class="flex items-center space-x-3">
         <div
-          class="w-9 h-9 rounded-lg flex items-center justify-center border shrink-0"
+          class="w-8 h-8 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center border shrink-0"
           style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-main);"
         >
           <Newspaper class="w-4 h-4" />
         </div>
         <div>
-          <h2 class="text-xs sm:text-sm font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
-            全网多源重大舆情与流动性情报 (OKX / Binance / Gate)
+          <h2 class="text-xs sm:text-sm font-black uppercase tracking-wide" style="color: var(--text-main);">
+            {{ i18n.t.newsTitle }}
           </h2>
-          <p class="text-xs font-mono mt-0.5" style="color: var(--text-muted);">
-            全天候扫描 OKX 突发快讯、币安官方公告与 Gate.io 上线异动 · 更新于 {{ intel.updated_at || '--' }} (UTC+8)
+          <p class="text-[11px] sm:text-xs mt-0.5" style="color: var(--text-muted);">
+            {{ i18n.t.newsSubtitle }}
           </p>
         </div>
       </div>
 
       <div class="flex items-center space-x-2">
         <span
-          class="px-2.5 py-1 rounded-lg border text-xs font-mono font-bold"
+          class="px-2.5 py-1 rounded-lg border text-[11px] sm:text-xs font-bold"
           :style="{
             backgroundColor: breakerActive ? 'var(--color-down-bg)' : 'var(--color-up-bg)',
             borderColor: breakerActive ? 'var(--color-down-border)' : 'var(--color-up-border)',
@@ -97,41 +94,41 @@ function platformBadgeStyle(platform: string) {
           }"
         >
           <ShieldAlert class="w-3 h-3 inline mr-1" />
-          {{ breakerActive ? '黑天鹅熔断激活' : '常态监控中' }}
+          {{ breakerActive ? i18n.t.circuitBreakerActive : i18n.t.circuitBreakerNormal }}
         </span>
 
         <span
-          class="px-2.5 py-1 rounded-lg border text-xs font-mono"
+          class="px-2.5 py-1 rounded-lg border text-[11px] sm:text-xs"
           style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-muted);"
         >
-          宏观情绪: <strong style="color: var(--text-main);">{{ macro }}</strong>
+          宏观: <strong style="color: var(--text-main);">{{ macro }}</strong>
         </span>
       </div>
     </div>
 
-    <!-- Platform Filter Tabs -->
+    <!-- Platform Filter Tabs (完美适配移动端与桌面端自适应比例) -->
     <div
-      class="rounded-xl border p-2 flex flex-wrap items-center justify-between gap-2 shadow-xs transition-colors"
+      class="rounded-xl border p-1.5 sm:p-2 flex flex-wrap items-center justify-between gap-2 shadow-xs transition-colors"
       style="background-color: var(--bg-card); border-color: var(--border-subtle);"
     >
-      <div class="flex items-center gap-1.5 overflow-x-auto">
+      <div class="grid grid-cols-2 sm:flex items-center gap-1.5 w-full sm:w-auto">
         <button
           v-for="tab in (['ALL', 'OKX', 'Binance', 'Gate.io'] as const)"
           :key="tab"
           @click="selectedPlatform = tab"
-          class="px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer flex items-center gap-1.5"
+          class="px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center sm:justify-start gap-1.5"
           :style="selectedPlatform === tab
-            ? { backgroundColor: 'var(--text-main)', color: 'var(--bg-card)' }
+            ? { backgroundColor: 'var(--text-main)', color: 'var(--bg-app)' }
             : { backgroundColor: 'var(--bg-card-subtle)', color: 'var(--text-muted)' }"
         >
-          <span>{{ tab === 'ALL' ? '全平台全息' : tab }}</span>
+          <span>{{ tab === 'ALL' ? i18n.t.filterAll : tab }}</span>
           <span class="text-[10px] px-1.5 py-0.2 rounded-full border opacity-80" :style="{ borderColor: 'currentColor' }">
             {{ platformCounts[tab] || 0 }}
           </span>
         </button>
       </div>
 
-      <div class="text-[11px] font-mono px-2 text-right hidden sm:block" style="color: var(--text-faint);">
+      <div class="text-[11px] px-2 text-right hidden lg:block" style="color: var(--text-faint);">
         展示 {{ filteredNews.length }} 条 · 支持多源独立过滤
       </div>
     </div>
@@ -145,76 +142,71 @@ function platformBadgeStyle(platform: string) {
         style="background-color: var(--bg-card); border-color: var(--border-subtle);"
       >
         <div class="flex items-center justify-between mb-1.5">
-          <span class="text-xs font-black font-mono" style="color: var(--text-main);">{{ ccy }}</span>
-          <span class="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold border" :style="labelClass(s.label)">
+          <span class="text-xs font-black" style="color: var(--text-main);">{{ ccy }}</span>
+          <span class="px-1.5 py-0.2 rounded text-[10px] font-bold border" :style="labelClass(s.label)">
             {{ labelCn(s.label) }}
           </span>
         </div>
-        <div class="flex items-center justify-between text-[11px] font-mono">
+        <div class="flex items-center justify-between text-[11px]">
           <span style="color: var(--color-up);">多 {{ s.bullish_ratio || s.bullish_pct || '--' }}</span>
           <span style="color: var(--color-down);">空 {{ s.bearish_ratio || s.bearish_pct || '--' }}</span>
-        </div>
-        <div class="flex items-center justify-between text-[10px] font-mono mt-1 pt-1 border-t" style="border-color: var(--border-subtle);">
-          <span style="color: var(--text-faint);">提及 {{ (s.mentions ?? 0).toLocaleString() }}</span>
-          <span v-if="s.long_short_ratio" class="font-bold text-blue-400">比率 {{ s.long_short_ratio }}</span>
         </div>
       </div>
     </div>
 
-    <!-- News List -->
-    <div
-      v-if="filteredNews.length === 0"
-      class="py-16 text-center border border-dashed rounded-xl"
-      style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-muted);"
-    >
-      <p class="text-xs font-mono font-medium">当前平台筛选下无突发快讯或公告。</p>
+    <!-- News List / Cards -->
+    <div v-if="filteredNews.length === 0" class="py-16 text-center rounded-xl border border-dashed" style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-muted);">
+      <div class="w-10 h-10 mx-auto mb-2 rounded-xl flex items-center justify-center border" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
+        <Layers class="w-4 h-4" />
+      </div>
+      <p class="text-xs">{{ i18n.t.noNews }}</p>
     </div>
 
     <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-3">
       <div
         v-for="item in filteredNews"
         :key="item.id"
-        class="rounded-xl border p-4 transition-all shadow-xs flex flex-col justify-between"
+        class="rounded-xl border p-3.5 sm:p-4 flex flex-col justify-between space-y-3 transition-colors hover:border-[var(--border-medium)]"
         style="background-color: var(--bg-card); border-color: var(--border-subtle);"
       >
         <div>
-          <div class="flex items-start justify-between gap-2 mb-2">
-            <div class="flex items-start space-x-1.5 min-w-0">
-              <Flame class="w-4 h-4 shrink-0 mt-0.5" :style="importanceClass(item.importance)" />
-              <span class="font-bold text-xs sm:text-sm leading-snug font-sans" style="color: var(--text-main);">
+          <div class="flex items-start justify-between gap-2 mb-1.5">
+            <div class="flex items-start space-x-2 min-w-0">
+              <Flame class="w-3.5 h-3.5 shrink-0 mt-0.5" style="color: var(--color-down);" />
+              <h3 class="font-bold text-xs sm:text-sm line-clamp-2" style="color: var(--text-main);">
                 {{ item.title }}
-              </span>
+              </h3>
             </div>
-            <span class="text-[10px] font-mono shrink-0" style="color: var(--text-faint);">
+            <span class="text-[10px] shrink-0" style="color: var(--text-faint);">
               {{ item.time }}
             </span>
           </div>
 
-          <p class="text-xs leading-relaxed font-sans line-clamp-3 mb-3" style="color: var(--text-muted);">
+          <p class="text-xs line-clamp-3 leading-relaxed" style="color: var(--text-muted);">
             {{ item.summary }}
           </p>
         </div>
 
-        <div class="mt-2 pt-2.5 border-t flex items-center justify-between text-[11px] font-mono" style="border-color: var(--border-subtle); color: var(--text-muted);">
-          <div class="flex items-center gap-1.5">
-            <span class="px-2 py-0.5 rounded text-[10px] font-bold border" :style="platformBadgeStyle(item.platform)">
+        <div class="pt-2 border-t flex items-center justify-between text-[11px]" style="border-color: var(--border-subtle); color: var(--text-faint);">
+          <div class="flex items-center space-x-2">
+            <span class="px-1.5 py-0.2 rounded border font-bold text-[10px]" :style="platformBadgeStyle(item.platform)">
               {{ item.platform || 'OKX' }}
             </span>
-            <span>热度: <strong :style="importanceClass(item.importance)">{{ importanceCn(item.importance) }}</strong></span>
+            <span v-if="item.coins && item.coins.length">
+              标的: <strong style="color: var(--text-muted);">{{ item.coins.join(', ') }}</strong>
+            </span>
           </div>
-          <span class="flex items-center space-x-2">
-            <span>标的: <strong style="color: var(--text-main);">{{ (item.coins || []).join(', ') || 'ALL' }}</strong></span>
-            <a
-              v-if="item.url"
-              :href="item.url"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="flex items-center hover:underline"
-              style="color: var(--color-brand);"
-            >
-              原文<ExternalLink class="w-3 h-3 ml-0.5" />
-            </a>
-          </span>
+
+          <a
+            v-if="item.url"
+            :href="item.url"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="flex items-center space-x-1 hover:underline text-indigo-400"
+          >
+            <span>{{ i18n.t.originalLink }}</span>
+            <ExternalLink class="w-3 h-3" />
+          </a>
         </div>
       </div>
     </div>

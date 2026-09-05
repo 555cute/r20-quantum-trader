@@ -1216,22 +1216,24 @@ DOCS_IMAGES_DIR = os.path.join(WORKSPACE_DIR, "docs", "images")
 
 
 class CachedStaticFiles(StaticFiles):
-    """Custom static files handler that injects Cloudflare/browser long-term caching headers."""
-    def __init__(self, *args, cache_control: str = "public, max-age=31536000, immutable", **kwargs):
+    """Static files handler with no-cache during development to prevent browser caching old bundles."""
+    def __init__(self, *args, cache_control: str = "no-cache, no-store, must-revalidate, max-age=0", **kwargs):
         self.cache_control = cache_control
         super().__init__(*args, **kwargs)
 
     def file_response(self, *args, **kwargs) -> Response:
         resp = super().file_response(*args, **kwargs)
         resp.headers["Cache-Control"] = self.cache_control
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
         return resp
 
 
 if os.path.isdir(VUE_ASSETS_DIR):
-    app.mount("/assets", CachedStaticFiles(directory=VUE_ASSETS_DIR, cache_control="public, max-age=31536000, immutable"), name="vue_assets")
+    app.mount("/assets", CachedStaticFiles(directory=VUE_ASSETS_DIR, cache_control="no-cache, no-store, must-revalidate, max-age=0"), name="vue_assets")
 
 if os.path.isdir(NEXT_ASSETS_DIR):
-    app.mount("/_next", CachedStaticFiles(directory=NEXT_ASSETS_DIR, cache_control="public, max-age=31536000, immutable"), name="next_assets")
+    app.mount("/_next", CachedStaticFiles(directory=NEXT_ASSETS_DIR, cache_control="no-cache, no-store, must-revalidate, max-age=0"), name="next_assets")
 
 if os.path.isdir(DOCS_IMAGES_DIR):
     app.mount("/docs/images", CachedStaticFiles(directory=DOCS_IMAGES_DIR, cache_control="public, max-age=604800, stale-while-revalidate=86400"), name="docs_images")

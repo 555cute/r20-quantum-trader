@@ -59,39 +59,16 @@ onUnmounted(() => {
     class="min-h-screen flex flex-col transition-colors select-none font-sans"
     style="background-color: var(--bg-app); color: var(--text-main);"
   >
-    <!-- Clean Unified Header Bar (Brand, Heartbeats, Language, Controls, Admin Entry) -->
+    <!-- Clean Unified Header Bar (Brand, Heartbeats, Desktop Tabs Dock, Language, Controls, Admin Entry) -->
     <HeaderBar />
 
     <!-- Fixed Header Spacer -->
-    <div class="h-[46px] shrink-0"></div>
+    <div class="h-[48px] shrink-0"></div>
 
-    <!-- Main Professional Workstation Container -->
-    <main class="flex-1 w-full px-2 lg:px-4 pt-2.5 pb-20 md:pb-6 space-y-2.5">
+    <!-- Main Professional Workstation Container (去除了桌面端下方多余的Dock栏，垂直空间彻底释放) -->
+    <main class="flex-1 w-full px-2 lg:px-4 pt-2 pb-20 md:pb-6 space-y-2.5">
       <!-- 统一顶部四大财务指标卡 -->
       <TopHudRibbon />
-
-      <!-- 主工作台核心模块切换栏 (桌面端独占居中工作台切换坞) -->
-      <div class="hidden md:flex items-center justify-between border-b pb-1.5 font-mono" style="border-color: var(--border-subtle);">
-        <nav class="flex items-center space-x-1 sm:space-x-1.5 overflow-x-auto py-0.5">
-          <button
-            v-for="tab in tabs"
-            :key="tab.id"
-            @click="store.activeTab = tab.id as any"
-            class="h-8 flex items-center space-x-2 px-3.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap"
-            :style="store.activeTab === tab.id
-              ? { backgroundColor: 'var(--text-main)', color: 'var(--bg-app)', boxShadow: '0 1px 3px rgba(0,0,0,0.12)' }
-              : { color: 'var(--text-muted)' }"
-            :class="store.activeTab === tab.id ? 'font-black' : 'hover:text-[var(--text-main)] hover:bg-[var(--bg-card-hover)]'"
-          >
-            <component :is="tab.icon" class="w-3.5 h-3.5 shrink-0" />
-            <span>{{ tab.label }}</span>
-          </button>
-        </nav>
-
-        <span class="text-[10px] px-2 py-0.5 rounded border text-slate-400 border-slate-700 bg-slate-800">
-          PRO QUANT TERMINAL
-        </span>
-      </div>
 
       <!-- ================================================================= -->
       <!-- TAB 1: 综合操盘 (Master Desk) - 70/30 黄金分割专注实盘执行 -->
@@ -99,12 +76,12 @@ onUnmounted(() => {
       <div v-show="store.activeTab === 'trading'" class="space-y-2.5">
         <div class="grid grid-cols-1 xl:grid-cols-12 gap-2.5 items-start">
           <!-- Left Wing: Live Professional Chart (8 Cols) -->
-          <div class="xl:col-span-8 space-y-2.5">
+          <div class="xl:col-span-8 space-y-2.5 min-w-0">
             <LiveTradingViewChart />
           </div>
 
           <!-- Right Wing: Tactical Order Desk (4 Cols) -->
-          <div class="xl:col-span-4 space-y-2.5">
+          <div class="xl:col-span-4 space-y-2.5 min-w-0">
             <TacticalDesk />
           </div>
         </div>
@@ -118,10 +95,10 @@ onUnmounted(() => {
       <!-- ================================================================= -->
       <div v-show="store.activeTab === 'factors'" class="space-y-2.5">
         <div class="grid grid-cols-1 xl:grid-cols-12 gap-2.5 items-start">
-          <div class="xl:col-span-8 space-y-2.5">
+          <div class="xl:col-span-8 space-y-2.5 min-w-0">
             <AiBrainHistory />
           </div>
-          <div class="xl:col-span-4 space-y-2.5">
+          <div class="xl:col-span-4 space-y-2.5 min-w-0">
             <InstrumentMatrix />
           </div>
         </div>

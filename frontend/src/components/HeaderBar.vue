@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useDashboardStore } from '../stores/dashboard'
 import { useTheme } from '../composables/useTheme'
 import { useI18nStore } from '../stores/i18n'
@@ -9,6 +9,11 @@ import {
   Moon,
   ShieldAlert,
   Globe,
+  Terminal,
+  Cpu,
+  Newspaper,
+  Sparkles,
+  Receipt,
 } from 'lucide-vue-next'
 
 const store = useDashboardStore()
@@ -33,16 +38,24 @@ onMounted(() => {
 onUnmounted(() => {
   if (timer) clearInterval(timer)
 })
+
+const tabs = computed(() => [
+  { id: 'trading', label: i18n.t.tabTrading, icon: Terminal },
+  { id: 'factors', label: i18n.t.tabAiBrain, icon: Cpu },
+  { id: 'news', label: i18n.t.tabMarket, icon: Newspaper },
+  { id: 'lab', label: i18n.t.tabLabs, icon: Sparkles },
+  { id: 'history', label: i18n.t.tabLedger, icon: Receipt },
+])
 </script>
 
 <template>
   <header
-    class="fixed top-0 left-0 right-0 z-40 h-[46px] px-3 sm:px-4 flex items-center border-b select-none transition-colors"
+    class="fixed top-0 left-0 right-0 z-40 h-[48px] px-2.5 sm:px-4 flex items-center border-b select-none transition-colors"
     style="background-color: var(--bg-header); border-color: var(--border-subtle); backdrop-filter: blur(16px);"
   >
-    <div class="w-full flex items-center justify-between gap-3">
-      <!-- Left: 纯粹品牌标识与交易所状态指示 -->
-      <div class="flex items-center space-x-2.5 shrink-0">
+    <div class="w-full flex items-center justify-between gap-2 sm:gap-4">
+      <!-- 1. Left: Brand & Exchange Status -->
+      <div class="flex items-center space-x-2 shrink-0">
         <div class="flex items-center space-x-2 cursor-pointer" @click="store.activeTab = 'trading'">
           <div
             class="w-6 h-6 rounded flex items-center justify-center font-mono font-black text-xs border tracking-tighter shadow-xs"
@@ -54,14 +67,11 @@ onUnmounted(() => {
             <span class="font-black text-xs tracking-wider uppercase text-slate-100">
               {{ i18n.t.appName }}
             </span>
-            <span class="hidden sm:inline-block text-[9px] px-1 py-0.2 rounded border border-slate-700 bg-slate-800 text-slate-400 font-semibold">
-              {{ i18n.t.appMode }}
-            </span>
           </div>
         </div>
 
         <!-- Venue Pulse Status (Desktop Only) -->
-        <div class="hidden xl:flex items-center space-x-1.5 pl-2 border-l" style="border-color: var(--border-subtle);">
+        <div class="hidden 2xl:flex items-center space-x-1 pl-2 border-l" style="border-color: var(--border-subtle);">
           <div class="flex items-center space-x-1 px-1.5 py-0.5 rounded border text-[10px] font-mono" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
             <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
             <span class="text-slate-300 font-bold">OKX</span>
@@ -77,7 +87,27 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- Right: 全局功能控制区（双时钟、语言、硬防线、唯一后台入口、亮暗主题） -->
+      <!-- 2. Center: 桌面端核心主页面切换胶囊 (工整优雅居中收归顶栏) -->
+      <nav
+        class="hidden md:flex items-center p-0.5 rounded-lg border shrink-0 transition-colors"
+        style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);"
+      >
+        <button
+          v-for="tab in tabs"
+          :key="tab.id"
+          @click="store.activeTab = tab.id as any"
+          class="h-7.5 flex items-center space-x-1.5 px-3 rounded-md text-xs font-mono font-bold transition-all cursor-pointer whitespace-nowrap"
+          :style="store.activeTab === tab.id
+            ? { backgroundColor: 'var(--text-main)', color: 'var(--bg-app)' }
+            : { color: 'var(--text-muted)' }"
+          :class="store.activeTab === tab.id ? 'shadow-xs' : 'hover:text-[var(--text-main)]'"
+        >
+          <component :is="tab.icon" class="w-3.5 h-3.5" />
+          <span>{{ tab.label }}</span>
+        </button>
+      </nav>
+
+      <!-- 3. Right: 全局控制区（语言、硬防线、唯一后台入口、亮暗主题） -->
       <div class="flex items-center space-x-1.5 sm:space-x-2 text-xs font-mono">
         <!-- Dual Clocks: UTC & SGT (Bloomberg style, Ultra-wide only) -->
         <div
@@ -92,7 +122,7 @@ onUnmounted(() => {
         <!-- 🌐 语言切换 (纯正双语) -->
         <button
           @click="i18n.toggleLocale"
-          class="h-7 px-2.5 rounded border flex items-center space-x-1.5 cursor-pointer transition-all hover:bg-[var(--bg-card-hover)]"
+          class="h-7 px-2 sm:px-2.5 rounded border flex items-center space-x-1 cursor-pointer transition-all hover:bg-[var(--bg-card-hover)]"
           style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-main);"
           :title="i18n.t.switchLang"
         >
@@ -102,17 +132,17 @@ onUnmounted(() => {
 
         <!-- 🛡️ Fail-Closed 熔断硬防线状态徽标 -->
         <div
-          class="hidden lg:flex items-center h-7 px-2.5 rounded border text-[10px] font-mono font-bold text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
+          class="hidden lg:flex items-center h-7 px-2 rounded border text-[10px] font-mono font-bold text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
           :title="i18n.t.hardDefense"
         >
           <ShieldAlert class="w-3 h-3 mr-1 text-emerald-400" />
           <span>{{ i18n.t.hardDefense }}</span>
         </div>
 
-        <!-- ⚙️ 全站唯一管理控制台入口 (桌面端显示文字，移动端为小巧图标) -->
+        <!-- ⚙️ 全站唯一管理控制台入口 -->
         <a
           href="/admin/"
-          class="h-7 px-2 sm:px-2.5 rounded border flex items-center space-x-1.5 cursor-pointer hover:bg-[var(--bg-card-hover)] transition-colors"
+          class="h-7 px-2 sm:px-2.5 rounded border flex items-center space-x-1 cursor-pointer hover:bg-[var(--bg-card-hover)] transition-colors"
           style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-main);"
           :title="i18n.t.adminConsole"
         >
