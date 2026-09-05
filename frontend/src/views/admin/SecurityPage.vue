@@ -21,9 +21,20 @@ const startingOauth = ref(false)
 const cliCheck = ref<any>(null)
 const installingCli = ref(false)
 
+// ---- active exchange tab ----
+const activeExchangeTab = ref<'okx' | 'binance' | 'gate'>('okx')
+const primaryExchange = ref<string>('okx')
+const binanceTestnet = ref<boolean>(true)
+const gateTestnet = ref<boolean>(true)
+
 // ---- backup API keys ----
 const keysOpen = ref(false)
-const keys = ref({ live_key: '', live_secret: '', live_pass: '', demo_key: '', demo_secret: '', demo_pass: '' })
+const keys = ref({
+  live_key: '', live_secret: '', live_pass: '',
+  demo_key: '', demo_secret: '', demo_pass: '',
+  binance_key: '', binance_secret: '',
+  gate_key: '', gate_secret: ''
+})
 
 // ---- capital ----
 const newCapital = ref<string>('')
@@ -59,6 +70,9 @@ async function loadAll() {
     applyRuntime(rt)
     newCapital.value = String(cfg.editable?.initial_capital ?? '')
     manualClose.value = !!cfg.editable?.manual_close_enabled
+    primaryExchange.value = cfg.editable?.primary_exchange || 'okx'
+    binanceTestnet.value = cfg.editable?.binance_testnet !== false
+    gateTestnet.value = cfg.editable?.gate_testnet !== false
     oauthSite.value = rt?.oauth?.site || 'global'
     const inst = await api('/api/v1/admin/instruments')
     instruments.value = inst.instruments || []
@@ -163,16 +177,30 @@ async function saveEnvironment() {
     }
   }
   try {
-    const body: any = { okx_environment: environment }
+    const body: any = {
+      okx_environment: environment,
+      primary_exchange: primaryExchange.value,
+      binance_testnet: binanceTestnet.value,
+      gate_testnet: gateTestnet.value
+    }
     if (keys.value.live_key) body.okx_live_api_key = keys.value.live_key
     if (keys.value.live_secret) body.okx_live_secret_key = keys.value.live_secret
     if (keys.value.live_pass) body.okx_live_passphrase = keys.value.live_pass
     if (keys.value.demo_key) body.okx_demo_api_key = keys.value.demo_key
     if (keys.value.demo_secret) body.okx_demo_secret_key = keys.value.demo_secret
     if (keys.value.demo_pass) body.okx_demo_passphrase = keys.value.demo_pass
+    if (keys.value.binance_key) body.binance_api_key = keys.value.binance_key
+    if (keys.value.binance_secret) body.binance_secret_key = keys.value.binance_secret
+    if (keys.value.gate_key) body.gate_api_key = keys.value.gate_key
+    if (keys.value.gate_secret) body.gate_secret_key = keys.value.gate_secret
     await api('/api/v1/admin/config', { method: 'PUT', body: JSON.stringify(body) })
-    keys.value = { live_key: '', live_secret: '', live_pass: '', demo_key: '', demo_secret: '', demo_pass: '' }
-    bannerMsg.value = { text: `OKX ${environment.toUpperCase()} 环境与凭证已安全保存`, type: 'ok' }
+    keys.value = {
+      live_key: '', live_secret: '', live_pass: '',
+      demo_key: '', demo_secret: '', demo_pass: '',
+      binance_key: '', binance_secret: '',
+      gate_key: '', gate_secret: ''
+    }
+    bannerMsg.value = { text: `交易所连接与凭证已安全保存`, type: 'ok' }
     await loadAll()
   } catch (e: any) {
     bannerMsg.value = { text: `保存失败：${e.message}`, type: 'err' }
@@ -290,9 +318,9 @@ onMounted(loadAll)
           <Wallet class="w-4 h-4" />
         </div>
         <div>
-          <h1 class="text-sm font-bold uppercase tracking-wide" style="color: var(--text-main);">OKX 账户连接与交易标的池</h1>
+          <h1 class="text-sm font-bold uppercase tracking-wide" style="color: var(--text-main);">多交易所连接与交易标的池</h1>
           <p class="text-[11px] font-sans" style="color: var(--text-muted);">
-            OKX 官方账户授权连接、实盘/模拟盘环境切换、初始本金基准、资产标的池管理与应急持仓处置。
+            OKX / Binance / Gate 多所行情聚合与凭证管理、实盘/模拟盘环境切换、初始本金基准、资产标的池管理与应急持仓处置。
           </p>
         </div>
       </div>
@@ -309,138 +337,312 @@ onMounted(loadAll)
     <div v-if="loading" class="py-12 text-center text-xs font-mono" style="color: var(--text-muted);">正在加载...</div>
 
     <template v-else-if="config">
-      <!-- 1. OKX account & environment -->
+      <!-- 1. OKX / Binance / Gate Multi-Exchange Workspace -->
       <div class="rounded-xl border p-4 sm:p-5 space-y-4 shadow-xs transition-colors" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
-        <div class="flex items-center justify-between pb-3 border-b" style="border-color: var(--border-subtle);">
+        <div class="flex flex-wrap items-center justify-between pb-3 border-b gap-2" style="border-color: var(--border-subtle);">
           <div class="flex items-center space-x-2">
             <ShieldAlert class="w-4 h-4" style="color: var(--color-brand);" />
-            <h2 class="text-sm font-bold font-mono" style="color: var(--text-main);">1. OKX 账号连接与交易环境</h2>
+            <h2 class="text-sm font-bold font-mono" style="color: var(--text-main);">1. 多交易所环境、凭证与执行路由工作台</h2>
           </div>
-          <span v-if="runtime" class="text-[10px] font-mono px-2 py-0.5 rounded border font-bold" :class="runtime.ready ? 'text-emerald-500 border-emerald-500/30 bg-emerald-500/10' : runtime.degraded ? 'text-amber-500 border-amber-500/30 bg-amber-500/10' : 'text-rose-500 border-rose-500/30 bg-rose-500/10'">
-            {{ runtime.ready ? 'READY · 可运行' : runtime.demo_oauth_unavailable ? 'DEGRADED · DEMO OAuth接口不可用' : runtime.degraded ? 'DEGRADED · OKX当前环境接口不可用' : 'NOT READY · 禁止交易' }}
-          </span>
-        </div>
-
-        <div v-if="runtime" class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-4">
-          <!-- runtime detail -->
-          <div>
-            <div class="text-xs font-mono leading-relaxed space-y-1" style="color: var(--text-muted);">
-              <div>当前环境：<strong style="color: var(--text-main);">{{ (runtime.selected_mode || 'demo').toUpperCase() }}</strong></div>
-              <div>CLI：<span style="color: var(--text-main);">{{ runtime.cli?.installed ? (runtime.cli.version || '已安装') : '未安装' }} · {{ runtime.cli?.path || 'PATH 中不可见' }}</span></div>
-              <div>认证来源：<span style="color: var(--color-brand);">{{ sourceLabel[runtime.credential_source] || runtime.credential_source }}</span></div>
-              <div>连接账号：<span style="color: var(--text-main);">{{ runtime.oauth?.account_label || (runtime.oauth?.status === 'logged_in' ? 'OAuth 已连接（OKX CLI 当前不返回账号昵称/UID）' : '--') }}</span></div>
-              <div>OAuth：<span style="color: var(--text-main);">{{ runtime.oauth?.status }}{{ runtime.oauth?.site ? ' · ' + runtime.oauth.site : '' }}</span></div>
-              <div class="text-[10px]" style="color: var(--text-faint);">权限：{{ (runtime.oauth?.scopes || []).join(', ') || '--' }}</div>
-              <div>只读探针：<span :class="runtime.read_probe?.ok ? 'text-emerald-500' : runtime.degraded ? 'text-amber-500' : 'text-rose-500'">{{ runtime.read_probe?.detail || '--' }}</span></div>
-              <div v-if="runtime.live_control_probe" class="text-[10px]">LIVE 对照探针：<span :class="runtime.live_control_probe.ok ? 'text-emerald-500' : 'text-rose-500'">{{ runtime.live_control_probe.detail }}</span></div>
-              <div v-if="runtime.issues?.length" class="mt-2 text-[11px]" :class="runtime.degraded ? 'text-amber-500' : 'text-rose-500'">
-                <div v-for="(issue, i) in runtime.issues" :key="i">• {{ issue }}</div>
-              </div>
-              <div v-if="runtime.steps?.length" class="mt-2 text-[10px]" style="color: var(--text-faint);">
-                <div class="font-bold mb-0.5" style="color: var(--text-muted);">操作指引</div>
-                <div v-for="(s, i) in runtime.steps" :key="i">• {{ s }}</div>
-              </div>
-            </div>
-            <div class="flex gap-2 mt-3">
-              <button @click="rediagnose" class="flex items-center space-x-1 px-3 py-1.5 rounded-lg border text-xs font-mono cursor-pointer transition-all shadow-xs" style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-main);"><RefreshCw class="w-3.5 h-3.5" /><span>重新诊断</span></button>
-              <button @click="checkCli" class="px-3 py-1.5 rounded-lg border text-xs font-mono cursor-pointer transition-all shadow-xs" style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-main);">检测 Node/npm/CLI</button>
-            </div>
-            <div v-if="cliCheck" class="mt-2 p-2.5 rounded-lg border text-[11px] font-mono space-y-0.5" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-muted);">
-              <div>Node.js：{{ cliCheck.node_installed ? `✓ ${cliCheck.node_version} (${cliCheck.node_path})` : '✗ 未安装' }}</div>
-              <div>npm：{{ cliCheck.npm_installed ? `✓ ${cliCheck.npm_version}` : '✗ 未安装' }}</div>
-              <div>OKX CLI：{{ cliCheck.okx_installed ? `✓ ${cliCheck.okx_version} (${cliCheck.okx_path})` : '✗ 未安装' }}</div>
-            </div>
-          </div>
-
-          <!-- OAuth panel -->
-          <div class="rounded-lg p-3.5 border shadow-xs" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
-            <div class="text-[11px] font-bold font-mono mb-2" style="color: var(--text-main);">官方 OAuth 授权（推荐）</div>
-            <div class="text-[10px] font-mono mb-2 leading-relaxed" style="color: var(--text-muted);">授权码登录，无需向 R20 提供 OKX 密码、API Key 或 2FA。</div>
-            <label class="block text-[10px] mb-1 font-mono" style="color: var(--text-muted);">OKX 站点</label>
-            <select v-model="oauthSite" class="w-full rounded-lg px-2 py-1.5 text-xs font-mono outline-none border mb-2" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);">
-              <option value="global">Global · www.okx.com</option>
-              <option value="eea">EEA · my.okx.com</option>
-              <option value="us">US · app.okx.com</option>
-              <option value="tr">TR · tr.okx.com</option>
+          
+          <!-- Global Target Exchange Selector -->
+          <div class="flex items-center gap-2">
+            <span class="text-[11px] font-mono" style="color: var(--text-muted);">全局执行路由目标:</span>
+            <select v-model="primaryExchange" class="rounded-lg px-2.5 py-1 text-xs font-mono font-bold outline-none border cursor-pointer" style="background-color: var(--bg-input); border-color: var(--border-medium); color: var(--color-brand);">
+              <option value="okx">OKX (官方原生实盘/模拟盘)</option>
+              <option value="binance">Binance 币安 (USDT-M 合约)</option>
+              <option value="gate">Gate.io 芝麻开门 (Futures V4)</option>
             </select>
-            <div class="flex gap-2">
-              <button
-                v-if="auth.isSuperadmin"
-                @click="startOauth"
-                :disabled="startingOauth"
-                class="flex-1 flex items-center justify-center space-x-1.5 px-3 py-2 rounded-lg text-xs font-mono font-bold cursor-pointer disabled:opacity-50 transition-all shadow-xs bg-blue-600 hover:bg-blue-500 text-white"
-                style="background-color: #2563EB; color: #FFFFFF;"
-              >
-                <KeyRound class="w-3.5 h-3.5" />
-                <span>{{ startingOauth ? '申请授权码中…' : '使用授权码连接 OKX' }}</span>
-              </button>
-              <button
-                v-if="auth.isSuperadmin"
-                @click="installCli"
-                :disabled="installingCli"
-                class="px-2.5 py-2 rounded-lg border text-[11px] font-mono cursor-pointer disabled:opacity-50 transition-all shadow-xs"
-                style="background-color: var(--bg-card); border-color: var(--border-medium); color: var(--text-main);"
-              >
-                {{ installingCli ? '安装中…' : '安装/升级 CLI' }}
-              </button>
-            </div>
-
-            <div v-if="oauthState" class="mt-2 text-[11px] font-mono text-amber-500">{{ oauthState }}</div>
-
-            <div v-if="oauthResult?.kind === 'device'" class="mt-2 p-2.5 rounded-lg border space-y-1.5" style="background-color: var(--color-brand-bg); border-color: var(--color-brand-border);">
-              <div class="text-[10px] font-bold font-mono" style="color: var(--text-main);">请在浏览器完成 OKX 官方授权</div>
-              <div class="text-[10px] font-mono break-all"><a :href="oauthResult.verification_uri" target="_blank" rel="noopener" class="underline" style="color: var(--color-brand);">{{ oauthResult.verification_uri }}</a></div>
-              <div class="text-center py-1.5 rounded border" style="background-color: var(--bg-card); border-color: var(--border-subtle);"><span class="text-lg font-black font-mono tracking-widest" style="color: var(--text-main);">{{ oauthResult.user_code }}</span></div>
-              <div class="text-[10px] font-mono" style="color: var(--text-muted);">有效期约 {{ Math.ceil(Number(oauthResult.expires_in || 600) / 60) }} 分钟</div>
-              <button @click="checkOauth" class="w-full px-2 py-1.5 rounded-lg border text-[11px] font-mono cursor-pointer transition-all shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-medium); color: var(--text-main);">我已授权，检查状态</button>
-            </div>
-            <div v-else-if="oauthResult?.kind === 'logged_in'" class="mt-2 p-2.5 rounded-lg border text-[11px] font-mono text-emerald-500" style="background-color: var(--color-up-bg); border-color: var(--color-up-border);">
-              ✅ 当前已经登录 · 站点 {{ oauthResult.site }}<div class="text-[10px] break-all" style="color: var(--text-muted);">{{ (oauthResult.scopes || []).join(', ') }}</div>
-            </div>
-            <div v-else-if="oauthResult?.kind === 'error'" class="mt-2 p-2.5 rounded-lg border text-[11px] font-mono text-rose-500" style="background-color: var(--color-down-bg); border-color: var(--color-down-border);">{{ oauthResult.message }}</div>
           </div>
         </div>
 
-        <!-- environment + backup keys -->
-        <div class="pt-3 border-t" style="border-color: var(--border-subtle);">
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+        <!-- Exchange Tabs Switcher -->
+        <div class="flex items-center gap-2 border-b pb-2" style="border-color: var(--border-subtle);">
+          <button
+            @click="activeExchangeTab = 'okx'"
+            class="px-3.5 py-1.5 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer flex items-center gap-1.5"
+            :style="activeExchangeTab === 'okx'
+              ? { backgroundColor: 'var(--text-main)', color: 'var(--bg-card)' }
+              : { backgroundColor: 'var(--bg-card-subtle)', color: 'var(--text-muted)' }"
+          >
+            <span>OKX 原生矩阵</span>
+            <span v-if="runtime" class="text-[10px] px-1.5 py-0.2 rounded-full border" :class="runtime.ready ? 'border-emerald-500/40 text-emerald-400' : 'border-amber-500/40 text-amber-400'">
+              {{ (runtime.selected_mode || 'demo').toUpperCase() }}
+            </span>
+          </button>
+
+          <button
+            @click="activeExchangeTab = 'binance'"
+            class="px-3.5 py-1.5 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer flex items-center gap-1.5"
+            :style="activeExchangeTab === 'binance'
+              ? { backgroundColor: '#f3ba2f', color: '#000000' }
+              : { backgroundColor: 'var(--bg-card-subtle)', color: 'var(--text-muted)' }"
+          >
+            <span>Binance 币安</span>
+            <span class="text-[10px] px-1.5 py-0.2 rounded-full border border-current opacity-80">
+              {{ config.editable.binance_configured ? '交易就绪' : '免登行情' }}
+            </span>
+          </button>
+
+          <button
+            @click="activeExchangeTab = 'gate'"
+            class="px-3.5 py-1.5 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer flex items-center gap-1.5"
+            :style="activeExchangeTab === 'gate'
+              ? { backgroundColor: '#2354ff', color: '#ffffff' }
+              : { backgroundColor: 'var(--bg-card-subtle)', color: 'var(--text-muted)' }"
+          >
+            <span>Gate.io 芝麻开门</span>
+            <span class="text-[10px] px-1.5 py-0.2 rounded-full border border-current opacity-80">
+              {{ config.editable.gate_configured ? '交易就绪' : '免登行情' }}
+            </span>
+          </button>
+        </div>
+
+        <!-- TAB 1: OKX PANEL -->
+        <div v-if="activeExchangeTab === 'okx'" class="space-y-4">
+          <div v-if="runtime" class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-4">
+            <!-- runtime detail -->
             <div>
-              <label class="block text-[11px] mb-1 font-mono" style="color: var(--text-muted);">当前交易环境</label>
-              <select v-model="config.editable.okx_environment" class="w-full rounded-lg px-3 py-2 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);">
-                <option value="demo">模拟盘 DEMO</option>
-                <option value="live">实盘 LIVE</option>
+              <div class="text-xs font-mono leading-relaxed space-y-1" style="color: var(--text-muted);">
+                <div>OKX 环境：<strong style="color: var(--text-main);">{{ (runtime.selected_mode || 'demo').toUpperCase() }}</strong></div>
+                <div>CLI：<span style="color: var(--text-main);">{{ runtime.cli?.installed ? (runtime.cli.version || '已安装') : '未安装' }} · {{ runtime.cli?.path || 'PATH 中不可见' }}</span></div>
+                <div>认证来源：<span style="color: var(--color-brand);">{{ sourceLabel[runtime.credential_source] || runtime.credential_source }}</span></div>
+                <div>连接账号：<span style="color: var(--text-main);">{{ runtime.oauth?.account_label || (runtime.oauth?.status === 'logged_in' ? 'OAuth 已连接' : '--') }}</span></div>
+                <div>OAuth：<span style="color: var(--text-main);">{{ runtime.oauth?.status }}{{ runtime.oauth?.site ? ' · ' + runtime.oauth.site : '' }}</span></div>
+                <div class="text-[10px]" style="color: var(--text-faint);">权限：{{ (runtime.oauth?.scopes || []).join(', ') || '--' }}</div>
+                <div>只读探针：<span :class="runtime.read_probe?.ok ? 'text-emerald-500' : runtime.degraded ? 'text-amber-500' : 'text-rose-500'">{{ runtime.read_probe?.detail || '--' }}</span></div>
+                <div v-if="runtime.live_control_probe" class="text-[10px]">LIVE 对照探针：<span :class="runtime.live_control_probe.ok ? 'text-emerald-500' : 'text-rose-500'">{{ runtime.live_control_probe.detail }}</span></div>
+                <div v-if="runtime.issues?.length" class="mt-2 text-[11px]" :class="runtime.degraded ? 'text-amber-500' : 'text-rose-500'">
+                  <div v-for="(issue, i) in runtime.issues" :key="i">• {{ issue }}</div>
+                </div>
+              </div>
+              <div class="flex gap-2 mt-3">
+                <button @click="rediagnose" class="flex items-center space-x-1 px-3 py-1.5 rounded-lg border text-xs font-mono cursor-pointer transition-all shadow-xs" style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-main);"><RefreshCw class="w-3.5 h-3.5" /><span>重新诊断</span></button>
+                <button @click="checkCli" class="px-3 py-1.5 rounded-lg border text-xs font-mono cursor-pointer transition-all shadow-xs" style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-main);">检测 Node/npm/CLI</button>
+              </div>
+            </div>
+
+            <!-- OAuth panel -->
+            <div class="rounded-lg p-3.5 border shadow-xs" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
+              <div class="text-[11px] font-bold font-mono mb-2" style="color: var(--text-main);">官方 OAuth 授权（推荐）</div>
+              <div class="text-[10px] font-mono mb-2 leading-relaxed" style="color: var(--text-muted);">授权码登录，无需向系统提供明文 API Key 或 2FA。</div>
+              <label class="block text-[10px] mb-1 font-mono" style="color: var(--text-muted);">OKX 站点</label>
+              <select v-model="oauthSite" class="w-full rounded-lg px-2 py-1.5 text-xs font-mono outline-none border mb-2" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);">
+                <option value="global">Global · www.okx.com</option>
+                <option value="eea">EEA · my.okx.com</option>
+                <option value="us">US · app.okx.com</option>
+                <option value="tr">TR · tr.okx.com</option>
               </select>
-            </div>
-            <div class="flex items-end pb-1">
-              <label class="flex items-center space-x-2 cursor-pointer">
-                <input type="checkbox" v-model="manualClose" class="accent-blue-500" />
-                <span class="text-xs font-mono" style="color: var(--text-muted);">允许后台手动平仓</span>
-              </label>
-            </div>
-            <div class="flex gap-2">
-              <button @click="saveEnvironment" class="flex-1 flex items-center justify-center space-x-1 px-3 py-2 rounded-lg text-xs font-mono font-bold cursor-pointer transition-all shadow-xs" style="background-color: var(--text-main); color: var(--bg-card);"><Save class="w-3.5 h-3.5" /><span>保存环境与凭证</span></button>
-              <button @click="saveManualClose" class="px-3 py-2 rounded-lg border text-xs font-mono cursor-pointer transition-all shadow-xs" style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-main);">保存平仓开关</button>
+              <div class="flex gap-2">
+                <button
+                  v-if="auth.isSuperadmin"
+                  @click="startOauth"
+                  :disabled="startingOauth"
+                  class="flex-1 flex items-center justify-center space-x-1.5 px-3 py-2 rounded-lg text-xs font-mono font-bold cursor-pointer disabled:opacity-50 transition-all shadow-xs bg-blue-600 hover:bg-blue-500 text-white"
+                  style="background-color: #2563EB; color: #FFFFFF;"
+                >
+                  <KeyRound class="w-3.5 h-3.5" />
+                  <span>{{ startingOauth ? '申请授权码中…' : '使用授权码连接 OKX' }}</span>
+                </button>
+                <button
+                  v-if="auth.isSuperadmin"
+                  @click="installCli"
+                  :disabled="installingCli"
+                  class="px-2.5 py-2 rounded-lg border text-[11px] font-mono cursor-pointer disabled:opacity-50 transition-all shadow-xs"
+                  style="background-color: var(--bg-card); border-color: var(--border-medium); color: var(--text-main);"
+                >
+                  {{ installingCli ? '安装中…' : '安装/升级 CLI' }}
+                </button>
+              </div>
+
+              <div v-if="oauthState" class="mt-2 text-[11px] font-mono text-amber-500">{{ oauthState }}</div>
+
+              <div v-if="oauthResult?.kind === 'device'" class="mt-2 p-2.5 rounded-lg border space-y-1.5" style="background-color: var(--color-brand-bg); border-color: var(--color-brand-border);">
+                <div class="text-[10px] font-bold font-mono" style="color: var(--text-main);">请在浏览器完成 OKX 官方授权</div>
+                <div class="text-[10px] font-mono break-all"><a :href="oauthResult.verification_uri" target="_blank" rel="noopener" class="underline" style="color: var(--color-brand);">{{ oauthResult.verification_uri }}</a></div>
+                <div class="text-center py-1.5 rounded border" style="background-color: var(--bg-card); border-color: var(--border-subtle);"><span class="text-lg font-black font-mono tracking-widest" style="color: var(--text-main);">{{ oauthResult.user_code }}</span></div>
+                <button @click="checkOauth" class="w-full px-2 py-1.5 rounded-lg border text-[11px] font-mono cursor-pointer transition-all shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-medium); color: var(--text-main);">我已授权，检查状态</button>
+              </div>
+              <div v-else-if="oauthResult?.kind === 'logged_in'" class="mt-2 p-2.5 rounded-lg border text-[11px] font-mono text-emerald-500" style="background-color: var(--color-up-bg); border-color: var(--color-up-border);">
+                ✅ 当前已经登录 · 站点 {{ oauthResult.site }}
+              </div>
             </div>
           </div>
 
-          <details class="mt-3">
-            <summary class="cursor-pointer text-[11px] font-mono select-none" style="color: var(--color-brand);">备用方式：分别配置 LIVE / DEMO API Key（无人值守部署）</summary>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3 p-3 rounded-lg border shadow-xs" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
-              <div class="space-y-2">
-                <div class="text-[10px] font-bold font-mono" style="color: var(--text-main);">实盘 LIVE Key</div>
-                <input v-model="keys.live_key" type="password" placeholder="API Key（留空保持现有）" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" />
-                <input v-model="keys.live_secret" type="password" placeholder="Secret Key" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" />
-                <input v-model="keys.live_pass" type="password" placeholder="Passphrase" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" />
+          <!-- OKX Environment & API Keys -->
+          <div class="pt-3 border-t" style="border-color: var(--border-subtle);">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+              <div>
+                <label class="block text-[11px] mb-1 font-mono" style="color: var(--text-muted);">OKX 交易环境</label>
+                <select v-model="config.editable.okx_environment" class="w-full rounded-lg px-3 py-2 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);">
+                  <option value="demo">模拟盘 DEMO</option>
+                  <option value="live">实盘 LIVE</option>
+                </select>
               </div>
-              <div class="space-y-2">
-                <div class="text-[10px] font-bold font-mono" style="color: var(--text-main);">模拟盘 DEMO Key</div>
-                <input v-model="keys.demo_key" type="password" placeholder="API Key（留空保持现有）" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" />
-                <input v-model="keys.demo_secret" type="password" placeholder="Secret Key" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" />
-                <input v-model="keys.demo_pass" type="password" placeholder="Passphrase" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" />
+              <div class="flex items-end pb-1">
+                <label class="flex items-center space-x-2 cursor-pointer">
+                  <input type="checkbox" v-model="manualClose" class="accent-blue-500" />
+                  <span class="text-xs font-mono" style="color: var(--text-muted);">允许后台手动平仓</span>
+                </label>
               </div>
-              <div class="sm:col-span-2 text-[10px] font-mono" style="color: var(--text-faint);">OAuth 与 API Key 二选一即可。不要为同一运行用户同时配置 CLI API Key Profile 和 OAuth。</div>
+              <div class="flex gap-2">
+                <button @click="saveEnvironment" class="flex-1 flex items-center justify-center space-x-1 px-3 py-2 rounded-lg text-xs font-mono font-bold cursor-pointer transition-all shadow-xs" style="background-color: var(--text-main); color: var(--bg-card);"><Save class="w-3.5 h-3.5" /><span>保存设置与凭证</span></button>
+                <button @click="saveManualClose" class="px-3 py-2 rounded-lg border text-xs font-mono cursor-pointer transition-all shadow-xs" style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-main);">保存平仓开关</button>
+              </div>
             </div>
-          </details>
+
+            <details class="mt-3">
+              <summary class="cursor-pointer text-[11px] font-mono select-none" style="color: var(--color-brand);">备用 API Key 授权（分别配置 LIVE / DEMO Key）</summary>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3 p-3 rounded-lg border shadow-xs" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
+                <div class="space-y-2">
+                  <div class="text-[10px] font-bold font-mono" style="color: var(--text-main);">实盘 LIVE Key</div>
+                  <input v-model="keys.live_key" type="password" placeholder="API Key（留空保持现有）" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" />
+                  <input v-model="keys.live_secret" type="password" placeholder="Secret Key" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" />
+                  <input v-model="keys.live_pass" type="password" placeholder="Passphrase" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" />
+                </div>
+                <div class="space-y-2">
+                  <div class="text-[10px] font-bold font-mono" style="color: var(--text-main);">模拟盘 DEMO Key</div>
+                  <input v-model="keys.demo_key" type="password" placeholder="API Key（留空保持现有）" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" />
+                  <input v-model="keys.demo_secret" type="password" placeholder="Secret Key" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" />
+                  <input v-model="keys.demo_pass" type="password" placeholder="Passphrase" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" />
+                </div>
+              </div>
+            </details>
+          </div>
+        </div>
+
+        <!-- TAB 2: BINANCE PANEL -->
+        <div v-else-if="activeExchangeTab === 'binance'" class="space-y-4">
+          <div class="p-4 rounded-xl border space-y-3" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
+                <h3 class="text-xs font-bold font-mono text-amber-400">Binance 币安 USDT-M 合约交易与行情网关</h3>
+              </div>
+              <span class="text-[10px] font-mono px-2 py-0.5 rounded border" :class="config.editable.binance_configured ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10' : 'text-amber-400 border-amber-500/30 bg-amber-500/10'">
+                {{ config.editable.binance_configured ? '● 私有交易凭证已就绪' : '○ 免登录全要素行情激活' }}
+              </span>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs font-mono" style="color: var(--text-muted);">
+              <div class="p-3 rounded-lg border" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
+                <div class="text-[10px] font-bold text-slate-400 mb-1">行情与动力学源</div>
+                <div class="text-emerald-400 font-bold">免登录 Direct REST</div>
+                <div class="text-[10px] mt-1" style="color: var(--text-faint);">15M/1H/4H K线 + 盘口深度 + 散度计算</div>
+              </div>
+              <div class="p-3 rounded-lg border" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
+                <div class="text-[10px] font-bold text-slate-400 mb-1">大户多空比数据源</div>
+                <div class="text-indigo-400 font-bold">TopTrader L/S Ratio</div>
+                <div class="text-[10px] mt-1" style="color: var(--text-faint);">实时注入 AI 交易大脑质询证据</div>
+              </div>
+              <div class="p-3 rounded-lg border" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
+                <div class="text-[10px] font-bold text-slate-400 mb-1">执行路由机制</div>
+                <div class="text-amber-400 font-bold">ExecutionRouter 适配</div>
+                <div class="text-[10px] mt-1" style="color: var(--text-faint);">精度换算 + 自动 STOP_MARKET OCO 挂载</div>
+              </div>
+            </div>
+
+            <!-- Binance Credentials Inputs -->
+            <div class="pt-3 border-t space-y-3" style="border-color: var(--border-subtle);">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="text-[11px] font-bold font-mono" style="color: var(--text-main);">币安 API 凭证与运行模式配置</div>
+                <div class="flex items-center gap-2">
+                  <label class="text-[11px] font-mono" style="color: var(--text-muted);">交易环境模式:</label>
+                  <select v-model="binanceTestnet" class="rounded px-2 py-0.5 text-[11px] font-mono font-bold outline-none border cursor-pointer" style="background-color: var(--bg-input); border-color: var(--border-medium); color: binanceTestnet ? '#f3ba2f' : '#ef4444';">
+                    <option :value="true">模拟测试网 (Futures Testnet)</option>
+                    <option :value="false">实盘网络 (Futures LIVE)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-[10px] mb-1 font-mono" style="color: var(--text-muted);">Binance API Key</label>
+                  <input v-model="keys.binance_key" type="password" :placeholder="binanceTestnet ? 'Binance Testnet API Key（留空保持）' : 'Binance Live API Key（留空保持）'" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" />
+                </div>
+                <div>
+                  <label class="block text-[10px] mb-1 font-mono" style="color: var(--text-muted);">Binance Secret Key</label>
+                  <input v-model="keys.binance_secret" type="password" placeholder="Binance Secret Key" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" />
+                </div>
+              </div>
+              <div class="flex justify-between items-center pt-2">
+                <div class="text-[10px] font-mono text-emerald-400">
+                  {{ binanceTestnet ? '当前切换为币安合约模拟盘（testnet.binancefuture.com），无资金风险。' : '⚠ 当前为币安实盘网络（fapi.binance.com），请确保 API 具备期货交易权限与 IP 白名单。' }}
+                </div>
+                <button @click="saveEnvironment" class="px-4 py-2 rounded-lg text-xs font-mono font-bold cursor-pointer transition-all shadow-xs flex items-center gap-1.5" style="background-color: #f3ba2f; color: #000000;">
+                  <Save class="w-3.5 h-3.5" />
+                  <span>保存币安设置与凭证</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 3: GATE.IO PANEL -->
+        <div v-else-if="activeExchangeTab === 'gate'" class="space-y-4">
+          <div class="p-4 rounded-xl border space-y-3" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
+                <h3 class="text-xs font-bold font-mono text-blue-400">Gate.io 芝麻开门 USDT 永续合约网关</h3>
+              </div>
+              <span class="text-[10px] font-mono px-2 py-0.5 rounded border" :class="config.editable.gate_configured ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10' : 'text-amber-400 border-amber-500/30 bg-amber-500/10'">
+                {{ config.editable.gate_configured ? '● 私有交易凭证已就绪' : '○ 免登录全要素行情激活' }}
+              </span>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs font-mono" style="color: var(--text-muted);">
+              <div class="p-3 rounded-lg border" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
+                <div class="text-[10px] font-bold text-slate-400 mb-1">Gate V4 官方行情</div>
+                <div class="text-emerald-400 font-bold">免登录 Direct API</div>
+                <div class="text-[10px] mt-1" style="color: var(--text-faint);">实时 K 线 + 深度盘口 + 自动断网容灾</div>
+              </div>
+              <div class="p-3 rounded-lg border" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
+                <div class="text-[10px] font-bold text-slate-400 mb-1">资金费率与套利</div>
+                <div class="text-blue-400 font-bold">Funding Rate Matrix</div>
+                <div class="text-[10px] mt-1" style="color: var(--text-faint);">实时比对 Gate 与各所费率溢价</div>
+              </div>
+              <div class="p-3 rounded-lg border" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
+                <div class="text-[10px] font-bold text-slate-400 mb-1">执行路由机制</div>
+                <div class="text-blue-400 font-bold">GateAdapter V4 签名</div>
+                <div class="text-[10px] mt-1" style="color: var(--text-faint);">合约张数转换 + SHA-512 私钥签名</div>
+              </div>
+            </div>
+
+            <!-- Gate Credentials Inputs -->
+            <div class="pt-3 border-t space-y-3" style="border-color: var(--border-subtle);">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="text-[11px] font-bold font-mono" style="color: var(--text-main);">Gate.io API 凭证与运行模式配置</div>
+                <div class="flex items-center gap-2">
+                  <label class="text-[11px] font-mono" style="color: var(--text-muted);">交易环境模式:</label>
+                  <select v-model="gateTestnet" class="rounded px-2 py-0.5 text-[11px] font-mono font-bold outline-none border cursor-pointer" style="background-color: var(--bg-input); border-color: var(--border-medium); color: gateTestnet ? '#3b82f6' : '#ef4444';">
+                    <option :value="true">模拟测试网 (Futures Testnet)</option>
+                    <option :value="false">实盘网络 (Futures LIVE)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-[10px] mb-1 font-mono" style="color: var(--text-muted);">Gate API Key</label>
+                  <input v-model="keys.gate_key" type="password" :placeholder="gateTestnet ? 'Gate Testnet API Key（留空保持）' : 'Gate Live API Key（留空保持）'" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" />
+                </div>
+                <div>
+                  <label class="block text-[10px] mb-1 font-mono" style="color: var(--text-muted);">Gate Secret Key</label>
+                  <input v-model="keys.gate_secret" type="password" placeholder="Gate Secret Key" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" />
+                </div>
+              </div>
+              <div class="flex justify-between items-center pt-2">
+                <div class="text-[10px] font-mono text-emerald-400">
+                  {{ gateTestnet ? '当前切换为 Gate 模拟测试网（fx-api-testnet.gateio.ws），无真实资产风险。' : '⚠ 当前为 Gate.io 实盘网络（api.gateio.ws），请确认已开放合约交易权限。' }}
+                </div>
+                <button @click="saveEnvironment" class="px-4 py-2 rounded-lg text-xs font-mono font-bold cursor-pointer transition-all shadow-xs flex items-center gap-1.5" style="background-color: #2354ff; color: #ffffff;">
+                  <Save class="w-3.5 h-3.5" />
+                  <span>保存 Gate 设置与凭证</span>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -477,11 +679,11 @@ onMounted(loadAll)
           <div class="flex items-center space-x-2">
             <Layers class="w-4 h-4" style="color: var(--color-brand);" />
             <h2 class="text-xs font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
-              3. 交易标的池 ({{ instruments.length }}/{{ instLimits.maximum }})
+              3. 多交易所交易标的池 ({{ instruments.length }}/{{ instLimits.maximum }})
             </h2>
           </div>
           <div class="flex gap-2">
-            <input v-model="newInstId" placeholder="例如: XRP-USDT-SWAP" class="w-44 rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border transition-colors" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" @keyup.enter="addInstrument" />
+            <input v-model="newInstId" placeholder="例如: XRP 或 XRP-USDT-SWAP" class="w-52 rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border transition-colors" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" @keyup.enter="addInstrument" />
             <button @click="addInstrument" class="px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer shadow-xs" style="background-color: var(--text-main); color: var(--bg-card);">添加标的</button>
           </div>
         </div>
@@ -489,8 +691,10 @@ onMounted(loadAll)
           <table class="w-full text-left text-xs font-mono whitespace-nowrap">
             <thead>
               <tr class="border-b text-[11px] uppercase tracking-wider font-bold" style="border-color: var(--border-subtle); background-color: var(--bg-card-subtle); color: var(--text-muted);">
-                <th class="py-2.5 px-4">合约代码</th>
-                <th class="py-2.5 px-3">名称</th>
+                <th class="py-2.5 px-4">通用资产</th>
+                <th class="py-2.5 px-3">OKX 合约</th>
+                <th class="py-2.5 px-3">币安合约</th>
+                <th class="py-2.5 px-3">Gate 合约</th>
                 <th class="py-2.5 px-3">类型</th>
                 <th class="py-2.5 px-3">风控状态</th>
                 <th class="py-2.5 px-4 text-right">操作</th>
@@ -498,8 +702,18 @@ onMounted(loadAll)
             </thead>
             <tbody>
               <tr v-for="item in instruments" :key="item.instId" class="border-b last:border-b-0 hover:bg-[var(--bg-card-hover)] transition-colors" style="border-color: var(--border-subtle);">
-                <td class="py-2.5 px-4 font-bold" style="color: var(--text-main);">{{ item.instId }}</td>
-                <td class="py-2.5 px-3" style="color: var(--text-muted);">{{ item.name }}</td>
+                <td class="py-2.5 px-4 font-bold text-emerald-400">
+                  {{ item.name || item.instId.split('-')[0] }}
+                </td>
+                <td class="py-2.5 px-3 font-mono" style="color: var(--text-main);">
+                  {{ item.instId }}
+                </td>
+                <td class="py-2.5 px-3 font-mono text-amber-400">
+                  {{ (item.name || item.instId.split('-')[0]) + 'USDT' }}
+                </td>
+                <td class="py-2.5 px-3 font-mono text-blue-400">
+                  {{ (item.name || item.instId.split('-')[0]) + '_USDT' }}
+                </td>
                 <td class="py-2.5 px-3 num-tabular" style="color: var(--text-faint);">{{ item.ctType || 'SWAP' }}</td>
                 <td class="py-2.5 px-3">
                   <span v-if="item.protected" class="px-1.5 py-0.2 rounded text-[10px] font-bold border" style="background-color: var(--color-warn-bg); border-color: var(--color-warn-border); color: var(--color-warn);">🔒 保底必选</span>
@@ -515,7 +729,9 @@ onMounted(loadAll)
             </tbody>
           </table>
         </div>
-        <p class="px-4 py-2 border-t text-[10px] font-mono" style="border-color: var(--border-subtle); color: var(--text-faint);">BTC 为系统保底标的不可删除；有在途追踪器的标的禁止移除；最多 {{ instLimits.maximum }} 个。</p>
+        <p class="px-4 py-2 border-t text-[10px] font-mono" style="border-color: var(--border-subtle); color: var(--text-faint);">
+          标的池统一维护：系统自动将通用资产（如 BTC/ETH/SOL）映射匹配到 OKX (SWAP)、币安 (USDT-M) 与 Gate (Futures V4)，支持三所全要素行情并发采集与按路由下单。
+        </p>
       </div>
 
       <!-- 4. positions & emergency close -->

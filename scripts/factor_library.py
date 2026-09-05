@@ -122,6 +122,13 @@ def compute_instrument_factors(item: Dict[str, Any], smart_money_pool: Dict[str,
             "prob_regime": "GAUSSIAN_BALANCED",
             "is_fat_tail": False
         },
+        # Pillar 7: Cross Exchange Arbitrage & Multi-Venue Insights (OKX / Binance / Gate)
+        "cross_exchange_insights": {
+            "prices": {},
+            "spread_disparity_pct": 0.0,
+            "binance_top_trader_long_short_ratio": None,
+            "gate_funding_rate": None,
+        },
         
         # Composite Factor Score (-100 to +100)
         "composite_alpha_score": 0.0,
@@ -324,6 +331,16 @@ def compute_instrument_factors(item: Dict[str, Any], smart_money_pool: Dict[str,
             if d.get("code") == "0" and d.get("data"):
                 usd = safe_float(d["data"][0].get("oiUsd", 0))
                 factors["smart_money_derivatives"]["oi_usd"] = f"{round(usd / 1e8, 2)}亿 U" if usd > 1e8 else f"{round(usd / 1e4, 1)}万 U"
+    except Exception:
+        pass
+
+    # 5.5 Cross Exchange Insights (Binance & Gate Public Integration)
+    try:
+        from multi_exchange_feed import fetch_cross_exchange_insights
+        base_sym = inst_id.split("-")[0] if "-" in inst_id else inst_id
+        cross_res = fetch_cross_exchange_insights(base_sym)
+        if cross_res:
+            factors["cross_exchange_insights"] = cross_res
     except Exception:
         pass
 

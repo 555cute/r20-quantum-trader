@@ -220,7 +220,7 @@ const quickNav = [
           @click="router.push('/admin/security')"
         >
           <div class="flex items-center justify-between mb-2">
-            <span class="text-[11px] font-mono" style="color: var(--text-muted);">OKX 连接环境</span>
+            <span class="text-[11px] font-mono" style="color: var(--text-muted);">多交易所网络与环境</span>
             <div
               class="w-6 h-6 rounded-md flex items-center justify-center border"
               style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--text-main);"
@@ -233,10 +233,10 @@ const quickNav = [
           </div>
           <div class="text-[10px] font-mono mt-1 flex items-center space-x-1" style="color: var(--text-faint);">
             <span :class="runtime.credentials?.okx_configured ? 'text-emerald-400' : 'text-amber-400'">
-              ● {{ runtime.credentials?.okx_configured ? 'API 凭证就绪' : '模拟环境就绪' }}
+              ● OKX / 币安 / Gate 聚合
             </span>
             <span>·</span>
-            <span class="text-indigo-400 group-hover:underline">账户管理 →</span>
+            <span class="text-indigo-400 group-hover:underline">凭证中心 →</span>
           </div>
         </div>
       </div>

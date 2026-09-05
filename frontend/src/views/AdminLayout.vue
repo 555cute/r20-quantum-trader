@@ -59,7 +59,7 @@ const navGroups = [
   {
     label: '交易与网关',
     items: [
-      { id: 'security', label: 'OKX 账户与标的池', icon: Wallet },
+      { id: 'security', label: '交易所与标的池', icon: Wallet },
       { id: 'gateway', label: '任务网关', icon: RefreshCw },
       { id: 'notify', label: '消息通知', icon: Radio },
       { id: 'backup', label: '备份与还原', icon: FileCode },

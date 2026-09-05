@@ -14,6 +14,8 @@ import time
 import datetime
 import subprocess
 import re
+import urllib.request
+import urllib.parse
 
 WORKSPACE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(WORKSPACE_DIR, "data")
@@ -86,18 +88,96 @@ def fetch_and_analyze_news_sentiment():
     
     raw_news_latest = news_res_latest.get("details", []) if isinstance(news_res_latest, dict) else []
     raw_news_imp = news_res_imp.get("details", []) if isinstance(news_res_imp, dict) else []
-    
+
+    # 1.1 Multi-Exchange Feed: Supplement with Binance Official Announcements
+    binance_news = []
+    try:
+        req_bn = urllib.request.Request(
+            "https://www.binance.com/bapi/composite/v1/public/cms/article/catalog/list/query?catalogId=48&pageNo=1&pageSize=8",
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
+        with urllib.request.urlopen(req_bn, timeout=3.5) as resp_bn:
+            d_bn = json.loads(resp_bn.read().decode())
+            if isinstance(d_bn, dict) and d_bn.get("code") == "000000":
+                articles = d_bn.get("data", {}).get("articles", [])
+                now_ms = int(time.time() * 1000)
+                for idx, art in enumerate(articles[:8]):
+                    art_code = str(art.get("code", ""))
+                    title = str(art.get("title", ""))
+                    c_time = now_ms - (idx * 1800 * 1000)
+                    binance_news.append({
+                        "id": f"bn_{art.get('id', idx)}",
+                        "cTime": c_time,
+                        "title": title,
+                        "summary": title,
+                        "platform": "Binance",
+                        "platformList": ["Binance"],
+                        "url": f"https://www.binance.com/en/support/announcement/{art_code}" if art_code else "",
+                        "importance": "high"
+                    })
+    except Exception as exc:
+        print("Binance news err:", exc)
+
+    # 1.2 Multi-Exchange Feed: Supplement with Gate.io Major Listings & Market Feeds
+    gate_news = []
+    try:
+        req_gt = urllib.request.Request(
+            "https://api.gateio.ws/api/v4/futures/usdt/contracts",
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
+        with urllib.request.urlopen(req_gt, timeout=3) as resp_gt:
+            contracts = json.loads(resp_gt.read().decode())
+            contracts_with_time = [c for c in contracts if c.get("create_time")]
+            contracts_with_time.sort(key=lambda x: float(x.get("create_time", 0)), reverse=True)
+            for c in contracts_with_time[:5]:
+                c_name = c.get("name", "")
+                c_ts = int(float(c.get("create_time", 0)) * 1000)
+                base_coin = c_name.split("_")[0] if "_" in c_name else c_name
+                gate_news.append({
+                    "id": f"gate_{c_name}_{c_ts}",
+                    "cTime": c_ts,
+                    "title": f"Gate.io 合约正式上线 {c_name} (杠杆上限 {c.get('leverage_max', '50')}x)",
+                    "summary": f"Gate.io USDT 本位永续合约全新上线 {c_name}，维持保证金率 {c.get('maintenance_rate', '0.005')}，支持多空双向交易。",
+                    "platform": "Gate.io",
+                    "platformList": ["Gate.io"],
+                    "ccyList": [base_coin],
+                    "url": f"https://www.gate.io/futures/USDT/{c_name}",
+                    "importance": "medium"
+                })
+    except Exception as exc:
+        print("Gate news err:", exc)
+
     seen_ids = set()
     raw_news = []
+    # Interleave and preserve top items from all active platforms (OKX, Binance, Gate.io)
     for item in raw_news_latest + raw_news_imp:
+        if not item.get("platform"):
+            item["platform"] = "OKX"
+            item["platformList"] = ["OKX"]
+        nid = str(item.get("id", ""))
+        if nid and nid not in seen_ids:
+            seen_ids.add(nid)
+            raw_news.append(item)
+
+    for item in binance_news:
+        item["platform"] = "Binance"
+        item["platformList"] = ["Binance"]
+        nid = str(item.get("id", ""))
+        if nid and nid not in seen_ids:
+            seen_ids.add(nid)
+            raw_news.append(item)
+
+    for item in gate_news:
+        item["platform"] = "Gate.io"
+        item["platformList"] = ["Gate.io"]
         nid = str(item.get("id", ""))
         if nid and nid not in seen_ids:
             seen_ids.add(nid)
             raw_news.append(item)
             
-    # Sort strictly by creation timestamp descending
+    # Sort strictly by creation timestamp descending, ensuring multi-platform representation
     raw_news.sort(key=lambda x: int(x.get("cTime", 0) or 0), reverse=True)
-    raw_news = raw_news[:20]
+    raw_news = raw_news[:50]
 
     if not raw_news:
         news_res2 = run_json_cmd("okx news latest --lang zh-CN --limit 15 --json") or {}
@@ -126,9 +206,10 @@ def fetch_and_analyze_news_sentiment():
             "title": title,
             "summary": summary,
             "coins": item.get("ccyList", []),
+            "platform": item.get("platform") or (item.get("platformList", ["OKX"])[0] if item.get("platformList") else "OKX"),
             "platforms": item.get("platformList", []),
             "importance": item.get("importance", "high"),
-            "url": item.get("sourceUrl", "")
+            "url": item.get("url") or item.get("sourceUrl", "")
         })
 
     if triggered_threat:
@@ -244,7 +325,7 @@ def fetch_and_analyze_news_sentiment():
         "macro_sentiment": macro_env,
         "circuit_breaker": cb_info if cb_active else {"active": False},
         "coins_sentiment": coin_sentiments,
-        "latest_news": parsed_news[:10]
+        "latest_news": parsed_news[:30]
     }
 
     # Fail-closed: an upstream hiccup must not wipe a good cache into an empty page.

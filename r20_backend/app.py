@@ -99,6 +99,9 @@ from fastapi.middleware.gzip import GZipMiddleware
 app = FastAPI(title="R20 Quantum Trader Standalone Backend", version="7.4.1", lifespan=lifespan, docs_url="/api/docs", redoc_url="/api/redoc")
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
+from r20_backend.lab_api import router as lab_router
+app.include_router(lab_router)
+
 
 @app.middleware("http")
 async def admin_session_context(request: Request, call_next):
@@ -162,6 +165,13 @@ class AdminConfigUpdate(BaseModel):
     okx_api_key: str | None = None
     okx_secret_key: str | None = None
     okx_passphrase: str | None = None
+    binance_api_key: str | None = None
+    binance_secret_key: str | None = None
+    gate_api_key: str | None = None
+    gate_secret_key: str | None = None
+    primary_exchange: str | None = Field(default=None, pattern=r"^(okx|binance|gate)$")
+    binance_testnet: bool | None = None
+    gate_testnet: bool | None = None
     okx_simulated: bool | None = None
     llm_base_url: str | None = None
     llm_api_key: str | None = None
@@ -530,6 +540,9 @@ def get_admin_configuration() -> dict[str, str]:
         "OKX 当前环境": "模拟盘 DEMO" if settings.okx_simulated else "实盘 LIVE",
         "OKX 实盘凭证": "已完整配置" if settings.okx_live_configured else "未配置",
         "OKX 模拟盘凭证": "已配置" if settings.okx_demo_configured else "未配置",
+        "币安行情与网络": "免登录全要素聚合 (ACTIVE)" + (" · 交易密钥已就绪" if getattr(settings, "binance_configured", False) else ""),
+        "Gate 行情与网络": "免登录全要素聚合 (ACTIVE)" + (" · 交易密钥已就绪" if getattr(settings, "gate_configured", False) else ""),
+        "多所微积分动力学": "多源容灾 Fallback + 价差多空比矩阵",
         "LLM 决策主脑": model_name,
         "LLM 思考强度": effort,
         "模型委员会": "加权共识机制 (ACTIVE)",
@@ -861,6 +874,11 @@ def admin_config(x_r20_admin_token: str | None = Header(default=None)) -> dict[s
             "okx_environment": settings.okx_environment,
             "okx_live_configured": settings.okx_live_configured,
             "okx_demo_configured": settings.okx_demo_configured,
+            "binance_configured": settings.binance_configured,
+            "gate_configured": settings.gate_configured,
+            "primary_exchange": getattr(settings, "primary_exchange", "okx"),
+            "binance_testnet": getattr(settings, "binance_testnet", True),
+            "gate_testnet": getattr(settings, "gate_testnet", True),
             "okx_simulated": settings.okx_simulated,
             "llm_base_url": settings.llm_base_url,
             "llm_model": settings.llm_model,
@@ -975,12 +993,17 @@ def update_admin_config(payload: AdminConfigUpdate, x_r20_admin_token: str | Non
         "OKX_LIVE_API_KEY": data.get("okx_live_api_key"), "OKX_LIVE_SECRET_KEY": data.get("okx_live_secret_key"), "OKX_LIVE_PASSPHRASE": data.get("okx_live_passphrase"),
         "OKX_DEMO_API_KEY": data.get("okx_demo_api_key"), "OKX_DEMO_SECRET_KEY": data.get("okx_demo_secret_key"), "OKX_DEMO_PASSPHRASE": data.get("okx_demo_passphrase"),
         "OKX_API_KEY": data.get("okx_api_key"), "OKX_SECRET_KEY": data.get("okx_secret_key"), "OKX_PASSPHRASE": data.get("okx_passphrase"),
+        "BINANCE_API_KEY": data.get("binance_api_key"), "BINANCE_SECRET_KEY": data.get("binance_secret_key"),
+        "GATE_API_KEY": data.get("gate_api_key"), "GATE_SECRET_KEY": data.get("gate_secret_key"),
         "LLM_API_KEY": data.get("llm_api_key"),
     }
     save_secrets({key: value for key, value in secret_values.items() if value})
     env_values = {
         "R20_OKX_ENV": selected_mode,
         "OKX_IS_SIMULATED": "1" if selected_mode == "demo" else "0" if selected_mode else None,
+        "R20_PRIMARY_EXCHANGE": data.get("primary_exchange"),
+        "BINANCE_TESTNET": "1" if data.get("binance_testnet") else "0" if "binance_testnet" in data else None,
+        "GATE_TESTNET": "1" if data.get("gate_testnet") else "0" if "gate_testnet" in data else None,
         "LLM_BASE_URL": data.get("llm_base_url"),
         "LLM_MODEL": data.get("llm_model"),
         "LLM_REASONING_EFFORT": data.get("llm_reasoning_effort"),

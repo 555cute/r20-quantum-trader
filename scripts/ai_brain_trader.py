@@ -185,129 +185,184 @@ def fetch_single_instrument_package(item: Dict[str, Any]) -> Dict[str, Any]:
     except Exception:
         pass
 
+    # Ticker Fallback to Binance / Gate if OKX fails
+    if pkg["price"] <= 0:
+        try:
+            from r20_backend.exchanges import get_exchange_adapter
+            base_sym = item.get("name", inst_id.split("-")[0])
+            for ex_id in ["binance", "gate"]:
+                try:
+                    ad = get_exchange_adapter(ex_id)
+                    tk = ad.fetch_ticker(base_sym, timeout=3.0)
+                    if tk.get("last", 0) > 0:
+                        pkg["price"] = float(tk["last"])
+                        pkg["bidPx"] = pkg["price"]
+                        pkg["askPx"] = pkg["price"]
+                        pkg["chg24h"] = float(tk.get("price_change_percent", 0) or 0)
+                        break
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
     # 2. 15M Candles (recent 24, about 6 hours) & Technical Indicators Calculation
+    raw_candles = []
     try:
         req = urllib.request.Request(f"https://www.okx.com/api/v5/market/candles?instId={inst_id}&bar=15m&limit=24", headers=headers)
         with urllib.request.urlopen(req, timeout=3) as resp:
             d = json.loads(resp.read().decode("utf-8"))
             if d.get("code") == "0" and d.get("data"):
                 raw_candles = d["data"]
-                pkg["recent_15m"] = [[float(c[1]), float(c[2]), float(c[3]), float(c[4]), round(float(c[5]), 1)] for c in raw_candles[:12]]
-
-                # Calculate 15M indicators
-                if len(raw_candles) >= 15:
-                    closes = [float(c[4]) for c in reversed(raw_candles)]
-                    highs = [float(c[2]) for c in reversed(raw_candles)]
-                    lows = [float(c[3]) for c in reversed(raw_candles)]
-                    vols = [float(c[5]) for c in reversed(raw_candles)]
-
-                    # ATR 15M
-                    tr_list = []
-                    for i in range(1, len(closes)):
-                        tr = max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1]))
-                        tr_list.append(tr)
-                    if len(tr_list) >= 14:
-                        pkg["atr_15m"] = round(sum(tr_list[-14:]) / 14, 4)
-                        pkg["atr"] = pkg["atr_15m"]
-
-                    # RSI 15M
-                    diffs = [closes[i] - closes[i-1] for i in range(1, len(closes))]
-                    gains = [d if d > 0 else 0 for d in diffs]
-                    losses = [-d if d < 0 else 0 for d in diffs]
-                    if len(gains) >= 14:
-                        avg_g = sum(gains[-14:]) / 14
-                        avg_l = sum(losses[-14:]) / 14
-                        rs = (avg_g / avg_l) if avg_l > 0 else 100.0
-                        pkg["rsi"] = round(100.0 - (100.0 / (1.0 + rs)), 1)
-                        pkg["rsi_15m"] = pkg["rsi"]
-
-                    # VWAP Bias
-                    pv_sum = sum(closes[i] * vols[i] for i in range(len(closes)))
-                    v_sum = sum(vols)
-                    if v_sum > 0:
-                        vwap = pv_sum / v_sum
-                        pkg["vwap_bias"] = round((pkg["price"] - vwap) / vwap * 100, 2)
-
-                    # Volume Ratio (Last vs MA5)
-                    if len(vols) >= 6:
-                        avg_v5 = sum(vols[-6:-1]) / 5
-                        if avg_v5 > 0:
-                            pkg["vol_ratio"] = round(vols[-1] / avg_v5, 2)
-
-                    # OBV Flow
-                    obv = 0
-                    for i in range(1, len(closes)):
-                        if closes[i] > closes[i-1]:
-                            obv += vols[i]
-                        elif closes[i] < closes[i-1]:
-                            obv -= vols[i]
-                    pkg["obv_flow"] = "BULL_FLOW" if obv > 0 else ("BEAR_FLOW" if obv < 0 else "NEUTRAL")
     except Exception:
         pass
 
+    if not raw_candles or len(raw_candles) < 12:
+        try:
+            from multi_exchange_feed import fetch_multi_exchange_candles
+            std_c = fetch_multi_exchange_candles(item.get("name", inst_id.split("-")[0]), "15m", 24)
+            if std_c:
+                raw_candles = [[str(int(c[0])), str(c[1]), str(c[2]), str(c[3]), str(c[4]), str(c[5])] for c in reversed(std_c)]
+        except Exception:
+            pass
+
+    if raw_candles:
+        pkg["recent_15m"] = [[float(c[1]), float(c[2]), float(c[3]), float(c[4]), round(float(c[5]), 1)] for c in raw_candles[:12]]
+        # Calculate 15M indicators
+        if len(raw_candles) >= 15:
+            closes = [float(c[4]) for c in reversed(raw_candles)]
+            highs = [float(c[2]) for c in reversed(raw_candles)]
+            lows = [float(c[3]) for c in reversed(raw_candles)]
+            vols = [float(c[5]) for c in reversed(raw_candles)]
+
+            # ATR 15M
+            tr_list = []
+            for i in range(1, len(closes)):
+                tr = max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1]))
+                tr_list.append(tr)
+            if len(tr_list) >= 14:
+                pkg["atr_15m"] = round(sum(tr_list[-14:]) / 14, 4)
+                pkg["atr"] = pkg["atr_15m"]
+
+            # RSI 15M
+            diffs = [closes[i] - closes[i-1] for i in range(1, len(closes))]
+            gains = [d if d > 0 else 0 for d in diffs]
+            losses = [-d if d < 0 else 0 for d in diffs]
+            if len(gains) >= 14:
+                avg_g = sum(gains[-14:]) / 14
+                avg_l = sum(losses[-14:]) / 14
+                rs = (avg_g / avg_l) if avg_l > 0 else 100.0
+                pkg["rsi"] = round(100.0 - (100.0 / (1.0 + rs)), 1)
+                pkg["rsi_15m"] = pkg["rsi"]
+
+            # VWAP Bias
+            pv_sum = sum(closes[i] * vols[i] for i in range(len(closes)))
+            v_sum = sum(vols)
+            if v_sum > 0:
+                vwap = pv_sum / v_sum
+                pkg["vwap_bias"] = round((pkg["price"] - vwap) / vwap * 100, 2)
+
+            # Volume Ratio (Last vs MA5)
+            if len(vols) >= 6:
+                avg_v5 = sum(vols[-6:-1]) / 5
+                if avg_v5 > 0:
+                    pkg["vol_ratio"] = round(vols[-1] / avg_v5, 2)
+
+            # OBV Flow
+            obv = 0
+            for i in range(1, len(closes)):
+                if closes[i] > closes[i-1]:
+                    obv += vols[i]
+                elif closes[i] < closes[i-1]:
+                    obv -= vols[i]
+            pkg["obv_flow"] = "BULL_FLOW" if obv > 0 else ("BEAR_FLOW" if obv < 0 else "NEUTRAL")
+
     # 3. 1H Candles (recent 24, about 24 hours) & 1H ATR / 1H RSI
+    raw_1h = []
     try:
         req = urllib.request.Request(f"https://www.okx.com/api/v5/market/candles?instId={inst_id}&bar=1H&limit=24", headers=headers)
         with urllib.request.urlopen(req, timeout=3) as resp:
             d = json.loads(resp.read().decode("utf-8"))
             if d.get("code") == "0" and d.get("data"):
                 raw_1h = d["data"]
-                pkg["recent_1h"] = [[float(c[1]), float(c[2]), float(c[3]), float(c[4]), round(float(c[5]), 1)] for c in raw_1h[:12]]
-                if len(raw_1h) >= 15:
-                    closes_1h = [float(c[4]) for c in reversed(raw_1h)]
-                    highs_1h = [float(c[2]) for c in reversed(raw_1h)]
-                    lows_1h = [float(c[3]) for c in reversed(raw_1h)]
-
-                    tr_list_1h = []
-                    for i in range(1, len(closes_1h)):
-                        tr = max(highs_1h[i] - lows_1h[i], abs(highs_1h[i] - closes_1h[i-1]), abs(lows_1h[i] - closes_1h[i-1]))
-                        tr_list_1h.append(tr)
-                    if len(tr_list_1h) >= 14:
-                        pkg["atr_1h"] = round(sum(tr_list_1h[-14:]) / 14, 4)
-                        pkg["atr"] = pkg["atr_1h"]  # Elevate primary ATR to 1H
-
-                    diffs_1h = [closes_1h[i] - closes_1h[i-1] for i in range(1, len(closes_1h))]
-                    gains_1h = [d if d > 0 else 0 for d in diffs_1h]
-                    losses_1h = [-d if d < 0 else 0 for d in diffs_1h]
-                    if len(gains_1h) >= 14:
-                        avg_g_1h = sum(gains_1h[-14:]) / 14
-                        avg_l_1h = sum(losses_1h[-14:]) / 14
-                        rs_1h = (avg_g_1h / avg_l_1h) if avg_l_1h > 0 else 100.0
-                        pkg["rsi_1h"] = round(100.0 - (100.0 / (1.0 + rs_1h)), 1)
-
-                    # 1H Swing Structure
-                    if len(closes_1h) >= 10:
-                        ma7_1h = sum(closes_1h[-7:]) / 7
-                        ma20_1h = sum(closes_1h[-20:]) / min(len(closes_1h), 20)
-                        if closes_1h[-1] > ma7_1h > ma20_1h:
-                            pkg["structure_1h"] = "1H_SWING_BULL"
-                        elif closes_1h[-1] < ma7_1h < ma20_1h:
-                            pkg["structure_1h"] = "1H_SWING_BEAR"
-                        else:
-                            pkg["structure_1h"] = "1H_SWING_CHOP"
     except Exception:
         pass
 
+    if not raw_1h or len(raw_1h) < 8:
+        try:
+            from multi_exchange_feed import fetch_multi_exchange_candles
+            std_1h = fetch_multi_exchange_candles(item.get("name", inst_id.split("-")[0]), "1h", 24)
+            if std_1h:
+                raw_1h = [[str(int(c[0])), str(c[1]), str(c[2]), str(c[3]), str(c[4]), str(c[5])] for c in reversed(std_1h)]
+        except Exception:
+            pass
+
+    if raw_1h:
+        pkg["recent_1h"] = [[float(c[1]), float(c[2]), float(c[3]), float(c[4]), round(float(c[5]), 1)] for c in raw_1h[:12]]
+        if len(raw_1h) >= 15:
+            closes_1h = [float(c[4]) for c in reversed(raw_1h)]
+            highs_1h = [float(c[2]) for c in reversed(raw_1h)]
+            lows_1h = [float(c[3]) for c in reversed(raw_1h)]
+
+            tr_list_1h = []
+            for i in range(1, len(closes_1h)):
+                tr = max(highs_1h[i] - lows_1h[i], abs(highs_1h[i] - closes_1h[i-1]), abs(lows_1h[i] - closes_1h[i-1]))
+                tr_list_1h.append(tr)
+            if len(tr_list_1h) >= 14:
+                pkg["atr_1h"] = round(sum(tr_list_1h[-14:]) / 14, 4)
+                pkg["atr"] = pkg["atr_1h"]  # Elevate primary ATR to 1H
+
+            diffs_1h = [closes_1h[i] - closes_1h[i-1] for i in range(1, len(closes_1h))]
+            gains_1h = [d if d > 0 else 0 for d in diffs_1h]
+            losses_1h = [-d if d < 0 else 0 for d in diffs_1h]
+            if len(gains_1h) >= 14:
+                avg_g_1h = sum(gains_1h[-14:]) / 14
+                avg_l_1h = sum(losses_1h[-14:]) / 14
+                rs_1h = (avg_g_1h / avg_l_1h) if avg_l_1h > 0 else 100.0
+                pkg["rsi_1h"] = round(100.0 - (100.0 / (1.0 + rs_1h)), 1)
+
+            # 1H Swing Structure
+            if len(closes_1h) >= 10:
+                ma7_1h = sum(closes_1h[-7:]) / 7
+                ma20_1h = sum(closes_1h[-20:]) / min(len(closes_1h), 20)
+                if closes_1h[-1] > ma7_1h > ma20_1h:
+                    pkg["structure_1h"] = "1H_SWING_BULL"
+                elif closes_1h[-1] < ma7_1h < ma20_1h:
+                    pkg["structure_1h"] = "1H_SWING_BEAR"
+                else:
+                    pkg["structure_1h"] = "1H_SWING_CHOP"
+
     # 4. 4H Candles (recent 16, about 64 hours) & 4H Macro Structure
+    raw_4h = []
     try:
         req = urllib.request.Request(f"https://www.okx.com/api/v5/market/candles?instId={inst_id}&bar=4H&limit=16", headers=headers)
         with urllib.request.urlopen(req, timeout=3) as resp:
             d = json.loads(resp.read().decode("utf-8"))
             if d.get("code") == "0" and d.get("data"):
                 raw_4h = d["data"]
-                pkg["recent_4h"] = [[float(c[1]), float(c[2]), float(c[3]), float(c[4]), round(float(c[5]), 1)] for c in raw_4h[:8]]
-                if len(raw_4h) >= 8:
-                    closes_4h = [float(c[4]) for c in reversed(raw_4h)]
-                    ma5_4h = sum(closes_4h[-5:]) / 5
-                    ma12_4h = sum(closes_4h[-12:]) / min(len(closes_4h), 12)
-                    if closes_4h[-1] > ma5_4h > ma12_4h:
-                        pkg["macro_4h"] = "4H_MACRO_BULL (大级别多头通道)"
-                    elif closes_4h[-1] < ma5_4h < ma12_4h:
-                        pkg["macro_4h"] = "4H_MACRO_BEAR (大级别空头承压)"
-                    else:
-                        pkg["macro_4h"] = "4H_MACRO_RANGE (大级别区间震荡)"
     except Exception:
         pass
+
+    if not raw_4h or len(raw_4h) < 6:
+        try:
+            from multi_exchange_feed import fetch_multi_exchange_candles
+            std_4h = fetch_multi_exchange_candles(item.get("name", inst_id.split("-")[0]), "4h", 16)
+            if std_4h:
+                raw_4h = [[str(int(c[0])), str(c[1]), str(c[2]), str(c[3]), str(c[4]), str(c[5])] for c in reversed(std_4h)]
+        except Exception:
+            pass
+
+    if raw_4h:
+        pkg["recent_4h"] = [[float(c[1]), float(c[2]), float(c[3]), float(c[4]), round(float(c[5]), 1)] for c in raw_4h[:8]]
+        if len(raw_4h) >= 8:
+            closes_4h = [float(c[4]) for c in reversed(raw_4h)]
+            ma5_4h = sum(closes_4h[-5:]) / 5
+            ma12_4h = sum(closes_4h[-12:]) / min(len(closes_4h), 12)
+            if closes_4h[-1] > ma5_4h > ma12_4h:
+                pkg["macro_4h"] = "4H_MACRO_BULL (大级别多头通道)"
+            elif closes_4h[-1] < ma5_4h < ma12_4h:
+                pkg["macro_4h"] = "4H_MACRO_BEAR (大级别空头承压)"
+            else:
+                pkg["macro_4h"] = "4H_MACRO_RANGE (大级别区间震荡)"
 
     # 5. Funding Rate & OI
     if item["type"] == "crypto":
@@ -362,6 +417,17 @@ def fetch_single_instrument_package(item: Dict[str, Any]) -> Dict[str, Any]:
                     adx_vals = ind_data[0].get("data", [{}])[0].get("timeframes", {}).get("1H", {}).get("indicators", {}).get("ADX", [])
                     if adx_vals:
                         pkg["adx_1h"] = float(adx_vals[0].get("values", {}).get("adx", 0.0) or 0.0)
+        except Exception:
+            pass
+
+    # 5.5 Cross Exchange Insights & Arbitrage Sentiment
+    if item["type"] == "crypto":
+        try:
+            from multi_exchange_feed import fetch_cross_exchange_insights
+            base_sym = item.get("name", inst_id.split("-")[0])
+            cross_data = fetch_cross_exchange_insights(base_sym)
+            if cross_data:
+                pkg["cross_exchange_insights"] = cross_data
         except Exception:
             pass
 
@@ -547,6 +613,16 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
             f"{tf}:v={v.get('velocity', '--')},a={v.get('acceleration', '--')},I={v.get('impulse', '--')},态={v.get('regime', '--')}"
             for tf, v in calc_tfs.items() if isinstance(v, dict)
         )
+        cross_ex = p.get("cross_exchange_insights", {})
+        cross_ex_line = ""
+        if cross_ex:
+            prices_dict = cross_ex.get("prices", {})
+            p_str = "/".join(f"{k.upper()}:{v}" for k, v in prices_dict.items())
+            bn_ls = cross_ex.get("binance_top_trader_long_short_ratio", "--")
+            gt_fr = cross_ex.get("gate_funding_rate", "--")
+            spread_d = cross_ex.get("spread_disparity_pct", 0.0)
+            cross_ex_line = f"- 🌐 多交易所全要素行情比对 (OKX/Binance/Gate): 实时比价={p_str} | 币安-OKX价差散度={spread_d}% | 币安大户多空比={bn_ls} | Gate费率={gt_fr}"
+
         info = f"""---------------------------------------------------------
 【{p['name']} ({p['instId']})】| 数据质量: {quality} | 现价: {p['price']} | 24H涨跌: {p['chg24h']}% | 盘口买/卖: {p['bidPx']}/{p['askPx']}
 - 🏛️ 三重滤网宏观结构: 4H宏观大势={p.get('macro_4h', '4H_MACRO_RANGE')} | 1H波段结构={p.get('structure_1h', '1H_SWING_CHOP')}
@@ -559,9 +635,12 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
 - ⚅ 概率论与统计风险: {prob_line}
 - ∂ 分周期速度/加速度/冲量: {calc_tf_line or 'UNKNOWN'}
 - 衍生品博弈: 资金费率: {p['fundingRate']}% | OI未平仓: {p['oiUsd']} | 多空比: {p['lsRatio']} | 5M主动吃单净差: {p['takerNetUsd']}
+{cross_ex_line}
 - 15M K线(倒序12根 [O,H,L,C,V]): {k15}
 - 1H K线(倒序12根 [O,H,L,C,V]): {k1h}
 - 4H K线(倒序8根 [O,H,L,C,V]): {k4h}"""
+        # Strip blank lines if cross_ex_line was empty
+        info = "\n".join(l for l in info.split("\n") if l.strip())
         market_lines.append(info)
 
     all_market_str = "\n".join(market_lines)

@@ -6,6 +6,7 @@ import HeaderBar from '../components/HeaderBar.vue'
 import TopHudRibbon from '../components/TopHudRibbon.vue'
 import TacticalDesk from '../components/TacticalDesk.vue'
 import InstrumentMatrix from '../components/InstrumentMatrix.vue'
+import LiveTradingViewChart from '../components/LiveTradingViewChart.vue'
 import LedgerLogs from '../components/LedgerLogs.vue'
 import NewsIntelligence from '../components/NewsIntelligence.vue'
 import SelfEvolutionLab from '../components/SelfEvolutionLab.vue'
@@ -134,23 +135,30 @@ function setLayout(mode: 'dual' | 'stacked') {
         </div>
 
         <!-- Layout Mode 1: Dual-Wing Institutional Workstation (Only when user explicitly chooses dual) -->
-        <div v-if="layoutMode === 'dual'" class="flex flex-col lg:flex-row gap-3.5 items-start">
-          <!-- Left Wing: Master Asset Cockpit + Tactical Desk (62% width on wide displays) -->
-          <div class="w-full lg:w-[62%] 2xl:w-[64%] space-y-3.5">
-            <!-- 1. Master Bento HUD Cockpit -->
-            <TopHudRibbon />
-            <!-- 2. Integrated Interactive Tactical Desk (Positions + Orders) -->
-            <TacticalDesk />
-          </div>
+        <div v-if="layoutMode === 'dual'" class="space-y-3.5">
+          <!-- Professional Live TradingView Chart -->
+          <LiveTradingViewChart />
 
-          <!-- Right Wing: 6-Asset Live Dynamics Radar (38% width on wide displays) -->
-          <div class="w-full lg:w-[38%] 2xl:w-[36%] space-y-3.5">
-            <InstrumentMatrix />
+          <div class="flex flex-col lg:flex-row gap-3.5 items-start">
+            <!-- Left Wing: Master Asset Cockpit + Tactical Desk (62% width on wide displays) -->
+            <div class="w-full lg:w-[62%] 2xl:w-[64%] space-y-3.5">
+              <!-- 1. Master Bento HUD Cockpit -->
+              <TopHudRibbon />
+              <!-- 2. Integrated Interactive Tactical Desk (Positions + Orders) -->
+              <TacticalDesk />
+            </div>
+
+            <!-- Right Wing: 6-Asset Live Dynamics Radar (38% width on wide displays) -->
+            <div class="w-full lg:w-[38%] 2xl:w-[36%] space-y-3.5">
+              <InstrumentMatrix />
+            </div>
           </div>
         </div>
 
         <!-- Layout Mode 2: Stacked Full View (Default: Natural Top-Down Flow) -->
         <div v-else class="space-y-3.5">
+          <!-- Professional Live TradingView Chart -->
+          <LiveTradingViewChart />
           <TopHudRibbon />
           <TacticalDesk />
           <InstrumentMatrix />

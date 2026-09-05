@@ -41,6 +41,11 @@ class Settings:
     okx_passphrase: str = ""
     okx_live_configured: bool = False
     okx_demo_configured: bool = False
+    binance_configured: bool = False
+    gate_configured: bool = False
+    primary_exchange: str = "okx"
+    binance_testnet: bool = True
+    gate_testnet: bool = True
     okx_simulated: bool = True
     llm_base_url: str = "https://api.openai.com/v1"
     llm_api_key: str = ""
@@ -71,6 +76,11 @@ def refresh_settings() -> Settings:
     effective = {**os.environ, **secret_values}
     settings.okx_live_configured = bool(effective.get("OKX_LIVE_API_KEY") and effective.get("OKX_LIVE_SECRET_KEY") and effective.get("OKX_LIVE_PASSPHRASE"))
     settings.okx_demo_configured = bool(effective.get("OKX_DEMO_API_KEY") and effective.get("OKX_DEMO_SECRET_KEY") and effective.get("OKX_DEMO_PASSPHRASE"))
+    settings.binance_configured = bool(effective.get("BINANCE_API_KEY") and effective.get("BINANCE_SECRET_KEY"))
+    settings.gate_configured = bool(effective.get("GATE_API_KEY") and effective.get("GATE_SECRET_KEY"))
+    settings.primary_exchange = os.getenv("R20_PRIMARY_EXCHANGE", "okx").lower()
+    settings.binance_testnet = os.getenv("BINANCE_TESTNET", "1") == "1"
+    settings.gate_testnet = os.getenv("GATE_TESTNET", "1") == "1"
     settings.okx_simulated = selected.simulated
     settings.llm_base_url = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1")
     settings.llm_api_key = os.getenv("LLM_API_KEY", "")

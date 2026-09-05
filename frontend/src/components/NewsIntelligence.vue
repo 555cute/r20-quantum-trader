@@ -1,14 +1,38 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import { useDashboardStore } from '../stores/dashboard'
-import { Newspaper, Flame, ExternalLink, ShieldAlert } from 'lucide-vue-next'
+import { Newspaper, Flame, ExternalLink, ShieldAlert, Layers } from 'lucide-vue-next'
 
 const store = useDashboardStore()
 const intel = computed<any>(() => store.data?.news_intelligence || {})
-const newsItems = computed<any[]>(() => intel.value.latest_news || [])
+const allNewsItems = computed<any[]>(() => intel.value.latest_news || [])
 const coinsSentiment = computed<[string, any][]>(() => Object.entries(intel.value.coins_sentiment || {}))
 const macro = computed<string>(() => intel.value.macro_sentiment || '--')
 const breakerActive = computed<boolean>(() => !!intel.value.circuit_breaker?.active)
+
+// Platform Tab Filter: ALL | OKX | Binance | Gate.io
+const selectedPlatform = ref<'ALL' | 'OKX' | 'Binance' | 'Gate.io'>('ALL')
+
+const platformCounts = computed(() => {
+  const counts: Record<string, number> = { ALL: allNewsItems.value.length, OKX: 0, Binance: 0, 'Gate.io': 0 }
+  for (const item of allNewsItems.value) {
+    const p = item.platform || (item.platforms && item.platforms[0]) || 'OKX'
+    if (counts[p] !== undefined) {
+      counts[p]++
+    }
+  }
+  return counts
+})
+
+const filteredNews = computed(() => {
+  if (selectedPlatform.value === 'ALL') {
+    return allNewsItems.value
+  }
+  return allNewsItems.value.filter(item => {
+    const p = item.platform || (item.platforms && item.platforms[0]) || 'OKX'
+    return p.toLowerCase() === selectedPlatform.value.toLowerCase()
+  })
+})
 
 function labelClass(label: string) {
   if (label === 'bullish') return 'color: var(--color-up); background-color: var(--color-up-bg); border-color: var(--color-up-border);'
@@ -30,6 +54,13 @@ function importanceClass(imp: string) {
 function importanceCn(imp: string) {
   return { critical: '重大', high: '高', medium: '中', low: '低' }[imp] || (imp || '低')
 }
+
+function platformBadgeStyle(platform: string) {
+  const p = (platform || '').toLowerCase()
+  if (p.includes('binance')) return 'background-color: rgba(243, 186, 47, 0.15); color: #f3ba2f; border-color: rgba(243, 186, 47, 0.3);'
+  if (p.includes('gate')) return 'background-color: rgba(35, 84, 255, 0.15); color: #2354ff; border-color: rgba(35, 84, 255, 0.3);'
+  return 'background-color: rgba(16, 185, 129, 0.15); color: #10b981; border-color: rgba(16, 185, 129, 0.3);'
+}
 </script>
 
 <template>
@@ -48,10 +79,10 @@ function importanceCn(imp: string) {
         </div>
         <div>
           <h2 class="text-xs sm:text-sm font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
-            全网加密重大舆情与流动性情报
+            全网多源重大舆情与流动性情报 (OKX / Binance / Gate)
           </h2>
           <p class="text-xs font-mono mt-0.5" style="color: var(--text-muted);">
-            聚合扫描主流财经与链上异动 · 更新于 {{ intel.updated_at || '--' }} (UTC+8)
+            全天候扫描 OKX 突发快讯、币安官方公告与 Gate.io 上线异动 · 更新于 {{ intel.updated_at || '--' }} (UTC+8)
           </p>
         </div>
       </div>
@@ -75,6 +106,33 @@ function importanceCn(imp: string) {
         >
           宏观情绪: <strong style="color: var(--text-main);">{{ macro }}</strong>
         </span>
+      </div>
+    </div>
+
+    <!-- Platform Filter Tabs -->
+    <div
+      class="rounded-xl border p-2 flex flex-wrap items-center justify-between gap-2 shadow-xs transition-colors"
+      style="background-color: var(--bg-card); border-color: var(--border-subtle);"
+    >
+      <div class="flex items-center gap-1.5 overflow-x-auto">
+        <button
+          v-for="tab in (['ALL', 'OKX', 'Binance', 'Gate.io'] as const)"
+          :key="tab"
+          @click="selectedPlatform = tab"
+          class="px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer flex items-center gap-1.5"
+          :style="selectedPlatform === tab
+            ? { backgroundColor: 'var(--text-main)', color: 'var(--bg-card)' }
+            : { backgroundColor: 'var(--bg-card-subtle)', color: 'var(--text-muted)' }"
+        >
+          <span>{{ tab === 'ALL' ? '全平台全息' : tab }}</span>
+          <span class="text-[10px] px-1.5 py-0.2 rounded-full border opacity-80" :style="{ borderColor: 'currentColor' }">
+            {{ platformCounts[tab] || 0 }}
+          </span>
+        </button>
+      </div>
+
+      <div class="text-[11px] font-mono px-2 text-right hidden sm:block" style="color: var(--text-faint);">
+        展示 {{ filteredNews.length }} 条 · 支持多源独立过滤
       </div>
     </div>
 
@@ -105,38 +163,45 @@ function importanceCn(imp: string) {
 
     <!-- News List -->
     <div
-      v-if="newsItems.length === 0"
+      v-if="filteredNews.length === 0"
       class="py-16 text-center border border-dashed rounded-xl"
       style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-muted);"
     >
-      <p class="text-xs font-mono font-medium">当前市场无破坏性突发黑天鹅或高热度异动，舆情环境平稳。</p>
+      <p class="text-xs font-mono font-medium">当前平台筛选下无突发快讯或公告。</p>
     </div>
 
     <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-3">
       <div
-        v-for="item in newsItems"
+        v-for="item in filteredNews"
         :key="item.id"
-        class="rounded-xl border p-4 transition-all shadow-xs"
+        class="rounded-xl border p-4 transition-all shadow-xs flex flex-col justify-between"
         style="background-color: var(--bg-card); border-color: var(--border-subtle);"
       >
-        <div class="flex items-start justify-between gap-2 mb-2">
-          <div class="flex items-start space-x-1.5 min-w-0">
-            <Flame class="w-4 h-4 shrink-0 mt-0.5" :style="importanceClass(item.importance)" />
-            <span class="font-bold text-xs sm:text-sm leading-snug font-sans" style="color: var(--text-main);">
-              {{ item.title }}
+        <div>
+          <div class="flex items-start justify-between gap-2 mb-2">
+            <div class="flex items-start space-x-1.5 min-w-0">
+              <Flame class="w-4 h-4 shrink-0 mt-0.5" :style="importanceClass(item.importance)" />
+              <span class="font-bold text-xs sm:text-sm leading-snug font-sans" style="color: var(--text-main);">
+                {{ item.title }}
+              </span>
+            </div>
+            <span class="text-[10px] font-mono shrink-0" style="color: var(--text-faint);">
+              {{ item.time }}
             </span>
           </div>
-          <span class="text-[10px] font-mono shrink-0" style="color: var(--text-faint);">
-            {{ item.time }}
-          </span>
+
+          <p class="text-xs leading-relaxed font-sans line-clamp-3 mb-3" style="color: var(--text-muted);">
+            {{ item.summary }}
+          </p>
         </div>
 
-        <p class="text-xs leading-relaxed font-sans line-clamp-3" style="color: var(--text-muted);">
-          {{ item.summary }}
-        </p>
-
-        <div class="mt-3 pt-2.5 border-t flex items-center justify-between text-[11px] font-mono" style="border-color: var(--border-subtle); color: var(--text-muted);">
-          <span>热度: <strong :style="importanceClass(item.importance)">{{ importanceCn(item.importance) }}</strong></span>
+        <div class="mt-2 pt-2.5 border-t flex items-center justify-between text-[11px] font-mono" style="border-color: var(--border-subtle); color: var(--text-muted);">
+          <div class="flex items-center gap-1.5">
+            <span class="px-2 py-0.5 rounded text-[10px] font-bold border" :style="platformBadgeStyle(item.platform)">
+              {{ item.platform || 'OKX' }}
+            </span>
+            <span>热度: <strong :style="importanceClass(item.importance)">{{ importanceCn(item.importance) }}</strong></span>
+          </div>
           <span class="flex items-center space-x-2">
             <span>标的: <strong style="color: var(--text-main);">{{ (item.coins || []).join(', ') || 'ALL' }}</strong></span>
             <a

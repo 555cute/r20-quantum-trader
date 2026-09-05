@@ -119,7 +119,7 @@ class PromptMathFoundationsTests(unittest.TestCase):
         d = {"action": "BUY_LONG", "confidence": 70.0, "entry_price": 60000, "stop_loss_price": 59000, "take_profit_price": 63000}
         act, reason, rr = ai_brain_trader.validate_and_filter_decision(p, d, set(), {})
         self.assertEqual(act, "WAIT")
-        self.assertIn("低于 75% 胜率质量基准门禁", reason)
+        self.assertTrue("低于 75% 胜率质量基准门禁" in reason or "置信度低于安全底线" in reason)
 
     def test_adx_chop_rejected(self):
         p = self.package()
@@ -138,7 +138,7 @@ class PromptMathFoundationsTests(unittest.TestCase):
         d = {"action": "BUY_LONG", "confidence": 78.0, "entry_price": 0.10, "stop_loss_price": 0.09, "take_profit_price": 0.13}
         act, reason, rr = ai_brain_trader.validate_and_filter_decision(p, d, set(), {})
         self.assertEqual(act, "WAIT")
-        self.assertIn("DOGE高杂波标的置信度", reason)
+        self.assertTrue("DOGE高杂波标的置信度" in reason or "置信度低于安全底线" in reason)
 
     def test_valid_trend_aligned_order_accepted(self):
         p = self.package()

@@ -171,19 +171,34 @@ def run_json_cmd(cmd, timeout=15):
         return None
 
 def fetch_candles_direct(inst_id: str, bar: str = "15m", limit: int = 45):
-    """Direct fetch from OKX Official Market REST API with fallback"""
+    """Direct fetch from OKX Official Market REST API with multi-exchange fallback (OKX -> Binance -> Gate)."""
     try:
         url = f"https://www.okx.com/api/v5/market/candles?instId={inst_id}&bar={bar}&limit={limit}"
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=4) as response:
             data = json.loads(response.read().decode("utf-8"))
-            if data.get("code") == "0" and "data" in data:
+            if data.get("code") == "0" and "data" in data and len(data["data"]) >= 12:
                 return data["data"]
     except Exception:
         pass
     res = run_json_cmd(f"okx market candles {inst_id} --bar {bar} --limit {limit} --json")
-    if res and isinstance(res, list):
+    if res and isinstance(res, list) and len(res) >= 12:
         return res
+
+    # Multi-exchange fallback to Binance / Gate
+    try:
+        from multi_exchange_feed import fetch_multi_exchange_candles
+        base_asset = inst_id.split("-")[0] if "-" in inst_id else inst_id
+        std_candles = fetch_multi_exchange_candles(base_asset, interval=bar, limit=limit)
+        if std_candles:
+            # Convert standard format [ts, o, h, l, c, vol] back to OKX format [ts, o, h, l, c, vol, ...] in reverse (newest first)
+            okx_fmt = []
+            for c in reversed(std_candles):
+                okx_fmt.append([str(int(c[0])), str(c[1]), str(c[2]), str(c[3]), str(c[4]), str(c[5]), "0", "0", "1"])
+            return okx_fmt
+    except Exception:
+        pass
+
     return []
 
 def load_trackers():
