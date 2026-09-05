@@ -1,32 +1,44 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, nextTick } from 'vue'
-import { LineChart, BarChart2, Maximize2, RefreshCw } from 'lucide-vue-next'
+import { ref, watch, onMounted, nextTick } from 'vue'
+import { useDashboardStore } from '../stores/dashboard'
+import { useI18nStore } from '../stores/i18n'
+import {
+  LineChart,
+  Maximize2,
+  Minimize2,
+  RefreshCw,
+  ChevronDown,
+  Activity,
+  Layers,
+} from 'lucide-vue-next'
 
-// Trading symbols supported across OKX / Binance / Gate
-const symbols = [
-  { id: 'BTC', label: 'BTC/USDT', tvSymbol: 'BINANCE:BTCUSDT' },
-  { id: 'ETH', label: 'ETH/USDT', tvSymbol: 'BINANCE:ETHUSDT' },
-  { id: 'SOL', label: 'SOL/USDT', tvSymbol: 'BINANCE:SOLUSDT' },
-  { id: 'DOGE', label: 'DOGE/USDT', tvSymbol: 'BINANCE:DOGEUSDT' },
-  { id: 'XRP', label: 'XRP/USDT', tvSymbol: 'BINANCE:XRPUSDT' },
-  { id: 'PEPE', label: 'PEPE/USDT', tvSymbol: 'BINANCE:PEPEUSDT' },
+const store = useDashboardStore()
+const i18n = useI18nStore()
+const containerRef = ref<HTMLDivElement | null>(null)
+const isExpanded = ref(true)
+
+const symbolList = [
+  { id: 'BTC', name: 'BTC', tvSymbol: 'BINANCE:BTCUSDT' },
+  { id: 'ETH', name: 'ETH', tvSymbol: 'BINANCE:ETHUSDT' },
+  { id: 'SOL', name: 'SOL', tvSymbol: 'BINANCE:SOLUSDT' },
+  { id: 'DOGE', name: 'DOGE', tvSymbol: 'BINANCE:DOGEUSDT' },
+  { id: 'XRP', name: 'XRP', tvSymbol: 'BINANCE:XRPUSDT' },
+  { id: 'PEPE', name: 'PEPE', tvSymbol: 'BINANCE:PEPEUSDT' },
 ]
 
-const intervals = [
+const intervalList = [
   { id: '15', label: '15m' },
   { id: '60', label: '1H' },
   { id: '240', label: '4H' },
   { id: 'D', label: '1D' },
 ]
 
-const selectedSymbol = ref(symbols[0])
-const selectedInterval = ref(intervals[1]) // Default 1H
-const isCollapsed = ref(false)
-const containerRef = ref<HTMLElement | null>(null)
+const selectedSymbol = ref(symbolList[0])
+const selectedInterval = ref(intervalList[1])
 
 function initTradingViewWidget() {
   if (!containerRef.value) return
-  containerRef.value.innerHTML = '' // Clear existing
+  containerRef.value.innerHTML = ''
 
   const widgetContainer = document.createElement('div')
   widgetContainer.className = 'tradingview-widget-container__widget'
@@ -44,8 +56,8 @@ function initTradingViewWidget() {
     interval: selectedInterval.value.id,
     timezone: 'Asia/Shanghai',
     theme: 'dark',
-    style: '1', // Candlestick
-    locale: 'zh_CN',
+    style: '1',
+    locale: i18n.locale === 'zh' ? 'zh_CN' : 'en',
     enable_publishing: false,
     hide_top_toolbar: false,
     hide_legend: false,
@@ -63,7 +75,7 @@ onMounted(() => {
   initTradingViewWidget()
 })
 
-watch([selectedSymbol, selectedInterval], () => {
+watch([selectedSymbol, selectedInterval, () => i18n.locale], () => {
   nextTick(() => {
     initTradingViewWidget()
   })
@@ -72,91 +84,90 @@ watch([selectedSymbol, selectedInterval], () => {
 
 <template>
   <div
-    class="rounded-xl border shadow-xs transition-colors overflow-hidden"
+    class="rounded-xl border shadow-xs transition-colors overflow-hidden font-mono"
     style="background-color: var(--bg-card); border-color: var(--border-subtle);"
   >
     <!-- Header Controls Ribbon -->
     <div
-      class="px-4 py-2.5 border-b flex flex-wrap items-center justify-between gap-3"
+      class="px-3 sm:px-4 py-2 border-b flex flex-wrap items-center justify-between gap-2.5"
       style="border-color: var(--border-subtle); background-color: var(--bg-card-subtle);"
     >
-      <div class="flex items-center space-x-2.5">
+      <div class="flex items-center space-x-2">
         <div
-          class="w-7 h-7 rounded-lg flex items-center justify-center border shadow-xs"
+          class="w-6 h-6 rounded flex items-center justify-center border shadow-xs"
           style="background-color: var(--color-brand-bg); border-color: var(--color-brand-border); color: var(--color-brand);"
         >
-          <LineChart class="w-4 h-4" />
+          <LineChart class="w-3.5 h-3.5" />
         </div>
         <div>
-          <span class="text-xs font-black font-mono tracking-wide" style="color: var(--text-main);">
-            实盘专业 K 线视窗 · 全要素微积分行情联动
+          <span class="text-xs font-black tracking-wide" style="color: var(--text-main);">
+            {{ i18n.t.chartTitle }}
           </span>
-          <span class="ml-2 text-[10px] font-mono px-1.5 py-0.2 rounded border text-emerald-400 border-emerald-500/30 bg-emerald-500/10">
-            TradingView 原生引擎
+          <span class="ml-2 text-[10px] px-1.5 py-0.2 rounded border text-emerald-400 border-emerald-500/30 bg-emerald-500/10">
+            {{ i18n.t.tradingViewEngine }}
           </span>
         </div>
       </div>
 
       <!-- Controls: Symbol, Timeframe, Toggle -->
-      <div class="flex items-center gap-2">
-        <!-- Symbol Selector -->
-        <div class="flex items-center rounded-lg border p-0.5 text-xs font-mono" style="background-color: var(--bg-input); border-color: var(--border-subtle);">
+      <div class="flex items-center space-x-1.5 sm:space-x-2 text-xs">
+        <!-- Symbol Selector Pills -->
+        <div class="flex items-center space-x-1 p-0.5 rounded border" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
           <button
-            v-for="sym in symbols"
+            v-for="sym in symbolList"
             :key="sym.id"
             @click="selectedSymbol = sym"
-            class="px-2 py-1 rounded transition-all cursor-pointer text-[11px] font-bold"
+            class="px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer"
             :style="selectedSymbol.id === sym.id
-              ? { backgroundColor: 'var(--color-brand-bg)', color: 'var(--color-brand)' }
+              ? { backgroundColor: 'var(--text-main)', color: 'var(--bg-app)' }
               : { color: 'var(--text-muted)' }"
           >
-            {{ sym.id }}
+            {{ sym.name }}
           </button>
         </div>
 
-        <!-- Interval Selector -->
-        <div class="hidden sm:flex items-center rounded-lg border p-0.5 text-xs font-mono" style="background-color: var(--bg-input); border-color: var(--border-subtle);">
+        <!-- Timeframe Selector Pills -->
+        <div class="flex items-center space-x-1 p-0.5 rounded border" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
           <button
-            v-for="int in intervals"
-            :key="int.id"
-            @click="selectedInterval = int"
-            class="px-2 py-1 rounded transition-all cursor-pointer text-[11px] font-bold"
-            :style="selectedInterval.id === int.id
-              ? { backgroundColor: 'var(--text-main)', color: 'var(--bg-card)' }
+            v-for="iv in intervalList"
+            :key="iv.id"
+            @click="selectedInterval = iv"
+            class="px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer"
+            :style="selectedInterval.id === iv.id
+              ? { backgroundColor: 'var(--text-main)', color: 'var(--bg-app)' }
               : { color: 'var(--text-muted)' }"
           >
-            {{ int.label }}
+            {{ iv.label }}
           </button>
         </div>
 
-        <!-- Refresh / Reload -->
+        <!-- Reload Widget Button -->
         <button
           @click="initTradingViewWidget"
-          class="p-1.5 rounded-lg border cursor-pointer hover:opacity-80 transition-opacity"
+          class="w-7 h-7 rounded border flex items-center justify-center cursor-pointer transition-colors hover:bg-[var(--bg-card-hover)]"
           style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-muted);"
-          title="刷新图表"
+          :title="i18n.t.refresh"
         >
           <RefreshCw class="w-3.5 h-3.5" />
         </button>
 
-        <!-- Toggle Collapse -->
+        <!-- Toggle Collapse/Expand -->
         <button
-          @click="isCollapsed = !isCollapsed"
-          class="px-2 py-1 rounded-lg border text-[11px] font-mono cursor-pointer hover:opacity-80 transition-opacity"
+          @click="isExpanded = !isExpanded"
+          class="h-7 px-2 rounded border flex items-center space-x-1 cursor-pointer transition-colors hover:bg-[var(--bg-card-hover)] text-[11px]"
           style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-muted);"
         >
-          {{ isCollapsed ? '展开图表' : '折叠' }}
+          <span>{{ isExpanded ? i18n.t.collapse : i18n.t.expand }}</span>
         </button>
       </div>
     </div>
 
-    <!-- Chart Container Area -->
+    <!-- Chart Body Container -->
     <div
-      v-show="!isCollapsed"
-      class="w-full relative"
-      style="height: 480px; min-height: 400px; background-color: #0b0f19;"
-    >
-      <div ref="containerRef" class="w-full h-full tradingview-widget-container"></div>
-    </div>
+      v-show="isExpanded"
+      ref="containerRef"
+      class="w-full transition-all duration-300 relative"
+      style="height: 520px; background-color: #0b0f19;"
+    ></div>
   </div>
 </template>
