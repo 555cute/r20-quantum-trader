@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -454,6 +455,7 @@ class BackupRequest(BaseModel):
 class BackupRestoreRequest(BaseModel):
     archive_name: str
     confirmation: str
+    key_env: str = Field(default="", max_length=64)
 
 
 class MemoryItemRequest(BaseModel):
@@ -2418,44 +2420,112 @@ def simple_backup_config(x_r20_admin_token: str | None = Header(default=None)) -
 
 @app.put("/api/v1/admin/backups/simple")
 def update_simple_backup(payload: SimpleBackupUpdateRequest, x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
-    actor=require_superadmin(x_r20_session); jobs=list_backup_jobs(); job=next((x for x in jobs if x.get("id")=="nightly-default"), jobs[0] if jobs else None)
-    if not job: raise HTTPException(status_code=404,detail="主灾备任务不存在")
-    wanted_type="baidu" if payload.destination=="baidu_oauth" else payload.destination
-    existing=next((x for x in job.get("targets",[]) if x.get("type")==wanted_type and (wanted_type!="baidu" or x.get("auth_mode")=="oauth")),None)
+    actor = require_superadmin(x_r20_session)
+    jobs = list_backup_jobs()
+    job = next((x for x in jobs if x.get("id") == "nightly-default"), jobs[0] if jobs else None)
+    if not job:
+        raise HTTPException(status_code=404, detail="主灾备任务不存在")
+    wanted_type = "baidu" if payload.destination == "baidu_oauth" else payload.destination
+    existing = next((x for x in job.get("targets", []) if x.get("type") == wanted_type and (wanted_type != "baidu" or x.get("auth_mode") == "oauth")), None)
     if not existing:
-        target_id=f"{wanted_type}-{__import__('uuid').uuid4().hex[:10]}"; existing={"id":target_id,"type":wanted_type,"label":{"local":"本地归档","s3":"S3存储","oss":"阿里云OSS","webdav":"WebDAV/OpenList","baidu":"百度网盘"}[wanted_type],"credential_ref":f"backup:{target_id}","enabled":False,"remote_path":"R20_Backups","path":"backups/local","retention":3,"retries":3,"auth_mode":"oauth" if wanted_type=="baidu" else "native"}; job.setdefault("targets",[]).append(existing)
-    for target in job.get("targets",[]): target["enabled"] = target is existing
-    existing["retention"] = payload.retention if wanted_type=="local" else 0
-    if wanted_type in {"s3","oss","webdav"}: existing["endpoint"] = payload.endpoint.strip()
-    if wanted_type in {"s3","oss"}: existing["bucket"] = payload.bucket.strip()
-    if wanted_type=="baidu": existing["auth_mode"]="oauth"
-    if payload.credentials: save_backup_credentials(existing["credential_ref"], payload.credentials)
-    job["enabled"]=payload.enabled; job["schedule_times"]=[payload.schedule_time]
-    try: saved=update_backup_job(job["id"],job)
-    except ValueError as exc: raise HTTPException(status_code=400,detail=str(exc)) from exc
-    audit_record("backup.simple.update","success",{"actor":actor["username"],"destination":payload.destination,"enabled":payload.enabled})
-    return {"saved":True,"job":saved}
+        target_id = f"{wanted_type}-{__import__('uuid').uuid4().hex[:10]}"
+        labels = {"local": "本地归档", "s3": "S3存储", "oss": "阿里云OSS", "webdav": "WebDAV/OpenList", "baidu": "百度网盘"}
+        existing = {
+            "id": target_id,
+            "type": wanted_type,
+            "label": labels.get(wanted_type, wanted_type.upper()),
+            "credential_ref": f"backup:{target_id}",
+            "enabled": False,
+            "remote_path": "R20_Backups",
+            "path": "backups/local",
+            "retention": 3,
+            "retries": 3,
+            "auth_mode": "oauth" if wanted_type == "baidu" else "native",
+        }
+        job.setdefault("targets", []).append(existing)
+    for target in job.get("targets", []):
+        target["enabled"] = (target is existing)
+    existing["retention"] = payload.retention if wanted_type == "local" else 0
+    if wanted_type in {"s3", "oss", "webdav"}:
+        existing["endpoint"] = payload.endpoint.strip()
+    if wanted_type in {"s3", "oss"}:
+        existing["bucket"] = payload.bucket.strip()
+    if wanted_type == "baidu":
+        existing["auth_mode"] = "oauth"
+    if payload.credentials:
+        save_backup_credentials(existing["credential_ref"], payload.credentials)
+    job["enabled"] = payload.enabled
+    job["schedule_times"] = [payload.schedule_time]
+    try:
+        saved = update_backup_job(job["id"], job)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    audit_record("backup.simple.update", "success", {"actor": actor["username"], "destination": payload.destination, "enabled": payload.enabled})
+    return {"saved": True, "job": saved}
 
 
 @app.post("/api/v1/admin/backups/simple/test")
 def test_simple_backup(payload: SimpleBackupUpdateRequest, x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
     require_superadmin(x_r20_session)
     if payload.destination == "local":
-        directory=(ROOT/"backups"/"local").resolve(); directory.mkdir(parents=True,exist_ok=True)
-        if not directory.is_relative_to((ROOT/"backups").resolve()): raise HTTPException(status_code=400,detail="本地灾备目录无效")
-        return {"status":"ready","sent":False,"detail":"本地目录可写；未生成或上传归档"}
-    wanted_type="baidu" if payload.destination=="baidu_oauth" else payload.destination
-    target={"type":wanted_type,"endpoint":payload.endpoint.strip(),"bucket":payload.bucket.strip(),"auth_mode":"oauth" if wanted_type=="baidu" else "native"}
-    required={"s3":{"access_key_id","secret_access_key"},"oss":{"access_key_id","secret_access_key"},"webdav":set(),"baidu":{"app_key","app_secret","refresh_token"}}[wanted_type]
-    missing=sorted(key for key in required if not payload.credentials.get(key))
-    if missing: raise HTTPException(status_code=400,detail=f"连接信息不完整：{', '.join(missing)}")
-    if wanted_type in {"s3","oss","webdav"}:
-        try: target["endpoint"]=__import__("r20_backend.net_security",fromlist=["validate_outbound_url"]).validate_outbound_url(target["endpoint"])
-        except ValueError as exc: raise HTTPException(status_code=400,detail=str(exc)) from exc
-    if wanted_type in {"s3","oss"} and not target["bucket"]: raise HTTPException(status_code=400,detail="Bucket 不能为空")
-    # Intentionally no upload and no OAuth token exchange: this endpoint validates
-    # configuration and safe reachability only, never creates remote objects.
-    return {"status":"ready","sent":False,"detail":"配置格式与目标地址校验通过；未上传任何文件","destination":payload.destination}
+        directory = (ROOT / "backups" / "local").resolve()
+        if not directory.is_relative_to((ROOT / "backups").resolve()):
+            raise HTTPException(status_code=400, detail="本地灾备目录无效：必须位于 backups/ 目录下")
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            test_file = directory / ".test_write.tmp"
+            test_file.write_text("ok", encoding="utf-8")
+            test_file.unlink(missing_ok=True)
+        except OSError as exc:
+            raise HTTPException(status_code=400, detail=f"本地灾备目录不可写：{exc}")
+        return {"status": "ready", "sent": False, "detail": "本地目录可写；未生成或上传归档"}
+
+    wanted_type = "baidu" if payload.destination == "baidu_oauth" else payload.destination
+    req_map = {
+        "s3": {"access_key_id", "secret_access_key"},
+        "oss": {"access_key_id", "secret_access_key"},
+        "webdav": set(),
+        "baidu": {"app_key", "app_secret", "refresh_token"},
+    }
+    if wanted_type not in req_map:
+        raise HTTPException(status_code=400, detail=f"不支持的灾备目标：{payload.destination}")
+
+    required = req_map[wanted_type]
+    jobs = list_backup_jobs()
+    job = next((x for x in jobs if x.get("id") == "nightly-default"), jobs[0] if jobs else None)
+    existing = next((x for x in (job.get("targets", []) if job else []) if x.get("type") == wanted_type and (wanted_type != "baidu" or x.get("auth_mode") == "oauth")), None)
+    saved_creds = {}
+    if existing and existing.get("credential_ref"):
+        try:
+            from r20_backend.backup_secrets import load_credentials
+            saved_creds = load_credentials(existing["credential_ref"])
+        except Exception:
+            saved_creds = {}
+
+    target = {
+        "type": wanted_type,
+        "endpoint": (payload.endpoint or (existing.get("endpoint", "") if existing else "")).strip(),
+        "bucket": (payload.bucket or (existing.get("bucket", "") if existing else "")).strip(),
+        "auth_mode": "oauth" if wanted_type == "baidu" else "native",
+    }
+    combined_creds = {**saved_creds, **{k: v for k, v in (payload.credentials or {}).items() if str(v).strip()}}
+    missing = sorted(key for key in required if not str(combined_creds.get(key) or "").strip())
+    if missing:
+        raise HTTPException(status_code=400, detail=f"连接信息不完整：{', '.join(missing)}")
+
+    if wanted_type in {"s3", "oss", "webdav"}:
+        if not target["endpoint"]:
+            raise HTTPException(status_code=400, detail=f"{wanted_type.upper()} Endpoint 不能为空")
+        try:
+            from r20_backend.net_security import validate_outbound_url
+            target["endpoint"] = validate_outbound_url(target["endpoint"])
+        except (ValueError, Exception) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if wanted_type in {"s3", "oss"} and not target["bucket"]:
+        raise HTTPException(status_code=400, detail=f"{wanted_type.upper()} Bucket 不能为空")
+
+    return {"status": "ready", "sent": False, "detail": "配置格式与目标地址校验通过；未上传任何文件", "destination": payload.destination}
 
 
 @app.get("/api/v1/admin/backup-target-types")
@@ -2594,8 +2664,9 @@ def backup_status(x_r20_admin_token: str | None = Header(default=None)) -> dict[
     require_admin_header(x_r20_admin_token)
     backups_dir = ROOT / "backups"
     archive_paths = list(backups_dir.glob("*.tar.gz")) + list((backups_dir / "local").glob("*.tar.gz")) if backups_dir.exists() else []
-    local_archives = [{"name": str(item.relative_to(backups_dir)), "bytes": item.stat().st_size, "mtime": int(item.stat().st_mtime)} for item in archive_paths]
-    sqlite_snapshots = [{"name": item.name, "bytes": item.stat().st_size, "mtime": int(item.stat().st_mtime)} for item in (backups_dir / "sqlite").glob("*.db")] if (backups_dir / "sqlite").exists() else []
+    local_archives = [{"name": str(item.relative_to(backups_dir)), "bytes": item.stat().st_size, "mtime": int(item.stat().st_mtime)} for item in archive_paths if item.is_file()]
+    sqlite_files = list((backups_dir / "sqlite").glob("*.db")) + list((backups_dir / "sqlite").glob("*/*.db")) if (backups_dir / "sqlite").exists() else []
+    sqlite_snapshots = [{"name": str(item.relative_to(backups_dir / "sqlite")), "bytes": item.stat().st_size, "mtime": int(item.stat().st_mtime)} for item in sqlite_files if item.is_file()]
     return {
         "schedule": "每天北京时间 02:00，由 Gateway Scheduler 执行全部已启用灾备方式",
         "script": str(SCRIPTS_DIR / "nightly_backup_and_clean.py"),
@@ -2640,6 +2711,8 @@ def download_backup_archive(
     )
     effective_admin_token = x_r20_admin_token if isinstance(x_r20_admin_token, str) else None
     require_admin_header(effective_admin_token, effective_session)
+    if ".." in Path(filename).parts:
+        raise HTTPException(status_code=400, detail="非法文件路径：不能包含 ..")
     clean_name = Path(filename).name
     backups_dir = ROOT / "backups"
     candidate = backups_dir / clean_name
@@ -2651,6 +2724,8 @@ def download_backup_archive(
             candidate = rel_candidate
     if not candidate.exists() or not candidate.is_file():
         raise HTTPException(status_code=404, detail="备份文件不存在或已清理")
+    if not candidate.resolve().is_relative_to(backups_dir.resolve()):
+        raise HTTPException(status_code=400, detail="非法文件路径")
     audit_record("backup.download", "success", {"filename": clean_name})
     return FileResponse(
         path=str(candidate),
@@ -2667,9 +2742,13 @@ async def upload_backup_archive(file: UploadFile = File(...), x_r20_admin_token:
     if not file.filename or not (file.filename.endswith(".tar.gz") or file.filename.endswith(".tgz")):
         raise HTTPException(status_code=400, detail="仅支持上传 .tar.gz 或 .tgz 格式备份包")
     clean_name = Path(file.filename).name
+    if not clean_name or clean_name in {".", ".."} or ".." in clean_name:
+        raise HTTPException(status_code=400, detail="非法文件名")
     target_dir = ROOT / "backups" / "local"
     target_dir.mkdir(parents=True, exist_ok=True)
     dest_path = target_dir / clean_name
+    if not dest_path.resolve().is_relative_to(target_dir.resolve()):
+        raise HTTPException(status_code=400, detail="非法文件上传路径")
     content = await file.read()
     dest_path.write_bytes(content)
     audit_record("backup.upload", "success", {"filename": clean_name, "bytes": len(content)})
@@ -2682,25 +2761,75 @@ def restore_backup_archive(payload: BackupRestoreRequest, x_r20_admin_token: str
     require_superadmin(x_r20_session)
     if payload.confirmation.strip().upper() != "RESTORE R20":
         raise HTTPException(status_code=400, detail="确认短语必须精确为：RESTORE R20")
+    if ".." in Path(payload.archive_name).parts:
+        raise HTTPException(status_code=400, detail="非法归档文件名：不能包含 ..")
     clean_name = Path(payload.archive_name).name
     backups_dir = ROOT / "backups"
     candidate = backups_dir / clean_name
     if not candidate.exists():
         candidate = backups_dir / "local" / clean_name
+    if not candidate.exists():
+        rel_candidate = (backups_dir / payload.archive_name).resolve()
+        if rel_candidate.is_relative_to(backups_dir.resolve()) and rel_candidate.is_file():
+            candidate = rel_candidate
     if not candidate.exists() or not candidate.is_file():
         raise HTTPException(status_code=404, detail="指定的备份归档文件不存在")
+    if not candidate.resolve().is_relative_to(backups_dir.resolve()):
+        raise HTTPException(status_code=400, detail="指定的备份文件路径不合法")
+
+    is_encrypted = candidate.name.endswith(".aes256")
+    temp_decrypted: Path | None = None
+    actual_tar = candidate
+    if is_encrypted:
+        key_env = getattr(payload, "key_env", "") or "R20_BACKUP_ENCRYPTION_KEY"
+        if not key_env or not os.getenv(key_env):
+            raise HTTPException(status_code=400, detail=f"恢复加密归档需要有效的加密密钥环境变量 ({key_env})")
+        from scripts.backup_runtime import decrypt_archive
+        fd, temp_name = tempfile.mkstemp(prefix="r20-restore-", suffix=".tar.gz", dir=backups_dir)
+        os.close(fd)
+        temp_decrypted = Path(temp_name)
+        try:
+            actual_tar = decrypt_archive(candidate, key_env, temp_decrypted)
+        except Exception as exc:
+            temp_decrypted.unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail=f"解密归档失败：{exc}") from exc
 
     import tarfile
     restored_files = []
-    # Verify archive safety first (prevent directory traversal)
-    with tarfile.open(candidate, "r:gz") as tar:
-        for member in tar.getmembers():
-            member_path = Path(member.name)
-            if member_path.is_absolute() or ".." in member_path.parts:
-                raise HTTPException(status_code=400, detail=f"非法不安全归档路径: {member.name}")
-        for member in tar.getmembers():
-            tar.extract(member, path=ROOT)
-            restored_files.append(member.name)
+    try:
+        try:
+            tar = tarfile.open(actual_tar, "r:gz")
+        except (tarfile.TarError, OSError, EOFError) as exc:
+            raise HTTPException(status_code=400, detail=f"无效或损坏的归档文件：{exc}") from exc
+
+        with tar:
+            members = tar.getmembers()
+            for member in members:
+                member_path = Path(member.name)
+                if member.name.startswith("/") or member_path.is_absolute() or os.path.isabs(member.name):
+                    raise HTTPException(status_code=400, detail=f"非法不安全归档路径 (绝对路径): {member.name}")
+                if ".." in member_path.parts or ".." in member.name.replace("\\", "/").split("/"):
+                    raise HTTPException(status_code=400, detail=f"非法不安全归档路径 (路径逃逸): {member.name}")
+                dest_path = (ROOT / member.name).resolve()
+                if not dest_path.is_relative_to(ROOT.resolve()):
+                    raise HTTPException(status_code=400, detail=f"非法越界归档路径: {member.name}")
+                if member.issym() or member.islnk():
+                    link_target = member.linkname
+                    if os.path.isabs(link_target) or ".." in Path(link_target).parts:
+                        raise HTTPException(status_code=400, detail=f"非法不安全符号链接: {member.name} -> {link_target}")
+                    resolved_link = (ROOT / Path(member.name).parent / link_target).resolve()
+                    if not resolved_link.is_relative_to(ROOT.resolve()):
+                        raise HTTPException(status_code=400, detail=f"符号链接指向项目外部: {member.name} -> {link_target}")
+                if member.isdev() or member.ischr() or member.isblk() or member.isfifo():
+                    raise HTTPException(status_code=400, detail=f"归档包含特殊设备节点: {member.name}")
+
+            extract_kwargs = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
+            for member in members:
+                tar.extract(member, path=ROOT, **extract_kwargs)
+                restored_files.append(member.name)
+    finally:
+        if temp_decrypted and temp_decrypted.exists():
+            temp_decrypted.unlink(missing_ok=True)
 
     audit_record("backup.restore", "success", {"filename": clean_name, "files_count": len(restored_files)})
     return {"restored": True, "filename": clean_name, "restored_count": len(restored_files), "sample_files": restored_files[:10]}
