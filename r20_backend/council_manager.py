@@ -42,7 +42,7 @@ DEFAULT_PRESET_TEMPLATES: Dict[str, Dict[str, Any]] = {
         "id": "trader_trend",
         "name": "资深交易员 A (顺势稳健型)",
         "role_title": "Senior Trend Trader",
-        "description": "专注顺大势回踩低吸，全盘审视可用资金与持仓浮盈，严守 0.8R 保本移损与高胜率。",
+        "description": "专注顺大势回踩低吸，全盘审视可用资金与持仓浮盈，严守三阶动态利润棘轮防磨损与高胜率。",
         "prompt": (
             "【角色：资深交易员 A · 稳健顺势波段操盘手】\n"
             "你是对冲基金交易台的核心波段交易员，你的交易哲学是「顺应大势、重视资金利用效率、保本第一」：\n\n"

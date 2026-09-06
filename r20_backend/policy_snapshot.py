@@ -27,6 +27,8 @@ try:
 except ImportError:
     fcntl = None  # type: ignore
 
+from r20_backend.version import __version__
+
 logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,7 +36,7 @@ DATA_DIR = ROOT / "data"
 ARCHIVE_DIR = DATA_DIR / "policy_archives"
 ARCHIVE_INDEX_FILE = ARCHIVE_DIR / "index.json"
 
-DEFAULT_BASE_VERSION = "v7.4.2"
+DEFAULT_BASE_VERSION = f"v{__version__}"
 
 
 def compute_layout_hash(profile: Dict[str, Any]) -> str:

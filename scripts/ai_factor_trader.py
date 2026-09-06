@@ -19,6 +19,8 @@ Architecture:
 4. Dynamic Adaptive Position Sizing, Volatility-Trailing Exits & Cooldown Protection.
 """
 
+from r20_backend.version import __version__
+
 import os
 import sys
 from pathlib import Path
@@ -526,9 +528,9 @@ def record_trade(trade_data):
     if "policy_version" not in trade_data:
         try:
             from policy_snapshot import generate_policy_snapshot
-            trade_data["policy_version"] = generate_policy_snapshot().get("policy_version", "v7.3.0@unknown")
+            trade_data["policy_version"] = generate_policy_snapshot().get("policy_version", f"v{__version__}@unknown")
         except Exception:
-            trade_data["policy_version"] = "v7.3.0@unknown"
+            trade_data["policy_version"] = f"v{__version__}@unknown"
     try:
         ledger = []
         if os.path.exists(LEDGER_JSON_FILE):

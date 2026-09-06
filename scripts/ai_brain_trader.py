@@ -33,6 +33,19 @@ try:
 except ImportError:
     standalone_settings = None
 
+try:
+    from r20_backend.version import __version__
+except Exception:
+    __version__ = "7.5.1"
+
+
+def _get_system_version_tag() -> str:
+    try:
+        from r20_backend.version import __version__ as _ver
+        return f"v{_ver}"
+    except Exception:
+        return "v7.5.1"
+
 WORKSPACE_DIR = PROJECT_ROOT
 DATA_DIR = os.path.join(WORKSPACE_DIR, "data")
 from market_data_service import fetch_single_indicator, fetch_ticker
@@ -49,6 +62,7 @@ PROMPT_OVERRIDE_FILE = os.path.join(DATA_DIR, "system_prompt_override.txt")
 AI_BRAIN_LOCK_FILE = os.path.join(DATA_DIR, ".ai_brain_cycle.lock")
 DECISION_MAX_AGE_SECONDS = 300
 
+from r20_backend.version import __version__
 from instrument_pool import load_instruments
 from prompt_library import active_profile, append_layer, apply_module_layout
 from r20_gateway.telemetry import ModelCallTelemetry
@@ -725,8 +739,12 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
         "trading_memory": memory_lessons.strip(),
         "market_matrix": all_market_str,
     }
+    try:
+        from r20_backend.version import __version__ as _sys_ver
+    except Exception:
+        _sys_ver = "7.5.1"
     profile = active_profile()
-    policy_ver = (policy_snapshot or {}).get("policy_version") or os.getenv("R20_VERSION", "v7.3.0")
+    policy_ver = (policy_snapshot or {}).get("policy_version") or os.getenv("R20_VERSION", f"v{_sys_ver}")
     policy_hash = (policy_snapshot or {}).get("policy_hash") or ""
     runtime_vars.update({
         "timestamp": now_bj_str, "timezone": "Asia/Shanghai",
@@ -783,7 +801,7 @@ def assemble_decision_cache(
 ) -> Dict[str, Any]:
     """Pure assembly of validated decisions into the standard cache contract, bound to policy snapshot."""
     policy_snapshot = policy_snapshot or {}
-    p_ver = policy_snapshot.get("policy_version", "v7.3.0@unknown")
+    p_ver = policy_snapshot.get("policy_version", f"{_get_system_version_tag()}@unknown")
     p_hash = policy_snapshot.get("policy_hash", "unknown")
     p_summary = policy_snapshot.get("summary", "")
 
@@ -908,12 +926,12 @@ def execute_batch_ai_brain_cycle(
             except Exception as exc:
                 print(f"[AI Brain Batch] Policy snapshot warning: {exc}")
                 policy_snapshot = {
-                    "policy_version": "v7.3.0@unknown",
+                    "policy_version": f"{_get_system_version_tag()}@unknown",
                     "policy_hash": "unknown",
                     "summary": "policy_snapshot_fallback",
                     "units": {},
                 }
-    policy_version = policy_snapshot.get("policy_version", "v7.3.0@unknown")
+    policy_version = policy_snapshot.get("policy_version", f"{_get_system_version_tag()}@unknown")
     policy_hash = policy_snapshot.get("policy_hash", "unknown")
     policy_summary = policy_snapshot.get("summary", "")
     print(f"[AI Brain Batch] 📌 当前决策策略快照: {policy_version} ({policy_hash})")

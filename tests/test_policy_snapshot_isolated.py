@@ -436,7 +436,8 @@ class TestPolicySnapshotIsolated(unittest.TestCase):
         self.assertEqual(res_auth.status_code, 200)
         data = res_auth.json()
         self.assertTrue(data["ok"])
-        self.assertTrue(data["policy_version"].startswith("v7.4.2@"))
+        from r20_backend.version import __version__
+        self.assertTrue(data["policy_version"].startswith(f"v{__version__}@"))
         self.assertEqual(len(data["policy_hash"]), 8)
         self.assertIn("units", data["snapshot"])
 

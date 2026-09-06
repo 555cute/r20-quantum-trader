@@ -42,6 +42,7 @@ EVOLUTION_LAST_PROMPT_FILE = os.path.join(DATA_DIR, "self_improvement_last_promp
 LOG_FILE = os.path.join(LOGS_DIR, "self_improvement.log")
 EVOLUTION_LOCK_FILE = os.path.join(DATA_DIR, ".self_improvement.lock")
 
+from r20_backend.version import __version__
 from instrument_pool import load_instruments
 from prompt_library import active_profile, apply_module_layout
 from r20_gateway.telemetry import ModelCallTelemetry
@@ -254,7 +255,7 @@ def call_llm_evolution_review(closed_trades: List[Dict[str, Any]], existing_memo
         "closed_trades_json": json.dumps(closed_trades, indent=2, ensure_ascii=False),
         "active_instruments": ",".join(TARGET_INSTRUMENTS),
         "profile_name": profile.get("name", ""), "timezone": "Asia/Shanghai",
-        "strategy_version": os.getenv("R20_VERSION", "6.8.1"),
+        "strategy_version": os.getenv("R20_VERSION", f"v{__version__}"),
     }
     effective_evolution_system = apply_module_layout(EVOLUTION_SYSTEM_PROMPT, profile, "evolution_system", f"{profile.get('name', '稳健')}自进化系统提示词模板", context=runtime_context)
     effective_evolution_user = apply_module_layout(prompt, profile, "evolution_user", f"{profile.get('name', '稳健')}自进化用户提示词模板", context=runtime_context)
