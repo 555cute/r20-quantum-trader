@@ -93,7 +93,7 @@ function setLayout(mode: 'dual' | 'stacked') {
     <div class="h-[46px] sm:h-[50px] shrink-0"></div>
 
     <!-- Dynamic Main Content Based on Active Tab -->
-    <main class="flex-1 max-w-[2048px] w-full mx-auto px-4 sm:px-6 2xl:px-8 pt-3 pb-24 sm:pb-6 space-y-3.5">
+    <main class="flex-1 max-w-[2048px] w-full mx-auto px-3 sm:px-6 2xl:px-8 pt-3 pb-24 sm:pb-6 space-y-3.5 overflow-x-hidden">
       <!-- TAB 1: 实盘矩阵 (TRADING) -->
       <div v-show="store.activeTab === 'trading'" class="space-y-3.5">
         <!-- Sub-Header Controls: Layout Switcher & Status Line -->

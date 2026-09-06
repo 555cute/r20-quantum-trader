@@ -24,11 +24,11 @@ function copyPrompt() {
 <template>
   <div
     v-if="visible"
-    class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex justify-end transition-opacity"
+    class="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex justify-end transition-opacity overflow-hidden"
     @click.self="emit('close')"
   >
     <div
-      class="w-full max-w-2xl border-l h-full flex flex-col shadow-2xl overflow-hidden animate-slide-in"
+      class="w-full max-w-2xl border-l h-[100dvh] flex flex-col shadow-2xl overflow-hidden animate-slide-in"
       style="background-color: var(--bg-card); border-color: var(--border-subtle);"
     >
       <!-- Drawer Header -->
@@ -97,8 +97,8 @@ function copyPrompt() {
         </button>
       </div>
 
-      <!-- Drawer Content -->
-      <div class="flex-1 overflow-y-auto p-4 space-y-3.5">
+      <!-- Drawer Content (Scrollable with mobile bottom padding) -->
+      <div class="flex-1 overflow-y-auto overscroll-contain p-4 pb-36 sm:pb-8 space-y-3.5">
         <!-- TAB 1: 五重数学与微积分动能推演 -->
         <div v-if="activeTab === 'reasoning'" class="space-y-3">
           <!-- Decision Summary Banner -->
