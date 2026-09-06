@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useDashboardStore } from '../stores/dashboard'
 import { useI18n } from '../composables/useI18n'
+import { APP_VERSION, APP_NAME } from '../config/version'
 import HeaderBar from '../components/HeaderBar.vue'
 import TopHudRibbon from '../components/TopHudRibbon.vue'
 import TacticalDesk from '../components/TacticalDesk.vue'
@@ -193,7 +194,7 @@ function setLayout(mode: 'dual' | 'stacked') {
           class="hover:text-[var(--color-brand)] transition-colors cursor-pointer"
           title="点击查看开源仓库与项目信息"
         >
-          R20量子交易系统 v7.5.0
+          {{ APP_NAME }} {{ APP_VERSION }}
         </button>
         <span>•</span>
         <span>VUE 3 + VITE + TAILWIND CSS</span>

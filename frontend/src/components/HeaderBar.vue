@@ -3,6 +3,7 @@ import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useDashboardStore } from '../stores/dashboard'
 import { useTheme } from '../composables/useTheme'
 import { useI18n } from '../composables/useI18n'
+import { APP_VERSION, APP_NAME } from '../config/version'
 import AboutModal from './AboutModal.vue'
 import CryptoLogo from './CryptoLogo.vue'
 import {
@@ -63,7 +64,7 @@ const tabs = computed(() => [
             ₿
           </div>
           <span class="font-mono font-black text-xs sm:text-sm tracking-wide whitespace-nowrap" style="color: var(--text-main);">
-            R20量子交易系统
+            {{ APP_NAME }}
           </span>
         </div>
         <button
@@ -72,7 +73,7 @@ const tabs = computed(() => [
           style="background-color: var(--bg-card-subtle); color: var(--text-muted); border-color: var(--border-subtle);"
           :title="t('nav.aboutTitle')"
         >
-          v7.5.0
+          {{ APP_VERSION }}
         </button>
         <span
           class="w-1.5 h-1.5 rounded-full shrink-0"

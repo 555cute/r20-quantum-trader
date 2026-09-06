@@ -962,19 +962,19 @@ defineExpose({
       class="relative w-full h-[420px] sm:h-[480px] 2xl:h-[540px] select-none"
       style="background-color: var(--bg-card);"
     >
-      <!-- Top Left Active Indicators Legend -->
-      <div class="absolute top-2 left-3 flex flex-wrap items-center gap-2 text-[10px] font-mono pointer-events-none opacity-85 z-10">
-        <span v-if="indMA" class="flex items-center space-x-1.5 bg-black/40 px-1.5 py-0.5 rounded backdrop-blur-xs">
-          <span class="text-amber-400 font-bold">MA5</span>
-          <span class="text-sky-400 font-bold">MA10</span>
-          <span class="text-purple-400 font-bold">MA20</span>
+      <!-- Top Left Active Indicators Legend (彻底去除阴影遮罩与深色背景，亮暗双模纯净无遮挡) -->
+      <div class="absolute top-2 left-3 flex flex-wrap items-center gap-3 text-[10px] font-mono pointer-events-none z-10 select-none">
+        <span v-if="indMA" class="flex items-center space-x-1.5">
+          <span class="text-amber-500 font-bold">MA5</span>
+          <span class="text-sky-500 font-bold">MA10</span>
+          <span class="text-purple-500 font-bold">MA20</span>
         </span>
-        <span v-if="indBOLL" class="flex items-center space-x-1.5 bg-black/40 px-1.5 py-0.5 rounded backdrop-blur-xs">
-          <span class="text-emerald-400 font-bold">BOLL(20,2)</span>
+        <span v-if="indBOLL" class="flex items-center space-x-1.5">
+          <span class="text-emerald-500 font-bold">BOLL(20,2)</span>
         </span>
-        <span v-if="indVOL" class="flex items-center space-x-1.5 bg-black/40 px-1.5 py-0.5 rounded backdrop-blur-xs">
-          <span class="text-emerald-400 font-bold">VOL</span>
-          <span class="text-amber-400">MA5</span>
+        <span v-if="indVOL" class="flex items-center space-x-1.5">
+          <span class="text-emerald-500 font-bold">VOL</span>
+          <span class="text-amber-500 font-bold">MA5</span>
         </span>
       </div>
     </div>

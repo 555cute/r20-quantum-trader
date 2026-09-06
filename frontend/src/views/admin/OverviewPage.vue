@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApi } from '../../composables/useApi'
+import { APP_VERSION } from '../../config/version'
 import {
   Cpu,
   Database,
@@ -110,7 +111,7 @@ const quickNav = [
               R20 QUANTUM CONTROL CENTER
             </h1>
             <span class="badge-lever">
-              v7.5.0
+              {{ APP_VERSION }}
             </span>
           </div>
           <p class="text-[11px] 2xl:text-xs font-mono mt-0.5" style="color: var(--text-muted);">

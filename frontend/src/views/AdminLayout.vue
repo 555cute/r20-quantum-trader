@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useTheme } from '../composables/useTheme'
 import { useI18n } from '../composables/useI18n'
+import { APP_VERSION } from '../config/version'
 import AboutModal from '../components/AboutModal.vue'
 import CryptoLogo from '../components/CryptoLogo.vue'
 import {
@@ -202,7 +203,7 @@ const showAboutModal = ref(false)
               class="text-[10px] font-mono transition-colors cursor-pointer text-left block"
               style="color: var(--color-brand);"
             >
-              v7.5.0
+              {{ APP_VERSION }}
             </button>
           </div>
         </div>
@@ -291,7 +292,7 @@ const showAboutModal = ref(false)
               style="color: var(--color-brand);"
               title="点击查看开源主仓信息"
             >
-              v7.5.0
+              {{ APP_VERSION }}
             </button>
           </div>
         </div>

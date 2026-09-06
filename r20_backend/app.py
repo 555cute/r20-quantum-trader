@@ -26,6 +26,7 @@ from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from pydantic import BaseModel, Field, field_validator
 from r20_backend.config import refresh_settings, settings
+from r20_backend.version import __version__, APP_NAME, APP_VERSION
 from r20_backend.okx_client import OKXClient
 from r20_backend.okx_trade_service import account_snapshot as okx_account_snapshot, fast_close_confirmed
 from r20_backend.okx_setup import diagnose_okx_runtime, install_okx_cli, check_node_npm, start_oauth_device_login, oauth_status, oauth_logout
@@ -99,7 +100,7 @@ async def lifespan(_: FastAPI):
 
 
 from fastapi.middleware.gzip import GZipMiddleware
-app = FastAPI(title="R20 Quantum Trader Standalone Backend", version="7.5.0", lifespan=lifespan, docs_url="/api/docs", redoc_url="/api/redoc")
+app = FastAPI(title=f"{APP_NAME} Standalone Backend", version=__version__, lifespan=lifespan, docs_url="/api/docs", redoc_url="/api/redoc")
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
@@ -589,7 +590,7 @@ def runtime_overview() -> dict[str, Any]:
     }
     positions_payload = read_json("position_trackers.json", {})
     return {
-        "service": {"version": "7.5.0", "pid": os.getpid(), "uptime_seconds": int(time.time() - STARTED_AT)},
+        "service": {"version": __version__, "pid": os.getpid(), "uptime_seconds": int(time.time() - STARTED_AT)},
         "credentials": {"okx": bool(settings.okx_api_key and settings.okx_secret_key and settings.okx_passphrase), "llm": bool(settings.llm_api_key)},
         "configuration": get_admin_configuration(),
         "data_health": health_payload,
@@ -1763,10 +1764,10 @@ def admin_about(
     import platform
     store = GatewayStore(GATEWAY_DB_PATH)
     return {
-        "product": {"name": "R20 Quantum Trader", "version": "7.5.0", "control_plane": "R20 Gateway Runtime", "gateway_version": GATEWAY_VERSION},
+        "product": {"name": APP_NAME, "version": __version__, "control_plane": "R20 Gateway Runtime", "gateway_version": GATEWAY_VERSION},
         "runtime": {"python": platform.python_version(), "platform": platform.platform(), "backend_pid": os.getpid(), "gateway": gateway_status(x_r20_admin_token)},
         "components": [
-            {"name": "FastAPI Control Plane", "version": "7.5.0"},
+            {"name": "FastAPI Control Plane", "version": __version__},
             {"name": "Gateway Event Runtime", "version": GATEWAY_VERSION},
             {"name": "SQLite", "version": __import__("sqlite3").sqlite_version},
         ],
@@ -2939,7 +2940,7 @@ def update_admin_memory_all(payload: MemoryUpdateAllRequest, x_r20_admin_token: 
 def health() -> dict[str, Any]:
     return {
         "service": "r20-standalone-backend",
-        "version": "7.5.0",
+        "version": __version__,
         "status": "ok",
         "timestamp": int(time.time()),
         "credentials": {

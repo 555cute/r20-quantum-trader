@@ -11,6 +11,7 @@ import {
 
 const router = useRouter()
 const { theme, toggleTheme } = useTheme()
+import { APP_VERSION, APP_NAME } from '../config/version'
 
 const activeSection = ref('overview')
 const mobileMenuOpen = ref(false)
@@ -86,14 +87,14 @@ onUnmounted(() => {
         <div class="flex items-center space-x-1.5 sm:space-x-2 min-w-0">
           <span class="font-mono font-black text-xs text-[#F7931A] px-1 py-0.2 rounded bg-amber-500/10 border border-amber-500/30 shrink-0">₿</span>
           <span class="font-mono font-black text-xs sm:text-sm tracking-wide shrink-0 whitespace-nowrap" style="color: var(--text-main);">
-            R20量子交易系统
+            {{ APP_NAME }}
           </span>
           <span
             class="px-1.5 sm:px-2 py-0.2 rounded text-[10px] font-mono border font-bold shrink-0 whitespace-nowrap"
             style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);"
           >
-            <span class="hidden md:inline">v7.5.0 官方开发与使用指南</span>
-            <span class="hidden sm:inline md:hidden">v7.5.0 指南</span>
+            <span class="hidden md:inline">{{ APP_VERSION }} 官方开发与使用指南</span>
+            <span class="hidden sm:inline md:hidden">{{ APP_VERSION }} 指南</span>
             <span class="sm:hidden">DOCS</span>
           </span>
         </div>

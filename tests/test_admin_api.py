@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 import r20_backend.app as app_module
 from r20_backend.admin_auth import AdminAuthStore
+from r20_backend.version import __version__
 
 
 class AdminApiTests(unittest.TestCase):
@@ -43,13 +44,13 @@ class AdminApiTests(unittest.TestCase):
     def test_health_and_about_report_651_release(self):
         health=self.client.get("/api/v1/health")
         self.assertEqual(health.status_code,200,health.text)
-        self.assertEqual(health.json()["version"],"7.5.0")
+        self.assertEqual(health.json()["version"], __version__)
         headers=self.login("admin","InitialAdmin123456")
         about=self.client.get("/api/v1/admin/about",headers=headers)
         self.assertEqual(about.status_code,200,about.text)
-        self.assertEqual(about.json()["product"]["version"],"7.5.0")
+        self.assertEqual(about.json()["product"]["version"], __version__)
         versions={item["name"]:item["version"] for item in about.json()["components"]}
-        self.assertEqual(versions["FastAPI Control Plane"],"7.5.0")
+        self.assertEqual(versions["FastAPI Control Plane"], __version__)
 
     def test_legacy_header_disabled_after_initialization(self):
         response = self.client.get("/api/v1/admin/overview", headers={"X-R20-Admin-Token": "InitialAdmin123456"})
