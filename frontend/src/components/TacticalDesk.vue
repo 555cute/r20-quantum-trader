@@ -167,7 +167,7 @@ const allProtected = computed(() =>
           <button
             v-for="sym in availableSymbols"
             :key="sym"
-            @click="selectedSymbol = sym"
+            @click="selectedSymbol = sym; if (sym !== 'ALL') focusChartOn(sym)"
             class="h-7 2xl:h-8 px-2.5 2xl:px-3 rounded-md text-[11px] 2xl:text-xs font-mono transition-all cursor-pointer border"
             :style="selectedSymbol === sym
               ? { backgroundColor: 'var(--bg-badge)', borderColor: 'var(--border-medium)', color: 'var(--text-main)', fontWeight: 'bold' }
