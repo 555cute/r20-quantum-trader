@@ -58,12 +58,12 @@ async function copyToClipboard(text: string, targetName: string) {
             <CryptoLogo :size="32" class="w-8 h-8 rounded-xl shadow-xs" />
             <div>
               <h3 class="text-sm font-bold uppercase tracking-wide flex items-center gap-2" style="color: var(--text-main);">
-                <span>R20 Quantum Trader</span>
+                <span>R20量子交易系统</span>
                 <span
                   class="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold border"
                   style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);"
                 >
-                  v7.4.2
+                  v7.5.0
                 </span>
               </h3>
             </div>

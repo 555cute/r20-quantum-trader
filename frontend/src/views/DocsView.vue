@@ -84,16 +84,16 @@ onUnmounted(() => {
         </button>
         <div class="h-4 w-px hidden sm:block shrink-0" style="background-color: var(--border-subtle);"></div>
         <div class="flex items-center space-x-1.5 sm:space-x-2 min-w-0">
-          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
+          <span class="font-mono font-black text-xs text-[#F7931A] px-1 py-0.2 rounded bg-amber-500/10 border border-amber-500/30 shrink-0">₿</span>
           <span class="font-mono font-black text-xs sm:text-sm tracking-wide shrink-0 whitespace-nowrap" style="color: var(--text-main);">
-            R20 QUANTUM
+            R20量子交易系统
           </span>
           <span
             class="px-1.5 sm:px-2 py-0.2 rounded text-[10px] font-mono border font-bold shrink-0 whitespace-nowrap"
             style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);"
           >
-            <span class="hidden md:inline">v7.4.2 官方开发与使用指南</span>
-            <span class="hidden sm:inline md:hidden">v7.4.2 指南</span>
+            <span class="hidden md:inline">v7.5.0 官方开发与使用指南</span>
+            <span class="hidden sm:inline md:hidden">v7.5.0 指南</span>
             <span class="sm:hidden">DOCS</span>
           </span>
         </div>
@@ -216,7 +216,7 @@ onUnmounted(() => {
           </div>
 
           <p class="text-xs sm:text-sm leading-relaxed font-sans" style="color: var(--text-muted);">
-            <strong>R20 Quantum Trader</strong> 是一套专为高波动加密货币（Crypto）打造的<strong>机构级全自动波段量化决策与执行系统</strong>。系统依托 OKX 交易所官方 REST/WebSocket V5 生产 API 与 @okx_ai 官方交易底座，运行在严格的北京时间（UTC+8）自然日财务基准之上，聚焦 1H~4H 大级别顺势波段，以<strong>“胜率第一、宁缺毋滥、三位一体 Fail-Closed 物理硬防线”</strong>为最高风控宗旨。
+            <strong>R20量子交易系统 (R20 Quantum Trading System)</strong> 是一套专为高波动加密货币（Crypto）打造的<strong>机构级全自动波段量化决策与执行系统</strong>。系统依托 OKX 交易所官方 REST/WebSocket V5 生产 API 与 @okx_ai 官方交易底座，运行在严格的北京时间（UTC+8）自然日财务基准之上，聚焦 1H~4H 大级别顺势波段，以<strong>“胜率第一、宁缺毋滥、三位一体 Fail-Closed 物理硬防线”</strong>为最高风控宗旨。在 v7.5.0 全面集成本地化 TradingView 官方轻量引擎与视觉 LLM 友好型量价形态工作站。
           </p>
 
           <!-- 4 Core Pillars Grid -->
@@ -278,8 +278,8 @@ onUnmounted(() => {
             <div class="p-3.5 rounded-xl border space-y-1.5" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
               <div class="font-bold text-sm" style="color: var(--text-main);">左翼：主控与操盘中心 (62%)</div>
               <p style="color: var(--text-muted);">
-                • <strong>4 单元独立 Bento 资产控制舱</strong>：官方总权益、基准净盈亏水线、今日已结、持仓净盈亏分离解耦。<br>
-                • <strong>高密度交互式操盘台 (Tactical Desk)</strong>：分段切换在途实盘持仓与限价挂单池，支持币种快速筛选与云端 100% OCO 止损状态验证。
+                • <strong>4 单元独立 Bento 资产控制舱</strong>：移动端采用 2x2 对称紧凑网格（两行，一行两个），PC 宽屏呈现黄金比例立体空间（总权益、基准净盈亏、今日已结、持仓浮盈分离解耦）。<br>
+                • <strong>TradingView 官方原生 K 线操盘工作站 (v7.5.0)</strong>：本地打包集成，0 外部依赖免 VPN 秒开；支持 150 根 K 线全屏铺满、MA/BOLL/VOL 多指标独立共存，为视觉 LLM 读取 K 线形态量身打造；叠加四维交易线（入场、止损、止盈）与科学真实盈亏比测算控制台。
               </p>
             </div>
             <div class="p-3.5 rounded-xl border space-y-1.5" style="background-color: var(--bg-card); border-color: var(--border-subtle);">

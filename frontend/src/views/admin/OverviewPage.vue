@@ -110,7 +110,7 @@ const quickNav = [
               R20 QUANTUM CONTROL CENTER
             </h1>
             <span class="badge-lever">
-              v7.4.2
+              v7.5.0
             </span>
           </div>
           <p class="text-[11px] 2xl:text-xs font-mono mt-0.5" style="color: var(--text-muted);">

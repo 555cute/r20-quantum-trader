@@ -56,14 +56,14 @@ const tabs = computed(() => [
     style="background-color: var(--bg-header); border-color: var(--border-subtle); backdrop-filter: blur(12px);"
   >
     <div class="max-w-[2048px] w-full mx-auto px-2.5 sm:px-6 2xl:px-8 flex items-center justify-between gap-1.5 sm:gap-4 overflow-hidden">
-      <!-- Left: Minimal Institutional Identity with Crypto Quantum Logo -->
+      <!-- Left: Minimal Institutional Identity with Bitcoin Logo -->
       <div class="flex items-center space-x-2 shrink-0">
         <div class="flex items-center space-x-2 cursor-pointer select-none" @click="store.activeTab = 'trading'">
-          <div class="w-6 h-6 rounded-md flex items-center justify-center border font-mono font-black text-sm text-indigo-400 shrink-0 shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-medium);">
-            Ω
+          <div class="w-6 h-6 rounded-md flex items-center justify-center border font-mono font-black text-sm text-[#F7931A] shrink-0 shadow-xs" style="background-color: rgba(247, 147, 26, 0.12); border-color: rgba(247, 147, 26, 0.35);">
+            ₿
           </div>
           <span class="font-mono font-black text-xs sm:text-sm tracking-wide whitespace-nowrap" style="color: var(--text-main);">
-            {{ t('nav.title') }}
+            R20量子交易系统
           </span>
         </div>
         <button
@@ -72,7 +72,7 @@ const tabs = computed(() => [
           style="background-color: var(--bg-card-subtle); color: var(--text-muted); border-color: var(--border-subtle);"
           :title="t('nav.aboutTitle')"
         >
-          v7.4.2
+          v7.5.0
         </button>
         <span
           class="w-1.5 h-1.5 rounded-full shrink-0"
