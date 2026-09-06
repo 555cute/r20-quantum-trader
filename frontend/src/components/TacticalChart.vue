@@ -210,19 +210,29 @@ const liveStopLoss = computed(() => {
     const s = Number(activeOrder.value.sl_px ?? 0)
     if (s > 0) return s
   }
-  return liveSide.value === 'long'
-    ? liveEntry.value - currentAtr.value * 2.0
-    : liveEntry.value + currentAtr.value * 2.0
+  if (activePosition.value || activeOrder.value) {
+    return liveSide.value === 'long'
+      ? liveEntry.value - currentAtr.value * 2.0
+      : liveEntry.value + currentAtr.value * 2.0
+  }
+  return 0
 })
 
 const liveTakeProfit = computed(() => {
+  if (activePosition.value) {
+    const tp = Number(activePosition.value.displayTakeProfit ?? activePosition.value.tpTriggerPx ?? 0)
+    if (tp > 0) return tp
+  }
   if (activeOrder.value) {
     const tp = Number(activeOrder.value.tp_px ?? 0)
     if (tp > 0) return tp
   }
-  return liveSide.value === 'long'
-    ? liveEntry.value + currentAtr.value * 4.0
-    : liveEntry.value - currentAtr.value * 4.0
+  if (activePosition.value || activeOrder.value) {
+    return liveSide.value === 'long'
+      ? liveEntry.value + currentAtr.value * 4.0
+      : liveEntry.value - currentAtr.value * 4.0
+  }
+  return 0
 })
 
 const effectiveSL = computed(() => (simMode.value ? simStopLoss.value : liveStopLoss.value))
@@ -361,17 +371,17 @@ function initTradingViewChart() {
       borderColor,
       autoScale: true,
       scaleMargins: {
-        top: 0.12, // ★ 留出 12% 顶部空间，确保止盈线 (TP) 极佳呈现！
-        bottom: 0.22, // 预留底部给成交量
+        top: 0.10,
+        bottom: 0.20,
       },
     },
     timeScale: {
       borderColor,
       timeVisible: true,
       secondsVisible: false,
-      barSpacing: 10,
+      barSpacing: 8,
       minBarSpacing: 3,
-      rightOffset: 2, // ★ 紧贴 K 线框右侧刻度轴，彻底消除原本空出的 110px 大空白！
+      rightOffset: 3,
     },
   })
 
@@ -382,26 +392,6 @@ function initTradingViewChart() {
     borderVisible: false,
     wickUpColor: '#10B981',
     wickDownColor: '#F43F5E',
-    autoscaleInfoProvider: (original: any) => {
-      const res = original ? original() : null
-      if (!res || !res.priceRange) return res
-      let minPrice = res.priceRange.minValue
-      let maxPrice = res.priceRange.maxValue
-
-      // ★ 核心增强：确保止盈线 (TP) 与止损线 (SL) 即使高于/低于蜡烛极值，也 100% 完整纳入可视区！
-      const sl = effectiveSL.value
-      const tp = effectiveTP.value
-      if (sl > 0) minPrice = Math.min(minPrice, sl)
-      if (tp > 0) maxPrice = Math.max(maxPrice, tp)
-
-      const padding = (maxPrice - minPrice) * 0.05
-      return {
-        priceRange: {
-          minValue: minPrice - padding,
-          maxValue: maxPrice + padding,
-        },
-      }
-    },
   })
 
   // 2. 彻底修复的 VOL 成交量系列 (高对比度柱状图，视觉 LLM 极佳读取)
@@ -738,7 +728,6 @@ async function loadCandles(silent = false, resetScale = false) {
       candles.value = data.candles
       renderChartData()
       if (resetScale && chart) {
-        chart.timeScale().fitContent()
         chart.timeScale().scrollToRealtime()
       }
     }
