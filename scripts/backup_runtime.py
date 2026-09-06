@@ -143,6 +143,7 @@ def verify_archive(path: Path, expected_sha256: str = "", key_env: str = "") -> 
     temp: Path | None = None; tar_path = path
     try:
         if path.name.endswith(".aes256"):
+            BACKUPS.mkdir(parents=True, exist_ok=True)
             fd, temp_name = tempfile.mkstemp(prefix="r20-verify-", suffix=".tar.gz", dir=BACKUPS)
             os.close(fd); temp = Path(temp_name); tar_path = decrypt_archive(path, key_env, temp)
         with tarfile.open(tar_path, "r:gz") as archive:

@@ -25,12 +25,13 @@ class JobSpec:
     timeout_seconds: int = 600
     schedule_key: str = ""
     default_times: tuple[str, ...] = ()
+    offset_seconds: int = 0
 
 
 JOBS = (
     JobSpec("trader", "ai_factor_trader.py", 15 * 60, 840),
     JobSpec("factor_library", "factor_library.py", 60, 55),
-    JobSpec("news", "news_sentiment_harvester.py", 10 * 60, 300),
+    JobSpec("news", "news_sentiment_harvester.py", 10 * 60, 300, offset_seconds=180),
     JobSpec("daily_briefing", "daily_summary_and_backup.py", None, 600, "briefing_times", ("08:00", "20:00")),
     JobSpec("self_improvement", "self_improvement_engine.py", None, 1200, "self_improvement_times", ("02:00", "08:00", "14:00", "20:00")),
 )
@@ -62,13 +63,15 @@ def scheduler_snapshot(store: GatewayStore) -> dict[str, Any]:
             last = None
         value = schedule.get(spec.schedule_key) if spec.schedule_key else None
         times = tuple(str(item) for item in value) if isinstance(value, list) else ((str(value),) if isinstance(value, str) else spec.default_times)
+        schedule_text = f"每 {spec.interval_seconds // 60} 分钟 (错峰 +{spec.offset_seconds // 60}m)" if (spec.interval_seconds and spec.offset_seconds) else (f"每 {spec.interval_seconds // 60} 分钟" if spec.interval_seconds else "、".join(times))
         jobs.append({
             "name": spec.name,
             "script": spec.script,
             "last_scheduled_at": last.isoformat() if last else "",
-            "schedule": f"每 {spec.interval_seconds // 60} 分钟" if spec.interval_seconds else "、".join(times),
+            "schedule": schedule_text,
             "timezone": "Asia/Shanghai",
             "overdue": bool(spec.interval_seconds and last and (now - last).total_seconds() > spec.interval_seconds * 2),
+            "offset_seconds": spec.offset_seconds,
         })
     return {"jobs": jobs, "recent_runs": store.job_runs(30)}
 
@@ -112,6 +115,13 @@ class GatewayScheduler:
                 slot = int(now.timestamp()) // spec.interval_seconds
                 last_slot = int(last.timestamp()) // spec.interval_seconds if last else -1
                 return slot > last_slot and int(now.timestamp()) % spec.interval_seconds < 10
+            if spec.offset_seconds:
+                # Staggered execution aligned to clock with offset to prevent resource collisions
+                ts = int(now.timestamp())
+                slot = (ts - spec.offset_seconds) // spec.interval_seconds
+                last_slot = (int(last.timestamp()) - spec.offset_seconds) // spec.interval_seconds if last else -1
+                sec_in_slot = (ts - spec.offset_seconds) % spec.interval_seconds
+                return slot > last_slot and sec_in_slot < 30
             return not last or (now - last).total_seconds() >= spec.interval_seconds
         minute = now.strftime("%H:%M")
         if minute not in self._scheduled_times(spec, schedule):
@@ -157,14 +167,16 @@ class GatewayScheduler:
         now = datetime.now(BJ_TZ)
         for spec in current_jobs():
             last = self._last_at(spec.name)
+            schedule_text = f"每 {spec.interval_seconds // 60} 分钟 (错峰 +{spec.offset_seconds // 60}m)" if (spec.interval_seconds and spec.offset_seconds) else (f"每 {spec.interval_seconds // 60} 分钟" if spec.interval_seconds else "、".join(self._scheduled_times(spec, schedule)))
             result.append({
                 "name": spec.name,
                 "script": spec.script,
                 "running": spec.name in self.running and not self.running[spec.name].done(),
                 "last_scheduled_at": last.isoformat() if last else "",
-                "schedule": f"每 {spec.interval_seconds // 60} 分钟" if spec.interval_seconds else "、".join(self._scheduled_times(spec, schedule)),
+                "schedule": schedule_text,
                 "timezone": "Asia/Shanghai",
                 "overdue": bool(spec.interval_seconds and last and (now - last).total_seconds() > spec.interval_seconds * 2),
+                "offset_seconds": spec.offset_seconds,
             })
         return {"jobs": result, "recent_runs": self.store.job_runs(30)}
 

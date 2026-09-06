@@ -484,18 +484,14 @@ def current_admin(x_r20_session: str | None = None, x_r20_admin_token: str | Non
     raise HTTPException(status_code=401, detail="管理员会话已失效，请重新登录")
 
 
-def _clean_header(val: Any) -> str | None:
-    return val if isinstance(val, str) else None
-
-
 def require_admin_header(x_r20_admin_token: Any = None, x_r20_session: Any = None) -> dict[str, Any]:
-    session_tok = _clean_header(x_r20_session) or REQUEST_SESSION.get()
-    admin_tok = _clean_header(x_r20_admin_token)
+    session_tok = x_r20_session if isinstance(x_r20_session, str) else REQUEST_SESSION.get()
+    admin_tok = x_r20_admin_token if isinstance(x_r20_admin_token, str) else None
     return current_admin(session_tok, admin_tok)
 
 
 def require_superadmin(x_r20_session: Any = None) -> dict[str, Any]:
-    session_tok = _clean_header(x_r20_session) or REQUEST_SESSION.get()
+    session_tok = x_r20_session if isinstance(x_r20_session, str) else REQUEST_SESSION.get()
     user = admin_auth.validate_session(session_tok)
     if not user:
         raise HTTPException(status_code=401, detail="管理员会话已失效，请重新登录")

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useDashboardStore } from '../stores/dashboard'
-import { Newspaper, Flame, ExternalLink, ShieldAlert } from 'lucide-vue-next'
+import { Newspaper, Flame, ExternalLink, ShieldAlert, RefreshCw, Radio } from 'lucide-vue-next'
 
 const store = useDashboardStore()
 const intel = computed<any>(() => store.data?.news_intelligence || {})
@@ -41,9 +41,15 @@ function importanceCn(imp: string) {
           <Newspaper class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
         </div>
         <div>
-          <h2 class="text-xs sm:text-[13px] 2xl:text-sm font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
-            全网加密重大舆情与流动性情报
-          </h2>
+          <div class="flex items-center space-x-2">
+            <h2 class="text-xs sm:text-[13px] 2xl:text-sm font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
+              全网加密重大舆情与流动性情报
+            </h2>
+            <span class="hidden md:inline-flex items-center space-x-1 text-[10px] 2xl:text-[11px] font-mono px-2 py-0.5 rounded-[4px] border" style="background-color: var(--color-up-bg); border-color: var(--color-up-border); color: var(--color-up);">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span>错峰自动更新中</span>
+            </span>
+          </div>
           <p class="text-[11px] 2xl:text-xs font-mono mt-0.5" style="color: var(--text-muted);">
             主流财经与链上异动 · 更新于 {{ intel.updated_at || '--' }} (UTC+8)
           </p>
@@ -51,6 +57,17 @@ function importanceCn(imp: string) {
       </div>
 
       <div class="flex items-center space-x-2 2xl:space-x-3">
+        <button
+          @click="store.fetchDashboard(false)"
+          :disabled="store.isRefreshing"
+          class="h-7 2xl:h-8 px-2 2xl:px-2.5 rounded-[4px] border text-[11px] 2xl:text-xs font-mono inline-flex items-center space-x-1 hover:bg-[var(--bg-card-hover)] transition-colors cursor-pointer"
+          style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-muted);"
+          title="立即手动刷新最新快讯与舆情"
+        >
+          <RefreshCw class="w-3 h-3" :class="store.isRefreshing ? 'animate-spin text-blue-400' : ''" />
+          <span class="hidden sm:inline">{{ store.isRefreshing ? '同步中' : '刷新' }}</span>
+        </button>
+
         <span
           class="h-7 2xl:h-8 px-2.5 2xl:px-3 rounded-[4px] border text-[11px] 2xl:text-xs font-mono font-bold inline-flex items-center space-x-1"
           :style="{

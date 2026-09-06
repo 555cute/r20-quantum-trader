@@ -278,10 +278,12 @@ def fetch_and_analyze_news_sentiment():
 
     try:
         os.makedirs(DATA_DIR, exist_ok=True)
-        with open(NEWS_CACHE_FILE, "w", encoding="utf-8") as f:
+        tmp_file = NEWS_CACHE_FILE + f".tmp.{os.getpid()}"
+        with open(tmp_file, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
+        os.replace(tmp_file, NEWS_CACHE_FILE)
+    except Exception as exc:
+        print(f"Failed to write news cache: {exc}")
 
     return payload
 

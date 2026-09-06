@@ -50,5 +50,31 @@ class GatewaySchedulerTests(unittest.TestCase):
         self.assertEqual(reopened.get_state("job.last.news"), self.now.isoformat())
 
 
+    def test_news_staggered_schedule_avoids_trader_collision(self):
+        news = next(spec for spec in JOBS if spec.name == "news")
+        self.assertEqual(news.interval_seconds, 600)
+        self.assertEqual(news.offset_seconds, 180)
+
+        # 1. At 18:00:00 (when trader runs), news should NOT be due
+        at_zero = self.now.replace(minute=0, second=0)
+        self.store.set_state("job.last.news", self.now.replace(minute=0).isoformat())
+        self.assertFalse(self.scheduler.due(news, at_zero, {}))
+
+        # 2. At 18:03:00 (offset by +3 minutes), news transitions into slot and becomes due
+        at_three = self.now.replace(minute=3, second=0)
+        self.assertTrue(self.scheduler.due(news, at_three, {}))
+        # After 30s in slot, it is no longer due
+        self.assertFalse(self.scheduler.due(news, at_three.replace(second=35), {}))
+
+        # 3. Simulate news finished at 18:03, at 18:13:00 it becomes due again
+        self.store.set_state("job.last.news", at_three.isoformat())
+        at_thirteen = self.now.replace(minute=13, second=0)
+        self.assertTrue(self.scheduler.due(news, at_thirteen, {}))
+
+        # 4. At 18:15:00 (trader's next run), news is NOT due
+        at_fifteen = self.now.replace(minute=15, second=0)
+        self.assertFalse(self.scheduler.due(news, at_fifteen, {}))
+
+
 if __name__ == "__main__":
     unittest.main()
