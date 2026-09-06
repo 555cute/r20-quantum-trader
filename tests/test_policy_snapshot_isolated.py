@@ -14,19 +14,13 @@ Verifies:
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
 import unittest
 from pathlib import Path
 from typing import Any, Dict, List
-from unittest.mock import MagicMock, patch
 
 from r20_backend.policy_snapshot import (
     compute_layout_hash,
-    extract_council_fingerprint,
-    extract_evolution_mind_fingerprint,
-    extract_interceptors_fingerprint,
-    extract_prompt_profile_fingerprint,
     format_policy_snapshot_summary,
     generate_policy_snapshot,
 )
@@ -376,7 +370,10 @@ class TestPolicySnapshotIsolated(unittest.TestCase):
         mock_snapshot = {
             "policy_version": "v7.3.0@aabb1122",
             "policy_hash": "aabb1122",
-            "summary": "Policy[v7.3.0@aabb1122] prompt:stable#1122 mind:3344(3) interceptors:5566(3) council:off(standard)",
+            "summary": (
+                "Policy[v7.3.0@aabb1122] prompt:stable#1122 "
+                "mind:3344(3) interceptors:5566(3) council:off(standard)"
+            ),
         }
 
         # Assemble decision cache
@@ -442,6 +439,189 @@ class TestPolicySnapshotIsolated(unittest.TestCase):
         self.assertTrue(data["policy_version"].startswith("v7.4.1@"))
         self.assertEqual(len(data["policy_hash"]), 8)
         self.assertIn("units", data["snapshot"])
+
+    def test_archive_creation_and_index_tracking(self) -> None:
+        """Verify archive creation writes package and updates index with metadata."""
+        import tempfile
+        from r20_backend.policy_snapshot import (
+            archive_current_policy,
+            archive_policy_snapshot,
+            load_archive_index,
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            t_dir = Path(td)
+            entry1 = archive_current_policy(
+                "Strategy A", description="Test desc A", author="trader1", archive_dir=t_dir
+            )
+            self.assertTrue((t_dir / entry1["archive_file"]).is_file())
+            self.assertEqual(entry1["name"], "Strategy A")
+            self.assertEqual(entry1["description"], "Test desc A")
+            self.assertEqual(entry1["author"], "trader1")
+
+            idx = load_archive_index(archive_dir=t_dir)
+            self.assertEqual(len(idx), 1)
+            self.assertEqual(idx[0]["policy_hash"], entry1["policy_hash"])
+
+            # Verify alias archive_policy_snapshot works
+            entry2 = archive_policy_snapshot(
+                "Strategy B", description="Test desc B", author="trader2", archive_dir=t_dir
+            )
+            self.assertTrue(entry2["policy_hash"])
+            idx2 = load_archive_index(archive_dir=t_dir)
+            self.assertTrue(len(idx2) >= 1)
+
+    def test_archive_deletion_and_aliases(self) -> None:
+        """Verify deletion removes file and index tracking, with alias support."""
+        import tempfile
+        from r20_backend.policy_snapshot import (
+            archive_current_policy,
+            delete_archived_policy,
+            delete_policy_archive,
+            load_archive_index,
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            t_dir = Path(td)
+            entry = archive_current_policy("ToDelete", archive_dir=t_dir)
+            p_hash = entry["policy_hash"]
+            self.assertTrue((t_dir / entry["archive_file"]).is_file())
+
+            # Delete using delete_archived_policy
+            del_res = delete_archived_policy(p_hash, archive_dir=t_dir)
+            self.assertTrue(del_res["deleted"])
+            self.assertFalse((t_dir / entry["archive_file"]).is_file())
+            self.assertEqual(len(load_archive_index(archive_dir=t_dir)), 0)
+
+            # Deleting again raises FileNotFoundError
+            with self.assertRaises(FileNotFoundError):
+                delete_policy_archive(p_hash, archive_dir=t_dir)
+
+            # Invalid hash raises ValueError
+            with self.assertRaises(ValueError):
+                delete_archived_policy("../etc/passwd", archive_dir=t_dir)
+
+    def test_one_click_rollback_and_no_partial_state(self) -> None:
+        """Verify one-click rollback restores snapshot and reverts on corruption."""
+        import tempfile
+        from r20_backend.policy_snapshot import (
+            archive_current_policy,
+            get_current_policy_snapshot,
+            restore_archived_policy,
+            restore_policy_snapshot,
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            t_dir = Path(td)
+            entry = archive_current_policy("Rollback Baseline", archive_dir=t_dir)
+            p_hash = entry["policy_hash"]
+
+            # Successful restore
+            res = restore_policy_snapshot(p_hash, archive_dir=t_dir)
+            self.assertEqual(res["status"], "restored")
+            self.assertEqual(res["target_policy_hash"], p_hash)
+            self.assertEqual(res["restored_snapshot"]["policy_hash"], p_hash)
+
+            # Failure during restore reverts without partial state
+            archive_file = t_dir / entry["archive_file"]
+            raw_pkg = json.loads(archive_file.read_text(encoding="utf-8"))
+            raw_pkg["package"]["evolution_memory"] = [{"corrupt_field": 123}]
+            archive_file.write_text(json.dumps(raw_pkg), encoding="utf-8")
+
+            orig_hash = get_current_policy_snapshot()["policy_hash"]
+            with self.assertRaises(RuntimeError):
+                restore_archived_policy(p_hash, archive_dir=t_dir)
+
+            current_hash = get_current_policy_snapshot()["policy_hash"]
+            self.assertEqual(current_hash, orig_hash)
+
+    def test_index_locking_and_corrupt_recovery(self) -> None:
+        """Verify index detects corrupt json, creates backup, and reconstructs from archives."""
+        import tempfile
+        from r20_backend.policy_snapshot import (
+            archive_current_policy,
+            load_archive_index,
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            t_dir = Path(td)
+            entry = archive_current_policy("Archive To Corrupt", archive_dir=t_dir)
+            p_hash = entry["policy_hash"]
+
+            # Corrupt index.json
+            idx_file = t_dir / "index.json"
+            idx_file.write_text("INVALID_JSON_CORRUPT_BYTES", encoding="utf-8")
+
+            rebuilt_idx = load_archive_index(archive_dir=t_dir)
+            self.assertEqual(len(rebuilt_idx), 1)
+            self.assertEqual(rebuilt_idx[0]["policy_hash"], p_hash)
+
+            corrupt_backups = list(t_dir.glob("index.json.corrupt.*"))
+            self.assertEqual(len(corrupt_backups), 1)
+
+    def test_scripts_proxy_module_exports(self) -> None:
+        """Verify scripts/policy_snapshot.py exposes all necessary interfaces and aliases."""
+        import scripts.policy_snapshot as proxy
+
+        required_attrs = [
+            "DEFAULT_BASE_VERSION",
+            "compute_layout_hash",
+            "compute_file_hash",
+            "extract_prompt_profile_fingerprint",
+            "extract_evolution_mind_fingerprint",
+            "extract_interceptors_fingerprint",
+            "extract_council_fingerprint",
+            "format_policy_snapshot_summary",
+            "generate_policy_snapshot",
+            "get_current_policy_snapshot",
+            "capture_full_strategy_package",
+            "load_archive_index",
+            "save_archive_index",
+            "archive_current_policy",
+            "archive_policy_snapshot",
+            "restore_archived_policy",
+            "restore_policy_snapshot",
+            "delete_archived_policy",
+            "delete_policy_archive",
+        ]
+        for attr in required_attrs:
+            self.assertTrue(hasattr(proxy, attr), f"Missing attr in scripts.policy_snapshot: {attr}")
+
+    def test_simple_and_advanced_prompt_profile_layout_hash(self) -> None:
+        """Verify simple and advanced prompt modes alter layout_hash deterministically."""
+        # Simple mode changes
+        prof_simple_1 = {
+            "id": "custom_simple",
+            "name": "极简测试",
+            "editor_mode": "simple",
+            "simple_policy": {"strategy": "顺势做多", "risk_budget": "conservative"},
+        }
+        prof_simple_2 = {
+            "id": "custom_simple",
+            "name": "极简测试",
+            "editor_mode": "simple",
+            "simple_policy": {"strategy": "逆势高空", "risk_budget": "aggressive"},
+        }
+        h_s1 = compute_layout_hash(prof_simple_1)
+        h_s2 = compute_layout_hash(prof_simple_2)
+        self.assertNotEqual(h_s1, h_s2)
+
+        # Advanced mode changes
+        prof_adv_1 = {
+            "id": "custom_adv",
+            "name": "高级测试",
+            "editor_mode": "advanced",
+            "trading_system": "System Rule A",
+        }
+        prof_adv_2 = {
+            "id": "custom_adv",
+            "name": "高级测试",
+            "editor_mode": "advanced",
+            "trading_system": "System Rule B",
+        }
+        h_a1 = compute_layout_hash(prof_adv_1)
+        h_a2 = compute_layout_hash(prof_adv_2)
+        self.assertNotEqual(h_a1, h_a2)
 
 
 if __name__ == "__main__":

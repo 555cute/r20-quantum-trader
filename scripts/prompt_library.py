@@ -163,7 +163,11 @@ def text_to_modules(text: str, source: str = "legacy", locked: bool = False) -> 
 
 
 def compile_modules(modules: list[dict[str, Any]]) -> str:
-    return "\n\n".join(str(item.get("content") or "") for item in modules if item.get("enabled",True) and str(item.get("content") or "").strip()).strip()
+    return "\n\n".join(
+        str(item.get("content") or "")
+        for item in modules
+        if isinstance(item, dict) and item.get("enabled", True) and str(item.get("content") or "").strip()
+    ).strip()
 
 
 def base_template_modules(text: str, pipeline: str) -> list[dict[str, Any]]:
@@ -192,21 +196,27 @@ def _clean_profile(raw: dict[str, Any], profile_id: str | None = None) -> dict[s
     result["editable"] = True
     result["enabled"] = bool(result.get("enabled", True))
     result["editor_mode"] = str(raw.get("editor_mode") or ("advanced" if any(raw.get(k) for k in TEMPLATE_KEYS) else "simple"))
-    if result["editor_mode"] not in {"simple", "advanced"}: result["editor_mode"] = "simple"
+    if result["editor_mode"] not in {"simple", "advanced", "modules"}:
+        result["editor_mode"] = "modules" if isinstance(raw.get("pipelines"), dict) else "simple"
     policy = raw.get("simple_policy") if isinstance(raw.get("simple_policy"), dict) else {}
     result["simple_policy"] = {
-        "strategy": str(policy.get("strategy") or "").strip()[:8000], "review_focus": str(policy.get("review_focus") or "").strip()[:4000],
-        "participation": str(policy.get("participation") or "balanced"), "evidence": str(policy.get("evidence") or "strict"), "risk_budget": str(policy.get("risk_budget") or "middle"),
+        "strategy": str(policy.get("strategy") or "").strip()[:8000],
+        "review_focus": str(policy.get("review_focus") or "").strip()[:4000],
+        "participation": str(policy.get("participation") or "balanced"),
+        "evidence": str(policy.get("evidence") or "strict"),
+        "risk_budget": str(policy.get("risk_budget") or "middle"),
     }
     result["created_at"] = str(result.get("created_at") or now)
     result["updated_at"] = str(result.get("updated_at") or now)
-    for key in TEMPLATE_KEYS: result[key] = str(result.get(key) or "").strip()
+    for key in TEMPLATE_KEYS:
+        result[key] = str(result.get(key) or "").strip()
     if result["editor_mode"] == "simple" and not isinstance(raw.get("pipelines"), dict):
         result["pipelines"] = {}
     else:
         result["pipelines"] = _clean_pipelines(raw.get("pipelines"), result)
-        if isinstance(raw.get("pipelines"), dict):
-            for key in TEMPLATE_KEYS: result[key] = compile_modules(result["pipelines"][key])
+        if isinstance(raw.get("pipelines"), dict) or result["editor_mode"] == "modules":
+            for key in TEMPLATE_KEYS:
+                result[key] = compile_modules(result["pipelines"][key])
         result["editor_mode"] = "modules"
     return result
 
@@ -289,43 +299,69 @@ def validate_profile(profile: dict[str, Any]) -> dict[str, Any]:
     errors: list[str] = []
     warnings: list[str] = []
     name = str(profile.get("name") or "").strip()
-    if not 1 <= len(name) <= 60: errors.append("方案名称长度必须为 1-60")
-    pipelines = profile.get("pipelines") if isinstance(profile.get("pipelines"),dict) else {}
+    if not 1 <= len(name) <= 60:
+        errors.append("方案名称长度必须为 1-60")
+    pipelines = profile.get("pipelines") if isinstance(profile.get("pipelines"), dict) else {}
     module_total = 0
     for pipeline, modules in pipelines.items():
-        if pipeline not in TEMPLATE_KEYS or not isinstance(modules,list): errors.append(f"无效消息管线：{pipeline}"); continue
-        if len(modules)>MAX_MODULES_PER_PIPELINE: errors.append(f"{pipeline} 模块数不得超过 {MAX_MODULES_PER_PIPELINE}")
-        seen=set()
+        if pipeline not in TEMPLATE_KEYS or not isinstance(modules, list):
+            errors.append(f"无效消息管线：{pipeline}")
+            continue
+        if len(modules) > MAX_MODULES_PER_PIPELINE:
+            errors.append(f"{pipeline} 模块数不得超过 {MAX_MODULES_PER_PIPELINE}")
+        seen = set()
         for module in modules:
-            module_id=str(module.get("id") or "")
-            if not module_id or module_id in seen: errors.append(f"{pipeline} 模块 ID 缺失或重复")
+            if not isinstance(module, dict):
+                errors.append(f"{pipeline} 包含无效模块对象")
+                continue
+            module_id = str(module.get("id") or "")
+            if not module_id or module_id in seen:
+                errors.append(f"{pipeline} 模块 ID 缺失或重复")
             seen.add(module_id)
-            value=str(module.get("content") or ""); module_total += len(value)
+            value = str(module.get("content") or "")
+            module_total += len(value)
+            if len(value) > MAX_TEMPLATE_CHARS:
+                errors.append(f"{pipeline}/{module.get('title', '模块')} 超过 {MAX_TEMPLATE_CHARS} 字符")
             unknown = sorted(set(_VAR_RE.findall(value)) - ALLOWED_VARIABLES)
-            if unknown: errors.append(f"{pipeline}/{module.get('title', '模块')} 包含未知变量：{', '.join(unknown)}")
-            if module.get("source")=="base" and module.get("locked"): continue
-            for pattern,message in _FORBIDDEN:
+            if unknown:
+                errors.append(f"{pipeline}/{module.get('title', '模块')} 包含未知变量：{', '.join(unknown)}")
+            if module.get("source") == "base" and module.get("locked"):
+                continue
+            for pattern, message in _FORBIDDEN:
                 for match in pattern.finditer(value):
-                    prefix=value[max(0,match.start()-12):match.start()]
-                    if re.search(r"(不得|严禁|禁止|不可).{0,10}$",prefix): continue
-                    errors.append(f"{pipeline}/{module.get('title','模块')}：{message}"); break
+                    prefix = value[max(0, match.start() - 12):match.start()]
+                    if re.search(r"(不得|严禁|禁止|不可).{0,10}$", prefix):
+                        continue
+                    errors.append(f"{pipeline}/{module.get('title', '模块')}：{message}")
+                    break
     policy = profile.get("simple_policy") if isinstance(profile.get("simple_policy"), dict) else {}
     if profile.get("editor_mode") == "simple":
-        strategy = str(policy.get("strategy") or ""); review = str(policy.get("review_focus") or "")
-        if not strategy.strip(): warnings.append("简单策略说明为空，将仅使用选择项和系统基础提示词")
-        for label,value in (("策略说明",strategy),("复盘重点",review)):
-            for pattern,message in _FORBIDDEN:
-                if pattern.search(value): errors.append(f"{label}：{message}")
-        if policy.get("participation","balanced") not in {"conservative","balanced","active"}: errors.append("参与风格无效")
-        if policy.get("evidence","strict") not in {"strict","balanced","trend"}: errors.append("证据要求无效")
-        if policy.get("risk_budget","middle") not in {"low","middle","high"}: errors.append("风险预算无效")
+        strategy = str(policy.get("strategy") or "")
+        review = str(policy.get("review_focus") or "")
+        if not strategy.strip():
+            warnings.append("简单策略说明为空，将仅使用选择项和系统基础提示词")
+        for label, value in (("策略说明", strategy), ("复盘重点", review)):
+            unknown = sorted(set(_VAR_RE.findall(value)) - ALLOWED_VARIABLES)
+            if unknown:
+                errors.append(f"{label} 包含未知变量：{', '.join(unknown)}")
+            for pattern, message in _FORBIDDEN:
+                if pattern.search(value):
+                    errors.append(f"{label}：{message}")
+        if policy.get("participation", "balanced") not in {"conservative", "balanced", "active"}:
+            errors.append("参与风格无效")
+        if policy.get("evidence", "strict") not in {"strict", "balanced", "trend"}:
+            errors.append("证据要求无效")
+        if policy.get("risk_budget", "middle") not in {"low", "middle", "high"}:
+            errors.append("风险预算无效")
     total = 0
     for key in TEMPLATE_KEYS:
         value = "" if pipelines else str(profile.get(key) or "")
         total += len(value)
-        if len(value) > MAX_TEMPLATE_CHARS: errors.append(f"{key} 超过 {MAX_TEMPLATE_CHARS} 字符")
+        if len(value) > MAX_TEMPLATE_CHARS:
+            errors.append(f"{key} 超过 {MAX_TEMPLATE_CHARS} 字符")
         unknown = sorted(set(_VAR_RE.findall(value)) - ALLOWED_VARIABLES)
-        if unknown: errors.append(f"{key} 包含未知变量：{', '.join(unknown)}")
+        if unknown:
+            errors.append(f"{key} 包含未知变量：{', '.join(unknown)}")
         for pattern, message in _FORBIDDEN:
             for match in pattern.finditer(value):
                 prefix = value[max(0, match.start() - 12):match.start()]
@@ -333,9 +369,12 @@ def validate_profile(profile: dict[str, Any]) -> dict[str, Any]:
                     continue
                 errors.append(f"{key}：{message}")
                 break
-    if total > MAX_PROFILE_CHARS: errors.append(f"四类模板合计不得超过 {MAX_PROFILE_CHARS} 字符")
-    if not total and not pipelines and profile.get("editor_mode") != "simple": warnings.append("当前方案四类附加模板均为空，将只使用基础提示词")
-    return {"valid": not errors, "errors": list(dict.fromkeys(errors)), "warnings": warnings, "characters": module_total if pipelines else total}
+    total_chars = module_total if pipelines else total
+    if total_chars > MAX_PROFILE_CHARS:
+        errors.append(f"四类模板合计不得超过 {MAX_PROFILE_CHARS} 字符")
+    if not total and not pipelines and profile.get("editor_mode") != "simple":
+        warnings.append("当前方案四类附加模板均为空，将只使用基础提示词")
+    return {"valid": not errors, "errors": list(dict.fromkeys(errors)), "warnings": warnings, "characters": total_chars}
 
 
 def _revision(profile: dict[str, Any], action: str, note: str = "") -> dict[str, Any]:
@@ -345,11 +384,21 @@ def _revision(profile: dict[str, Any], action: str, note: str = "") -> dict[str,
 def create_profile(name: str, description: str = "", source_id: str = "stable", note: str = "创建方案") -> dict[str, Any]:
     library = load_library()
     source = get_profile(source_id)
-    profile = _clean_profile({**source, "id": f"custom-{uuid.uuid4().hex[:10]}", "name": name, "description": description, "editor_mode": "simple", "simple_policy": {"strategy": "", "review_focus": "", "participation": "balanced", "evidence": "strict", "risk_budget": "middle"}, "created_at": _now(), "updated_at": _now()})
+    profile_data = copy.deepcopy(source)
+    profile_data.update({
+        "id": f"custom-{uuid.uuid4().hex[:10]}",
+        "name": name,
+        "description": description,
+        "created_at": _now(),
+        "updated_at": _now(),
+    })
+    profile = _clean_profile(profile_data)
     check = validate_profile(profile)
-    if not check["valid"]: raise ValueError("；".join(check["errors"]))
+    if not check["valid"]:
+        raise ValueError("；".join(check["errors"]))
     library["profiles"][profile["id"]] = profile
     library["revisions"].append(_revision(profile, "create", note))
+    library["revisions"] = library["revisions"][-MAX_REVISIONS:]
     save_library(library)
     return profile
 
@@ -381,9 +430,11 @@ def update_profile(profile_id: str, changes: dict[str, Any], note: str = "更新
 
 
 def delete_profile(profile_id: str) -> None:
-    if profile_id in PRESETS and profile_id not in load_library()["profiles"]: raise ValueError("内置预设不可删除")
+    if profile_id in PRESETS:
+        raise ValueError("内置预设不可删除")
     library = load_library()
-    if profile_id == library["active_profile_id"]: raise ValueError("当前启用方案不能删除，请先切换方案")
+    if profile_id == library["active_profile_id"]:
+        raise ValueError("当前启用方案不能删除，请先切换方案")
     if profile_id in library["profiles"]:
         del library["profiles"][profile_id]
         save_library(library)
@@ -405,7 +456,7 @@ def get_profile(profile_id: str) -> dict[str, Any]:
     if profile_id in library["profiles"]:
         return copy.deepcopy(library["profiles"][profile_id])
     if profile_id in PRESETS:
-        preset = copy.deepcopy(PRESETS[profile_id])
+        preset = _clean_profile(copy.deepcopy(PRESETS[profile_id]), profile_id)
         preset["editable"] = True
         return preset
     raise ValueError("提示词方案不存在")
@@ -418,10 +469,15 @@ def profile_history(profile_id: str) -> list[dict[str, Any]]:
 def rollback_profile(profile_id: str, revision_id: str) -> dict[str, Any]:
     library = load_library()
     revision = next((x for x in library["revisions"] if x.get("id") == revision_id and x.get("profile_id") == profile_id), None)
-    if not revision: raise ValueError("历史版本不存在")
+    if not revision:
+        raise ValueError("历史版本不存在")
     restored = _clean_profile({**revision["snapshot"], "updated_at": _now()}, profile_id)
+    check = validate_profile(restored)
+    if not check["valid"]:
+        raise ValueError("；".join(check["errors"]))
     library["profiles"][profile_id] = restored
     library["revisions"].append(_revision(restored, "rollback", f"回滚到 {revision_id}"))
+    library["revisions"] = library["revisions"][-MAX_REVISIONS:]
     save_library(library)
     return restored
 
@@ -432,24 +488,42 @@ def export_profile(profile_id: str) -> dict[str, Any]:
 
 
 def import_profile(payload: dict[str, Any], name_override: str = "") -> dict[str, Any]:
-    if payload.get("format") != "r20-prompt-profile" or not isinstance(payload.get("profile"), dict): raise ValueError("无效的 R20 提示词方案文件")
+    if payload.get("format") != "r20-prompt-profile" or not isinstance(payload.get("profile"), dict):
+        raise ValueError("无效的 R20 提示词方案文件")
     source = payload["profile"]
-    if isinstance(source.get("pipelines"), dict) and any(source.get("pipelines", {}).values()):
-        profile=create_profile(name_override or str(source.get("name") or "导入方案"),str(source.get("description") or ""),"stable","导入模块方案")
-        return update_profile(profile["id"],{"editor_mode":"modules","pipelines":source["pipelines"]},"导入模板构成")
-    if source.get("editor_mode") == "simple" or (not source.get("editor_mode") and source.get("simple_policy")):
-        profile = create_profile(name_override or str(source.get("name") or "导入方案"), str(source.get("description") or ""), "stable", "导入简单方案")
-        return update_profile(profile["id"], {"editor_mode": "simple", "simple_policy": source.get("simple_policy") or {}}, "导入简单策略")
-    return create_profile(name_override or str(source.get("name") or "导入方案"), str(source.get("description") or ""), "stable", "导入方案") if not any(source.get(k) for k in TEMPLATE_KEYS) else _import_with_templates(source, name_override)
+    library = load_library()
+    profile_id = f"custom-{uuid.uuid4().hex[:10]}"
+    profile_data = copy.deepcopy(source)
+    profile_data["id"] = profile_id
+    if name_override:
+        profile_data["name"] = name_override
+    elif not profile_data.get("name"):
+        profile_data["name"] = "导入方案"
+    profile_data["created_at"] = _now()
+    profile_data["updated_at"] = _now()
+    profile = _clean_profile(profile_data, profile_id)
+    check = validate_profile(profile)
+    if not check["valid"]:
+        raise ValueError("；".join(check["errors"]))
+    library["profiles"][profile["id"]] = profile
+    library["revisions"].append(_revision(profile, "import", "导入方案"))
+    library["revisions"] = library["revisions"][-MAX_REVISIONS:]
+    save_library(library)
+    return profile
 
 
 def _import_with_templates(source: dict[str, Any], name_override: str) -> dict[str, Any]:
-    profile = create_profile(name_override or str(source.get("name") or "导入方案"), str(source.get("description") or ""), "stable", "导入方案")
-    return update_profile(profile["id"], {key: source.get(key, "") for key in TEMPLATE_KEYS}, "导入模板内容")
+    return import_profile({"format": "r20-prompt-profile", "version": 3, "profile": source}, name_override)
 
 
 def active_profile() -> dict[str, Any]:
     return resolve_profile(get_profile(load_library()["active_profile_id"]))
+
+
+# Backward-compatible aliases for policy snapshot & external modules
+load_active_profile = active_profile
+load_prompt_config = load_library
+save_prompt_config = save_library
 
 
 def all_profiles() -> list[dict[str, Any]]:
@@ -460,7 +534,7 @@ def all_profiles() -> list[dict[str, Any]]:
         if pid in profiles_map:
             result.append(profiles_map.pop(pid))
         elif pid in PRESETS:
-            preset = copy.deepcopy(PRESETS[pid])
+            preset = _clean_profile(copy.deepcopy(PRESETS[pid]), pid)
             preset["editable"] = True
             result.append(preset)
     result.extend(profiles_map.values())
@@ -563,12 +637,12 @@ def apply_module_layout(base: str, profile: dict[str, Any], pipeline: str, label
 def pipeline_view(base: str, profile: dict[str, Any], pipeline: str) -> list[dict[str, Any]]:
     base_modules = base_template_modules(base, pipeline)
     current = ((profile.get("pipelines") or {}).get(pipeline) if isinstance(profile.get("pipelines"), dict) else [])
-    if isinstance(current, list) and any(item.get("source") == "base" for item in current):
+    if isinstance(current, list) and current:
         view = copy.deepcopy(current)
         for m in view:
             m["locked"] = False
         return view
-    return base_modules + text_to_modules(str(profile.get(pipeline) or ""), "custom")
+    return base_modules + (text_to_modules(str(profile.get(pipeline) or ""), "custom") if profile.get(pipeline) else [])
 
 
 def append_layer(base: str, layer: str, label: str) -> str:

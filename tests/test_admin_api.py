@@ -187,6 +187,114 @@ class AdminApiTests(unittest.TestCase):
         self.assertEqual(test_res.json()["status"], "success")
         self.assertGreaterEqual(len(test_res.json()["results"]), 4)
 
+    def test_policy_admin_endpoints_rbac_and_exception_handling(self):
+        root = self.login("admin", "InitialAdmin123456")
+        self.client.post("/api/v1/admin/users", headers=root, json={"username": "operator_policy", "password": "OperatorPassword123", "role": "admin"})
+        operator = self.login("operator_policy", "OperatorPassword123")
+
+        # 1. Anonymous requests return 401
+        self.assertEqual(self.client.get("/api/v1/admin/policy/current-snapshot").status_code, 401)
+        self.assertEqual(self.client.get("/api/v1/admin/policy/archives").status_code, 401)
+        self.assertEqual(self.client.post("/api/v1/admin/policy/archive", json={"name": "test"}).status_code, 401)
+        self.assertEqual(self.client.post("/api/v1/admin/policy/restore", json={"policy_hash": "abcdef12"}).status_code, 401)
+        self.assertEqual(self.client.delete("/api/v1/admin/policy/archive/abcdef12").status_code, 401)
+
+        # 2. Operator (admin role) can read snapshots and archives
+        snap_resp = self.client.get("/api/v1/admin/policy/current-snapshot", headers=operator)
+        self.assertEqual(snap_resp.status_code, 200)
+        self.assertTrue(snap_resp.json()["ok"])
+        self.assertIn("policy_hash", snap_resp.json())
+
+        arch_resp = self.client.get("/api/v1/admin/policy/archives", headers=operator)
+        self.assertEqual(arch_resp.status_code, 200)
+        self.assertTrue(arch_resp.json()["ok"])
+
+        # 3. Operator (admin role) is forbidden from archiving, restoring, deleting (403)
+        self.assertEqual(self.client.post("/api/v1/admin/policy/archive", headers=operator, json={"name": "forbidden"}).status_code, 403)
+        self.assertEqual(self.client.post("/api/v1/admin/policy/restore", headers=operator, json={"policy_hash": "abcdef12"}).status_code, 403)
+        self.assertEqual(self.client.delete("/api/v1/admin/policy/archive/abcdef12", headers=operator).status_code, 403)
+
+        # 4. Superadmin input validation and exception handling
+        # 4a. Malformed archive payload (empty name or whitespace only) -> 422
+        bad_name = self.client.post("/api/v1/admin/policy/archive", headers=root, json={"name": "   "})
+        self.assertEqual(bad_name.status_code, 422)
+
+        # 4b. Missing / invalid hash in restore -> 404 for missing hash, 422/400 for malformed
+        bad_hash_restore = self.client.post("/api/v1/admin/policy/restore", headers=root, json={"policy_hash": "non_existent_hash_12345"})
+        self.assertEqual(bad_hash_restore.status_code, 404)
+        malformed_restore = self.client.post("/api/v1/admin/policy/restore", headers=root, json={"policy_hash": "../../etc/passwd"})
+        self.assertEqual(malformed_restore.status_code, 422)
+
+        # 4c. Missing / invalid hash in delete -> 404 for missing, 400 for malformed chars
+        bad_del = self.client.delete("/api/v1/admin/policy/archive/non_existent_hash", headers=root)
+        self.assertEqual(bad_del.status_code, 404)
+        invalid_del = self.client.delete("/api/v1/admin/policy/archive/bad*hash!chars", headers=root)
+        self.assertEqual(invalid_del.status_code, 400)
+
+        # 4d. Successful archiving and deletion lifecycle by superadmin
+        created = self.client.post("/api/v1/admin/policy/archive", headers=root, json={"name": "test_audit_archive", "description": "audit test"})
+        self.assertEqual(created.status_code, 200, created.text)
+        created_hash = created.json()["entry"]["policy_hash"]
+        self.assertTrue(created_hash)
+
+        # Check archive exists in list
+        list_after = self.client.get("/api/v1/admin/policy/archives", headers=operator)
+        self.assertEqual(list_after.status_code, 200)
+        self.assertTrue(any(a["policy_hash"] == created_hash for a in list_after.json()["archives"]))
+
+        # Delete archive
+        deleted = self.client.delete(f"/api/v1/admin/policy/archive/{created_hash}", headers=root)
+        self.assertEqual(deleted.status_code, 200)
+        self.assertTrue(deleted.json()["ok"])
+
+    def test_prompt_admin_endpoints_rbac_and_exception_handling(self):
+        root = self.login("admin", "InitialAdmin123456")
+        self.client.post("/api/v1/admin/users", headers=root, json={"username": "operator_prompt", "password": "OperatorPassword123", "role": "admin"})
+        operator = self.login("operator_prompt", "OperatorPassword123")
+
+        # 1. Anonymous access returns 401
+        self.assertEqual(self.client.get("/api/v1/admin/prompt-library").status_code, 401)
+        self.assertEqual(self.client.put("/api/v1/admin/prompt-library", json={"active_style": "stable"}).status_code, 401)
+        self.assertEqual(self.client.get("/api/v1/admin/prompt-profiles").status_code, 401)
+        self.assertEqual(self.client.post("/api/v1/admin/prompt-profiles", json={"name": "test"}).status_code, 401)
+        self.assertEqual(self.client.get("/api/v1/admin/prompts").status_code, 401)
+        self.assertEqual(self.client.put("/api/v1/admin/prompts", json={"content": "test"}).status_code, 401)
+
+        # 2. Operator role checks: can read/validate, but CANNOT mutate prompt library or prompts override
+        self.assertEqual(self.client.get("/api/v1/admin/prompt-library", headers=operator).status_code, 200)
+        self.assertEqual(self.client.get("/api/v1/admin/prompt-profiles", headers=operator).status_code, 200)
+        self.assertEqual(self.client.get("/api/v1/admin/prompts", headers=operator).status_code, 200)
+
+        # Operator forbidden on PUT prompt-library and PUT prompts (403)
+        self.assertEqual(self.client.put("/api/v1/admin/prompt-library", headers=operator, json={"active_style": "stable"}).status_code, 403)
+        self.assertEqual(self.client.put("/api/v1/admin/prompts", headers=operator, json={"content": "test"}).status_code, 403)
+
+        # 3. Superadmin can PUT prompt-library and prompts
+        put_lib = self.client.put("/api/v1/admin/prompt-library", headers=root, json={"active_style": "stable", "trading_system": "", "trading_user": "", "evolution_system": "", "evolution_user": ""})
+        self.assertEqual(put_lib.status_code, 200)
+
+        put_prompts = self.client.put("/api/v1/admin/prompts", headers=root, json={"content": ""})
+        self.assertEqual(put_prompts.status_code, 200)
+
+        # 4. Exception handling on non-existent or malformed prompt profile operations (no unhandled 500)
+        self.assertEqual(self.client.get("/api/v1/admin/prompt-profiles/non_existent_profile/export", headers=operator).status_code, 404)
+        self.assertEqual(self.client.post("/api/v1/admin/prompt-profiles/non_existent_profile/activate", headers=root, json={}).status_code, 404)
+        self.assertEqual(self.client.delete("/api/v1/admin/prompt-profiles/non_existent_profile", headers=root).status_code, 404)
+        self.assertEqual(self.client.put("/api/v1/admin/prompt-profiles/non_existent_profile", headers=root, json={"name": "new_name"}).status_code, 404)
+        self.assertEqual(self.client.post("/api/v1/admin/prompt-profiles/non_existent_profile/rollback", headers=root, json={"revision_id": "rev-123"}).status_code, 404)
+
+        # Malformed profile_id chars -> 400
+        self.assertEqual(self.client.get("/api/v1/admin/prompt-profiles/bad*profile!id/export", headers=operator).status_code, 400)
+        self.assertEqual(self.client.delete("/api/v1/admin/prompt-profiles/bad*profile!id", headers=root).status_code, 400)
+
+        # Malformed import payload -> 400
+        bad_import = self.client.post("/api/v1/admin/prompt-profiles/import", headers=root, json={"payload": {"invalid": "data"}})
+        self.assertEqual(bad_import.status_code, 400)
+
+        # Whitespace-only profile name creation -> 422
+        bad_create = self.client.post("/api/v1/admin/prompt-profiles", headers=root, json={"name": "   ", "source_id": "stable"})
+        self.assertEqual(bad_create.status_code, 422)
+
 
 if __name__ == "__main__":
     unittest.main()
