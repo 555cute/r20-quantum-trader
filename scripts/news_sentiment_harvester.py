@@ -341,4 +341,5 @@ def fetch_and_analyze_news_sentiment():
 
 if __name__ == "__main__":
     res = fetch_and_analyze_news_sentiment()
-    print(f"✅ OKX News & Sentiment Engine complete. Macro: {res['macro_sentiment']}, News Count: {len(res['latest_news'])}")
+    flag = " ⚠️STALE(upstream empty, serving last cache)" if res.get("stale_sections") else ""
+    print(f"✅ OKX News & Sentiment Engine complete. Macro: {res['macro_sentiment']}, News Count: {len(res['latest_news'])}{flag} 最新快讯: {res.get('news_fresh_at') or '--'}")
