@@ -92,8 +92,11 @@ class PromptLibraryTests(unittest.TestCase):
         created = library.create_profile("导出测试方案", "导出测试说明", source_id="stable")
         exported = library.export_profile(created["id"])
         self.assertEqual(exported["format"], "r20-prompt-profile")
-        self.assertEqual(exported["version"], 3)
+        self.assertEqual(exported["version"], 4)
         self.assertIn("pipelines", exported["profile"])
+        self.assertEqual(exported["profile_id"], created["id"])
+        self.assertEqual([item["key"] for item in exported["variables"]], [item["key"] for item in library.TEMPLATE_VARIABLES_METADATA])
+        self.assertEqual(exported["allowed_variables"], sorted(library.ALLOWED_VARIABLES))
 
         imported = library.import_profile(exported, name_override="导入新方案")
         self.assertEqual(imported["name"], "导入新方案")

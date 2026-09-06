@@ -159,6 +159,14 @@ TEMPLATE_VARIABLES_METADATA = [
 ]
 
 ALLOWED_VARIABLES = {item["key"] for item in TEMPLATE_VARIABLES_METADATA} | {"profile_name", "timestamp"}
+EXPORT_FORMAT = "r20-prompt-profile"
+EXPORT_VERSION = 4
+_IMPORT_FORMAT_HINT = (
+    "无法识别的提示词文件。请提供以下三种格式之一："
+    "(1) 标准导出包 {\"format\":\"r20-prompt-profile\",\"version\":4,\"profile\":{...}}（v1~v4 均可）；"
+    "(2) 整库导出文件 {\"version\":2,\"active_profile_id\":\"...\",\"profiles\":{...}}，将导入其中的启用方案；"
+    "(3) 裸方案对象（直接包含 pipelines 或 trading_system/trading_user/evolution_system/evolution_user 字段）。"
+)
 MAX_TEMPLATE_CHARS = 12_000
 MAX_PROFILE_CHARS = 32_000
 MAX_REVISIONS = 100
@@ -599,37 +607,83 @@ def rollback_profile(profile_id: str, revision_id: str) -> dict[str, Any]:
 
 
 def export_profile(profile_id: str) -> dict[str, Any]:
+    """Self-describing profile export: one JSON file is enough to restore an
+    equivalent profile on any system of the same version, including the list of
+    template variables the file is allowed to reference."""
     profile = get_profile(profile_id)
-    return {"format": "r20-prompt-profile", "version": 3, "exported_at": _now(), "profile": {k: profile.get(k) for k in ("name", "description", "editor_mode", "pipelines", "simple_policy", *TEMPLATE_KEYS)}}
+    payload = {k: profile.get(k) for k in ("name", "description", "editor_mode", "pipelines", "simple_policy", *TEMPLATE_KEYS)}
+    return {
+        "format": EXPORT_FORMAT,
+        "version": EXPORT_VERSION,
+        "exported_at": _now(),
+        "profile_id": profile_id,
+        "profile": payload,
+        "variables": copy.deepcopy(TEMPLATE_VARIABLES_METADATA),
+        "allowed_variables": sorted(ALLOWED_VARIABLES),
+    }
+
+
+def _normalize_import_source(payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    """Accept every shape users actually hold on disk and return (source, origin).
+
+    A) standard wrapper ``{"format": "r20-prompt-profile", "profile": {...}}`` (v1..v4)
+    B) whole-library export ``{"version": 2, "active_profile_id": ..., "profiles": {...}}``
+    C) bare profile object (carries ``pipelines`` or any flat template key)
+    """
+    if not isinstance(payload, dict) or not payload:
+        raise ValueError(_IMPORT_FORMAT_HINT)
+    if payload.get("format") == EXPORT_FORMAT and isinstance(payload.get("profile"), dict):
+        return payload["profile"], "wrapped"
+    if isinstance(payload.get("profiles"), dict) and payload["profiles"]:
+        profiles = payload["profiles"]
+        active_id = str(payload.get("active_profile_id") or payload.get("active_style") or "")
+        source = profiles.get(active_id)
+        if not isinstance(source, dict):
+            source = next((v for v in profiles.values() if isinstance(v, dict)), None)
+        if not isinstance(source, dict):
+            raise ValueError(_IMPORT_FORMAT_HINT)
+        return source, "library"
+    if "format" not in payload and ("pipelines" in payload or any(key in payload for key in TEMPLATE_KEYS)):
+        return payload, "bare"
+    raise ValueError(_IMPORT_FORMAT_HINT)
+
+
+def _unknown_variable_errors(errors: list[str]) -> list[str]:
+    return [item for item in errors if "未知变量" in item]
 
 
 def import_profile(payload: dict[str, Any], name_override: str = "") -> dict[str, Any]:
-    if payload.get("format") != "r20-prompt-profile" or not isinstance(payload.get("profile"), dict):
-        raise ValueError("无效的 R20 提示词方案文件")
-    source = payload["profile"]
+    source, origin = _normalize_import_source(payload)
     library = load_library()
     profile_id = f"custom-{uuid.uuid4().hex[:10]}"
     profile_data = copy.deepcopy(source)
     profile_data["id"] = profile_id
+    original_name = str(profile_data.get("name") or "").strip()
     if name_override:
         profile_data["name"] = name_override
-    elif not profile_data.get("name"):
+    elif original_name:
+        profile_data["name"] = f"{original_name}（导入）"[:60]
+    else:
         profile_data["name"] = "导入方案"
     profile_data["created_at"] = _now()
     profile_data["updated_at"] = _now()
     profile = _clean_profile(profile_data, profile_id)
     check = validate_profile(profile)
     if not check["valid"]:
+        unknown = _unknown_variable_errors(check["errors"])
+        if unknown:
+            raise ValueError("导入文件包含未知变量，请对照导出文件中的 allowed_variables 清单修正：\n- " + "\n- ".join(unknown))
         raise ValueError("；".join(check["errors"]))
     library["profiles"][profile["id"]] = profile
-    library["revisions"].append(_revision(profile, "import", "导入方案"))
+    origin_label = {"wrapped": "标准导出包", "library": "整库导出文件", "bare": "裸方案对象"}.get(origin, "未知来源")
+    library["revisions"].append(_revision(profile, "import", f"导入方案（{origin_label}）"))
     library["revisions"] = library["revisions"][-MAX_REVISIONS:]
     save_library(library)
     return profile
 
 
 def _import_with_templates(source: dict[str, Any], name_override: str) -> dict[str, Any]:
-    return import_profile({"format": "r20-prompt-profile", "version": 3, "profile": source}, name_override)
+    return import_profile({"format": EXPORT_FORMAT, "version": EXPORT_VERSION, "profile": source}, name_override)
 
 
 def active_profile() -> dict[str, Any]:

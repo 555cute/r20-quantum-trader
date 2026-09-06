@@ -762,7 +762,7 @@ onMounted(loadLib)
             </div>
             <div>
               <h3 class="text-sm font-bold" style="color: var(--text-main);">导入策略方案包</h3>
-              <p class="text-[10px]" style="color: var(--text-muted);">支持导入从本系统导出或从策略广场获取的 .json 策略方案</p>
+              <p class="text-[10px]" style="color: var(--text-muted);">支持标准导出包 (v1~v4)、整库导出文件与裸方案对象三种 JSON 格式</p>
             </div>
           </div>
           <button @click="importVisible = false" class="cursor-pointer p-1" style="color: var(--text-muted);">
