@@ -280,6 +280,7 @@ onUnmounted(() => {
               <div class="font-bold text-sm" style="color: var(--text-main);">左翼：主控与操盘中心 (62%)</div>
               <p style="color: var(--text-muted);">
                 • <strong>4 单元独立 Bento 资产控制舱</strong>：移动端采用 2x2 对称紧凑网格（两行，一行两个），PC 宽屏呈现黄金比例立体空间（总权益、基准净盈亏、今日已结、持仓浮盈分离解耦）。<br>
+                • <strong>今日已结资金费与手续费全透传 (v7.5.0)</strong>：实时汇总统计跨周期永续合约资金费（Funding Fee）结算明细与平仓交易手续费（Trading Fee），对账透明清晰，消除浮盈与已结盈亏认知差。<br>
                 • <strong>TradingView 官方原生 K 线操盘工作站 (v7.5.0)</strong>：本地打包集成，0 外部依赖免 VPN 秒开；支持 150 根 K 线全屏铺满、MA/BOLL/VOL 多指标独立共存，为视觉 LLM 读取 K 线形态量身打造；叠加四维交易线（入场、止损、止盈）与科学真实盈亏比测算控制台。
               </p>
             </div>
@@ -295,14 +296,28 @@ onUnmounted(() => {
           <!-- Screenshot Card -->
           <div class="rounded-2xl border p-2 sm:p-3 overflow-hidden shadow-xl group" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
             <div class="text-[11px] font-mono px-2 py-1 flex items-center justify-between border-b mb-2" style="border-color: var(--border-subtle); color: var(--text-muted);">
-              <span>实机截图 · 双翼量化工作台 (左翼操盘台 + 右翼六币微积分雷达 + 亮暗双模切换)</span>
+              <span>实机截图 · R20 量子交易系统暗色极客操盘台 (v7.5.0 · Bento 资产舱 + 资金费/手续费明细透传 + TradingView 原生 K 线)</span>
               <span class="font-bold" style="color: var(--color-brand);">点击图片放大</span>
             </div>
             <img
-              src="https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/dashboard_trading.png"
-              alt="双翼量化工作台全景"
+              src="/images/v750_dashboard_dark.png"
+              alt="R20 量子交易系统暗色极客操盘台"
               class="w-full rounded-xl cursor-zoom-in group-hover:opacity-95 transition-opacity"
-              @click="zoomImage = 'https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/dashboard_trading.png'"
+              @click="zoomImage = '/images/v750_dashboard_dark.png'"
+            />
+          </div>
+
+          <!-- Screenshot Card 2: K-line TradingView & Multi-indicators -->
+          <div class="rounded-2xl border p-2 sm:p-3 overflow-hidden shadow-xl group" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
+            <div class="text-[11px] font-mono px-2 py-1 flex items-center justify-between border-b mb-2" style="border-color: var(--border-subtle); color: var(--text-muted);">
+              <span>实机截图 · 视觉 LLM 友好型多指标共存工作站 (MA + BOLL + VOL 高对比度无遮挡 · 150根铺满视口)</span>
+              <span class="font-bold" style="color: var(--color-brand);">点击图片放大</span>
+            </div>
+            <img
+              src="/images/v750_kline_tradingview.png"
+              alt="视觉 LLM 友好型多指标共存工作站"
+              class="w-full rounded-xl cursor-zoom-in group-hover:opacity-95 transition-opacity"
+              @click="zoomImage = '/images/v750_kline_tradingview.png'"
             />
           </div>
         </section>

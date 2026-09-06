@@ -17,7 +17,12 @@ const benchmarkNetPnl = computed(() => Number(account.value.cum_net_pnl || 0).to
 const benchmarkRoi = computed(() => Number(account.value.cum_roi_pct || 0).toFixed(2))
 const initialCap = computed(() => Number(account.value.initial_capital || 3695.0).toFixed(2))
 
+// 今日已结盈亏与费用明细 (真实资金费与手续费展示)
 const todayNet = computed(() => Number(today.value.net_realized ?? today.value.total_pnl ?? 0).toFixed(2))
+const todayFunding = computed(() => Number(today.value.funding_paid || 0).toFixed(2))
+const todayFees = computed(() => Number(today.value.fees_paid || 0).toFixed(2))
+const todayGross = computed(() => Number(today.value.realized_gross || 0).toFixed(2))
+
 const todayWinrate = computed(() => Number(today.value.win_rate || 100.0).toFixed(1))
 const winTrades = computed(() => Number(today.value.win_trades ?? 0))
 const lossTrades = computed(() => Number(today.value.loss_trades ?? 0))
@@ -37,7 +42,7 @@ const shortCount = computed(() => store.positions.filter((p) => p.side === 'shor
     
     <!-- Card 1: 主账户总权益 -->
     <div
-      class="rounded-xl border p-3 sm:p-4 lg:p-5 2xl:p-6 flex flex-col justify-between transition-all shadow-xs lg:min-h-[160px] 2xl:min-h-[175px]"
+      class="rounded-xl border p-3 sm:p-4 lg:p-5 2xl:p-6 flex flex-col justify-between transition-all shadow-xs lg:min-h-[165px] 2xl:min-h-[180px]"
       style="background-color: var(--bg-card); border-color: var(--border-subtle);"
     >
       <div class="flex items-center justify-between pb-1">
@@ -83,7 +88,7 @@ const shortCount = computed(() => store.positions.filter((p) => p.side === 'shor
 
     <!-- Card 2: 基准累计收益 -->
     <div
-      class="rounded-xl border p-3 sm:p-4 lg:p-5 2xl:p-6 flex flex-col justify-between transition-all shadow-xs lg:min-h-[160px] 2xl:min-h-[175px]"
+      class="rounded-xl border p-3 sm:p-4 lg:p-5 2xl:p-6 flex flex-col justify-between transition-all shadow-xs lg:min-h-[165px] 2xl:min-h-[180px]"
       style="background-color: var(--bg-card); border-color: var(--border-subtle);"
     >
       <div class="flex items-center justify-between pb-1">
@@ -118,9 +123,9 @@ const shortCount = computed(() => store.positions.filter((p) => p.side === 'shor
       </div>
     </div>
 
-    <!-- Card 3: 今日已结盈亏 -->
+    <!-- Card 3: 今日已结盈亏 (包含资金费与手续费明细) -->
     <div
-      class="rounded-xl border p-3 sm:p-4 lg:p-5 2xl:p-6 flex flex-col justify-between transition-all shadow-xs lg:min-h-[160px] 2xl:min-h-[175px]"
+      class="rounded-xl border p-3 sm:p-4 lg:p-5 2xl:p-6 flex flex-col justify-between transition-all shadow-xs lg:min-h-[165px] 2xl:min-h-[180px]"
       style="background-color: var(--bg-card); border-color: var(--border-subtle);"
     >
       <div class="flex items-center justify-between pb-1">
@@ -138,27 +143,29 @@ const shortCount = computed(() => store.positions.filter((p) => p.side === 'shor
         </span>
       </div>
 
-      <div class="py-1 lg:py-2">
+      <div class="py-1 lg:py-1.5">
         <div
           class="text-xl sm:text-2xl lg:text-3xl 2xl:text-4xl font-black font-mono tracking-tight num-tabular"
           :style="{ color: Number(todayNet) >= 0 ? 'var(--color-up)' : 'var(--color-down)' }"
         >
           {{ Number(todayNet) >= 0 ? '+' : '' }}{{ todayNet }}
         </div>
-        <div class="text-[10px] sm:text-[11px] lg:text-xs font-mono truncate pt-0.5" style="color: var(--text-muted);">
-          今日成交笔数: <strong class="font-bold" style="color: var(--text-main);">{{ todayTrades }}</strong>
+        <!-- 核心新增：今日资金费与手续费明细透传展示 -->
+        <div class="flex items-center justify-between text-[10px] sm:text-[11px] font-mono pt-1" style="color: var(--text-muted);">
+          <span>资金费: <strong :class="Number(todayFunding) < 0 ? 'text-rose-400' : 'text-emerald-400'">{{ todayFunding }} U</strong></span>
+          <span>手续费: <strong class="text-rose-400">{{ todayFees }} U</strong></span>
         </div>
       </div>
 
-      <div class="flex items-center justify-between text-[10px] sm:text-[11px] font-mono pt-1" style="color: var(--text-muted);">
-        <span>胜: <strong class="text-emerald-400">{{ winTrades }}</strong> 负: <strong class="text-rose-400">{{ lossTrades }}</strong></span>
+      <div class="flex items-center justify-between text-[10px] sm:text-[11px] font-mono pt-1 border-t" style="border-color: var(--border-subtle); color: var(--text-faint);">
+        <span>成交: <strong style="color: var(--text-main);">{{ todayTrades }}</strong>笔 ({{ winTrades }}胜/{{ lossTrades }}负)</span>
         <span>盈亏比: <strong class="text-emerald-400">2.0+</strong></span>
       </div>
     </div>
 
     <!-- Card 4: 当前持仓浮盈 -->
     <div
-      class="rounded-xl border p-3 sm:p-4 lg:p-5 2xl:p-6 flex flex-col justify-between transition-all shadow-xs lg:min-h-[160px] 2xl:min-h-[175px]"
+      class="rounded-xl border p-3 sm:p-4 lg:p-5 2xl:p-6 flex flex-col justify-between transition-all shadow-xs lg:min-h-[165px] 2xl:min-h-[180px]"
       style="background-color: var(--bg-card); border-color: var(--border-subtle);"
     >
       <div class="flex items-center justify-between pb-1">
