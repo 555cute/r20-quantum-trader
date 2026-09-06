@@ -153,7 +153,7 @@ def _clean_probe_detail(result: Mapping[str, Any]) -> str:
     return "\n".join(filtered)[:500] or "invalid response"
 
 
-def start_oauth_device_login(site: str, *, env: Mapping[str, str] | None = None) -> dict[str, Any]:
+def start_oauth_device_login(site: str, *, force_relogin: bool = False, env: Mapping[str, str] | None = None) -> dict[str, Any]:
     """Start OKX OAuth RFC8628 device flow and return the public verification fields."""
     if site not in {"global", "eea", "us", "tr"}:
         raise ValueError("不支持的 OKX 站点")
@@ -166,12 +166,15 @@ def start_oauth_device_login(site: str, *, env: Mapping[str, str] | None = None)
         raise RuntimeError(f"已配置 API Key Profile（{', '.join(profiles)}）；CLI 会优先使用 API Key，请先删除或切换该 Profile 后再授权 OAuth")
     current = _json_output(_run([binary, "auth", "status", "--json"], env=env))
     if isinstance(current, dict) and current.get("status") == "logged_in":
-        return {
-            "status": "already_logged_in",
-            "site": str(current.get("site") or site),
-            "scopes": [str(item) for item in current.get("scopes", []) if item],
-            "account_label": _oauth_identity(current),
-        }
+        if force_relogin:
+            oauth_logout(env=env)
+        else:
+            return {
+                "status": "already_logged_in",
+                "site": str(current.get("site") or site),
+                "scopes": [str(item) for item in current.get("scopes", []) if item],
+                "account_label": _oauth_identity(current),
+            }
     result = _run([binary, "auth", "login", "--manual", "--site", site], timeout=30, env=env)
     payload = _json_output(result)
     if not result["ok"] or not isinstance(payload, dict):
@@ -198,6 +201,26 @@ def oauth_status(*, env: Mapping[str, str] | None = None) -> dict[str, Any]:
         "scopes": [str(item) for item in payload.get("scopes", []) if item],
         "account_label": _oauth_identity(payload),
     }
+
+
+def oauth_logout(*, env: Mapping[str, str] | None = None) -> dict[str, Any]:
+    """Clear OKX OAuth tokens and session state via the official OKX CLI / okx-auth broker.
+    This unbinds the current OKX account so a new account can be connected or re-authorized."""
+    binary = shutil.which("okx", path=(env or os.environ).get("PATH"))
+    if not binary:
+        raise RuntimeError("OKX CLI 未安装或服务 PATH 中不可见")
+    result = _run([binary, "auth", "logout"], env=env, timeout=15)
+    # Also clean up token file directly if it exists to guarantee clean unbind
+    cred_file = Path.home() / ".okx" / "oauth" / "profiles" / "oauth" / "credentials.enc"
+    try:
+        if cred_file.exists():
+            cred_file.unlink()
+    except Exception:
+        pass
+    if not result["ok"] and "not logged in" not in (result["stderr"] + result["stdout"]).lower():
+        # If logout command failed for an unexpected reason, report it
+        raise RuntimeError(result["stderr"] or result["stdout"] or "OKX 授权解绑失败")
+    return {"status": "logged_out", "message": "OKX OAuth 账号已成功解绑"}
 
 
 def _version_tuple(text: str) -> tuple[int, int, int]:

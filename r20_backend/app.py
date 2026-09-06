@@ -27,7 +27,7 @@ from pydantic import BaseModel, Field, field_validator
 from r20_backend.config import refresh_settings, settings
 from r20_backend.okx_client import OKXClient
 from r20_backend.okx_trade_service import account_snapshot as okx_account_snapshot, fast_close_confirmed
-from r20_backend.okx_setup import diagnose_okx_runtime, install_okx_cli, check_node_npm, start_oauth_device_login, oauth_status
+from r20_backend.okx_setup import diagnose_okx_runtime, install_okx_cli, check_node_npm, start_oauth_device_login, oauth_status, oauth_logout
 from r20_backend.account_baseline import load_account_baseline, update_initial_capital
 from r20_backend.backup_secrets import credential_status as backup_credential_status, save_credentials as save_backup_credentials
 from r20_backend.prompt_views import EVOLUTION_USER_TEMPLATE, TRADING_USER_TEMPLATE, rendered_snapshots
@@ -151,6 +151,7 @@ class OkxCliInstallRequest(BaseModel):
 
 class OkxOAuthStartRequest(BaseModel):
     site: str = Field(pattern=r"^(global|eea|us|tr)$")
+    force_relogin: bool = Field(default=False)
 
 
 class AdminConfigUpdate(BaseModel):
@@ -1042,10 +1043,24 @@ def admin_okx_runtime(x_r20_session: str | None = Header(default=None, alias="X-
 def admin_okx_oauth_start(payload: OkxOAuthStartRequest, x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
     actor = require_superadmin(x_r20_session)
     try:
-        result = start_oauth_device_login(payload.site)
+        result = start_oauth_device_login(payload.site, force_relogin=payload.force_relogin)
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    audit_record("okx.oauth.start", "success", {"actor": actor["username"], "site": payload.site, "status": result.get("status")})
+    _OKX_RUNTIME_CACHE["at"] = 0.0
+    audit_record("okx.oauth.start", "success", {"actor": actor["username"], "site": payload.site, "force_relogin": payload.force_relogin, "status": result.get("status")})
+    return result
+
+
+@app.post("/api/v1/admin/okx/oauth/logout")
+def admin_okx_oauth_logout(x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
+    """Unbind current OKX OAuth account so user can switch or re-link an account."""
+    actor = require_superadmin(x_r20_session)
+    try:
+        result = oauth_logout()
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _OKX_RUNTIME_CACHE["at"] = 0.0
+    audit_record("okx.oauth.logout", "success", {"actor": actor["username"], "status": result.get("status")})
     return result
 
 

@@ -126,6 +126,13 @@ class AdminApiTests(unittest.TestCase):
         self.assertEqual(status.status_code,200,status.text)
         self.assertNotIn("token",status.text.lower())
 
+        # Test logout endpoint
+        self.assertEqual(self.client.post("/api/v1/admin/okx/oauth/logout").status_code, 401)
+        with patch.object(app_module, "oauth_logout", return_value={"status": "logged_out", "message": "OKX OAuth 账号已成功解绑"}):
+            logout_resp = self.client.post("/api/v1/admin/okx/oauth/logout", headers=root)
+        self.assertEqual(logout_resp.status_code, 200)
+        self.assertEqual(logout_resp.json()["status"], "logged_out")
+
     def test_okx_cli_check_and_install_require_valid_session_and_confirmation(self):
         self.assertEqual(self.client.get("/api/v1/admin/okx/cli-check").status_code, 401)
         self.assertEqual(self.client.post("/api/v1/admin/okx/install-cli", json={"confirmation":"INSTALL OKX CLI"}).status_code, 401)

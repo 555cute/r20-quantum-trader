@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
-import { ShieldAlert, Wallet, Save, Terminal, KeyRound, RefreshCw, Layers, Trash2, X } from 'lucide-vue-next'
+import { ShieldAlert, Wallet, Save, Terminal, KeyRound, RefreshCw, Layers, Trash2, X, LogOut, Unlink } from 'lucide-vue-next'
 
 const { api } = useApi()
 const auth = useAuthStore()
@@ -16,6 +16,8 @@ const oauthSite = ref('global')
 const oauthState = ref('')
 const oauthResult = ref<any>(null)
 const startingOauth = ref(false)
+const loggingOutOauth = ref(false)
+const switchingAccount = ref(false)
 
 // ---- CLI install ----
 const cliCheck = ref<any>(null)
@@ -120,6 +122,43 @@ async function checkOauth() {
     }
   } catch (e: any) {
     bannerMsg.value = { text: e.message, type: 'err' }
+  }
+}
+
+async function logoutOauth() {
+  if (!confirm('确认解绑当前的 OKX OAuth 账户？解绑后可连接新账号。')) return
+  loggingOutOauth.value = true
+  try {
+    const d = await api('/api/v1/admin/okx/oauth/logout', { method: 'POST' })
+    bannerMsg.value = { text: d.message || 'OKX OAuth 账号已解绑', type: 'ok' }
+    oauthResult.value = null
+    oauthState.value = ''
+    await rediagnose()
+  } catch (e: any) {
+    bannerMsg.value = { text: `解绑失败：${e.message}`, type: 'err' }
+  } finally {
+    loggingOutOauth.value = false
+  }
+}
+
+async function switchOauthAccount() {
+  if (!confirm('确认更换 OKX 账号？系统将解除当前授权并为您获取新的浏览器授权码。')) return
+  switchingAccount.value = true
+  oauthState.value = '正在切换并向 OKX 申请新的授权码…'
+  oauthResult.value = null
+  try {
+    const d = await api('/api/v1/admin/okx/oauth/start', {
+      method: 'POST',
+      body: JSON.stringify({ site: oauthSite.value, force_relogin: true }),
+    })
+    oauthResult.value = { kind: 'device', ...d }
+    oauthState.value = '请在 OKX 页面登录新账号并完成授权'
+    await rediagnose()
+  } catch (e: any) {
+    oauthState.value = ''
+    oauthResult.value = { kind: 'error', message: e.message }
+  } finally {
+    switchingAccount.value = false
   }
 }
 
@@ -365,16 +404,43 @@ onMounted(loadAll)
               <option value="us">US · app.okx.com</option>
               <option value="tr">TR · tr.okx.com</option>
             </select>
-            <div class="flex gap-2">
-              <button
-                v-if="auth.isSuperadmin"
-                @click="startOauth"
-                :disabled="startingOauth"
-                class="flex-1 btn-admin-primary disabled:opacity-50"
-              >
-                <KeyRound class="w-3.5 h-3.5" />
-                <span>{{ startingOauth ? '申请授权码中…' : '使用授权码连接 OKX' }}</span>
-              </button>
+            <div class="flex flex-wrap gap-2">
+              <!-- When logged in: provide Unbind and Switch buttons -->
+              <template v-if="runtime?.oauth?.status === 'logged_in'">
+                <button
+                  v-if="auth.isSuperadmin"
+                  @click="switchOauthAccount"
+                  :disabled="switchingAccount || loggingOutOauth"
+                  class="flex-1 btn-admin-primary disabled:opacity-50 inline-flex items-center justify-center space-x-1"
+                  title="解除当前授权并重新在浏览器中连接新 OKX 账号"
+                >
+                  <RefreshCw class="w-3.5 h-3.5" :class="switchingAccount ? 'animate-spin' : ''" />
+                  <span>{{ switchingAccount ? '切换中…' : '更换 OKX 账号' }}</span>
+                </button>
+                <button
+                  v-if="auth.isSuperadmin"
+                  @click="logoutOauth"
+                  :disabled="loggingOutOauth || switchingAccount"
+                  class="px-3 py-1.5 rounded-lg border text-xs font-mono cursor-pointer transition-all shadow-xs disabled:opacity-50 inline-flex items-center space-x-1 text-rose-400 hover:bg-rose-950/30"
+                  style="background-color: var(--bg-card-subtle); border-color: var(--color-down-border);"
+                  title="解绑当前 OKX 账号并清除本地授权凭证"
+                >
+                  <Unlink class="w-3.5 h-3.5" />
+                  <span>{{ loggingOutOauth ? '解绑中…' : '解绑账号' }}</span>
+                </button>
+              </template>
+              <!-- When not logged in: standard connect button -->
+              <template v-else>
+                <button
+                  v-if="auth.isSuperadmin"
+                  @click="startOauth"
+                  :disabled="startingOauth"
+                  class="flex-1 btn-admin-primary disabled:opacity-50"
+                >
+                  <KeyRound class="w-3.5 h-3.5" />
+                  <span>{{ startingOauth ? '申请授权码中…' : '使用授权码连接 OKX' }}</span>
+                </button>
+              </template>
               <button
                 v-if="auth.isSuperadmin"
                 @click="installCli"
@@ -395,7 +461,11 @@ onMounted(loadAll)
               <button @click="checkOauth" class="w-full px-2 py-1.5 rounded-lg border text-[11px] font-mono cursor-pointer transition-all shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-medium); color: var(--text-main);">我已授权，检查状态</button>
             </div>
             <div v-else-if="oauthResult?.kind === 'logged_in'" class="mt-2 p-2.5 rounded-lg border text-[11px] font-mono text-emerald-500" style="background-color: var(--color-up-bg); border-color: var(--color-up-border);">
-              ✅ 当前已经登录 · 站点 {{ oauthResult.site }}<div class="text-[10px] break-all" style="color: var(--text-muted);">{{ (oauthResult.scopes || []).join(', ') }}</div>
+              <div class="flex items-center justify-between">
+                <span>✅ 当前已经登录 · 站点 {{ oauthResult.site }}</span>
+                <span class="text-[10px] text-emerald-400">已就绪</span>
+              </div>
+              <div class="text-[10px] break-all mt-1" style="color: var(--text-muted);">{{ (oauthResult.scopes || []).join(', ') }}</div>
             </div>
             <div v-else-if="oauthResult?.kind === 'error'" class="mt-2 p-2.5 rounded-lg border text-[11px] font-mono text-rose-500" style="background-color: var(--color-down-bg); border-color: var(--color-down-border);">{{ oauthResult.message }}</div>
           </div>
