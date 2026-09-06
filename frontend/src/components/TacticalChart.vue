@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useDashboardStore } from '../stores/dashboard'
 import { useTheme } from '../composables/useTheme'
+import { useI18n } from '../composables/useI18n'
 import {
   createChart,
   CandlestickSeries,
@@ -64,12 +65,14 @@ const availableSymbols = computed<string[]>(() => {
   return Array.from(set)
 })
 
-const periods = [
-  { id: '15m', label: '15分', sec: 900 },
-  { id: '1H', label: '1时', sec: 3600 },
-  { id: '4H', label: '4时', sec: 14400 },
-  { id: '1D', label: '1日', sec: 86400 },
-]
+const { t } = useI18n()
+
+const periods = computed(() => [
+  { id: '15m', label: t('chart.timeframe15m', '15分'), sec: 900 },
+  { id: '1H', label: t('chart.timeframe1h', '1时'), sec: 3600 },
+  { id: '4H', label: t('chart.timeframe4h', '4时'), sec: 14400 },
+  { id: '1D', label: t('chart.timeframe1d', '1日'), sec: 86400 },
+])
 
 const currentSymbol = ref<string>('BTC')
 const currentPeriod = ref<string>('1H')
@@ -929,7 +932,7 @@ defineExpose({
       style="border-color: var(--border-subtle); background-color: var(--bg-app);"
     >
       <div class="flex items-center space-x-2.5">
-        <span class="font-black text-xs sm:text-sm" style="color: var(--text-main);">{{ currentSymbol }}USDT 永续</span>
+        <span class="font-black text-xs sm:text-sm" style="color: var(--text-main);">{{ currentSymbol }}USDT {{ t('chart.swapPerp', '永续') }}</span>
         <span class="font-black text-xs sm:text-sm num-tabular" style="color: var(--text-main);">
           ${{ currentPrice >= 100 ? currentPrice.toFixed(1) : currentPrice.toFixed(4) }}
         </span>
@@ -938,7 +941,7 @@ defineExpose({
         </span>
         <span class="flex items-center space-x-1 pl-1">
           <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-          <span class="text-[9px] text-emerald-400 font-bold">实时 3s</span>
+          <span class="text-[9px] text-emerald-400 font-bold">{{ t('chart.liveStatus', '实时') }} 3s</span>
         </span>
         <span class="text-[10px]" style="color: var(--text-faint);">1H ATR: ${{ currentAtr.toFixed(1) }}</span>
       </div>
@@ -951,7 +954,7 @@ defineExpose({
         <span>C: <strong style="color: var(--text-main);">${{ hoverCandle.close.toFixed(1) }}</strong></span>
       </div>
       <div v-else class="flex items-center space-x-2 text-[10px] font-mono" style="color: var(--text-muted);">
-        <span>K线结线倒计时:</span>
+        <span>{{ t('chart.countdownLabel', 'K线结线倒计时') }}:</span>
         <span class="font-bold text-amber-400 num-tabular">{{ candleCountdown }}</span>
       </div>
     </div>
@@ -996,14 +999,14 @@ defineExpose({
             }"
           >
             <span class="text-[10px] uppercase font-bold" :style="{ color: riskRewardMetrics.isRrCompliant ? 'var(--color-up)' : 'var(--color-warn)' }">
-              {{ riskRewardMetrics.isRrCompliant ? '✅ 期望盈亏比 (R:R)' : '⚠️ 盈亏比不足 2.0' }}
+              {{ riskRewardMetrics.isRrCompliant ? (isEn ? '✅ Expected R:R' : '✅ 期望盈亏比 (R:R)') : (isEn ? '⚠️ Low R:R (<2.0)' : '⚠️ 盈亏比不足 2.0') }}
             </span>
             <div class="flex items-baseline space-x-1 mt-0.5">
               <span class="text-base sm:text-lg font-black num-tabular" :style="{ color: riskRewardMetrics.isRrCompliant ? 'var(--color-up)' : 'var(--color-warn)' }">
                 {{ riskRewardMetrics.rrRatio.toFixed(2) }} : 1
               </span>
               <span class="text-[9px] opacity-70" :style="{ color: riskRewardMetrics.isRrCompliant ? 'var(--color-up)' : 'var(--color-warn)' }">
-                底线 2.0
+                {{ isEn ? 'Min 2.0' : '底线 2.0' }}
               </span>
             </div>
           </div>
@@ -1014,7 +1017,7 @@ defineExpose({
             style="background-color: var(--bg-card); border-color: var(--border-subtle);"
           >
             <span class="text-[10px] uppercase font-bold" style="color: var(--text-muted);">
-              止损呼吸空间 (ATR)
+              {{ isEn ? 'SL Buffer (ATR)' : '止损呼吸空间 (ATR)' }}
             </span>
             <div class="flex items-baseline space-x-1 mt-0.5">
               <span
@@ -1024,7 +1027,7 @@ defineExpose({
                 {{ riskRewardMetrics.atrMultiple.toFixed(2) }}x
               </span>
               <span class="text-[9px] font-bold" :style="{ color: riskRewardMetrics.isAtrOptimal ? 'var(--color-brand)' : 'var(--color-warn)' }">
-                {{ riskRewardMetrics.isAtrOptimal ? '防插针区间' : '偏离1.8~2.2' }}
+                {{ riskRewardMetrics.isAtrOptimal ? (isEn ? 'Noise Buffer' : '防插针区间') : (isEn ? 'Deviates 1.8~2.2' : '偏离1.8~2.2') }}
               </span>
             </div>
           </div>
@@ -1035,7 +1038,7 @@ defineExpose({
             style="background-color: var(--bg-card); border-color: var(--border-subtle);"
           >
             <span class="text-[10px] uppercase font-bold text-emerald-500">
-              预期收益目标 (TP)
+              {{ isEn ? 'Target Profit (TP)' : '预期收益目标 (TP)' }}
             </span>
             <div class="flex items-baseline space-x-1 mt-0.5">
               <span class="text-base sm:text-lg font-black text-emerald-400 num-tabular">
@@ -1053,7 +1056,7 @@ defineExpose({
             style="background-color: var(--bg-card); border-color: var(--border-subtle);"
           >
             <span class="text-[10px] uppercase font-bold text-rose-500">
-              最大硬风控风险 (SL)
+              {{ isEn ? 'Max Risk (SL)' : '最大硬风控风险 (SL)' }}
             </span>
             <div class="flex items-baseline space-x-1 mt-0.5">
               <span class="text-base sm:text-lg font-black text-rose-400 num-tabular">
@@ -1085,21 +1088,21 @@ defineExpose({
               @click="resetSimulation"
               class="px-2.5 py-1 rounded-lg border text-[11px] font-mono flex items-center space-x-1 cursor-pointer transition-colors"
               style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-muted);"
-              title="重置点位"
+              :title="isEn ? 'Reset' : '重置点位'"
             >
               <RotateCcw class="w-3 h-3" />
-              <span>复位</span>
+              <span>{{ isEn ? 'Reset' : '复位' }}</span>
             </button>
           </div>
 
           <button
             @click="copySimulationSummary"
             class="btn-admin-secondary text-xs font-mono flex items-center space-x-1.5"
-            title="复制风控测算契约"
+            :title="isEn ? 'Copy risk metrics' : '复制风控测算契约'"
           >
             <Check v-if="copied" class="w-3.5 h-3.5 text-emerald-400" />
             <Copy v-else class="w-3.5 h-3.5" />
-            <span>{{ copied ? '已复制' : '复制风控参数' }}</span>
+            <span>{{ copied ? (isEn ? 'Copied' : '已复制') : (isEn ? 'Copy Params' : '复制风控参数') }}</span>
           </button>
         </div>
       </div>

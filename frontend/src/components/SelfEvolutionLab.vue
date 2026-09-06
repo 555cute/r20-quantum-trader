@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useDashboardStore } from '../stores/dashboard'
+import { useI18n } from '../composables/useI18n'
 import { Sparkles, Brain, Cpu, AlertTriangle, CheckCircle2, Clock, Activity, ShieldCheck, FileText } from 'lucide-vue-next'
 
 const store = useDashboardStore()
+const { t, isEn } = useI18n()
 const review = computed(() => store.data?.review || {})
 const memoryMd = computed(() => store.data?.ai_trading_memory_md || '')
 
@@ -28,17 +30,17 @@ const overwriteReason = computed(() => review.value?.memory_overwrites_reason ||
         <div>
           <div class="flex items-center space-x-2 flex-wrap gap-y-1">
             <h2 class="text-xs sm:text-sm font-black font-mono tracking-wide" style="color: var(--text-main);">
-              AI 策略自进化与认知提炼中枢
+              {{ t('lab.labTitle') }}
             </h2>
             <span
               class="text-[10px] font-mono px-2 py-0.5 rounded border font-bold"
               :class="changeStatus === 'EVOLVED' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' : 'text-amber-400 bg-amber-500/10 border-amber-500/30'"
             >
-              状态: {{ changeStatus }}
+              {{ t('lab.status') }}: {{ changeStatus }}
             </span>
           </div>
           <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);">
-            每 6 小时自动读取全量实盘平仓台账进行自省复盘，严防过拟合与情绪干扰
+            {{ t('lab.labSubtitle') }}
           </p>
         </div>
       </div>
@@ -47,17 +49,17 @@ const overwriteReason = computed(() => review.value?.memory_overwrites_reason ||
       <div class="flex items-center space-x-2 sm:space-x-3 text-xs font-mono flex-wrap gap-y-1.5">
         <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg border" style="background-color: var(--bg-badge); border-color: var(--border-subtle);">
           <Clock class="w-3.5 h-3.5 text-indigo-400" />
-          <span style="color: var(--text-muted);">最新复盘:</span>
+          <span style="color: var(--text-muted);">{{ t('lab.latestReview') }}:</span>
           <strong class="text-emerald-400 font-bold num-tabular">{{ evolutionTime }}</strong>
         </div>
         <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg border" style="background-color: var(--bg-badge); border-color: var(--border-subtle);">
           <Activity class="w-3.5 h-3.5 text-blue-400" />
-          <span style="color: var(--text-muted);">样本:</span>
-          <strong style="color: var(--text-main);">{{ totalTrades }}笔 ({{ winRate }}%)</strong>
+          <span style="color: var(--text-muted);">{{ t('lab.sampleBaseline') }}:</span>
+          <strong style="color: var(--text-main);">{{ totalTrades }} {{ t('lab.sampleTrades') }} ({{ winRate }}%)</strong>
         </div>
         <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg border" style="background-color: var(--bg-badge); border-color: var(--border-subtle);">
           <Cpu class="w-3.5 h-3.5 text-purple-400" />
-          <span style="color: var(--text-muted);">模型:</span>
+          <span style="color: var(--text-muted);">{{ t('lab.engineModel') }}:</span>
           <strong class="text-indigo-300">{{ store.llmRuntime.model }}</strong>
         </div>
       </div>
@@ -71,8 +73,8 @@ const overwriteReason = computed(() => review.value?.memory_overwrites_reason ||
     >
       <AlertTriangle class="w-3.5 h-3.5 shrink-0 mt-0.5" />
       <div class="space-y-0.5">
-        <div class="font-bold">最近一轮 {{ review.timestamp || '--' }} 复盘未能完成：大模型网关返回错误，本轮按 NO_CHANGE 保留原有心法。</div>
-        <div style="color: var(--text-muted);">错误详情：{{ review.llm_error }}</div>
+        <div class="font-bold">{{ isEn ? `Review failed at ${review.timestamp || '--'}: upstream gateway error. Existing heuristics preserved as NO_CHANGE.` : `最近一轮 ${review.timestamp || '--'} 复盘未能完成：大模型网关返回错误，本轮按 NO_CHANGE 保留原有心法。` }}</div>
+        <div style="color: var(--text-muted);">{{ review.llm_error }}</div>
       </div>
     </div>
 
@@ -89,26 +91,26 @@ const overwriteReason = computed(() => review.value?.memory_overwrites_reason ||
             <div class="flex items-center space-x-2">
               <Brain class="w-4 h-4 text-emerald-400" />
               <h3 class="text-xs sm:text-sm font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
-                实战经验心法库 (Trading Memory)
+                {{ t('lab.memoryTitle') }}
               </h3>
             </div>
             <span
               class="text-[10px] font-mono px-2 py-0.5 rounded border font-bold text-emerald-400"
               style="background-color: var(--bg-badge); border-color: var(--border-subtle);"
             >
-              白盒启发式沉淀
+              {{ t('lab.memoryBadge') }}
             </span>
           </div>
           <div
             class="p-3.5 rounded-lg border text-xs font-mono leading-relaxed max-h-[440px] overflow-y-auto whitespace-pre-wrap select-text"
             style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-main);"
           >
-            {{ memoryMd || '正在读取长期心法知识库...' }}
+            {{ memoryMd || (isEn ? 'Loading immutable heuristics...' : '正在读取长期心法知识库...') }}
           </div>
         </div>
         <div class="pt-3 mt-3 border-t text-[11px] font-mono flex items-center justify-between" style="border-color: var(--border-subtle); color: var(--text-faint);">
-          <span>存储文件: <code>data/AI_TRADING_MEMORY.md</code></span>
-          <span class="text-emerald-400 font-bold">注入交易 Prompt: ACTIVE</span>
+          <span>{{ t('lab.storageFile') }}: <code>data/AI_TRADING_MEMORY.md</code></span>
+          <span class="text-emerald-400 font-bold">{{ t('lab.promptStatus') }}</span>
         </div>
       </div>
 
@@ -122,7 +124,7 @@ const overwriteReason = computed(() => review.value?.memory_overwrites_reason ||
             <div class="flex items-center space-x-2">
               <FileText class="w-4 h-4 text-indigo-400" />
               <h3 class="text-xs sm:text-sm font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
-                最新自进化诊断洞察与行动清单
+                {{ t('lab.insightsTitle') }}
               </h3>
             </div>
             <span
@@ -135,7 +137,7 @@ const overwriteReason = computed(() => review.value?.memory_overwrites_reason ||
 
           <!-- 决策理由 -->
           <div v-if="overwriteReason" class="p-3 rounded-lg border text-xs font-mono leading-relaxed" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
-            <div class="text-[10px] uppercase mb-1 font-bold text-amber-400">本次复盘裁决理由</div>
+            <div class="text-[10px] uppercase mb-1 font-bold text-amber-400">{{ t('lab.verdictReason') }}</div>
             <p class="text-xs font-sans leading-relaxed" style="color: var(--text-main);">
               {{ overwriteReason }}
             </p>
@@ -144,7 +146,7 @@ const overwriteReason = computed(() => review.value?.memory_overwrites_reason ||
           <!-- 诊断洞察列表 -->
           <div class="space-y-2">
             <div class="text-[10px] font-mono uppercase font-bold" style="color: var(--text-faint);">
-              AI 逐单归因与痛点诊断 ({{ insights.length }}项)
+              {{ t('lab.diagnosisInsights') }} ({{ insights.length }})
             </div>
             <div class="space-y-1.5 max-h-[220px] overflow-y-auto pr-1">
               <div
@@ -159,7 +161,7 @@ const overwriteReason = computed(() => review.value?.memory_overwrites_reason ||
                 </div>
               </div>
               <div v-if="insights.length === 0" class="text-xs font-mono py-2 text-center" style="color: var(--text-faint);">
-                暂无诊断条目，策略处于稳态运行中
+                {{ t('lab.noDiagnosis') }}
               </div>
             </div>
           </div>
@@ -167,7 +169,7 @@ const overwriteReason = computed(() => review.value?.memory_overwrites_reason ||
           <!-- 执行行动清单 -->
           <div v-if="actionsTaken.length > 0" class="space-y-1.5 pt-1">
             <div class="text-[10px] font-mono uppercase font-bold" style="color: var(--text-faint);">
-              拟定执行行动 ({{ actionsTaken.length }}项)
+              {{ t('lab.actionsTaken') }} ({{ actionsTaken.length }})
             </div>
             <div class="space-y-1">
               <div
@@ -184,8 +186,8 @@ const overwriteReason = computed(() => review.value?.memory_overwrites_reason ||
         </div>
 
         <div class="pt-3 mt-3 border-t text-[11px] font-mono flex items-center justify-between" style="border-color: var(--border-subtle); color: var(--text-faint);">
-          <span>复盘基线: 最近 {{ totalTrades }} 笔平仓</span>
-          <span class="text-indigo-400 font-bold">自适应进化闭环</span>
+          <span>{{ isEn ? `Baseline: recent ${totalTrades} closed trades` : `复盘基线: 最近 ${totalTrades} 笔平仓` }}</span>
+          <span class="text-indigo-400 font-bold">{{ t('lab.evolutionLoop') }}</span>
         </div>
       </div>
 

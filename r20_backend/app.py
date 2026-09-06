@@ -794,7 +794,12 @@ def admin_audit(x_r20_admin_token: str | None = Header(default=None), limit: int
     return {"records": recent_audit(limit)}
 
 
-ADMIN_LOG_SOURCES = {"trader": "ai_factor_trader.log", "backend": "r20_backend.log", "scheduler": "r20_scheduler.log"}
+ADMIN_LOG_SOURCES = {
+    "trader": "ai_factor_trader.log",
+    "backend": "r20_backend.log",
+    "scheduler": "r20_gateway.log",
+    "gateway": "r20_gateway.log",
+}
 
 
 @app.get("/api/v1/admin/runtime")

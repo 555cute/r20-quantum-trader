@@ -19,8 +19,6 @@ Architecture:
 4. Dynamic Adaptive Position Sizing, Volatility-Trailing Exits & Cooldown Protection.
 """
 
-from r20_backend.version import __version__
-
 import os
 import sys
 from pathlib import Path
@@ -31,6 +29,11 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 if str(_THIS_DIR) not in sys.path:
     sys.path.insert(0, str(_THIS_DIR))
+
+try:
+    from r20_backend.version import __version__
+except Exception:
+    __version__ = "7.5.1"
 
 from okx_runtime import freeze_environment as freeze_okx_environment, replace_cli_prefix as okx_private_command, unfreeze_environment as unfreeze_okx_environment, selected_environment
 import json

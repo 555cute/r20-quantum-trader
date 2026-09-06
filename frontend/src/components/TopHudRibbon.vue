@@ -17,7 +17,7 @@ const marginUsage = computed(() => Number(account.value.margin_usage_pct || 0).t
 // 2. 基准累计收益
 const benchmarkNetPnl = computed(() => Number(account.value.cum_net_pnl || 0).toFixed(2))
 const benchmarkRoi = computed(() => Number(account.value.cum_roi_pct || 0).toFixed(2))
-const initialCap = computed(() => Number(account.value.initial_capital || 3695.0).toFixed(2))
+const initialCap = computed(() => Number(account.value.initial_capital || 4021.53).toFixed(2))
 
 // 3. 今日已结盈亏与费用明细
 const todayNet = computed(() => Number(today.value.net_realized ?? today.value.total_pnl ?? 0).toFixed(2))
@@ -87,7 +87,7 @@ const ocoProtectedRatio = computed(() => {
 </script>
 
 <template>
-  <!-- 4 Compact Bento Cards: Mobile 2x2 Grid (两行，一行两个), Desktop 1x4 (严格等高、等大、Pixel-Perfect 镜面对称) -->
+  <!-- 4 Compact Bento Cards: Mobile 2x2 Grid, Desktop 1x4 (Strictly Symmetrical & Full i18n) -->
   <div class="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 lg:gap-4 items-stretch">
     
     <!-- Card 1: 主账户总权益 -->
@@ -101,13 +101,13 @@ const ocoProtectedRatio = computed(() => {
           <div class="w-5 h-5 lg:w-6 lg:h-6 rounded-md flex items-center justify-center border shrink-0" style="background-color: var(--bg-badge); border-color: var(--border-subtle);">
             <Wallet class="w-3 h-3 lg:w-3.5 lg:h-3.5 text-indigo-400 shrink-0" />
           </div>
-          <span class="truncate">主账户总权益</span>
+          <span class="truncate">{{ t('hud.accountEquity') }}</span>
         </div>
         <span
           class="text-[9px] sm:text-[10px] lg:text-[11px] font-mono px-1.5 py-0.2 rounded border font-bold shrink-0"
           style="background-color: var(--bg-badge); color: var(--text-muted); border-color: var(--border-subtle);"
         >
-          OKX PROD
+          {{ t('hud.prodTag') }}
         </span>
       </div>
 
@@ -117,8 +117,8 @@ const ocoProtectedRatio = computed(() => {
           ${{ totalEq }}
         </div>
         <div class="flex items-center justify-between text-[10px] sm:text-[11px] font-mono pt-1" style="color: var(--text-muted);">
-          <span>可用: <strong class="font-bold" style="color: var(--text-main);">${{ availEq }}</strong></span>
-          <span>本金: <strong class="font-bold" style="color: var(--text-muted);">${{ initialCap }}</strong></span>
+          <span>{{ t('hud.availMargin') }}: <strong class="font-bold" style="color: var(--text-main);">${{ availEq }}</strong></span>
+          <span>{{ t('hud.initialCapital') }}: <strong class="font-bold" style="color: var(--text-muted);">${{ initialCap }}</strong></span>
         </div>
       </div>
 
@@ -133,7 +133,7 @@ const ocoProtectedRatio = computed(() => {
           ></div>
         </div>
         <div class="flex items-center justify-between text-[10px] sm:text-[11px] font-mono" style="color: var(--text-faint);">
-          <span>保证金占用率</span>
+          <span>{{ t('hud.marginUsagePct') }}</span>
           <span class="font-bold text-emerald-400">{{ marginUsage }}%</span>
         </div>
       </div>
@@ -150,7 +150,7 @@ const ocoProtectedRatio = computed(() => {
           <div class="w-5 h-5 lg:w-6 lg:h-6 rounded-md flex items-center justify-center border shrink-0" style="background-color: var(--bg-badge); border-color: var(--border-subtle);">
             <TrendingUp class="w-3 h-3 lg:w-3.5 lg:h-3.5 text-emerald-400 shrink-0" />
           </div>
-          <span class="truncate">基准累计收益</span>
+          <span class="truncate">{{ t('hud.pnlWaterline') }}</span>
         </div>
         <span
           class="text-[9px] sm:text-[10px] lg:text-[11px] font-mono px-1.5 py-0.2 rounded border font-bold text-emerald-400 num-tabular shrink-0"
@@ -169,8 +169,8 @@ const ocoProtectedRatio = computed(() => {
           {{ Number(benchmarkNetPnl) >= 0 ? '+' : '' }}{{ benchmarkNetPnl }}
         </div>
         <div class="flex items-center justify-between text-[10px] sm:text-[11px] font-mono pt-1" style="color: var(--text-muted);">
-          <span>净收益率: <strong class="text-emerald-400">+{{ benchmarkRoi }}%</strong></span>
-          <span>夏普锚定: <strong class="text-emerald-400">2.1+</strong></span>
+          <span>{{ t('hud.netRoi') }}: <strong class="text-emerald-400">+{{ benchmarkRoi }}%</strong></span>
+          <span>{{ t('hud.sharpeAnchor') }}: <strong class="text-emerald-400">2.1+</strong></span>
         </div>
       </div>
 
@@ -185,13 +185,13 @@ const ocoProtectedRatio = computed(() => {
           ></div>
         </div>
         <div class="flex items-center justify-between text-[10px] sm:text-[11px] font-mono" style="color: var(--text-faint);">
-          <span>策略基线 2026-03</span>
-          <span class="text-emerald-400 font-bold">全网实盘验证</span>
+          <span>{{ t('hud.strategyBaseline') }}</span>
+          <span class="text-emerald-400 font-bold">{{ t('hud.liveVerified') }}</span>
         </div>
       </div>
     </div>
 
-    <!-- Card 3: 今日已结盈亏 (包含资金费与手续费明细) -->
+    <!-- Card 3: 今日已结盈亏 -->
     <div
       class="h-full rounded-xl border p-3 sm:p-4 lg:p-5 flex flex-col justify-between transition-all shadow-xs"
       style="background-color: var(--bg-card); border-color: var(--border-subtle);"
@@ -202,13 +202,13 @@ const ocoProtectedRatio = computed(() => {
           <div class="w-5 h-5 lg:w-6 lg:h-6 rounded-md flex items-center justify-center border shrink-0" style="background-color: var(--bg-badge); border-color: var(--border-subtle);">
             <Zap class="w-3 h-3 lg:w-3.5 lg:h-3.5 text-amber-400 shrink-0" />
           </div>
-          <span class="truncate">今日已结盈亏</span>
+          <span class="truncate">{{ t('hud.todaySettled') }}</span>
         </div>
         <span
           class="text-[9px] sm:text-[10px] lg:text-[11px] font-mono px-1.5 py-0.2 rounded border font-bold text-emerald-400 shrink-0"
           style="background-color: var(--color-up-bg); border-color: var(--color-up-border);"
         >
-          胜率 {{ todayWinrate }}%
+          {{ t('hud.winRate') }} {{ todayWinrate }}%
         </span>
       </div>
 
@@ -220,10 +220,9 @@ const ocoProtectedRatio = computed(() => {
         >
           {{ Number(todayNet) >= 0 ? '+' : '' }}{{ todayNet }}
         </div>
-        <!-- 资金费与手续费明细透传 -->
         <div class="flex items-center justify-between text-[10px] sm:text-[11px] font-mono pt-1" style="color: var(--text-muted);">
-          <span>资金费: <strong :class="Number(todayFunding) < 0 ? 'text-rose-400' : 'text-emerald-400'">{{ todayFunding }} U</strong></span>
-          <span>手续费: <strong class="text-rose-400">{{ todayFees }} U</strong></span>
+          <span>{{ t('hud.fundingFee') }}: <strong :class="Number(todayFunding) < 0 ? 'text-rose-400' : 'text-emerald-400'">{{ todayFunding }} U</strong></span>
+          <span>{{ t('hud.tradingFee') }}: <strong class="text-rose-400">{{ todayFees }} U</strong></span>
         </div>
       </div>
 
@@ -241,13 +240,13 @@ const ocoProtectedRatio = computed(() => {
           ></div>
         </div>
         <div class="flex items-center justify-between text-[10px] sm:text-[11px] font-mono" style="color: var(--text-faint);">
-          <span>成交: <strong style="color: var(--text-main);">{{ todayTrades }}</strong>笔 ({{ winTrades }}胜/{{ lossTrades }}负)</span>
-          <span>盈亏比: <strong class="text-emerald-400">2.0+</strong></span>
+          <span>{{ t('hud.trades') }}: <strong style="color: var(--text-main);">{{ todayTrades }}</strong> {{ t('hud.tradesCount') }} ({{ winTrades }}{{ t('hud.win') }}/{{ lossTrades }}{{ t('hud.loss') }})</span>
+          <span>{{ t('hud.rrRatio') }}: <strong class="text-emerald-400">2.0+</strong></span>
         </div>
       </div>
     </div>
 
-    <!-- Card 4: 当前持仓浮盈 (全量饱满微结构：保证金总额、名义总敞口、多空分布条与云端OCO) -->
+    <!-- Card 4: 当前持仓浮盈 -->
     <div
       class="h-full rounded-xl border p-3 sm:p-4 lg:p-5 flex flex-col justify-between transition-all shadow-xs"
       style="background-color: var(--bg-card); border-color: var(--border-subtle);"
@@ -258,14 +257,14 @@ const ocoProtectedRatio = computed(() => {
           <div class="w-5 h-5 lg:w-6 lg:h-6 rounded-md flex items-center justify-center border shrink-0" style="background-color: var(--bg-badge); border-color: var(--border-subtle);">
             <ShieldCheck class="w-3 h-3 lg:w-3.5 lg:h-3.5 text-blue-400 shrink-0" />
           </div>
-          <span class="truncate">当前持仓浮盈</span>
+          <span class="truncate">{{ t('hud.unrealizedPnl') }}</span>
         </div>
         <span
           class="text-[9px] sm:text-[10px] lg:text-[11px] font-mono px-1.5 py-0.2 rounded border font-bold shrink-0"
           :class="posUplNum >= 0 ? 'text-emerald-400' : 'text-rose-400'"
           style="background-color: var(--bg-badge); border-color: var(--border-subtle);"
         >
-          ROI {{ Number(posRoiPct) >= 0 ? '+' : '' }}{{ posRoiPct }}%
+          {{ t('hud.unrealizedRoi') }} {{ Number(posRoiPct) >= 0 ? '+' : '' }}{{ posRoiPct }}%
         </span>
       </div>
 
@@ -278,14 +277,13 @@ const ocoProtectedRatio = computed(() => {
           {{ posUplNum >= 0 ? '+' : '' }}{{ posUplStr }}
         </div>
         <div class="flex items-center justify-between text-[10px] sm:text-[11px] font-mono pt-1" style="color: var(--text-muted);">
-          <span>持仓本金: <strong class="font-bold" style="color: var(--text-main);">${{ totalPosMarginStr }}</strong></span>
-          <span>名义敞口: <strong class="font-bold" style="color: var(--text-main);">${{ totalPosNotionalStr }}</strong></span>
+          <span>{{ t('hud.holdingCapital') }}: <strong class="font-bold" style="color: var(--text-main);">${{ totalPosMarginStr }}</strong></span>
+          <span>{{ t('hud.notionalExposure') }}: <strong class="font-bold" style="color: var(--text-main);">${{ totalPosNotionalStr }}</strong></span>
         </div>
       </div>
 
       <!-- Row 3: Progress Bar & Footer Status -->
       <div class="pt-1.5 space-y-1.5 border-t" style="border-color: var(--border-subtle);">
-        <!-- 多空分布双色微条: 绿色代表多头, 红色代表空头, 无持仓展示中性灰 -->
         <div class="w-full h-1.5 rounded-full overflow-hidden flex" style="background-color: var(--bg-badge);">
           <div
             v-if="longCount > 0"
@@ -303,8 +301,8 @@ const ocoProtectedRatio = computed(() => {
           ></div>
         </div>
         <div class="flex items-center justify-between text-[10px] sm:text-[11px] font-mono" style="color: var(--text-faint);">
-          <span>多: <strong class="text-emerald-400">{{ longCount }}</strong> 空: <strong class="text-rose-400">{{ shortCount }}</strong> (共{{ totalPosCount }}笔)</span>
-          <span class="text-emerald-400 font-bold">OCO: {{ ocoProtectedRatio }}</span>
+          <span>{{ t('hud.long') }}: <strong class="text-emerald-400">{{ longCount }}</strong> {{ t('hud.short') }}: <strong class="text-rose-400">{{ shortCount }}</strong> ({{ t('hud.totalPos') }}{{ totalPosCount }}{{ t('hud.tradesCount') }})</span>
+          <span class="text-emerald-400 font-bold">{{ t('hud.ocoLabel') }}: {{ ocoProtectedRatio }}</span>
         </div>
       </div>
     </div>
