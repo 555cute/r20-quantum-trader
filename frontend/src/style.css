@@ -45,16 +45,16 @@
 }
 
 :root[data-theme="light"] {
-  --bg-app: #F8F9FA;
-  --bg-header: rgba(255, 255, 255, 0.96);
+  --bg-app: #F8FAFC;
+  --bg-header: rgba(255, 255, 255, 0.92);
   --bg-card: #FFFFFF;
-  --bg-card-subtle: #F1F3F5;
-  --bg-card-hover: #E9ECEF;
+  --bg-card-subtle: #F1F5F9;
+  --bg-card-hover: #E2E8F0;
   --bg-input: #FFFFFF;
-  --bg-badge: #ECEEF2;
+  --bg-badge: #F1F5F9;
   
-  --border-subtle: #E2E4E8;
-  --border-medium: #CBD0D8;
+  --border-subtle: #E2E8F0;
+  --border-medium: #CBD5E1;
   --border-strong: #94A3B8;
 
   --text-main: #0F172A;
@@ -67,19 +67,19 @@
   --color-brand-border: #CBD5E1;
 
   --color-up: #059669;
-  --color-up-bg: #ECFDF5;
-  --color-up-border: #A7F3D0;
+  --color-up-bg: rgba(16, 185, 129, 0.08);
+  --color-up-border: rgba(16, 185, 129, 0.25);
 
-  --color-down: #DC2626;
-  --color-down-bg: #FEF2F2;
-  --color-down-border: #FECACA;
+  --color-down: #E11D48;
+  --color-down-bg: rgba(225, 29, 72, 0.08);
+  --color-down-border: rgba(225, 29, 72, 0.25);
 
   --color-warn: #D97706;
-  --color-warn-bg: #FFFBEB;
-  --color-warn-border: #FDE68A;
+  --color-warn-bg: rgba(217, 119, 6, 0.08);
+  --color-warn-border: rgba(217, 119, 6, 0.25);
 
-  --shadow-card: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.04);
-  --shadow-float: 0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
+  --shadow-card: 0 1px 3px 0 rgba(15, 23, 42, 0.04), 0 1px 2px -1px rgba(15, 23, 42, 0.03);
+  --shadow-float: 0 10px 25px -5px rgba(15, 23, 42, 0.08), 0 8px 10px -6px rgba(15, 23, 42, 0.04);
 }
 
 /* =========================================================================
@@ -330,6 +330,51 @@ td {
     background-color: var(--bg-input) !important;
     border-color: var(--border-subtle) !important;
     color: var(--text-main) !important;
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]):focus,
+  select:focus,
+  textarea:focus {
+    border-color: var(--color-brand) !important;
+    box-shadow: 0 0 0 1px var(--color-brand) !important;
+    outline: none !important;
+  }
+
+  /* Refined light-mode status banner overrides (prevent unreadable pastel on light theme) */
+  .bg-emerald-500\/10 {
+    background-color: var(--color-up-bg) !important;
+  }
+  .border-emerald-500\/20,
+  .border-emerald-500\/25,
+  .border-emerald-500\/30 {
+    border-color: var(--color-up-border) !important;
+  }
+  .text-emerald-400 {
+    color: var(--color-up) !important;
+  }
+
+  .bg-rose-500\/10 {
+    background-color: var(--color-down-bg) !important;
+  }
+  .border-rose-500\/20,
+  .border-rose-500\/25,
+  .border-rose-500\/30 {
+    border-color: var(--color-down-border) !important;
+  }
+  .text-rose-400 {
+    color: var(--color-down) !important;
+  }
+
+  .bg-amber-500\/10 {
+    background-color: var(--color-warn-bg) !important;
+  }
+  .border-amber-500\/20,
+  .border-amber-500\/25,
+  .border-amber-500\/30 {
+    border-color: var(--color-warn-border) !important;
+  }
+  .text-amber-400 {
+    color: var(--color-warn) !important;
   }
 }
 
