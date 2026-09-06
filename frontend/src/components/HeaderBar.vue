@@ -10,7 +10,7 @@ import {
   Newspaper,
   Sparkles,
   Receipt,
-  ShieldCheck,
+  Settings,
   ExternalLink,
   BookOpen,
   Sun,
@@ -157,16 +157,15 @@ const tabs = computed(() => [
           <span class="hidden md:inline font-medium">{{ t('nav.docs') }}</span>
         </a>
 
-        <!-- Control Plane Button -->
+        <!-- Control Plane / Admin Settings Button (Icon only) -->
         <a
           href="/admin"
           target="_blank"
-          class="flex items-center h-7 sm:h-7.5 space-x-1 px-2 sm:px-2.5 rounded-lg border transition-all font-medium cursor-pointer shadow-xs"
-          style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-main);"
+          class="flex items-center justify-center w-7 h-7 sm:w-7.5 sm:h-7.5 rounded-lg border transition-all cursor-pointer shadow-xs shrink-0 group"
+          style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-main);"
+          :title="t('nav.controlPlane')"
         >
-          <ShieldCheck class="w-3.5 h-3.5" />
-          <span class="text-[11px] sm:text-xs">{{ t('nav.controlPlane') }}</span>
-          <ExternalLink class="w-3 h-3 opacity-60 hidden lg:inline" />
+          <Settings class="w-3.5 h-3.5 group-hover:rotate-90 transition-transform duration-300" style="color: var(--text-muted);" />
         </a>
       </div>
     </div>
