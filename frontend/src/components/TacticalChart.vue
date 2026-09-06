@@ -64,6 +64,9 @@ const currentPeriod = ref<string>('1H')
 const chartEngine = ref<'native' | 'tv'>('native') // 默认原生极速高饱满K线，支持切换
 const isLoading = ref<boolean>(false)
 const copied = ref<boolean>(false)
+const candleCountdown = ref<string>('00:00')
+let pollTimer: any = null
+let tickTimer: any = null
 
 // 指标切换选项 (参考 OKX App)
 type MainIndicatorType = 'BOLL' | 'MA' | 'EMA' | 'NONE'
@@ -130,6 +133,14 @@ const currentPrice = computed(() => {
   if (currentFactor.value?.price) return Number(currentFactor.value.price)
   if (candles.value.length > 0) return candles.value[candles.value.length - 1].close
   return 100.0
+})
+
+const liveChangePct = computed(() => {
+  if (candles.value.length < 2) return 0.0
+  const first = candles.value[0]
+  const last = candles.value[candles.value.length - 1]
+  if (!first || !last || first.open <= 0) return 0.0
+  return ((last.close - first.open) / first.open) * 100
 })
 
 const currentAtr = computed(() => {
@@ -640,16 +651,19 @@ function drawChart() {
     ctx.lineTo(chartWidth, lastY)
     ctx.stroke()
 
-    // 右轴光标胶囊
+    // 右轴光标胶囊 (对标 OKX 官方 App: 现价 + 倒计时)
     ctx.setLineDash([])
     ctx.fillStyle = isDark ? '#262936' : '#E2E8F0'
     ctx.beginPath()
-    ctx.roundRect(chartWidth + 2, lastY - 9, 66, 18, 3)
+    ctx.roundRect(chartWidth + 2, lastY - 13, 66, 26, 3)
     ctx.fill()
     ctx.fillStyle = textMain
     ctx.font = 'bold 9px monospace'
     ctx.textAlign = 'center'
-    ctx.fillText(lastC.close >= 100 ? lastC.close.toFixed(2) : lastC.close.toFixed(4), chartWidth + 35, lastY + 3)
+    ctx.fillText(lastC.close >= 100 ? lastC.close.toFixed(1) : lastC.close.toFixed(4), chartWidth + 35, lastY - 2)
+    ctx.fillStyle = isDark ? '#9CA3AF' : '#6B7280'
+    ctx.font = '8px monospace'
+    ctx.fillText(candleCountdown.value || '00:00', chartWidth + 35, lastY + 9)
     ctx.restore()
   }
 
@@ -905,9 +919,52 @@ function selectSymbol(s: string) {
   loadCandles()
 }
 
-// 拉取行情
-async function loadCandles() {
-  isLoading.value = true
+function updateCountdown() {
+  const now = new Date()
+  const sec = now.getSeconds()
+  const min = now.getMinutes()
+  const hr = now.getHours()
+  let remainSec = 0
+  if (currentPeriod.value === '15m') {
+    remainSec = (15 - (min % 15)) * 60 - sec
+  } else if (currentPeriod.value === '1H') {
+    remainSec = (60 - min) * 60 - sec
+  } else if (currentPeriod.value === '4H') {
+    remainSec = (4 - (hr % 4)) * 3600 - min * 60 - sec
+  } else {
+    remainSec = 86400 - (hr * 3600 + min * 60 + sec)
+  }
+  remainSec = Math.max(0, remainSec)
+  const h = Math.floor(remainSec / 3600)
+  const m = Math.floor((remainSec % 3600) / 60)
+  const s = remainSec % 60
+  if (h > 0) {
+    candleCountdown.value = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+  } else {
+    candleCountdown.value = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+  }
+}
+
+// 实时秒级跳动：让最后一根 K 线收盘价与高低价随盘口跳动
+function updateLiveTick() {
+  updateCountdown()
+  if (candles.value.length === 0) return
+  const last = candles.value[candles.value.length - 1]
+  const px = currentPrice.value
+  if (px > 0 && last) {
+    const prevClose = last.close
+    last.close = px
+    last.high = Math.max(last.high, px)
+    last.low = Math.min(last.low, px)
+    if (Math.abs(prevClose - px) > 0.0001) {
+      drawChart()
+    }
+  }
+}
+
+// 拉取行情 (支持静默轮询)
+async function loadCandles(silent = false) {
+  if (!silent) isLoading.value = true
   try {
     const res = await fetch(
       `/api/v1/market/${currentInstId.value}/candles?bar=${currentPeriod.value}&limit=60`
@@ -920,7 +977,7 @@ async function loadCandles() {
   } catch (err) {
     console.warn('Candles fetch fallback:', err)
   } finally {
-    isLoading.value = false
+    if (!silent) isLoading.value = false
     nextTick(() => {
       initSimulation()
       drawChart()
@@ -967,10 +1024,18 @@ onMounted(() => {
     resizeObserver.observe(containerRef.value)
   }
   loadCandles()
+  pollTimer = setInterval(() => {
+    if (typeof document !== 'undefined' && !document.hidden) {
+      loadCandles(true)
+    }
+  }, 3000)
+  tickTimer = setInterval(updateLiveTick, 1000)
 })
 
 onUnmounted(() => {
   if (resizeObserver) resizeObserver.disconnect()
+  if (pollTimer) clearInterval(pollTimer)
+  if (tickTimer) clearInterval(tickTimer)
 })
 
 defineExpose({
@@ -1063,7 +1128,13 @@ defineExpose({
         <span class="font-black text-xs sm:text-sm num-tabular" style="color: var(--text-main);">
           ${{ currentPrice >= 100 ? currentPrice.toFixed(1) : currentPrice.toFixed(4) }}
         </span>
-        <span class="text-[10px] text-emerald-400 font-bold">+0.00%</span>
+        <span :class="liveChangePct >= 0 ? 'text-emerald-400' : 'text-rose-400'" class="text-[10px] font-bold">
+          {{ liveChangePct >= 0 ? '+' : '' }}{{ liveChangePct.toFixed(2) }}%
+        </span>
+        <span class="flex items-center space-x-1 pl-1">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span class="text-[9px] text-emerald-400 font-bold">实时 3s</span>
+        </span>
       </div>
 
       <!-- 主图指标当前读数 (如 BOLL20: 77873.4 UB: 83427.7 LB: 72319.0) -->
