@@ -58,8 +58,10 @@ const tabs = computed(() => [
     <div class="max-w-[2048px] w-full mx-auto px-2.5 sm:px-6 2xl:px-8 flex items-center justify-between gap-1.5 sm:gap-4 overflow-hidden">
       <!-- Left: Minimal Institutional Identity with Crypto Quantum Logo -->
       <div class="flex items-center space-x-2 shrink-0">
-        <div class="flex items-center space-x-1.5 cursor-pointer select-none" @click="store.activeTab = 'trading'">
-          <CryptoLogo :size="20" class="w-5 h-5 rounded-md shadow-xs" />
+        <div class="flex items-center space-x-2 cursor-pointer select-none" @click="store.activeTab = 'trading'">
+          <div class="w-6 h-6 rounded-md flex items-center justify-center border font-mono font-black text-sm text-indigo-400 shrink-0 shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-medium);">
+            Ω
+          </div>
           <span class="font-mono font-black text-xs sm:text-sm tracking-wide whitespace-nowrap" style="color: var(--text-main);">
             {{ t('nav.title') }}
           </span>
@@ -122,13 +124,24 @@ const tabs = computed(() => [
         <!-- 🌐 Global Language Switcher Capsule -->
         <button
           @click="toggleLocale"
-          class="flex items-center h-7 sm:h-7.5 space-x-1 px-1.5 sm:px-2 rounded-lg border transition-all cursor-pointer shadow-xs shrink-0 font-bold select-none"
+          class="flex items-center h-7 sm:h-7.5 space-x-1 px-2 rounded-lg border transition-all cursor-pointer shadow-xs shrink-0 font-bold select-none text-[11px]"
           style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-main);"
           :title="t('nav.switchLang')"
         >
-          <Globe class="w-3 h-3 sm:w-3.5 sm:h-3.5 text-indigo-400" />
-          <span class="text-[10px] sm:text-[11px] uppercase tracking-wider">{{ isEn ? 'EN' : '中' }}</span>
+          <Globe class="w-3.5 h-3.5 text-indigo-400" />
+          <span class="tracking-wider">中 / EN</span>
         </button>
+
+        <!-- Control Plane / Admin Settings Button (Icon only) -->
+        <a
+          href="/admin"
+          target="_blank"
+          class="flex items-center justify-center w-7 h-7 sm:w-7.5 sm:h-7.5 rounded-lg border transition-all cursor-pointer shadow-xs shrink-0 group"
+          style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-main);"
+          :title="t('nav.controlPlane')"
+        >
+          <Settings class="w-3.5 h-3.5 group-hover:rotate-90 transition-transform duration-300" style="color: var(--text-muted);" />
+        </a>
 
         <!-- ☀️ / 🌙 Theme Toggle Button -->
         <button
@@ -141,26 +154,15 @@ const tabs = computed(() => [
           <Moon v-else class="w-3.5 h-3.5 text-slate-700 hover:-rotate-12 transition-transform" />
         </button>
 
-        <!-- Documentation Link -->
+        <!-- Documentation Link (Desktop only) -->
         <a
           href="/docs"
-          class="hidden sm:flex items-center h-7 sm:h-7.5 space-x-1 px-2 rounded-lg border transition-colors cursor-pointer shadow-xs"
+          class="hidden lg:flex items-center h-7 sm:h-7.5 space-x-1 px-2 rounded-lg border transition-colors cursor-pointer shadow-xs text-xs"
           style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-muted);"
           :title="t('nav.docs')"
         >
           <BookOpen class="w-3.5 h-3.5" />
-          <span class="hidden md:inline font-medium">{{ t('nav.docs') }}</span>
-        </a>
-
-        <!-- Control Plane / Admin Settings Button (Icon only) -->
-        <a
-          href="/admin"
-          target="_blank"
-          class="flex items-center justify-center w-7 h-7 sm:w-7.5 sm:h-7.5 rounded-lg border transition-all cursor-pointer shadow-xs shrink-0 group"
-          style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-main);"
-          :title="t('nav.controlPlane')"
-        >
-          <Settings class="w-3.5 h-3.5 group-hover:rotate-90 transition-transform duration-300" style="color: var(--text-muted);" />
+          <span class="font-medium">{{ t('nav.docs') }}</span>
         </a>
       </div>
     </div>

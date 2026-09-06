@@ -21,6 +21,7 @@ import {
   Receipt,
   Columns,
   Rows,
+  Terminal,
 } from 'lucide-vue-next'
 
 const router = useRouter()
@@ -219,8 +220,8 @@ function setLayout(mode: 'dual' | 'stacked') {
           class="flex flex-col items-center justify-center flex-1 py-1 transition cursor-pointer"
           :style="{ color: store.activeTab === 'trading' ? 'var(--color-brand)' : 'var(--text-muted)' }"
         >
-          <LayoutGrid class="w-4 h-4 mb-0.5" />
-          <span class="text-[10px] font-bold">{{ t('nav.tabMatrix') }}</span>
+          <Terminal class="w-4 h-4 mb-0.5" />
+          <span class="text-[10px] font-bold">综合操盘</span>
         </button>
         <button
           @click="store.activeTab = 'factors'"
@@ -228,7 +229,7 @@ function setLayout(mode: 'dual' | 'stacked') {
           :style="{ color: store.activeTab === 'factors' ? 'var(--color-brand)' : 'var(--text-muted)' }"
         >
           <Cpu class="w-4 h-4 mb-0.5" />
-          <span class="text-[10px] font-bold">{{ t('nav.tabRadar') }}</span>
+          <span class="text-[10px] font-bold">决策中枢</span>
         </button>
         <button
           @click="store.activeTab = 'news'"
@@ -236,7 +237,7 @@ function setLayout(mode: 'dual' | 'stacked') {
           :style="{ color: store.activeTab === 'news' ? 'var(--color-brand)' : 'var(--text-muted)' }"
         >
           <Newspaper class="w-4 h-4 mb-0.5" />
-          <span class="text-[10px] font-bold">{{ t('nav.tabNews') }}</span>
+          <span class="text-[10px] font-bold">市场全息</span>
         </button>
         <button
           @click="store.activeTab = 'lab'"
@@ -244,7 +245,7 @@ function setLayout(mode: 'dual' | 'stacked') {
           :style="{ color: store.activeTab === 'lab' ? 'var(--color-brand)' : 'var(--text-muted)' }"
         >
           <Sparkles class="w-4 h-4 mb-0.5" />
-          <span class="text-[10px] font-bold">{{ t('nav.tabLab') }}</span>
+          <span class="text-[10px] font-bold">量子实验室</span>
         </button>
         <button
           @click="store.activeTab = 'history'"
@@ -252,7 +253,7 @@ function setLayout(mode: 'dual' | 'stacked') {
           :style="{ color: store.activeTab === 'history' ? 'var(--color-brand)' : 'var(--text-muted)' }"
         >
           <Receipt class="w-4 h-4 mb-0.5" />
-          <span class="text-[10px] font-bold">{{ t('nav.tabLedger') }}</span>
+          <span class="text-[10px] font-bold">审计台账</span>
         </button>
       </div>
     </nav>

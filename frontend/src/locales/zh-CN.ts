@@ -1,7 +1,7 @@
 export const zhCN = {
   // Navigation & General
   nav: {
-    title: 'R20 QUANTUM',
+    title: 'R20 量子操盘系统',
     badge: '机构桌面端',
     tabMatrix: '实盘',
     tabRadar: 'AI全景推演',
