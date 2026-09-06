@@ -16,24 +16,31 @@ function toggle(i: number) {
 
 <template>
   <div
-    class="rounded-xl border p-4 sm:p-5 transition-all shadow-xs space-y-4"
+    class="rounded-xl border p-3 sm:p-4 transition-all shadow-xs space-y-3"
     style="background-color: var(--bg-card); border-color: var(--border-subtle);"
   >
     <!-- Header -->
-    <div class="flex items-center space-x-3 pb-3 border-b" style="border-color: var(--border-subtle);">
-      <div
-        class="w-9 h-9 rounded-lg flex items-center justify-center border shrink-0"
-        style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-main);"
-      >
-        <Brain class="w-4 h-4" />
+    <div class="flex items-center justify-between pb-2.5 border-b" style="border-color: var(--border-subtle);">
+      <div class="flex items-center space-x-2.5">
+        <div class="panel-banner-icon">
+          <Brain class="w-3.5 h-3.5" />
+        </div>
+        <div>
+          <div class="flex items-center space-x-2">
+            <h2 class="text-xs sm:text-[13px] font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
+              AI 宏观多周期推演基调与决策审计
+            </h2>
+            <span class="text-[10px] font-mono px-1.5 py-0.5 rounded border" style="background-color: var(--bg-badge); color: var(--color-brand); border-color: var(--border-subtle);">
+              15m 周期
+            </span>
+          </div>
+          <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);">
+            宏观大盘研判、多模型辩论实录与在途持仓管理指令
+          </p>
+        </div>
       </div>
-      <div>
-        <h2 class="text-xs sm:text-sm font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
-          AI 宏观多周期推演基调与决策审计
-        </h2>
-        <p class="text-xs font-mono mt-0.5" style="color: var(--text-muted);">
-          每 15 分钟交易决策周期的宏观研判、多模型辩论实录与在途持仓管理指令
-        </p>
+      <div class="hidden sm:flex items-center space-x-1 text-xs font-mono" style="color: var(--text-muted);">
+        <span>最近保留 {{ history.length }} 轮决策</span>
       </div>
     </div>
 

@@ -500,23 +500,17 @@ onMounted(() => {
     <!-- VIEW 1: 供应商列表页 (对应截图 1) -->
     <template v-if="currentView === 'list'">
       <!-- Top Title & Navigation Bar -->
-      <div
-        class="rounded-2xl border p-4 sm:p-5 flex items-center justify-between shadow-xs transition-colors"
-        style="background-color: var(--bg-card); border-color: var(--border-subtle);"
-      >
-        <div class="flex items-center space-x-3">
-          <div
-            class="w-10 h-10 rounded-xl flex items-center justify-center border shadow-xs"
-            style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--color-brand);"
-          >
-            <Cpu class="w-5 h-5" />
+      <div class="panel-banner-compact">
+        <div class="flex items-center space-x-2.5">
+          <div class="panel-banner-icon">
+            <Cpu class="w-3.5 h-3.5" />
           </div>
           <div>
-            <h1 class="text-base sm:text-lg font-bold tracking-tight" style="color: var(--text-main);">
-              供应商
+            <h1 class="text-xs sm:text-[13px] font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
+              AI 模型供应商与直连矩阵
             </h1>
-            <p class="text-[11px]" style="color: var(--text-muted);">
-              管理 AI 模型渠道矩阵与 API 密钥直连配置
+            <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);">
+              管理大模型渠道矩阵、思考强度与 API 密钥直连
             </p>
           </div>
         </div>
@@ -525,21 +519,19 @@ onMounted(() => {
         <div class="flex items-center space-x-2">
           <button
             @click="openAddProviderModal"
-            class="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold cursor-pointer transition-all hover:opacity-90 btn-primary-text"
-            style="background-color: #2563EB; color: #FFFFFF;"
+            class="btn-admin-primary"
             title="添加自定义供应商"
           >
-            <Plus class="w-4 h-4" />
+            <Plus class="w-3.5 h-3.5" />
             <span>添加供应商</span>
           </button>
 
           <button
             @click="loadConfig"
-            class="p-2 rounded-xl border text-xs cursor-pointer transition-all hover:opacity-80"
-            style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-muted);"
+            class="btn-admin-secondary px-2"
             title="刷新状态"
           >
-            <RefreshCw class="w-4 h-4" :class="loading ? 'animate-spin' : ''" />
+            <RefreshCw class="w-3.5 h-3.5" :class="loading ? 'animate-spin' : ''" />
           </button>
         </div>
       </div>

@@ -114,12 +114,12 @@ async function handleLogin() {
           <button
             @click="handleLogin"
             :disabled="loading"
-            class="btn-primary-text w-full flex items-center justify-center space-x-2 font-mono font-bold text-xs py-2.5 rounded-lg border transition-all cursor-pointer shadow-xs disabled:opacity-50 disabled:cursor-not-allowed mt-2 hover:bg-blue-600"
-            style="background-color: #2563EB; border-color: #2563EB; color: #FFFFFF !important;"
+            class="w-full flex items-center justify-center space-x-2 font-mono font-bold text-xs py-2.5 rounded-lg border transition-all cursor-pointer shadow-xs disabled:opacity-50 disabled:cursor-not-allowed mt-2 hover:opacity-90"
+            style="background-color: var(--text-main); border-color: var(--text-main); color: var(--bg-app);"
           >
-            <LogIn v-if="!loading" class="w-3.5 h-3.5" style="color: #FFFFFF;" />
-            <RefreshCw v-else class="w-3.5 h-3.5 animate-spin" style="color: #FFFFFF;" />
-            <span style="color: #FFFFFF;">{{ loading ? '鉴权登录中...' : '登录管理控制面' }}</span>
+            <LogIn v-if="!loading" class="w-3.5 h-3.5" />
+            <RefreshCw v-else class="w-3.5 h-3.5 animate-spin" />
+            <span>{{ loading ? '鉴权登录中...' : '登录管理控制面' }}</span>
           </button>
         </div>
 

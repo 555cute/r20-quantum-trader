@@ -20,6 +20,16 @@ Architecture:
 """
 
 import os
+import sys
+from pathlib import Path
+
+_THIS_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = _THIS_DIR.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+if str(_THIS_DIR) not in sys.path:
+    sys.path.insert(0, str(_THIS_DIR))
+
 from okx_runtime import freeze_environment as freeze_okx_environment, replace_cli_prefix as okx_private_command, unfreeze_environment as unfreeze_okx_environment, selected_environment
 import json
 import time
@@ -29,8 +39,9 @@ import urllib.request
 import fcntl
 from typing import Tuple, Dict, Any, List, Optional
 from concurrent.futures import ThreadPoolExecutor
+from market_data_service import fetch_candles, fetch_ticker
 
-WORKSPACE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+WORKSPACE_DIR = str(_PROJECT_ROOT)
 DATA_DIR = os.path.join(WORKSPACE_DIR, "data")
 LOGS_DIR = os.path.join(WORKSPACE_DIR, "logs")
 
@@ -171,20 +182,8 @@ def run_json_cmd(cmd, timeout=15):
         return None
 
 def fetch_candles_direct(inst_id: str, bar: str = "15m", limit: int = 45):
-    """Direct fetch from OKX Official Market REST API with fallback"""
-    try:
-        url = f"https://www.okx.com/api/v5/market/candles?instId={inst_id}&bar={bar}&limit={limit}"
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=4) as response:
-            data = json.loads(response.read().decode("utf-8"))
-            if data.get("code") == "0" and "data" in data:
-                return data["data"]
-    except Exception:
-        pass
-    res = run_json_cmd(f"okx market candles {inst_id} --bar {bar} --limit {limit} --json")
-    if res and isinstance(res, list):
-        return res
-    return []
+    """Direct fetch from OKX Official Market REST API with Keep-Alive connection pooling."""
+    return fetch_candles(inst_id, bar=bar, limit=limit)
 
 def load_trackers():
     if os.path.exists(POSITION_TRACKER_FILE):

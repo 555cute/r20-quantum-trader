@@ -11,6 +11,15 @@ Calculates and normalizes 5 core factor pillars for crypto perpetuals:
 
 import os
 import sys
+from pathlib import Path
+
+_THIS_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = _THIS_DIR.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+if str(_THIS_DIR) not in sys.path:
+    sys.path.insert(0, str(_THIS_DIR))
+
 import json
 import time
 import subprocess
@@ -18,11 +27,12 @@ import urllib.request
 from typing import Dict, Any, List, Optional
 from concurrent.futures import ThreadPoolExecutor
 
-WORKSPACE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+WORKSPACE_DIR = str(_PROJECT_ROOT)
 DATA_DIR = os.path.join(WORKSPACE_DIR, "data")
 FACTOR_LIB_CACHE_FILE = os.path.join(DATA_DIR, "factor_library_snapshot.json")
 
 from instrument_pool import load_instruments
+from market_data_service import fetch_orderbook_depth, fetch_indicators_batch, fetch_ticker, fetch_funding_rate
 
 TARGET_INSTRUMENTS = load_instruments()
 
@@ -148,24 +158,21 @@ def compute_instrument_factors(item: Dict[str, Any], smart_money_pool: Dict[str,
     except Exception:
         pass
 
-    # 2. Orderbook Depth (Top 5 Level Imbalance)
+    # 2. Orderbook Depth (Top 5 Level Imbalance) via direct REST (zero Node CLI fork)
     try:
-        cmd = f"okx market orderbook {inst_id} --sz 5 --json 2>/dev/null"
-        res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=3)
-        if res.stdout:
-            ob_data = json.loads(res.stdout)
-            if isinstance(ob_data, list) and ob_data:
-                bids = ob_data[0].get("bids", [])
-                asks = ob_data[0].get("asks", [])
-                total_bid_sz = sum(safe_float(b[1]) for b in bids)
-                total_ask_sz = sum(safe_float(a[1]) for a in asks)
-                if total_ask_sz > 0:
-                    ratio = round(total_bid_sz / total_ask_sz, 2)
-                    factors["microstructure"]["bid_ask_depth_ratio"] = ratio
-                    if ratio >= 1.5:
-                        factors["microstructure"]["depth_bias"] = "STRONG_BID"
-                    elif ratio <= 0.67:
-                        factors["microstructure"]["depth_bias"] = "STRONG_ASK"
+        ob_data = fetch_orderbook_depth(inst_id, sz=5)
+        if ob_data and isinstance(ob_data, dict):
+            bids = ob_data.get("bids", [])
+            asks = ob_data.get("asks", [])
+            total_bid_sz = sum(safe_float(b[1]) for b in bids)
+            total_ask_sz = sum(safe_float(a[1]) for a in asks)
+            if total_ask_sz > 0:
+                ratio = round(total_bid_sz / total_ask_sz, 2)
+                factors["microstructure"]["bid_ask_depth_ratio"] = ratio
+                if ratio >= 1.5:
+                    factors["microstructure"]["depth_bias"] = "STRONG_BID"
+                elif ratio <= 0.67:
+                    factors["microstructure"]["depth_bias"] = "STRONG_ASK"
     except Exception:
         pass
 
@@ -282,30 +289,19 @@ def compute_instrument_factors(item: Dict[str, Any], smart_money_pool: Dict[str,
     except Exception:
         pass
 
-    # 4. OKX Official Indicators (ADX, KDJ, BBWidth, CMF)
-    for ind, key_path in [
-        ("adx", ("trend_momentum", "adx_1h")),
-        ("kdj", ("trend_momentum", "kdj_j")),
-        ("bbwidth", ("volatility_channel", "bb_width_1h")),
-        ("cmf", ("volume_money_flow", "cmf_1h"))
-    ]:
-        try:
-            cmd = f"okx market indicator {ind} {inst_id} --bar 1H --json 2>/dev/null"
-            res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=3)
-            if res.stdout:
-                ind_res = json.loads(res.stdout)
-                if isinstance(ind_res, list) and ind_res:
-                    tfs = ind_res[0].get("data", [{}])[0].get("timeframes", {}).get("1H", {}).get("indicators", {})
-                    ind_key = ind.upper().replace("-", "")
-                    items = tfs.get(ind_key, [])
-                    if items:
-                        vals = items[0].get("values", {})
-                        if ind == "adx": factors[key_path[0]][key_path[1]] = safe_float(vals.get("adx"))
-                        elif ind == "kdj": factors[key_path[0]][key_path[1]] = safe_float(vals.get("j"))
-                        elif ind == "bbwidth": factors[key_path[0]][key_path[1]] = safe_float(vals.get("bbWidth"))
-                        elif ind == "cmf": factors[key_path[0]][key_path[1]] = safe_float(vals.get("cmf"))
-        except Exception:
-            pass
+    # 4. OKX Official Indicators (ADX, KDJ, BBWidth, CMF) via 1 single batch REST call (zero Node CLI fork)
+    try:
+        inds = fetch_indicators_batch(inst_id, ["adx", "kdj", "bbwidth", "cmf"], bar="1H")
+        if "ADX" in inds:
+            factors["trend_momentum"]["adx_1h"] = safe_float(inds["ADX"].get("adx"))
+        if "KDJ" in inds:
+            factors["trend_momentum"]["kdj_j"] = safe_float(inds["KDJ"].get("j"))
+        if "BBWIDTH" in inds:
+            factors["volatility_channel"]["bb_width_1h"] = safe_float(inds["BBWIDTH"].get("bbWidth"))
+        if "CMF" in inds:
+            factors["volume_money_flow"]["cmf_1h"] = safe_float(inds["CMF"].get("cmf"))
+    except Exception:
+        pass
 
     # 5. Derivatives & SmartMoney
     try:

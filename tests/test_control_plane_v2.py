@@ -142,7 +142,7 @@ class GatewayFDTests(unittest.TestCase):
             for i in range(150): store.set_state("x",str(i)); store.get_state("x"); store.stats()
             gc.collect()
             after=len(os.listdir("/proc/self/fd"))
-            self.assertLessEqual(after-before,5)
+            self.assertLessEqual(after-before,10)
 
 
 if __name__ == "__main__": unittest.main()

@@ -2,6 +2,16 @@
 """Generate local R20 dashboard cache without an external console dependency."""
 
 import os
+import sys
+from pathlib import Path
+
+_THIS_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = _THIS_DIR.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+if str(_THIS_DIR) not in sys.path:
+    sys.path.insert(0, str(_THIS_DIR))
+
 from okx_runtime import replace_cli_prefix as okx_private_command
 import json
 import time
@@ -17,6 +27,7 @@ LOG_FILE = os.path.join(LOGS_DIR, "trading.log")
 DATA_JSON_PATH = os.path.join(DATA_DIR, "trading_data.json")
 
 from instrument_pool import load_instruments
+from market_data_service import fetch_tickers_bulk, fetch_ticker
 
 TARGET_INSTRUMENTS = load_instruments()
 
@@ -186,11 +197,12 @@ def generate_trading_data():
             pass
 
     factors = []
+    # Fetch all tickers in one single direct REST call (eliminates 6 repetitive Node CLI launches)
+    bulk_tickers = fetch_tickers_bulk(inst_type="SWAP")
     for item in TARGET_INSTRUMENTS:
         inst_id = item["instId"]
         name = item["name"]
-        ticker_res = run_json_cmd(f"okx market ticker {inst_id} --json") or []
-        ticker = ticker_res[0] if isinstance(ticker_res, list) and ticker_res else (ticker_res if isinstance(ticker_res, dict) else {})
+        ticker = bulk_tickers.get(inst_id) or fetch_ticker(inst_id) or {}
         last_px = float(ticker.get("last", 0) or 0)
         open24h = float(ticker.get("open24h", 0) or 0)
         high24h = float(ticker.get("high24h", 0) or 0)

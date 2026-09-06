@@ -53,28 +53,26 @@ function clean(v: any, fallback = '--'): string {
 <template>
   <div class="space-y-3.5">
     <!-- Header -->
-    <div
-      class="rounded-xl border p-4 sm:p-5 flex flex-wrap items-center justify-between gap-3 shadow-xs transition-colors"
-      style="background-color: var(--bg-card); border-color: var(--border-subtle);"
-    >
-      <div class="flex items-center space-x-3">
-        <div
-          class="w-9 h-9 rounded-lg flex items-center justify-center border shrink-0"
-          style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-main);"
-        >
-          <Receipt class="w-4 h-4" />
+    <div class="panel-banner-compact">
+      <div class="flex items-center space-x-2.5">
+        <div class="panel-banner-icon">
+          <Receipt class="w-3.5 h-3.5" />
         </div>
         <div>
-          <h2 class="text-xs sm:text-sm font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
+          <h2 class="text-xs sm:text-[13px] font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
             完整成交台账与生命周期履历
           </h2>
-          <p class="text-xs font-mono mt-0.5" style="color: var(--text-muted);">
-            真实撮合成交记录，已扣除交易所手续费与资金费率净额
+          <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);">
+            真实撮合成交记录 · 净额穿透扣除手续费与资金费
           </p>
         </div>
       </div>
-      <div class="text-xs font-mono" style="color: var(--text-muted);">
-        持仓 <strong style="color: var(--color-brand);">{{ holdingCount }}</strong> · 已平仓 <strong style="color: var(--text-main);">{{ closedCount }}</strong>
+      <div class="flex items-center space-x-2 text-xs font-mono h-7 px-2.5 rounded-[4px] border" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
+        <span style="color: var(--text-muted);">在途持仓:</span>
+        <strong style="color: var(--color-up);">{{ holdingCount }}</strong>
+        <span class="mx-1 opacity-40">|</span>
+        <span style="color: var(--text-muted);">已平结算:</span>
+        <strong style="color: var(--text-main);">{{ closedCount }}</strong>
       </div>
     </div>
 
@@ -160,29 +158,21 @@ function clean(v: any, fallback = '--'): string {
               style="border-color: var(--border-subtle);"
             >
               <td class="py-3 px-4">
-                <span class="font-bold text-sm" style="color: var(--text-main);">{{ t.inst }}</span>
-                <span
-                  class="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold border"
-                  :style="{
-                    backgroundColor: t.side === '多' ? 'var(--color-up-bg)' : 'var(--color-down-bg)',
-                    borderColor: t.side === '多' ? 'var(--color-up-border)' : 'var(--color-down-border)',
-                    color: t.side === '多' ? 'var(--color-up)' : 'var(--color-down)'
-                  }"
-                >
-                  {{ t.side }} {{ t.lever || '3x' }}
-                </span>
+                <div class="flex items-center space-x-1.5">
+                  <span class="font-bold text-sm" style="color: var(--text-main);">{{ t.inst }}</span>
+                  <span :class="t.side === '多' ? 'capsule-direction-long' : 'capsule-direction-short'">
+                    {{ t.side }} {{ t.lever || '3x' }}
+                  </span>
+                </div>
               </td>
               <td class="py-3 px-3">
-                <div class="flex flex-col space-y-0.5">
-                  <span
-                    class="px-2 py-0.5 rounded border text-[11px] w-fit"
-                    style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--text-muted);"
-                  >
+                <div class="flex flex-col space-y-1">
+                  <span class="badge-strategy">
                     {{ clean(t.strategy, '观望') }}
                   </span>
                   <span
                     v-if="t.policy_version || t.policy_hash"
-                    class="text-[9px] font-mono px-1 py-0.2 rounded border w-fit text-cyan-400 border-cyan-500/30 bg-cyan-500/10"
+                    class="badge-policy-hash"
                     :title="t.policy_version || t.policy_hash"
                   >
                     #{{ (t.policy_hash || (t.policy_version || '').split('@')[1] || '').substring(0, 8) }}
@@ -223,7 +213,7 @@ function clean(v: any, fallback = '--'): string {
               </td>
               <td class="py-3 px-4 text-xs" style="color: var(--text-muted);">
                 <span
-                  class="px-2 py-0.5 rounded text-[10px] font-bold border mr-1"
+                  class="px-2 py-0.5 rounded-[3px] text-[10px] font-mono font-bold border mr-1.5 inline-flex items-center"
                   :style="{
                     backgroundColor: t.status === 'holding' ? 'var(--color-brand-bg)' : 'var(--bg-badge)',
                     borderColor: t.status === 'holding' ? 'var(--color-brand-border)' : 'var(--border-subtle)',

@@ -99,36 +99,33 @@ const quickNav = [
 <template>
   <div class="space-y-4 max-w-[2160px] mx-auto">
     <!-- Top Executive Header Strip -->
-    <div
-      class="rounded-xl border p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-xs transition-colors"
-      style="background-color: var(--bg-card); border-color: var(--border-subtle);"
-    >
-      <div>
-        <div class="flex items-center space-x-2">
-          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-          <h1 class="text-sm sm:text-base font-black font-mono tracking-wide" style="color: var(--text-main);">
-            R20 QUANTUM CONTROL CENTER
-          </h1>
-          <span
-            class="px-2 py-0.2 rounded text-[10px] font-mono font-bold border"
-            style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);"
-          >
-            v7.4.1
-          </span>
+    <div class="panel-banner-compact">
+      <div class="flex items-center space-x-2.5">
+        <div class="panel-banner-icon">
+          <Activity class="w-3.5 h-3.5" />
         </div>
-        <p class="text-xs font-mono mt-1" style="color: var(--text-muted);">
-          交易引擎、微积分决策链路、数据健康与物理拦截插件全景监控。
-        </p>
+        <div>
+          <div class="flex items-center space-x-2">
+            <h1 class="text-xs sm:text-[13px] font-black font-mono tracking-wide" style="color: var(--text-main);">
+              R20 QUANTUM CONTROL CENTER
+            </h1>
+            <span class="badge-lever">
+              v7.4.2
+            </span>
+          </div>
+          <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);">
+            交易引擎、微积分动力学、数据健康与物理拦截门禁全景监控
+          </p>
+        </div>
       </div>
 
       <div class="flex items-center space-x-2">
         <button
           @click="loadRuntime"
           :disabled="loading"
-          class="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border text-xs font-mono font-bold transition-all cursor-pointer shadow-xs disabled:opacity-50"
-          style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-main);"
+          class="btn-admin-secondary text-xs disabled:opacity-50"
         >
-          <RefreshCw class="w-3.5 h-3.5" :class="loading ? 'animate-spin' : ''" />
+          <RefreshCw class="w-3 h-3" :class="loading ? 'animate-spin' : ''" />
           <span>刷新状态</span>
         </button>
       </div>
@@ -307,7 +304,7 @@ const quickNav = [
                   <div class="flex items-center space-x-2">
                     <span class="font-black text-sm" style="color: var(--text-main);">{{ d.instId }}</span>
                     <span
-                      class="px-2 py-0.5 rounded text-[10px] font-bold border"
+                      class="px-2 py-0.5 rounded-[3px] text-[10px] font-mono font-bold border"
                       :style="{
                         backgroundColor: d.action?.includes('BUY') ? 'var(--color-up-bg)' : d.action?.includes('SELL') ? 'var(--color-down-bg)' : 'var(--bg-badge)',
                         borderColor: d.action?.includes('BUY') ? 'var(--color-up-border)' : d.action?.includes('SELL') ? 'var(--color-down-border)' : 'var(--border-subtle)',
@@ -380,7 +377,7 @@ const quickNav = [
                   </td>
                   <td class="py-2.5">
                     <span
-                      class="px-2 py-0.5 rounded text-[10px] font-bold border inline-flex items-center space-x-1"
+                      class="px-2 py-0.5 rounded-[3px] text-[10px] font-mono font-bold border inline-flex items-center space-x-1"
                       :style="{
                         backgroundColor: x.fresh ? 'var(--color-up-bg)' : 'var(--color-down-bg)',
                         borderColor: x.fresh ? 'var(--color-up-border)' : 'var(--color-down-border)',
@@ -389,7 +386,7 @@ const quickNav = [
                     >
                       <CheckCircle2 v-if="x.fresh" class="w-2.5 h-2.5" />
                       <AlertCircle v-else class="w-2.5 h-2.5" />
-                      <span>{{ x.fresh ? '正常新鲜' : '延迟过期' }}</span>
+                      <span>{{ x.fresh ? '正常' : '延迟' }}</span>
                     </span>
                   </td>
                   <td class="py-2.5 num-tabular" style="color: var(--text-muted);">

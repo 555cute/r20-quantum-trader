@@ -96,7 +96,7 @@ async def lifespan(_: FastAPI):
 
 
 from fastapi.middleware.gzip import GZipMiddleware
-app = FastAPI(title="R20 Quantum Trader Standalone Backend", version="7.4.1", lifespan=lifespan, docs_url="/api/docs", redoc_url="/api/redoc")
+app = FastAPI(title="R20 Quantum Trader Standalone Backend", version="7.4.2", lifespan=lifespan, docs_url="/api/docs", redoc_url="/api/redoc")
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
@@ -574,7 +574,7 @@ def runtime_overview() -> dict[str, Any]:
     }
     positions_payload = read_json("position_trackers.json", {})
     return {
-        "service": {"version": "7.4.1", "pid": os.getpid(), "uptime_seconds": int(time.time() - STARTED_AT)},
+        "service": {"version": "7.4.2", "pid": os.getpid(), "uptime_seconds": int(time.time() - STARTED_AT)},
         "credentials": {"okx": bool(settings.okx_api_key and settings.okx_secret_key and settings.okx_passphrase), "llm": bool(settings.llm_api_key)},
         "configuration": get_admin_configuration(),
         "data_health": health_payload,
@@ -639,13 +639,13 @@ def top_sitemap_xml() -> Response:
     return Response(content="""<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://www.r20.cn/</loc><priority>1.0</priority></url><url><loc>https://www.r20.cn/factors</loc><priority>0.9</priority></url><url><loc>https://www.r20.cn/news</loc><priority>0.8</priority></url><url><loc>https://www.r20.cn/lab</loc><priority>0.8</priority></url><url><loc>https://www.r20.cn/history</loc><priority>0.8</priority></url><url><loc>https://www.r20.cn/docs</loc><priority>0.9</priority></url></urlset>""", media_type="application/xml")
 
 
-@app.get("/trading", include_in_schema=False)
-@app.get("/factors", include_in_schema=False)
-@app.get("/news", include_in_schema=False)
-@app.get("/lab", include_in_schema=False)
-@app.get("/history", include_in_schema=False)
-@app.get("/docs", include_in_schema=False)
-@app.get("/docs/{subpath:path}", include_in_schema=False)
+@app.api_route("/trading", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route("/factors", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route("/news", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route("/lab", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route("/history", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route("/docs", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route("/docs/{subpath:path}", methods=["GET", "HEAD"], include_in_schema=False)
 def public_tab_spa_page(subpath: str = "") -> FileResponse:
     vue_index = ROOT / "frontend" / "dist" / "index.html"
     if vue_index.is_file():
@@ -845,6 +845,100 @@ def replay_gateway_delivery(delivery_id: int, payload: GatewayReplayRequest, x_r
         raise HTTPException(status_code=409, detail="仅允许重放当前处于 dead 状态的投递")
     audit_record("gateway.delivery.replay", "accepted", {"delivery_id": delivery_id})
     return {"accepted": True, "delivery_id": delivery_id, "status": "pending"}
+
+
+@app.post("/api/v1/admin/gateway/jobs/{job_id}/run")
+def run_gateway_job(
+    job_id: str,
+    payload: dict[str, Any] = Body(default={}),
+    x_r20_admin_token: str | None = Header(default=None),
+    x_r20_session: str | None = Header(default=None, alias="X-R20-Session"),
+) -> dict[str, Any]:
+    refresh_settings()
+    actor = require_admin_header(x_r20_admin_token, x_r20_session)
+    allowed_jobs = {
+        "self_improvement": {
+            "script": "self_improvement_engine.py",
+            "args": ["--force"],
+            "timeout": 180,
+            "label": "自进化复盘",
+        },
+        "trader": {
+            "script": "ai_factor_trader.py",
+            "args": [],
+            "timeout": 180,
+            "label": "AI量化主脑决策",
+        },
+        "factor_library": {
+            "script": "factor_library.py",
+            "args": [],
+            "timeout": 120,
+            "label": "多因子矩阵计算",
+        },
+        "news": {
+            "script": "news_sentiment_harvester.py",
+            "args": [],
+            "timeout": 120,
+            "label": "全网情绪抓取",
+        },
+        "daily_briefing": {
+            "script": "daily_summary_and_backup.py",
+            "args": [],
+            "timeout": 180,
+            "label": "每日战报生成",
+        },
+    }
+    job_cfg = allowed_jobs.get(job_id)
+    if not job_cfg:
+        raise HTTPException(status_code=404, detail=f"未找到网关任务：{job_id}")
+
+    script_path = SCRIPTS_DIR / job_cfg["script"]
+    if not script_path.exists():
+        raise HTTPException(status_code=500, detail=f"任务脚本不存在：{script_path}")
+
+    cmd = [sys.executable, str(script_path), *job_cfg["args"]]
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            timeout=job_cfg["timeout"],
+        )
+    except subprocess.TimeoutExpired:
+        audit_record(
+            f"gateway.job.{job_id}.run",
+            "timeout",
+            {"actor": actor.get("username", "admin"), "timeout": job_cfg["timeout"]},
+        )
+        raise HTTPException(
+            status_code=504,
+            detail=f"任务执行超时（限时 {job_cfg['timeout']} 秒）",
+        )
+
+    audit_record(
+        f"gateway.job.{job_id}.run",
+        "success" if result.returncode == 0 else "failed",
+        {"actor": actor.get("username", "admin"), "returncode": result.returncode},
+    )
+    if result.returncode != 0:
+        err_detail = (
+            result.stderr[-600:].strip()
+            or result.stdout[-600:].strip()
+            or "未知错误"
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=f"任务执行异常（退出码 {result.returncode}）：{err_detail}",
+        )
+
+    return {
+        "ok": True,
+        "completed": True,
+        "job_id": job_id,
+        "detail": f"{job_cfg['label']}已顺利完成",
+        "output": result.stdout[-2000:],
+    }
 
 
 @app.get("/api/v1/admin/agents")
@@ -1615,10 +1709,10 @@ def admin_about(x_r20_admin_token: str | None = Header(default=None)) -> dict[st
     import platform
     store = GatewayStore(GATEWAY_DB_PATH)
     return {
-        "product": {"name": "R20 Quantum Trader", "version": "7.4.1", "control_plane": "R20 Gateway Runtime", "gateway_version": GATEWAY_VERSION},
+        "product": {"name": "R20 Quantum Trader", "version": "7.4.2", "control_plane": "R20 Gateway Runtime", "gateway_version": GATEWAY_VERSION},
         "runtime": {"python": platform.python_version(), "platform": platform.platform(), "backend_pid": os.getpid(), "gateway": gateway_status(x_r20_admin_token)},
         "components": [
-            {"name": "FastAPI Control Plane", "version": "7.4.1"},
+            {"name": "FastAPI Control Plane", "version": "7.4.2"},
             {"name": "Gateway Event Runtime", "version": GATEWAY_VERSION},
             {"name": "SQLite", "version": __import__("sqlite3").sqlite_version},
         ],
@@ -2638,7 +2732,7 @@ def update_admin_memory_all(payload: MemoryUpdateAllRequest, x_r20_admin_token: 
 def health() -> dict[str, Any]:
     return {
         "service": "r20-standalone-backend",
-        "version": "7.4.1",
+        "version": "7.4.2",
         "status": "ok",
         "timestamp": int(time.time()),
         "credentials": {

@@ -101,10 +101,7 @@ const allProtected = computed(() =>
                 <span class="font-black text-sm tracking-wide font-mono" style="color: var(--text-main);">
                   {{ pos.name }}
                 </span>
-                <span
-                  class="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold border"
-                  style="background-color: var(--bg-badge); color: var(--color-brand); border-color: var(--color-brand-border);"
-                >
+                <span class="badge-lever">
                   {{ pos.lever }}x
                 </span>
               </div>
@@ -112,14 +109,7 @@ const allProtected = computed(() =>
 
             <!-- 方向 -->
             <td class="py-3 px-3.5">
-              <span
-                class="px-2 py-0.5 rounded text-[11px] font-bold inline-flex items-center space-x-1 border"
-                :style="{
-                  backgroundColor: pos.side === 'long' ? 'var(--color-up-bg)' : 'var(--color-down-bg)',
-                  borderColor: pos.side === 'long' ? 'var(--color-up-border)' : 'var(--color-down-border)',
-                  color: pos.side === 'long' ? 'var(--color-up)' : 'var(--color-down)'
-                }"
-              >
+              <span :class="pos.side === 'long' ? 'capsule-direction-long' : 'capsule-direction-short'">
                 <span>{{ pos.side === 'long' ? '多头 BUY' : '空头 SELL' }}</span>
               </span>
             </td>

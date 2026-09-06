@@ -96,7 +96,9 @@ class SelfEvolutionSafetyTests(unittest.TestCase):
         self.assertTrue(report["memory_preserved"])
         self.assertEqual(report["core_lessons"], ["old lesson"])
         self.assertEqual(self.snapshot(), self.old)
-        self.assertEqual([c.args[0] for c in self.json_write.call_args_list], [self.engine.REPORT_JSON_FILE])
+        written_files = [c.args[0] for c in self.json_write.call_args_list]
+        self.assertIn(self.engine.REPORT_JSON_FILE, written_files)
+        self.assertNotIn(self.engine.AI_MEMORY_FILE, written_files)
         self.assertNotIn(self.engine.AI_MEMORY_MD_FILE, [c.args[1] for c in self.replace.call_args_list])
 
     def test_all_rejected_preserves_both_files(self):

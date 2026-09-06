@@ -17,7 +17,10 @@ import fcntl
 import hashlib
 from typing import Dict, Any, List, Optional, Tuple
 
+from pathlib import Path
+
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = Path(PROJECT_ROOT)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
@@ -424,7 +427,7 @@ def run_self_evolution(force: bool = False):
             "multipliers": asset_mults,
             "updated_by": "self_improvement_engine",
         }
-        atomic_write_json(ROOT / "data" / "asset_multipliers.json", mults_payload)
+        atomic_write_json(os.path.join(DATA_DIR, "asset_multipliers.json"), mults_payload)
     except Exception as exc:
         log_msg(f"Failed to persist asset multipliers: {exc}")
 

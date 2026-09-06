@@ -232,26 +232,25 @@ onMounted(loadData)
     <!-- 1. Top Control Station: Switch, Consensus Mode & Actions -->
     <div class="rounded-2xl border p-4 sm:p-5 shadow-xs space-y-4" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
       <!-- Header row -->
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b" style="border-color: var(--border-subtle);">
-        <div class="flex items-center space-x-3">
-          <div
-            class="p-2.5 rounded-xl border"
-            style="background-color: var(--color-brand-bg); border-color: var(--color-brand-border); color: var(--color-brand);"
-          >
-            <Users class="w-5 h-5" />
+      <div class="panel-banner-compact">
+        <div class="flex items-center space-x-2.5">
+          <div class="panel-banner-icon">
+            <Users class="w-3.5 h-3.5" />
           </div>
           <div>
             <div class="flex items-center space-x-2">
-              <h2 class="text-sm font-bold font-mono" style="color: var(--text-main);">对冲基金投委会决策中枢 (Trading Desk Council)</h2>
+              <h2 class="text-xs sm:text-[13px] font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
+                对冲基金投委会决策中枢 (Trading Desk Council)
+              </h2>
               <span
-                class="text-[10px] font-mono font-bold px-2 py-0.5 rounded border"
-                :style="councilConfig.enabled ? { backgroundColor: 'var(--color-brand-bg)', color: 'var(--color-brand)', borderColor: 'var(--color-brand-border)' } : { backgroundColor: 'var(--bg-badge)', color: 'var(--text-faint)', borderColor: 'var(--border-subtle)' }"
+                class="badge-lever"
+                :style="councilConfig.enabled ? { backgroundColor: 'var(--color-up-bg)', color: 'var(--color-up)', borderColor: 'var(--color-up-border)' } : {}"
               >
-                {{ councilConfig.enabled ? '● 投委会辩论模式' : '○ 单模型决策模式' }}
+                {{ councilConfig.enabled ? '● 投委会辩论' : '○ 单模型' }}
               </span>
             </div>
-            <p class="text-xs font-mono mt-0.5" style="color: var(--text-muted);">
-              Trader A/B/C 独立提出作战方案并互相找茬，由首席投资官 (CIO) 统筹可用资金并终审发单。
+            <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);">
+              多交易员独立提案并交叉质询，由首席投资官 (CIO) 统筹可用资金终审发单
             </p>
           </div>
         </div>
@@ -262,14 +261,12 @@ onMounted(loadData)
           <button
             type="button"
             @click="auth.isSuperadmin && (councilConfig.enabled = !councilConfig.enabled)"
-            class="flex items-center space-x-2 px-3 py-1.5 rounded-xl border cursor-pointer transition-colors text-xs font-mono font-bold"
-            :style="councilConfig.enabled
-              ? { backgroundColor: 'var(--color-brand-bg)', borderColor: 'var(--color-brand-border)', color: 'var(--color-brand)' }
-              : { backgroundColor: 'var(--bg-card-subtle)', borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }"
+            class="btn-admin-secondary"
+            :style="councilConfig.enabled ? { color: 'var(--color-up)', borderColor: 'var(--color-up-border)', backgroundColor: 'var(--color-up-bg)' } : {}"
             :disabled="!auth.isSuperadmin"
           >
-            <ToggleRight v-if="councilConfig.enabled" class="w-4 h-4 text-emerald-400" />
-            <ToggleLeft v-else class="w-4 h-4 text-zinc-500" />
+            <ToggleRight v-if="councilConfig.enabled" class="w-3.5 h-3.5 text-emerald-400" />
+            <ToggleLeft v-else class="w-3.5 h-3.5 opacity-50" />
             <span>{{ councilConfig.enabled ? '机制已开启' : '机制已关闭' }}</span>
           </button>
 
@@ -277,8 +274,7 @@ onMounted(loadData)
           <button
             @click="saveConfig"
             :disabled="saving || !auth.isSuperadmin"
-            class="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold cursor-pointer disabled:opacity-40 shadow-xs transition-all"
-            style="background-color: var(--text-main); color: var(--bg-card);"
+            class="btn-admin-primary disabled:opacity-40"
           >
             <Save class="w-3.5 h-3.5" />
             <span>{{ saving ? '保存中...' : '保存配置' }}</span>
@@ -288,8 +284,7 @@ onMounted(loadData)
           <button
             @click="runDebateTest"
             :disabled="testing"
-            class="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl border text-xs font-mono font-bold cursor-pointer disabled:opacity-40 transition-all shadow-xs"
-            style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-main);"
+            class="btn-admin-secondary disabled:opacity-40"
           >
             <Play class="w-3.5 h-3.5" :class="{ 'animate-spin': testing }" />
             <span>{{ testing ? '现场辩论中...' : '现场辩论测试' }}</span>
@@ -311,7 +306,7 @@ onMounted(loadData)
           <div class="flex items-center justify-between mb-1">
             <span class="text-xs font-bold font-mono" style="color: var(--text-main);">{{ mode.name }}</span>
             <span
-              class="text-[9px] px-1.5 py-0.2 rounded font-mono border font-bold"
+              class="text-[9px] px-1.5 py-0.5 rounded-[3px] font-mono border font-bold"
               :style="councilConfig.consensus_mode === mode.id
                 ? { backgroundColor: 'var(--bg-card)', color: 'var(--text-main)', borderColor: 'var(--border-medium)' }
                 : { backgroundColor: 'var(--bg-card)', color: 'var(--text-muted)', borderColor: 'var(--border-subtle)' }"

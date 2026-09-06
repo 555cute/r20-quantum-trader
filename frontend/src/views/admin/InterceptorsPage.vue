@@ -213,15 +213,17 @@ onMounted(loadPlugins)
 <template>
   <div class="space-y-4 font-mono text-xs max-w-[2160px] mx-auto">
     <!-- Header & Action Bar -->
-    <div class="flex flex-wrap items-center justify-between gap-3">
+    <div class="panel-banner-compact">
       <div class="flex items-center space-x-2.5">
-        <div class="w-8 h-8 rounded-lg flex items-center justify-center border shadow-xs" style="background-color: var(--color-up-bg); border-color: var(--color-up-border); color: var(--color-up);">
-          <ShieldCheck class="w-4 h-4" />
+        <div class="panel-banner-icon">
+          <ShieldCheck class="w-3.5 h-3.5" style="color: var(--color-up);" />
         </div>
         <div>
-          <h1 class="text-sm font-bold uppercase tracking-wide" style="color: var(--text-main);">物理拦截插件配置中心</h1>
-          <p class="text-[11px] font-sans" style="color: var(--text-muted);">
-            所有交易决策发出前必须通过 Python 物理拦截插件管线 (Fail-Closed)。支持热插拔、热编辑与策略广场插件生态。
+          <h1 class="text-xs sm:text-[13px] font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
+            物理拦截插件配置中心
+          </h1>
+          <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);">
+            交易决策发出前必须通过 Python 物理拦截插件管线 (Fail-Closed)
           </p>
         </div>
       </div>
@@ -229,22 +231,20 @@ onMounted(loadPlugins)
         <button
           @click="runSandbox"
           :disabled="testing"
-          class="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-lg border font-bold transition-all cursor-pointer shadow-xs disabled:opacity-50"
-          style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--color-up);"
+          class="btn-admin-secondary text-xs disabled:opacity-50"
         >
-          <Play class="w-3.5 h-3.5" />
-          <span>{{ testing ? '正在回归测试...' : '⚡ 现场沙箱回归测试' }}</span>
+          <Play class="w-3 h-3 text-emerald-400" />
+          <span>{{ testing ? '正在回归测试...' : '现场沙箱回归测试' }}</span>
         </button>
         <button
           v-if="auth.isSuperadmin"
           @click="openCreateModal"
-          class="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-lg font-bold transition-all cursor-pointer shadow-xs"
-          style="background-color: var(--text-main); color: var(--bg-card);"
+          class="btn-admin-primary text-xs"
         >
           <Plus class="w-3.5 h-3.5" />
-          <span>新建拦截插件</span>
+          <span>新建插件</span>
         </button>
-        <span class="text-[10px] px-2 py-1 rounded border font-bold" style="background-color: var(--color-up-bg); border-color: var(--color-up-border); color: var(--color-up);">
+        <span class="badge-lever" style="color: var(--color-up); border-color: var(--color-up-border); background-color: var(--color-up-bg);">
           FAIL-CLOSED 物理防线
         </span>
       </div>

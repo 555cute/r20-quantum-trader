@@ -35,45 +35,40 @@ function importanceCn(imp: string) {
 <template>
   <div class="space-y-3.5">
     <!-- Header Banner -->
-    <div
-      class="rounded-xl border p-4 sm:p-5 flex flex-wrap items-center justify-between gap-3 shadow-xs transition-colors"
-      style="background-color: var(--bg-card); border-color: var(--border-subtle);"
-    >
-      <div class="flex items-center space-x-3">
-        <div
-          class="w-9 h-9 rounded-lg flex items-center justify-center border shrink-0"
-          style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-main);"
-        >
-          <Newspaper class="w-4 h-4" />
+    <div class="panel-banner-compact">
+      <div class="flex items-center space-x-2.5">
+        <div class="panel-banner-icon">
+          <Newspaper class="w-3.5 h-3.5" />
         </div>
         <div>
-          <h2 class="text-xs sm:text-sm font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
+          <h2 class="text-xs sm:text-[13px] font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
             全网加密重大舆情与流动性情报
           </h2>
-          <p class="text-xs font-mono mt-0.5" style="color: var(--text-muted);">
-            聚合扫描主流财经与链上异动 · 更新于 {{ intel.updated_at || '--' }} (UTC+8)
+          <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);">
+            主流财经与链上异动 · 更新于 {{ intel.updated_at || '--' }} (UTC+8)
           </p>
         </div>
       </div>
 
       <div class="flex items-center space-x-2">
         <span
-          class="px-2.5 py-1 rounded-lg border text-xs font-mono font-bold"
+          class="h-7 px-2.5 rounded-[4px] border text-[11px] font-mono font-bold inline-flex items-center space-x-1"
           :style="{
             backgroundColor: breakerActive ? 'var(--color-down-bg)' : 'var(--color-up-bg)',
             borderColor: breakerActive ? 'var(--color-down-border)' : 'var(--color-up-border)',
             color: breakerActive ? 'var(--color-down)' : 'var(--color-up)'
           }"
         >
-          <ShieldAlert class="w-3 h-3 inline mr-1" />
-          {{ breakerActive ? '黑天鹅熔断激活' : '常态监控中' }}
+          <ShieldAlert class="w-3 h-3" />
+          <span>{{ breakerActive ? '黑天鹅熔断激活' : '常态监控中' }}</span>
         </span>
 
         <span
-          class="px-2.5 py-1 rounded-lg border text-xs font-mono"
+          class="h-7 px-2.5 rounded-[4px] border text-[11px] font-mono inline-flex items-center space-x-1"
           style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-muted);"
         >
-          宏观情绪: <strong style="color: var(--text-main);">{{ macro }}</strong>
+          <span>宏观情绪:</span>
+          <strong style="color: var(--text-main);">{{ macro }}</strong>
         </span>
       </div>
     </div>

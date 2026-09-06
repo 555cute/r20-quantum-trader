@@ -2,7 +2,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-v7.4.1-blue.svg?style=flat-square)](https://github.com/555cute/r20-quantum-trader/releases/tag/v7.4.1)
+[![Version](https://img.shields.io/badge/version-v7.4.2-blue.svg?style=flat-square)](https://github.com/555cute/r20-quantum-trader/releases/tag/v7.4.2)
 [![License](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg?style=flat-square)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688.svg?style=flat-square)](https://fastapi.tiangolo.com/)
@@ -19,23 +19,33 @@
 
 ---
 
-## 🏛️ v7.4.1 重磅升级总览 (Release Highlights)
+## 🏛️ v7.4.2 重磅升级总览 (Release Highlights)
 
-在 **v7.4.1** 中，系统全面修复了自进化生命周期闭环与后台策略版本管理交互：
+在 **v7.4.2** 中，系统全面落地了公共行情零进程化重构、自进化防污染认知闭环与全链路服务加固：
 
-1. **自进化引擎 6 小时定时调度与自动运行彻底盘活**：
-   - 调度器时间升级为 `["02:00", "08:00", "14:00", "20:00"]` 标准列表，解决此前调度单点锁死在 20:00 的缺陷；
-   - 彻底修复大模型输出解析中的字典/字符串类型混杂崩溃隐患；
-   - **落实 TTL 半衰期自然淘汰机制与 Top 8 容量上限保护**：超过 7 天的心法自动过期沉淀，避免 Prompt 上下文过载；
-   - **激活 `asset_multipliers` 币种资金乘数**：复盘结果持久化并动态调配实盘保证金，结束参数空转。
+1. **高性能零进程公共行情微服务 (Zero-Process Market Feed)**：
+   - 彻底切断高频反复唤起 Node CLI / OKX CLI 派生进程的 CPU 资源风暴；
+   - 采用持久化 HTTP Keep-Alive 连接池，单次标的行情耗时由 550ms 压降至 **66ms**；
+   - 发现并直连官方 MCP 聚合指标端点（`POST /api/v5/aigc/mcp/indicators`），单次 JSON 批处理同时返回 ADX/KDJ/BBWIDTH/CMF，技术指标获取速度提升 **29.7 倍**（2.2s -> **74ms**）；
+   - 全市场 Ticker 批量秒拉，全量因子计算时间由 20s 骤降至 **2.7s**，彻底根除低配机器 CPU 打满导致的 LLM 调用 502 超时隐患。
 
-2. **策略版本控制工作台 (Policy Snapshot Workbench) 补齐删除功能**：
-   - 支持对废弃的具名策略归档一键物理删除与二次确认；
-   - 实时聚合四大单元不可变指纹（如 `v7.4.1@4aa048db`），支持一键秒级原子回滚。
+2. **自进化认知防污染护栏与白盒心法库闭环**：
+   - 修复自进化引擎中的 `ROOT` 路径未定义及标的资金乘数持久化缺陷；
+   - 全面初始化并激活白盒结构化基准心法库（`structured_trading_memory.json`），解决后台心法列表空载与版本锁死；
+   - 落地网关任务远程触发中枢（`POST /api/v1/admin/gateway/jobs/{job_id}/run`），支持在管理后台一键触发自进化复盘与全量网关任务。
 
-3. **OKX 手动平仓 502 报错彻底根治**：
-   - 快速平仓模块全面升级为标准现代 Chrome 浏览器 User-Agent 与 Accept 标头，杜绝被 OKX Cloudflare WAF 误杀拦截；
-   - 平仓前同步扫描并预先清理同标的在途云端 OCO 策略委托，消除交易所撮合冲突。
+3. **Web 端全链路与网络协议加固**：
+   - 全面支持 `HEAD /` 及各 SPA 路由探测，彻底根除网络监控及探针的 405 Method Not Allowed；
+   - 规范各子脚本模块顶层 `sys.path` 隔离加载，消除外部包导入断层。
+
+---
+
+## 🏛️ v7.4.1 历史回顾
+
+在 **v7.4.1** 中，系统修复了自进化生命周期闭环与后台策略版本管理交互：
+- 调度器升级为 `["02:00", "08:00", "14:00", "20:00"]`；
+- 落实 TTL 半衰期自然淘汰机制与 Top 8 容量上限保护；
+- 策略版本控制工作台补齐物理删除与原子回滚。
 
 ---
 

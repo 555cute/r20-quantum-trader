@@ -284,19 +284,21 @@ onMounted(loadAll)
 <template>
   <div class="space-y-4 font-mono text-xs">
     <!-- Header & Action Bar -->
-    <div class="flex flex-wrap items-center justify-between gap-3">
+    <div class="panel-banner-compact">
       <div class="flex items-center space-x-2.5">
-        <div class="w-8 h-8 rounded-lg flex items-center justify-center border shadow-xs" style="background-color: var(--color-brand-bg); border-color: var(--color-brand-border); color: var(--color-brand);">
-          <Wallet class="w-4 h-4" />
+        <div class="panel-banner-icon">
+          <Wallet class="w-3.5 h-3.5" />
         </div>
         <div>
-          <h1 class="text-sm font-bold uppercase tracking-wide" style="color: var(--text-main);">OKX 账户连接与交易标的池</h1>
-          <p class="text-[11px] font-sans" style="color: var(--text-muted);">
-            OKX 官方账户授权连接、实盘/模拟盘环境切换、初始本金基准、资产标的池管理与应急持仓处置。
+          <h1 class="text-xs sm:text-[13px] font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
+            OKX 账户连接与交易标的池
+          </h1>
+          <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);">
+            OKX 官方账户授权连接、实盘/模拟盘环境切换、初始本金基准与交易标的管理
           </p>
         </div>
       </div>
-      <span class="text-[10px] px-2 py-1 rounded border font-bold" style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);">
+      <span class="badge-lever">
         交易核心底座 · 2/4
       </span>
     </div>
@@ -368,8 +370,7 @@ onMounted(loadAll)
                 v-if="auth.isSuperadmin"
                 @click="startOauth"
                 :disabled="startingOauth"
-                class="flex-1 flex items-center justify-center space-x-1.5 px-3 py-2 rounded-lg text-xs font-mono font-bold cursor-pointer disabled:opacity-50 transition-all shadow-xs bg-blue-600 hover:bg-blue-500 text-white"
-                style="background-color: #2563EB; color: #FFFFFF;"
+                class="flex-1 btn-admin-primary disabled:opacity-50"
               >
                 <KeyRound class="w-3.5 h-3.5" />
                 <span>{{ startingOauth ? '申请授权码中…' : '使用授权码连接 OKX' }}</span>
@@ -378,8 +379,7 @@ onMounted(loadAll)
                 v-if="auth.isSuperadmin"
                 @click="installCli"
                 :disabled="installingCli"
-                class="px-2.5 py-2 rounded-lg border text-[11px] font-mono cursor-pointer disabled:opacity-50 transition-all shadow-xs"
-                style="background-color: var(--bg-card); border-color: var(--border-medium); color: var(--text-main);"
+                class="btn-admin-secondary disabled:opacity-50"
               >
                 {{ installingCli ? '安装中…' : '安装/升级 CLI' }}
               </button>
@@ -418,8 +418,8 @@ onMounted(loadAll)
               </label>
             </div>
             <div class="flex gap-2">
-              <button @click="saveEnvironment" class="flex-1 flex items-center justify-center space-x-1 px-3 py-2 rounded-lg text-xs font-mono font-bold cursor-pointer transition-all shadow-xs" style="background-color: var(--text-main); color: var(--bg-card);"><Save class="w-3.5 h-3.5" /><span>保存环境与凭证</span></button>
-              <button @click="saveManualClose" class="px-3 py-2 rounded-lg border text-xs font-mono cursor-pointer transition-all shadow-xs" style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-main);">保存平仓开关</button>
+              <button @click="saveEnvironment" class="flex-1 btn-admin-primary"><Save class="w-3.5 h-3.5" /><span>保存环境与凭证</span></button>
+              <button @click="saveManualClose" class="btn-admin-secondary">保存平仓开关</button>
             </div>
           </div>
 
@@ -464,7 +464,7 @@ onMounted(loadAll)
             <input v-model="capitalConfirm" placeholder="输入 UPDATE CAPITAL" class="w-full rounded-lg px-3 py-2 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" />
           </div>
           <div class="flex items-end">
-            <button @click="saveCapital" :disabled="savingCapital" class="w-full flex items-center justify-center space-x-1.5 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-mono font-bold cursor-pointer disabled:opacity-50 transition-all shadow-xs">
+            <button @click="saveCapital" :disabled="savingCapital" class="w-full btn-admin-primary disabled:opacity-50">
               <Save class="w-3.5 h-3.5" /><span>{{ savingCapital ? '更新中...' : '更新基准本金' }}</span>
             </button>
           </div>
@@ -482,7 +482,7 @@ onMounted(loadAll)
           </div>
           <div class="flex gap-2">
             <input v-model="newInstId" placeholder="例如: XRP-USDT-SWAP" class="w-44 rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border transition-colors" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" @keyup.enter="addInstrument" />
-            <button @click="addInstrument" class="px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer shadow-xs" style="background-color: var(--text-main); color: var(--bg-card);">添加标的</button>
+            <button @click="addInstrument" class="btn-admin-primary">添加标的</button>
           </div>
         </div>
         <div class="overflow-x-auto">
@@ -502,9 +502,9 @@ onMounted(loadAll)
                 <td class="py-2.5 px-3" style="color: var(--text-muted);">{{ item.name }}</td>
                 <td class="py-2.5 px-3 num-tabular" style="color: var(--text-faint);">{{ item.ctType || 'SWAP' }}</td>
                 <td class="py-2.5 px-3">
-                  <span v-if="item.protected" class="px-1.5 py-0.2 rounded text-[10px] font-bold border" style="background-color: var(--color-warn-bg); border-color: var(--color-warn-border); color: var(--color-warn);">🔒 保底必选</span>
-                  <span v-else-if="item.has_tracker" class="px-1.5 py-0.2 rounded text-[10px] font-bold border" style="background-color: var(--color-brand-bg); border-color: var(--color-brand-border); color: var(--color-brand);">持仓中</span>
-                  <span v-else class="text-[11px]" style="color: var(--text-faint);">可移除</span>
+                  <span v-if="item.protected" class="px-1.5 py-0.5 rounded-[3px] text-[10px] font-mono font-bold border" style="background-color: var(--color-warn-bg); border-color: var(--color-warn-border); color: var(--color-warn);">🔒 保底必选</span>
+                  <span v-else-if="item.has_tracker" class="px-1.5 py-0.5 rounded-[3px] text-[10px] font-mono font-bold border" style="background-color: var(--color-brand-bg); border-color: var(--color-brand-border); color: var(--color-brand);">持仓中</span>
+                  <span v-else class="text-[10px] font-mono px-1.5 py-0.5 rounded-[3px] border" style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--text-faint);">可移除</span>
                 </td>
                 <td class="py-2.5 px-4 text-right">
                   <button @click="removeInstrument(item)" :disabled="item.protected || item.has_tracker" class="p-1 rounded hover:opacity-80 text-rose-400 disabled:opacity-20 cursor-pointer transition-opacity" title="从标的池移除">

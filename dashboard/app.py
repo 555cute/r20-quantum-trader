@@ -1286,7 +1286,7 @@ async def favicon_svg():
 
 # --- HTML Page Handlers ---
 
-@app.get("/", response_class=HTMLResponse)
+@app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def index(request: Request):
     vue_index_file = os.path.join(VUE_DIST_DIR, "index.html")
     if os.path.isfile(vue_index_file):

@@ -6,8 +6,18 @@ Maintains a validated live decision cache and durable Web audit history.
 """
 
 import os
-from okx_runtime import replace_cli_prefix as okx_private_command
 import sys
+from pathlib import Path
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = Path(PROJECT_ROOT)
+SCRIPTS_DIR = os.path.join(PROJECT_ROOT, "scripts")
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+if SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, SCRIPTS_DIR)
+
+from okx_runtime import replace_cli_prefix as okx_private_command
 import json
 import time
 import datetime
@@ -18,10 +28,6 @@ import fcntl
 from typing import Dict, Any, List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
-
 try:
     from r20_backend.config import settings as standalone_settings
 except ImportError:
@@ -29,6 +35,7 @@ except ImportError:
 
 WORKSPACE_DIR = PROJECT_ROOT
 DATA_DIR = os.path.join(WORKSPACE_DIR, "data")
+from market_data_service import fetch_single_indicator, fetch_ticker
 AI_DECISION_CACHE_FILE = os.path.join(DATA_DIR, "ai_brain_decisions.json")
 AI_DECISION_HISTORY_FILE = os.path.join(DATA_DIR, "ai_brain_history.json")
 AI_POSITION_MANAGEMENT_FILE = os.path.join(DATA_DIR, "ai_position_management.json")
@@ -352,16 +359,11 @@ def fetch_single_instrument_package(item: Dict[str, Any]) -> Dict[str, Any]:
             except Exception:
                 pass
 
-        # 6. OKX ADX Trend Strength Indicator (1H)
+        # 6. OKX ADX Trend Strength Indicator (1H) via direct REST (zero Node CLI fork)
         try:
-            cmd = f"okx market indicator adx {inst_id} --bar 1H --json 2>/dev/null"
-            res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5)
-            if res.stdout:
-                ind_data = json.loads(res.stdout)
-                if isinstance(ind_data, list) and ind_data:
-                    adx_vals = ind_data[0].get("data", [{}])[0].get("timeframes", {}).get("1H", {}).get("indicators", {}).get("ADX", [])
-                    if adx_vals:
-                        pkg["adx_1h"] = float(adx_vals[0].get("values", {}).get("adx", 0.0) or 0.0)
+            adx_data = fetch_single_indicator(inst_id, "ADX", bar="1H")
+            if adx_data and "adx" in adx_data:
+                pkg["adx_1h"] = float(adx_data.get("adx", 0.0) or 0.0)
         except Exception:
             pass
 
@@ -788,8 +790,8 @@ def assemble_decision_cache(
     # Load dynamic asset multipliers from self-improvement review if present
     asset_multipliers = {}
     try:
-        mult_file = ROOT / "data" / "asset_multipliers.json"
-        if mult_file.is_file():
+        mult_file = os.path.join(DATA_DIR, "asset_multipliers.json")
+        if os.path.isfile(mult_file):
             with open(mult_file, "r", encoding="utf-8") as f:
                 mult_data = json.load(f)
             asset_multipliers = mult_data.get("multipliers") or {}

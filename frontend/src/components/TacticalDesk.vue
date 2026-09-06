@@ -204,10 +204,7 @@ const allProtected = computed(() =>
                   <span class="font-black text-sm tracking-wide font-mono" style="color: var(--text-main);">
                     {{ pos.name }}
                   </span>
-                  <span
-                    class="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold border"
-                    style="background-color: var(--bg-badge); color: var(--text-main); border-color: var(--border-subtle);"
-                  >
+                  <span class="badge-lever">
                     {{ pos.lever }}x
                   </span>
                 </div>
@@ -215,14 +212,7 @@ const allProtected = computed(() =>
 
               <!-- 方向 -->
               <td class="py-3 px-3.5">
-                <span
-                  class="px-2 py-0.5 rounded text-[11px] font-bold inline-flex items-center space-x-1 border"
-                  :style="{
-                    backgroundColor: pos.side === 'long' ? 'var(--color-up-bg)' : 'var(--color-down-bg)',
-                    borderColor: pos.side === 'long' ? 'var(--color-up-border)' : 'var(--color-down-border)',
-                    color: pos.side === 'long' ? 'var(--color-up)' : 'var(--color-down)'
-                  }"
-                >
+                <span :class="pos.side === 'long' ? 'capsule-direction-long' : 'capsule-direction-short'">
                   <span>{{ pos.side === 'long' ? '多头 BUY' : '空头 SELL' }}</span>
                 </span>
               </td>
@@ -250,7 +240,7 @@ const allProtected = computed(() =>
               <!-- 云端止损防线 -->
               <td class="py-3 px-3.5">
                 <div
-                  class="inline-flex items-center space-x-1 px-2 py-0.5 rounded border text-[11px]"
+                  class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-[3px] border text-[11px]"
                   :style="{
                     backgroundColor: 'var(--bg-badge)',
                     borderColor: 'var(--border-subtle)',
@@ -327,14 +317,7 @@ const allProtected = computed(() =>
                 {{ ord.name || ord.inst || (ord.instId ? ord.instId.split('-')[0] : '--') }}
               </td>
               <td class="py-2.5 px-3.5">
-                <span
-                  class="px-2 py-0.5 rounded text-[11px] font-bold inline-flex items-center space-x-1 border"
-                  :style="{
-                    backgroundColor: (ord.side_raw === 'buy' || ord.side === 'buy' || String(ord.side).includes('多')) ? 'var(--color-up-bg)' : 'var(--color-down-bg)',
-                    borderColor: (ord.side_raw === 'buy' || ord.side === 'buy' || String(ord.side).includes('多')) ? 'var(--color-up-border)' : 'var(--color-down-border)',
-                    color: (ord.side_raw === 'buy' || ord.side === 'buy' || String(ord.side).includes('多')) ? 'var(--color-up)' : 'var(--color-down)'
-                  }"
-                >
+                <span :class="(ord.side_raw === 'buy' || ord.side === 'buy' || String(ord.side).includes('多')) ? 'capsule-direction-long' : 'capsule-direction-short'">
                   <span>{{ (ord.side_raw === 'buy' || ord.side === 'buy' || String(ord.side).includes('多')) ? '买入开多' : '卖出开空' }}</span>
                 </span>
               </td>
@@ -348,7 +331,7 @@ const allProtected = computed(() =>
                 {{ ord.time || (ord.cTime ? new Date(parseInt(ord.cTime)).toLocaleTimeString() : '--') }}
               </td>
               <td class="py-2.5 px-3.5 text-right font-bold" style="color: var(--text-main);">
-                <span class="inline-flex items-center space-x-1">
+                <span class="inline-flex items-center space-x-1.5 text-[11px] font-mono px-2 py-0.5 rounded-[3px] border" style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--color-brand);">
                   <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                   <span>挂单中</span>
                 </span>

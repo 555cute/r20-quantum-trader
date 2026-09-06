@@ -11,29 +11,23 @@ const memoryMd = computed(() => store.data?.ai_trading_memory_md || '')
 <template>
   <div class="space-y-3.5">
     <!-- Lab Header -->
-    <div
-      class="rounded-xl border p-4 sm:p-5 flex items-center justify-between shadow-xs transition-colors"
-      style="background-color: var(--bg-card); border-color: var(--border-subtle);"
-    >
-      <div class="flex items-center space-x-3">
-        <div
-          class="w-9 h-9 rounded-lg flex items-center justify-center border shrink-0"
-          style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-main);"
-        >
-          <Sparkles class="w-4 h-4" />
+    <div class="panel-banner-compact">
+      <div class="flex items-center space-x-2.5">
+        <div class="panel-banner-icon">
+          <Sparkles class="w-3.5 h-3.5" />
         </div>
         <div>
-          <h2 class="text-xs sm:text-sm font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
+          <h2 class="text-xs sm:text-[13px] font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
             AI 策略自进化与认知提炼中心
           </h2>
-          <p class="text-xs font-mono mt-0.5" style="color: var(--text-muted);">
-            基于大模型真实实盘胜率、盈亏比与微积分动能反馈，每6小时全自主修正参数与策略心法
+          <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);">
+            基于实盘胜率、盈亏比与动力学反馈，每 6 小时全自主修正参数与策略心法
           </p>
         </div>
       </div>
-      <div class="flex items-center space-x-2 text-xs font-mono">
-        <span style="color: var(--text-faint);">自进化主脑:</span>
-        <span class="font-bold font-mono" style="color: var(--text-main);">{{ store.llmRuntime.model }}</span>
+      <div class="flex items-center space-x-2 text-xs font-mono h-7 px-2.5 rounded-[4px] border" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
+        <span style="color: var(--text-muted);">自进化主脑:</span>
+        <span class="font-bold font-mono" style="color: var(--color-brand);">{{ store.llmRuntime.model }}</span>
       </div>
     </div>
 

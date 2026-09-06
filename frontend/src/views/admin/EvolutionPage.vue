@@ -238,19 +238,21 @@ onMounted(loadData)
 <template>
   <div class="space-y-4 max-w-[2160px] mx-auto">
     <!-- Header -->
-    <div class="flex items-center justify-between">
-      <div>
-        <h1 class="text-sm sm:text-base font-black font-mono tracking-wide" style="color: var(--text-main);">
-          AI 策略自进化认知中枢与白盒防污染护栏 (Evolution Shield)
-        </h1>
-        <p class="text-xs font-mono mt-0.5" style="color: var(--text-muted);">
-          引入离群噪点剔除、宪法级防偏见红线、心法生命周期衰减与白盒启停管理，杜绝极端行情反噬未来策略。
-        </p>
+    <div class="panel-banner-compact">
+      <div class="flex items-center space-x-2.5">
+        <div class="panel-banner-icon">
+          <Brain class="w-3.5 h-3.5" />
+        </div>
+        <div>
+          <h1 class="text-xs sm:text-[13px] font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
+            AI 策略自进化认知中枢与白盒防污染护栏 (Evolution Shield)
+          </h1>
+          <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);">
+            离群噪点剔除、宪法级防偏见红线、心法生命周期衰减与白盒启停管理
+          </p>
+        </div>
       </div>
-      <span
-        class="text-[10px] font-mono px-2 py-1 rounded border font-bold"
-        style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);"
-      >
+      <span class="badge-lever">
         白盒认知 · 防偏见护栏
       </span>
     </div>
@@ -435,11 +437,11 @@ onMounted(loadData)
             >
               <!-- Card Header Row -->
               <div class="flex items-center justify-between gap-2 font-mono text-xs">
-                <div class="flex items-center space-x-2">
+                <div class="flex items-center space-x-1.5">
                   <span
-                    class="px-2 py-0.5 rounded text-[10px] font-bold border"
+                    class="px-1.5 py-0.5 rounded-[3px] text-[10px] font-mono font-bold border"
                     :style="{
-                      backgroundColor: item.is_baseline ? 'rgba(56, 117, 246, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                      backgroundColor: item.is_baseline ? 'rgba(56, 117, 246, 0.12)' : 'rgba(16, 185, 129, 0.12)',
                       borderColor: item.is_baseline ? 'rgba(56, 117, 246, 0.3)' : 'rgba(16, 185, 129, 0.3)',
                       color: item.is_baseline ? '#3875F6' : '#10B981'
                     }"
@@ -447,12 +449,12 @@ onMounted(loadData)
                     {{ item.is_baseline ? '👑 官方黄金基准' : '🧬 AI 实战自进化' }}
                   </span>
 
-                  <span class="text-[10px] font-bold" style="color: var(--text-muted);">
+                  <span class="text-[10px] font-mono px-1.5 py-0.5 rounded-[3px] border" style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--text-muted);">
                     {{ item.category }}
                   </span>
 
-                  <span class="text-[10px] px-1.5 py-0.2 rounded border bg-emerald-500/15 border-emerald-500/30 text-emerald-400 font-bold">
-                    健康评分: {{ item.health_score }}分
+                  <span class="text-[10px] font-mono px-1.5 py-0.5 rounded-[3px] border bg-emerald-500/10 border-emerald-500/25 text-emerald-400 font-bold">
+                    评分 {{ item.health_score }}
                   </span>
                 </div>
 
