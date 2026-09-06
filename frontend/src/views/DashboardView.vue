@@ -91,7 +91,7 @@ function setLayout(mode: 'dual' | 'stacked') {
     <div class="h-[46px] sm:h-[50px] shrink-0"></div>
 
     <!-- Dynamic Main Content Based on Active Tab -->
-    <main class="flex-1 max-w-[2160px] w-full mx-auto px-3 sm:px-6 2xl:px-8 pt-3 pb-24 sm:pb-6 space-y-3.5">
+    <main class="flex-1 max-w-[2048px] w-full mx-auto px-4 sm:px-6 2xl:px-8 pt-3 pb-24 sm:pb-6 space-y-3.5">
       <!-- TAB 1: 实盘矩阵 (TRADING) -->
       <div v-show="store.activeTab === 'trading'" class="space-y-3.5">
         <!-- Sub-Header Controls: Layout Switcher & Status Line -->
@@ -135,17 +135,17 @@ function setLayout(mode: 'dual' | 'stacked') {
 
         <!-- Layout Mode 1: Dual-Wing Institutional Workstation (Only when user explicitly chooses dual) -->
         <div v-if="layoutMode === 'dual'" class="flex flex-col lg:flex-row gap-3.5 items-start">
-          <!-- Left Wing: Master Asset Cockpit + Tactical Desk (62% width on wide displays) -->
-          <div class="w-full lg:w-[62%] 2xl:w-[64%] space-y-3.5">
+          <!-- Left Wing: Master Asset Cockpit + Tactical Desk (60% width on desktop, 62% on 2K wide displays) -->
+          <div class="w-full lg:w-[60%] 2xl:w-[62%] space-y-3.5">
             <!-- 1. Master Bento HUD Cockpit -->
             <TopHudRibbon />
             <!-- 2. Integrated Interactive Tactical Desk (Positions + Orders) -->
             <TacticalDesk />
           </div>
 
-          <!-- Right Wing: 6-Asset Live Dynamics Radar (38% width on wide displays) -->
-          <div class="w-full lg:w-[38%] 2xl:w-[36%] space-y-3.5">
-            <InstrumentMatrix />
+          <!-- Right Wing: 6-Asset Live Dynamics Radar (40% width on desktop, 38% on 2K wide displays) -->
+          <div class="w-full lg:w-[40%] 2xl:w-[38%] space-y-3.5">
+            <InstrumentMatrix :layout-mode="layoutMode" />
           </div>
         </div>
 
@@ -153,7 +153,7 @@ function setLayout(mode: 'dual' | 'stacked') {
         <div v-else class="space-y-3.5">
           <TopHudRibbon />
           <TacticalDesk />
-          <InstrumentMatrix />
+          <InstrumentMatrix :layout-mode="layoutMode" />
         </div>
       </div>
 

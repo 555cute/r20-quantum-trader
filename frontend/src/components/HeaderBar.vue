@@ -48,10 +48,10 @@ const tabs = [
 
 <template>
   <header
-    class="fixed top-0 left-0 right-0 z-40 h-[46px] sm:h-[50px] px-3 sm:px-5 flex items-center border-b transition-colors"
+    class="fixed top-0 left-0 right-0 z-40 h-[46px] sm:h-[50px] flex items-center border-b transition-colors"
     style="background-color: var(--bg-header); border-color: var(--border-subtle); backdrop-filter: blur(12px);"
   >
-    <div class="max-w-[2160px] w-full mx-auto flex items-center justify-between gap-2.5 sm:gap-4">
+    <div class="max-w-[2048px] w-full mx-auto px-4 sm:px-6 2xl:px-8 flex items-center justify-between gap-2.5 sm:gap-4">
       <!-- Left: Minimal Institutional Identity with subtle crypto currency icon -->
       <div class="flex items-center space-x-2 shrink-0">
         <div class="flex items-center space-x-1.5 cursor-pointer select-none" @click="store.activeTab = 'trading'">
