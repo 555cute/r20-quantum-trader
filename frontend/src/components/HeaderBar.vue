@@ -4,6 +4,7 @@ import { useDashboardStore } from '../stores/dashboard'
 import { useTheme } from '../composables/useTheme'
 import { useI18n } from '../composables/useI18n'
 import AboutModal from './AboutModal.vue'
+import CryptoLogo from './CryptoLogo.vue'
 import {
   LayoutGrid,
   Cpu,
@@ -55,16 +56,10 @@ const tabs = computed(() => [
     style="background-color: var(--bg-header); border-color: var(--border-subtle); backdrop-filter: blur(12px);"
   >
     <div class="max-w-[2048px] w-full mx-auto px-2.5 sm:px-6 2xl:px-8 flex items-center justify-between gap-1.5 sm:gap-4 overflow-hidden">
-      <!-- Left: Minimal Institutional Identity with subtle crypto currency icon -->
+      <!-- Left: Minimal Institutional Identity with Crypto Quantum Logo -->
       <div class="flex items-center space-x-2 shrink-0">
         <div class="flex items-center space-x-1.5 cursor-pointer select-none" @click="store.activeTab = 'trading'">
-          <div
-            class="w-5 h-5 rounded flex items-center justify-center font-mono font-black text-xs border"
-            style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);"
-            title="Crypto Native Quant"
-          >
-            ₿
-          </div>
+          <CryptoLogo :size="20" class="w-5 h-5 rounded-md shadow-xs" />
           <span class="font-mono font-black text-xs sm:text-sm tracking-wide whitespace-nowrap" style="color: var(--text-main);">
             {{ t('nav.title') }}
           </span>

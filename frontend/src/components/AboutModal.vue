@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useI18n } from '../composables/useI18n'
+import CryptoLogo from './CryptoLogo.vue'
 import {
   Code,
   BookOpen,
@@ -54,12 +55,7 @@ async function copyToClipboard(text: string, targetName: string) {
         <!-- Modal Header -->
         <div class="flex items-center justify-between pb-3 border-b" style="border-color: var(--border-subtle);">
           <div class="flex items-center space-x-2.5">
-            <div
-              class="w-7 h-7 rounded-lg flex items-center justify-center font-bold border"
-              style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-main);"
-            >
-              <Code class="w-4 h-4" />
-            </div>
+            <CryptoLogo :size="32" class="w-8 h-8 rounded-xl shadow-xs" />
             <div>
               <h3 class="text-sm font-bold uppercase tracking-wide flex items-center gap-2" style="color: var(--text-main);">
                 <span>R20 Quantum Trader</span>

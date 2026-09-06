@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import { useTheme } from '../../composables/useTheme'
 import { useI18n } from '../../composables/useI18n'
+import CryptoLogo from '../../components/CryptoLogo.vue'
 import { LogIn, AlertCircle, RefreshCw, Sun, Moon, ArrowLeft, Globe } from 'lucide-vue-next'
 
 const auth = useAuthStore()
@@ -67,12 +68,7 @@ async function handleLogin() {
     <div class="w-full max-w-md mx-auto my-auto py-8">
       <!-- Brand Header -->
       <div class="flex flex-col items-center mb-6 text-center">
-        <div
-          class="w-12 h-12 rounded-xl flex items-center justify-center font-mono font-black text-xl border shadow-xs mb-3"
-          style="background-color: var(--bg-card); border-color: var(--border-medium); color: var(--text-main);"
-        >
-          R
-        </div>
+        <CryptoLogo :size="48" class="w-12 h-12 rounded-xl shadow-md mb-3" />
         <div class="text-base font-black font-mono tracking-wide" style="color: var(--text-main);">
           {{ t('admin.loginTitle') }}
         </div>
