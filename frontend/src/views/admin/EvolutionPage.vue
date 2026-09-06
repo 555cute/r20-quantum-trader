@@ -41,6 +41,7 @@ const structuredLessons = ref<any[]>([])
 const memoryVersion = ref<string | null>(null)
 const newMemoryText = ref('')
 const newCategory = ref('TACTICAL')
+const evolutionReport = ref<any>(null)
 
 // Scheduler settings
 const briefingTimes = ref<string[]>(['02:00', '08:00', '14:00', '20:00'])
@@ -51,14 +52,16 @@ async function loadData() {
   loading.value = true
   memoryVersion.value = null
   try {
-    const [libRes, memRes] = await Promise.all([
-      api('/api/v1/admin/prompt-library'),
+    const [libRes, memRes, reportRes] = await Promise.all([
+      api('/api/v1/prompt-library').catch(() => api('/api/v1/admin/prompt-library')),
       api('/api/v1/admin/memory'),
+      api('/api/v1/cache/self-improvement').catch(() => null),
     ])
     lib.value = libRes
-    selectedProfileId.value = libRes.active_profile_id || 'stable'
-    structuredLessons.value = memRes.structured_lessons || []
-    memoryVersion.value = memRes.version || null
+    selectedProfileId.value = libRes?.active_profile_id || 'stable'
+    structuredLessons.value = memRes?.structured_lessons || []
+    memoryVersion.value = memRes?.version || null
+    evolutionReport.value = reportRes || null
     syncWorkingModules()
   } catch (e: any) {
     bannerMsg.value = { text: `加载失败: ${e.message}`, type: 'err' }
@@ -335,6 +338,61 @@ onMounted(loadData)
 
     <!-- TAB 1: Settings & Structured White-Box Memory -->
     <div v-if="activeTab === 'settings'" class="space-y-4">
+      <!-- 核心新增：最新自进化执行实况与诊断成果看板 -->
+      <div v-if="evolutionReport" class="rounded-xl border p-4 shadow-xs space-y-3 font-mono" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
+        <div class="flex items-center justify-between pb-2 border-b" style="border-color: var(--border-subtle);">
+          <div class="flex items-center space-x-2">
+            <Sparkles class="w-4 h-4 text-amber-400" />
+            <h3 class="text-xs sm:text-sm font-black uppercase tracking-wide" style="color: var(--text-main);">
+              最新自进化复盘实况与诊断档案
+            </h3>
+            <span
+              class="text-[10px] px-2 py-0.5 rounded border font-bold"
+              :class="evolutionReport.change_status === 'EVOLVED' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' : 'text-amber-400 bg-amber-500/10 border-amber-500/30'"
+            >
+              {{ evolutionReport.change_status || 'NO_CHANGE' }}
+            </span>
+          </div>
+          <div class="text-[11px]" style="color: var(--text-muted);">
+            复盘时间: <strong class="text-emerald-400 font-bold">{{ evolutionReport.timestamp }}</strong>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+          <div class="p-2 rounded-lg border" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
+            <div class="text-[10px]" style="color: var(--text-faint);">复盘样本数</div>
+            <div class="font-bold text-sm mt-0.5" style="color: var(--text-main);">{{ evolutionReport.total_trades }} 笔平仓</div>
+          </div>
+          <div class="p-2 rounded-lg border" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
+            <div class="text-[10px]" style="color: var(--text-faint);">样本综合胜率</div>
+            <div class="font-bold text-sm mt-0.5 text-emerald-400">{{ evolutionReport.win_rate }}%</div>
+          </div>
+          <div class="p-2 rounded-lg border" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
+            <div class="text-[10px]" style="color: var(--text-faint);">利润因子 (PF)</div>
+            <div class="font-bold text-sm mt-0.5 text-blue-400">{{ evolutionReport.profit_factor }}</div>
+          </div>
+          <div class="p-2 rounded-lg border" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
+            <div class="text-[10px]" style="color: var(--text-faint);">启发式记忆保护</div>
+            <div class="font-bold text-sm mt-0.5 text-purple-400">{{ evolutionReport.memory_preserved ? '100% 启用' : '更新重构' }}</div>
+          </div>
+        </div>
+
+        <div v-if="evolutionReport.memory_overwrites_reason" class="p-2.5 rounded-lg border text-xs" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
+          <div class="text-[10px] uppercase font-bold text-amber-400 mb-0.5">决策裁决理由:</div>
+          <p class="text-[11px] leading-relaxed" style="color: var(--text-muted);">{{ evolutionReport.memory_overwrites_reason }}</p>
+        </div>
+
+        <div v-if="evolutionReport.insights && evolutionReport.insights.length" class="space-y-1">
+          <div class="text-[10px] font-bold uppercase" style="color: var(--text-faint);">AI 逐单归因与深度诊断切片 ({{ evolutionReport.insights.length }} 条)</div>
+          <div class="space-y-1 max-h-[160px] overflow-y-auto pr-1">
+            <div v-for="(ins, idx) in evolutionReport.insights" :key="idx" class="p-2 rounded border text-[11px] leading-relaxed" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-muted);">
+              <span class="text-indigo-400 font-bold mr-1">#{{ idx + 1 }}</span>
+              <span>{{ ins }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Strategy & Schedule Overview -->
       <div class="grid grid-cols-1 md:grid-cols-4 gap-3 font-mono">
         <div class="rounded-xl border p-3.5 shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-subtle);">

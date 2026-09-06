@@ -1,37 +1,69 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useDashboardStore } from '../stores/dashboard'
-import { Sparkles, Brain, Cpu, AlertTriangle } from 'lucide-vue-next'
+import { Sparkles, Brain, Cpu, AlertTriangle, CheckCircle2, Clock, Activity, ShieldCheck, FileText } from 'lucide-vue-next'
 
 const store = useDashboardStore()
 const review = computed(() => store.data?.review || {})
 const memoryMd = computed(() => store.data?.ai_trading_memory_md || '')
+
+const evolutionTime = computed(() => review.value?.timestamp || '--')
+const totalTrades = computed(() => review.value?.total_trades ?? 0)
+const winRate = computed(() => review.value?.win_rate ?? 0)
+const profitFactor = computed(() => review.value?.profit_factor ?? 0)
+const changeStatus = computed(() => review.value?.change_status || 'NO_CHANGE')
+const insights = computed<string[]>(() => review.value?.insights || review.value?.diagnosis_insights || [])
+const actionsTaken = computed<string[]>(() => review.value?.actions_taken || [])
+const overwriteReason = computed(() => review.value?.memory_overwrites_reason || review.value?.summary || '')
 </script>
 
 <template>
   <div class="space-y-3.5 2xl:space-y-5">
-    <!-- Lab Header -->
-    <div class="panel-banner-compact">
+    <!-- Lab Header Banner with Realtime Execution Status -->
+    <div class="p-3 sm:p-4 rounded-xl border flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
       <div class="flex items-center space-x-2.5 2xl:space-x-3">
-        <div class="panel-banner-icon">
-          <Sparkles class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
+        <div class="w-8 h-8 rounded-lg flex items-center justify-center border shrink-0" style="background-color: var(--bg-badge); border-color: var(--border-subtle);">
+          <Sparkles class="w-4 h-4 text-amber-400 shrink-0" />
         </div>
         <div>
-          <h2 class="text-xs sm:text-[13px] 2xl:text-sm font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
-            AI 策略自进化与认知提炼中心
-          </h2>
-          <p class="text-[11px] 2xl:text-xs font-mono mt-0.5" style="color: var(--text-muted);">
-            基于实盘胜率、盈亏比与动力学反馈，每 6 小时全自主修正参数与策略心法
+          <div class="flex items-center space-x-2 flex-wrap gap-y-1">
+            <h2 class="text-xs sm:text-sm font-black font-mono tracking-wide" style="color: var(--text-main);">
+              AI 策略自进化与认知提炼中枢
+            </h2>
+            <span
+              class="text-[10px] font-mono px-2 py-0.5 rounded border font-bold"
+              :class="changeStatus === 'EVOLVED' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' : 'text-amber-400 bg-amber-500/10 border-amber-500/30'"
+            >
+              状态: {{ changeStatus }}
+            </span>
+          </div>
+          <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);">
+            每 6 小时自动读取全量实盘平仓台账进行自省复盘，严防过拟合与情绪干扰
           </p>
         </div>
       </div>
-      <div class="flex items-center space-x-2 text-xs 2xl:text-sm font-mono h-7 2xl:h-8 px-2.5 2xl:px-3 rounded-[4px] border" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
-        <span style="color: var(--text-muted);">自进化主脑:</span>
-        <span class="font-bold font-mono" style="color: var(--color-brand);">{{ store.llmRuntime.model }}</span>
+
+      <!-- Live Evolution Metrics HUD -->
+      <div class="flex items-center space-x-2 sm:space-x-3 text-xs font-mono flex-wrap gap-y-1.5">
+        <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg border" style="background-color: var(--bg-badge); border-color: var(--border-subtle);">
+          <Clock class="w-3.5 h-3.5 text-indigo-400" />
+          <span style="color: var(--text-muted);">最新复盘:</span>
+          <strong class="text-emerald-400 font-bold num-tabular">{{ evolutionTime }}</strong>
+        </div>
+        <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg border" style="background-color: var(--bg-badge); border-color: var(--border-subtle);">
+          <Activity class="w-3.5 h-3.5 text-blue-400" />
+          <span style="color: var(--text-muted);">样本:</span>
+          <strong style="color: var(--text-main);">{{ totalTrades }}笔 ({{ winRate }}%)</strong>
+        </div>
+        <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg border" style="background-color: var(--bg-badge); border-color: var(--border-subtle);">
+          <Cpu class="w-3.5 h-3.5 text-purple-400" />
+          <span style="color: var(--text-muted);">模型:</span>
+          <strong class="text-indigo-300">{{ store.llmRuntime.model }}</strong>
+        </div>
       </div>
     </div>
 
-    <!-- Upstream LLM failure notice: explains why the memory library is unchanged -->
+    <!-- Upstream LLM failure notice -->
     <div
       v-if="review.llm_error"
       class="rounded-xl border p-3 sm:p-3.5 flex items-start space-x-2 font-mono text-[11px] 2xl:text-xs"
@@ -39,93 +71,124 @@ const memoryMd = computed(() => store.data?.ai_trading_memory_md || '')
     >
       <AlertTriangle class="w-3.5 h-3.5 shrink-0 mt-0.5" />
       <div class="space-y-0.5">
-        <div class="font-bold">最近一轮 {{ review.timestamp || '--' }} 复盘未能完成：大模型网关返回错误，本轮按 NO_CHANGE 保留原有心法，记忆库因此没有新增条目。</div>
+        <div class="font-bold">最近一轮 {{ review.timestamp || '--' }} 复盘未能完成：大模型网关返回错误，本轮按 NO_CHANGE 保留原有心法。</div>
         <div style="color: var(--text-muted);">错误详情：{{ review.llm_error }}</div>
-        <div style="color: var(--text-faint);">系统已自动重试；下一周期（每 6 小时）将再次尝试提炼。可在后台「AI 模型」切换可用模型后立即手动触发。</div>
       </div>
     </div>
 
-    <!-- Dual Layout: Realtime Memory MD & Factor Library -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-3.5 2xl:gap-5">
+    <!-- Dual Layout: Realtime Memory MD & Insights Diagnosis -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-3.5 2xl:gap-5 items-stretch">
+      
       <!-- 1. Realtime Trading Memory (Markdown) -->
       <div
-        class="rounded-xl border p-4 sm:p-5 2xl:p-6 flex flex-col justify-between shadow-xs transition-colors"
+        class="h-full rounded-xl border p-4 sm:p-5 flex flex-col justify-between shadow-xs transition-colors"
         style="background-color: var(--bg-card); border-color: var(--border-subtle);"
       >
         <div>
           <div class="flex items-center justify-between pb-3 mb-3 border-b" style="border-color: var(--border-subtle);">
             <div class="flex items-center space-x-2">
-              <Brain class="w-4 h-4 2xl:w-4.5 2xl:h-4.5" style="color: var(--color-brand);" />
-              <h3 class="text-xs 2xl:text-sm font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
-                实战经验记忆库 (Trading Memory)
+              <Brain class="w-4 h-4 text-emerald-400" />
+              <h3 class="text-xs sm:text-sm font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
+                实战经验心法库 (Trading Memory)
               </h3>
             </div>
             <span
-              class="text-[10px] 2xl:text-xs font-mono px-2 py-0.5 rounded border font-bold"
-              style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--text-muted);"
+              class="text-[10px] font-mono px-2 py-0.5 rounded border font-bold text-emerald-400"
+              style="background-color: var(--bg-badge); border-color: var(--border-subtle);"
             >
-              每6小时自动沉淀
+              白盒启发式沉淀
             </span>
           </div>
           <div
-            class="p-3.5 2xl:p-4.5 rounded-lg border text-xs 2xl:text-sm font-mono leading-relaxed max-h-[360px] 2xl:max-h-[480px] overflow-y-auto whitespace-pre-wrap select-text"
+            class="p-3.5 rounded-lg border text-xs font-mono leading-relaxed max-h-[440px] overflow-y-auto whitespace-pre-wrap select-text"
             style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-main);"
           >
             {{ memoryMd || '正在读取长期心法知识库...' }}
           </div>
         </div>
+        <div class="pt-3 mt-3 border-t text-[11px] font-mono flex items-center justify-between" style="border-color: var(--border-subtle); color: var(--text-faint);">
+          <span>存储文件: <code>data/AI_TRADING_MEMORY.md</code></span>
+          <span class="text-emerald-400 font-bold">注入交易 Prompt: ACTIVE</span>
+        </div>
       </div>
 
-      <!-- 2. Dynamic Factor Weights & Parameters -->
+      <!-- 2. AI Diagnosis & Actions Taken -->
       <div
-        class="rounded-xl border p-4 sm:p-5 2xl:p-6 flex flex-col justify-between shadow-xs transition-colors"
+        class="h-full rounded-xl border p-4 sm:p-5 flex flex-col justify-between shadow-xs transition-colors"
         style="background-color: var(--bg-card); border-color: var(--border-subtle);"
       >
-        <div>
-          <div class="flex items-center justify-between pb-3 mb-3 border-b" style="border-color: var(--border-subtle);">
+        <div class="space-y-3">
+          <div class="flex items-center justify-between pb-3 border-b" style="border-color: var(--border-subtle);">
             <div class="flex items-center space-x-2">
-              <Cpu class="w-4 h-4 2xl:w-4.5 2xl:h-4.5" style="color: var(--color-brand);" />
-              <h3 class="text-xs 2xl:text-sm font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
-                动态因子权重与量化自适应参数
+              <FileText class="w-4 h-4 text-indigo-400" />
+              <h3 class="text-xs sm:text-sm font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
+                最新自进化诊断洞察与行动清单
               </h3>
             </div>
             <span
-              class="text-[10px] 2xl:text-xs font-mono px-2 py-0.5 rounded border font-bold"
+              class="text-[10px] font-mono px-2 py-0.5 rounded border font-bold"
               style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--text-muted);"
             >
-              动态反馈
+              PF: {{ profitFactor }}
             </span>
           </div>
 
-          <div class="space-y-3 2xl:space-y-4 font-mono text-xs 2xl:text-sm">
-            <div class="p-3 2xl:p-4 rounded-lg border" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
-              <div class="text-[10px] 2xl:text-xs uppercase mb-1 font-bold" style="color: var(--text-faint);">最近复盘结论</div>
-              <p class="text-xs 2xl:text-sm font-sans leading-relaxed" style="color: var(--text-main);">
-                {{ review.summary || '当前市场因子权重处于最优稳态区间，微积分动能结合保本移损锁死期望值优势。' }}
-              </p>
-            </div>
+          <!-- 决策理由 -->
+          <div v-if="overwriteReason" class="p-3 rounded-lg border text-xs font-mono leading-relaxed" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
+            <div class="text-[10px] uppercase mb-1 font-bold text-amber-400">本次复盘裁决理由</div>
+            <p class="text-xs font-sans leading-relaxed" style="color: var(--text-main);">
+              {{ overwriteReason }}
+            </p>
+          </div>
 
-            <div class="grid grid-cols-2 2xl:grid-cols-4 gap-2 2xl:gap-3 text-center">
-              <div class="p-2.5 2xl:p-3.5 rounded-lg border" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
-                <div class="text-[10px] 2xl:text-xs" style="color: var(--text-faint);">微积分动能权重</div>
-                <div class="font-bold text-sm 2xl:text-base mt-0.5 num-tabular" style="color: var(--color-up);">35%</div>
+          <!-- 诊断洞察列表 -->
+          <div class="space-y-2">
+            <div class="text-[10px] font-mono uppercase font-bold" style="color: var(--text-faint);">
+              AI 逐单归因与痛点诊断 ({{ insights.length }}项)
+            </div>
+            <div class="space-y-1.5 max-h-[220px] overflow-y-auto pr-1">
+              <div
+                v-for="(item, idx) in insights"
+                :key="idx"
+                class="p-2 rounded-lg border text-[11px] font-mono leading-relaxed"
+                style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-muted);"
+              >
+                <div class="flex items-start space-x-1.5">
+                  <span class="text-indigo-400 font-bold shrink-0">#{{ idx + 1 }}</span>
+                  <span style="color: var(--text-main);">{{ item }}</span>
+                </div>
               </div>
-              <div class="p-2.5 2xl:p-3.5 rounded-lg border" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
-                <div class="text-[10px] 2xl:text-xs" style="color: var(--text-faint);">聪明钱流向权重</div>
-                <div class="font-bold text-sm 2xl:text-base mt-0.5 num-tabular" style="color: var(--text-main);">30%</div>
+              <div v-if="insights.length === 0" class="text-xs font-mono py-2 text-center" style="color: var(--text-faint);">
+                暂无诊断条目，策略处于稳态运行中
               </div>
-              <div class="p-2.5 2xl:p-3.5 rounded-lg border" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
-                <div class="text-[10px] 2xl:text-xs" style="color: var(--text-faint);">多周期结构共振</div>
-                <div class="font-bold text-sm 2xl:text-base mt-0.5 num-tabular" style="color: var(--text-main);">25%</div>
-              </div>
-              <div class="p-2.5 2xl:p-3.5 rounded-lg border" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
-                <div class="text-[10px] 2xl:text-xs" style="color: var(--text-faint);">全网舆情过滤</div>
-                <div class="font-bold text-sm 2xl:text-base mt-0.5 num-tabular" style="color: var(--color-warn);">10%</div>
+            </div>
+          </div>
+
+          <!-- 执行行动清单 -->
+          <div v-if="actionsTaken.length > 0" class="space-y-1.5 pt-1">
+            <div class="text-[10px] font-mono uppercase font-bold" style="color: var(--text-faint);">
+              拟定执行行动 ({{ actionsTaken.length }}项)
+            </div>
+            <div class="space-y-1">
+              <div
+                v-for="(act, idx) in actionsTaken"
+                :key="idx"
+                class="flex items-start space-x-1.5 text-[11px] font-mono"
+                style="color: var(--text-main);"
+              >
+                <CheckCircle2 class="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                <span>{{ act }}</span>
               </div>
             </div>
           </div>
         </div>
+
+        <div class="pt-3 mt-3 border-t text-[11px] font-mono flex items-center justify-between" style="border-color: var(--border-subtle); color: var(--text-faint);">
+          <span>复盘基线: 最近 {{ totalTrades }} 笔平仓</span>
+          <span class="text-indigo-400 font-bold">自适应进化闭环</span>
+        </div>
       </div>
+
     </div>
   </div>
 </template>
