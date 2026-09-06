@@ -217,7 +217,7 @@ const showAboutModal = ref(false)
       </div>
 
       <!-- Drawer Nav Items (Full Height, Ergonomic 44px Touch Targets) -->
-      <nav class="flex-1 overflow-y-auto p-3 space-y-4">
+      <nav class="flex-1 overflow-y-auto p-3 space-y-3">
         <div v-for="group in navGroups" :key="group.label">
           <div
             class="text-[10px] font-mono font-bold uppercase tracking-wider px-2.5 py-1 mb-1"
@@ -225,7 +225,7 @@ const showAboutModal = ref(false)
           >
             {{ group.label }}
           </div>
-          <div class="space-y-1">
+          <div class="space-y-1.5">
             <button
               v-for="item in group.items"
               :key="item.id"
@@ -271,7 +271,7 @@ const showAboutModal = ref(false)
 
     <!-- Desktop Sidebar (Hidden completely on mobile, only visible on md:) -->
     <aside
-      class="hidden md:flex md:w-[220px] md:shrink-0 md:border-r md:flex-col md:h-screen md:sticky md:top-0 transition-colors z-30"
+      class="hidden md:flex md:w-[240px] md:shrink-0 md:border-r md:flex-col md:h-screen md:sticky md:top-0 transition-colors z-30"
       style="background-color: var(--bg-card); border-color: var(--border-subtle);"
     >
       <!-- Brand Header (Desktop) -->
@@ -306,19 +306,19 @@ const showAboutModal = ref(false)
 
       <!-- Nav Groups (Desktop Vertical) -->
       <nav class="overflow-y-auto overflow-x-hidden flex-1 py-2 px-2.5 space-y-1">
-        <div v-for="group in navGroups" :key="group.label" class="mb-2.5">
+        <div v-for="group in navGroups" :key="group.label" class="mb-4.5">
           <div
-            class="text-[9px] font-mono font-bold uppercase tracking-wider px-2 py-1 flex items-center justify-between"
+            class="text-[10px] font-mono font-bold uppercase tracking-wider px-2.5 py-1.5 mb-1 flex items-center justify-between"
             style="color: var(--text-faint);"
           >
             <span>{{ group.label }}</span>
           </div>
-          <div class="space-y-0.5">
+          <div class="space-y-1.5">
             <button
               v-for="item in group.items"
               :key="item.id"
               @click="navigateTo(item.id)"
-              class="w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-mono font-medium transition-all flex items-center space-x-2 cursor-pointer"
+              class="w-full text-left px-3 py-2 rounded-lg text-xs font-mono font-medium transition-all flex items-center space-x-2.5 cursor-pointer min-h-[38px]"
               :style="activeView === item.id
                 ? { backgroundColor: 'var(--color-brand-bg)', color: 'var(--color-brand)', borderColor: 'var(--color-brand-border)' }
                 : { color: 'var(--text-muted)' }"
