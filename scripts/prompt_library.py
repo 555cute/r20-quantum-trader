@@ -764,17 +764,6 @@ def apply_module_layout(base: str, profile: dict[str, Any], pipeline: str, label
         custom = layout if isinstance(layout, list) else text_to_modules(str(profile.get(pipeline) or ""), "custom")
         return render_variables(compile_modules(base_modules + custom), context)
 
-    if pipeline == "trading_system":
-        # System pipeline: the profile layout is the authoritative single source of truth.
-        # User configurations must never be silently overridden by hardcoded base strings or zombie modules.
-        active_items = [
-            item for item in layout
-            if isinstance(item, dict) and item.get("enabled", True) and str(item.get("content") or "").strip()
-        ]
-        if not active_items:
-            active_items = base_modules
-        return render_variables(compile_modules(active_items), context)
-
     base_by_title = {item["title"]: item for item in base_modules}
     layout_titles = {str(item.get("title") or "") for item in layout if item.get("source") == "base"}
     runtime_groups = _trading_user_parent_groups(base_modules, layout_titles) if pipeline == "trading_user" else {}
@@ -791,6 +780,10 @@ def apply_module_layout(base: str, profile: dict[str, Any], pipeline: str, label
         title = str(item.get("title") or "")
         live = base_by_title.get(title)
         if not live:
+            if item.get("enabled", True):
+                content = str(item.get("content") or "").strip()
+                if content:
+                    output.append({**item, "content": content})
             continue
 
         group = runtime_groups.get(title, [live])
@@ -804,12 +797,16 @@ def apply_module_layout(base: str, profile: dict[str, Any], pipeline: str, label
                 content = raw_content
             else:
                 content = compile_modules(group)
+        elif any(token in title for token in ("三重滤网裁决协议", "开仓与价格几何")):
+            content = live["content"]
         else:
             content = str(item.get("content") if item.get("content") is not None else live["content"])
         output.append({**live, "content": content})
 
-    # Fail closed for user pipeline: preserve live sections that an older layout does not know.
-    output.extend(module for module in base_modules if module["title"] not in matched)
+    # Fail closed: only for trading_user to preserve live runtime sections
+    if pipeline == "trading_user":
+        output.extend(module for module in base_modules if module["title"] not in matched)
+
     return render_variables(compile_modules(output), context)
 
 
