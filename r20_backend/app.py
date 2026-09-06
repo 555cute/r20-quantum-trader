@@ -3000,13 +3000,13 @@ _CANDLES_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 
 
 @app.get("/api/v1/market/{inst_id}/candles")
-def market_candles(inst_id: str, bar: str = "1H", limit: int = 60) -> dict[str, Any]:
+def market_candles(inst_id: str, bar: str = "1H", limit: int = 150) -> dict[str, Any]:
     if not inst_id.endswith("-SWAP"):
         raise HTTPException(status_code=400, detail="only SWAP instrument ids are accepted")
     valid_bars = {"1m", "5m", "15m", "1H", "4H", "1D"}
     if bar not in valid_bars:
         bar = "1H"
-    limit = max(10, min(limit, 100))
+    limit = max(10, min(limit, 300))
     cache_key = f"{inst_id}:{bar}:{limit}"
     now_ts = time.time()
     cached = _CANDLES_CACHE.get(cache_key)
