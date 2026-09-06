@@ -46,6 +46,19 @@ _HARVEST_START = time.time()
 # never let upstream retries push the whole harvest past that budget.
 UPSTREAM_BUDGET_SECONDS = 9.0
 
+# The OKX CLI refuses *all* news endpoints while a demo/simulated profile is
+# selected ("News features are not available in demo/simulated trading mode").
+# News is public market data and is unrelated to order routing, so the harvest
+# always runs against the live data profile; trading env is left untouched.
+DEMO_ENV_FLAGS = ("OKX_DEMO", "OKX_SIMULATED", "R20_OKX_ENV", "OKX_ENV")
+
+
+def _news_env() -> dict:
+    env = dict(os.environ)
+    for flag in DEMO_ENV_FLAGS:
+        env.pop(flag, None)
+    return env
+
 
 def run_json_cmd(cmd: str, timeout: int = 5, retries: int = 1):
     """Run an OKX CLI command and parse JSON. Transient upstream failures are retried
@@ -58,13 +71,14 @@ def run_json_cmd(cmd: str, timeout: int = 5, retries: int = 1):
             timeout = min(timeout, 3)
             retries = attempt  # no further attempts
         try:
-            res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+            res = subprocess.run(cmd, shell=True, capture_output=True, text=True,
+                                 timeout=timeout, env=_news_env())
             out = (res.stdout or "").strip()
             if out:
                 try:
                     parsed = json.loads(out)
                 except Exception as je:
-                    last_err = f"invalid JSON: {je}"
+                    last_err = f"non-JSON stdout: {out[:120]}"
                 else:
                     if isinstance(parsed, dict):
                         det = parsed.get("details")
