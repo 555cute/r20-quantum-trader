@@ -236,7 +236,7 @@ onMounted(loadData)
 </script>
 
 <template>
-  <div class="space-y-4 max-w-[2160px] mx-auto">
+  <div class="space-y-4 max-w-[2048px] mx-auto">
     <!-- Header -->
     <div class="panel-banner-compact">
       <div class="flex items-center space-x-2.5">

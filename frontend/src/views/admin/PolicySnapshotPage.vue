@@ -164,30 +164,30 @@ onMounted(() => {
 
     <!-- Header Control Station -->
     <div
-      class="rounded-2xl border p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+      class="rounded-2xl border p-4 sm:p-5 2xl:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4"
       style="background-color: var(--bg-card); border-color: var(--border-subtle);"
     >
       <div class="flex items-center space-x-3">
         <div
-          class="p-2.5 rounded-xl border"
+          class="p-2.5 2xl:p-3 rounded-xl border"
           style="background-color: var(--color-brand-bg); border-color: var(--color-brand-border); color: var(--color-brand);"
         >
-          <Layers class="w-5 h-5" />
+          <Layers class="w-5 h-5 2xl:w-6 2xl:h-6" />
         </div>
         <div>
           <div class="flex items-center space-x-2">
-            <h2 class="text-sm font-bold font-mono" style="color: var(--text-main);">
+            <h2 class="text-sm 2xl:text-base font-bold font-mono" style="color: var(--text-main);">
               策略大一统版本快照 (Policy Snapshot Workbench)
             </h2>
             <span
               v-if="snapshotData?.policy_version"
-              class="text-[10px] font-mono font-bold px-2 py-0.5 rounded border"
+              class="text-[10px] 2xl:text-xs font-mono font-bold px-2 py-0.5 rounded border"
               style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);"
             >
               {{ snapshotData.policy_version }}
             </span>
           </div>
-          <p class="text-xs font-mono mt-0.5" style="color: var(--text-muted);">
+          <p class="text-xs 2xl:text-sm font-mono mt-0.5" style="color: var(--text-muted);">
             四大策略单元（提示词、自进化、物理拦截、模型委员会）的不可变指纹聚合与具名归档/一键回滚。
           </p>
         </div>
@@ -198,10 +198,10 @@ onMounted(() => {
         <button
           @click="showArchiveModal = true"
           :disabled="!auth.isSuperadmin"
-          class="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-mono font-bold cursor-pointer transition-all shadow-xs"
+          class="flex items-center space-x-1.5 px-3 py-1.5 2xl:px-4 2xl:py-2 rounded-xl text-xs 2xl:text-sm font-mono font-bold cursor-pointer transition-all shadow-xs"
           style="background-color: var(--text-main); color: var(--bg-card);"
         >
-          <BookmarkPlus class="w-3.5 h-3.5" />
+          <BookmarkPlus class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
           <span>归档为策略版本</span>
         </button>
 
@@ -209,10 +209,10 @@ onMounted(() => {
         <button
           @click="fetchSnapshot"
           :disabled="refreshing"
-          class="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border text-xs font-mono font-bold cursor-pointer transition-all shadow-xs"
+          class="flex items-center space-x-1.5 px-3 py-1.5 2xl:px-4 2xl:py-2 rounded-xl border text-xs 2xl:text-sm font-mono font-bold cursor-pointer transition-all shadow-xs"
           style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-main);"
         >
-          <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': refreshing }" />
+          <RefreshCw class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" :class="{ 'animate-spin': refreshing }" />
           <span>{{ refreshing ? '抓取中...' : '刷新指纹' }}</span>
         </button>
       </div>
@@ -231,35 +231,35 @@ onMounted(() => {
       正在计算并聚合四大策略单元实时指纹...
     </div>
 
-    <div v-else-if="snapshotData?.snapshot" class="space-y-4">
+    <div v-else-if="snapshotData?.snapshot" class="space-y-4 2xl:space-y-6">
       <!-- 1. Master Identity Bar -->
       <div
-        class="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 rounded-2xl border font-mono text-xs"
+        class="grid grid-cols-1 sm:grid-cols-3 gap-3 2xl:gap-4 p-4 2xl:p-5 rounded-2xl border font-mono text-xs 2xl:text-sm"
         style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);"
       >
         <div class="flex items-center space-x-2">
-          <Hash class="w-4 h-4 text-purple-400 shrink-0" />
+          <Hash class="w-4 h-4 2xl:w-5 2xl:h-5 text-purple-400 shrink-0" />
           <div>
-            <div class="text-[10px] text-[#8A99AD]">当前活跃策略版本 (Active Version)</div>
-            <div class="font-bold text-sm mt-0.5" style="color: var(--text-main);">
+            <div class="text-[10px] 2xl:text-xs text-[#8A99AD]">当前活跃策略版本 (Active Version)</div>
+            <div class="font-bold text-sm 2xl:text-base mt-0.5" style="color: var(--text-main);">
               {{ snapshotData.snapshot.policy_version }}
             </div>
           </div>
         </div>
         <div class="flex items-center space-x-2">
-          <Activity class="w-4 h-4 text-cyan-400 shrink-0" />
+          <Activity class="w-4 h-4 2xl:w-5 2xl:h-5 text-cyan-400 shrink-0" />
           <div>
-            <div class="text-[10px] text-[#8A99AD]">不可变指纹哈希 (Fingerprint Hash)</div>
-            <div class="font-bold text-sm mt-0.5 text-cyan-400">
+            <div class="text-[10px] 2xl:text-xs text-[#8A99AD]">不可变指纹哈希 (Fingerprint Hash)</div>
+            <div class="font-bold text-sm 2xl:text-base mt-0.5 text-cyan-400">
               #{{ snapshotData.snapshot.policy_hash }}
             </div>
           </div>
         </div>
         <div class="flex items-center space-x-2">
-          <Clock class="w-4 h-4 text-emerald-400 shrink-0" />
+          <Clock class="w-4 h-4 2xl:w-5 2xl:h-5 text-emerald-400 shrink-0" />
           <div>
-            <div class="text-[10px] text-[#8A99AD]">快照生成时间 (Snapshot Time)</div>
-            <div class="font-bold text-sm mt-0.5 text-emerald-400">
+            <div class="text-[10px] 2xl:text-xs text-[#8A99AD]">快照生成时间 (Snapshot Time)</div>
+            <div class="font-bold text-sm 2xl:text-base mt-0.5 text-emerald-400">
               {{ formatTimestamp(snapshotData.snapshot.timestamp) }}
             </div>
           </div>
@@ -267,7 +267,7 @@ onMounted(() => {
       </div>
 
       <!-- 2. Four Strategy Units Matrix -->
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 2xl:gap-5">
         <!-- Unit 1: Prompt Policy -->
         <div
           class="p-4 sm:p-5 rounded-2xl border space-y-3 flex flex-col justify-between"

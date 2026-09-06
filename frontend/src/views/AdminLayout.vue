@@ -363,7 +363,7 @@ const showAboutModal = ref(false)
     <div class="flex-1 flex flex-col min-w-0">
       <!-- Top Title Header Bar (Clean, Unified) -->
       <header
-        class="h-13 sm:h-14 border-b px-3 sm:px-6 flex items-center justify-between z-20 transition-colors shrink-0"
+        class="h-13 sm:h-14 2xl:h-16 border-b px-3 sm:px-6 2xl:px-8 flex items-center justify-between z-20 transition-colors shrink-0"
         style="background-color: var(--bg-header); border-color: var(--border-subtle); backdrop-filter: blur(12px);"
       >
         <!-- Mobile Drawer Hamburger + Breadcrumbs -->
@@ -441,7 +441,7 @@ const showAboutModal = ref(false)
       </header>
 
       <!-- Router View Workspace -->
-      <main class="flex-1 p-3.5 sm:p-5 overflow-y-auto max-w-[2160px] w-full mx-auto">
+      <main class="flex-1 p-3.5 sm:p-5 2xl:p-8 overflow-y-auto max-w-[2048px] w-full mx-auto">
         <router-view />
       </main>
     </div>

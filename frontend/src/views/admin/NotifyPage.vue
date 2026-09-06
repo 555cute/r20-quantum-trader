@@ -226,7 +226,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="space-y-4 max-w-[2160px] mx-auto">
+  <div class="space-y-4 max-w-[2048px] mx-auto">
     <div class="flex items-center justify-between">
       <p class="text-xs font-mono" style="color: var(--text-muted);">逐通道配置、仅诊断、发送测试；最后统一保存投递时间。</p>
       <span

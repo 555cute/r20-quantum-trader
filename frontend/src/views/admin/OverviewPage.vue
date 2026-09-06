@@ -97,7 +97,7 @@ const quickNav = [
 </script>
 
 <template>
-  <div class="space-y-4 max-w-[2160px] mx-auto">
+  <div class="space-y-4 2xl:space-y-6 max-w-[2048px] mx-auto">
     <!-- Top Executive Header Strip -->
     <div class="panel-banner-compact">
       <div class="flex items-center space-x-2.5">
@@ -106,14 +106,14 @@ const quickNav = [
         </div>
         <div>
           <div class="flex items-center space-x-2">
-            <h1 class="text-xs sm:text-[13px] font-black font-mono tracking-wide" style="color: var(--text-main);">
+            <h1 class="text-xs sm:text-[13px] 2xl:text-sm font-black font-mono tracking-wide" style="color: var(--text-main);">
               R20 QUANTUM CONTROL CENTER
             </h1>
             <span class="badge-lever">
               v7.4.2
             </span>
           </div>
-          <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);">
+          <p class="text-[11px] 2xl:text-xs font-mono mt-0.5" style="color: var(--text-muted);">
             交易引擎、微积分动力学、数据健康与物理拦截门禁全景监控
           </p>
         </div>
@@ -140,70 +140,70 @@ const quickNav = [
     <!-- Runtime Data -->
     <template v-else-if="runtime">
       <!-- 4 High-Density Metric Bento Cards -->
-      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 2xl:gap-4">
         <!-- 1. 服务状态 -->
         <div
-          class="rounded-xl border p-4 shadow-xs transition-colors"
+          class="rounded-xl border p-4 2xl:p-5 shadow-xs transition-colors"
           style="background-color: var(--bg-card); border-color: var(--border-subtle);"
         >
           <div class="flex items-center justify-between mb-2">
-            <span class="text-[11px] font-mono" style="color: var(--text-muted);">后台服务进程</span>
+            <span class="text-[11px] 2xl:text-xs font-mono" style="color: var(--text-muted);">后台服务进程</span>
             <div
-              class="w-6 h-6 rounded-md flex items-center justify-center border"
+              class="w-6 h-6 2xl:w-7 2xl:h-7 rounded-md flex items-center justify-center border"
               style="background-color: var(--color-up-bg); border-color: var(--color-up-border); color: var(--color-up);"
             >
-              <Server class="w-3.5 h-3.5" />
+              <Server class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
             </div>
           </div>
-          <div class="text-xl sm:text-2xl font-black font-mono tracking-tight" style="color: var(--color-up);">
+          <div class="text-xl sm:text-2xl 2xl:text-3xl font-black font-mono tracking-tight" style="color: var(--color-up);">
             ONLINE
           </div>
-          <div class="text-[10px] font-mono mt-1" style="color: var(--text-faint);">
+          <div class="text-[10px] 2xl:text-[11px] font-mono mt-1" style="color: var(--text-faint);">
             PID {{ runtime.service?.pid || '--' }} · FastAPI V5
           </div>
         </div>
 
         <!-- 2. 运行时间 -->
         <div
-          class="rounded-xl border p-4 shadow-xs transition-colors"
+          class="rounded-xl border p-4 2xl:p-5 shadow-xs transition-colors"
           style="background-color: var(--bg-card); border-color: var(--border-subtle);"
         >
           <div class="flex items-center justify-between mb-2">
-            <span class="text-[11px] font-mono" style="color: var(--text-muted);">引擎持续运行</span>
+            <span class="text-[11px] 2xl:text-xs font-mono" style="color: var(--text-muted);">引擎持续运行</span>
             <div
-              class="w-6 h-6 rounded-md flex items-center justify-center border"
+              class="w-6 h-6 2xl:w-7 2xl:h-7 rounded-md flex items-center justify-center border"
               style="background-color: var(--color-brand-bg); border-color: var(--color-brand-border); color: var(--color-brand);"
             >
-              <Activity class="w-3.5 h-3.5" />
+              <Activity class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
             </div>
           </div>
-          <div class="text-xl sm:text-2xl font-black font-mono tracking-tight num-tabular" style="color: var(--text-main);">
+          <div class="text-xl sm:text-2xl 2xl:text-3xl font-black font-mono tracking-tight num-tabular" style="color: var(--text-main);">
             {{ duration(runtime.service?.uptime_seconds) }}
           </div>
-          <div class="text-[10px] font-mono mt-1" style="color: var(--text-faint);">
+          <div class="text-[10px] 2xl:text-[11px] font-mono mt-1" style="color: var(--text-faint);">
             已运行秒数 {{ runtime.service?.uptime_seconds || 0 }}s
           </div>
         </div>
 
         <!-- 3. LLM 核心主脑 -->
         <div
-          class="rounded-xl border p-4 shadow-xs transition-colors cursor-pointer group"
+          class="rounded-xl border p-4 2xl:p-5 shadow-xs transition-colors cursor-pointer group"
           style="background-color: var(--bg-card); border-color: var(--border-subtle);"
           @click="router.push('/admin/llm')"
         >
           <div class="flex items-center justify-between mb-2">
-            <span class="text-[11px] font-mono" style="color: var(--text-muted);">决策主脑模型</span>
+            <span class="text-[11px] 2xl:text-xs font-mono" style="color: var(--text-muted);">决策主脑模型</span>
             <div
-              class="w-6 h-6 rounded-md flex items-center justify-center border"
+              class="w-6 h-6 2xl:w-7 2xl:h-7 rounded-md flex items-center justify-center border"
               style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--text-main);"
             >
-              <Cpu class="w-3.5 h-3.5" />
+              <Cpu class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
             </div>
           </div>
-          <div class="text-sm sm:text-base font-black font-mono truncate" style="color: var(--text-main);">
+          <div class="text-sm sm:text-base 2xl:text-lg font-black font-mono truncate" style="color: var(--text-main);">
             {{ runtime.llm_runtime?.active_model || 'gemini-3.8-flash-high' }}
           </div>
-          <div class="text-[10px] font-mono mt-1 flex items-center space-x-1.5" style="color: var(--text-faint);">
+          <div class="text-[10px] 2xl:text-[11px] font-mono mt-1 flex items-center space-x-1.5" style="color: var(--text-faint);">
             <span>推理思考: {{ runtime.llm_runtime?.active_reasoning_effort || 'HIGH' }}</span>
             <span>·</span>
             <span class="text-indigo-400 group-hover:underline">配置通道 →</span>
@@ -212,23 +212,23 @@ const quickNav = [
 
         <!-- 4. 交易所环境与授权 -->
         <div
-          class="rounded-xl border p-4 shadow-xs transition-colors cursor-pointer group"
+          class="rounded-xl border p-4 2xl:p-5 shadow-xs transition-colors cursor-pointer group"
           style="background-color: var(--bg-card); border-color: var(--border-subtle);"
           @click="router.push('/admin/security')"
         >
           <div class="flex items-center justify-between mb-2">
-            <span class="text-[11px] font-mono" style="color: var(--text-muted);">OKX 连接环境</span>
+            <span class="text-[11px] 2xl:text-xs font-mono" style="color: var(--text-muted);">OKX 连接环境</span>
             <div
-              class="w-6 h-6 rounded-md flex items-center justify-center border"
+              class="w-6 h-6 2xl:w-7 2xl:h-7 rounded-md flex items-center justify-center border"
               style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--text-main);"
             >
-              <Database class="w-3.5 h-3.5" />
+              <Database class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
             </div>
           </div>
-          <div class="text-xl sm:text-2xl font-black font-mono tracking-tight" style="color: var(--color-brand);">
+          <div class="text-xl sm:text-2xl 2xl:text-3xl font-black font-mono tracking-tight" style="color: var(--color-brand);">
             {{ runtime.credentials?.simulated_trading ? 'DEMO' : 'LIVE' }}
           </div>
-          <div class="text-[10px] font-mono mt-1 flex items-center space-x-1" style="color: var(--text-faint);">
+          <div class="text-[10px] 2xl:text-[11px] font-mono mt-1 flex items-center space-x-1" style="color: var(--text-faint);">
             <span :class="runtime.credentials?.okx_configured ? 'text-emerald-400' : 'text-amber-400'">
               ● {{ runtime.credentials?.okx_configured ? 'API 凭证就绪' : '模拟环境就绪' }}
             </span>
@@ -239,26 +239,26 @@ const quickNav = [
       </div>
 
       <!-- Quick Nav Action Deck -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 2xl:gap-4">
         <button
           v-for="nav in quickNav"
           :key="nav.route"
           @click="router.push(nav.route)"
-          class="p-3.5 rounded-xl border flex items-center justify-between transition-all cursor-pointer text-left group"
+          class="p-3.5 2xl:p-4 rounded-xl border flex items-center justify-between transition-all cursor-pointer text-left group"
           style="background-color: var(--bg-card); border-color: var(--border-subtle);"
         >
           <div class="flex items-center space-x-3">
             <div
-              class="w-8 h-8 rounded-lg flex items-center justify-center border shrink-0 transition-transform group-hover:scale-105"
+              class="w-8 h-8 2xl:w-9 2xl:h-9 rounded-lg flex items-center justify-center border shrink-0 transition-transform group-hover:scale-105"
               style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-main);"
             >
-              <component :is="nav.icon" class="w-4 h-4" />
+              <component :is="nav.icon" class="w-4 h-4 2xl:w-4.5 2xl:h-4.5" />
             </div>
             <div>
-              <div class="text-xs font-black font-mono group-hover:text-blue-500 transition-colors" style="color: var(--text-main);">
+              <div class="text-xs 2xl:text-sm font-black font-mono group-hover:text-blue-500 transition-colors" style="color: var(--text-main);">
                 {{ nav.label }}
               </div>
-              <div class="text-[10px] font-mono truncate" style="color: var(--text-faint);">
+              <div class="text-[10px] 2xl:text-[11px] font-mono truncate" style="color: var(--text-faint);">
                 {{ nav.desc }}
               </div>
             </div>
@@ -268,10 +268,10 @@ const quickNav = [
       </div>
 
       <!-- Main Dual Panel: LLM Decision Audit & Data Freshness -->
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 2xl:gap-5">
         <!-- Left: Full Decisions Audit (2 Columns) -->
         <div
-          class="lg:col-span-2 rounded-xl border p-4 sm:p-5 shadow-xs transition-colors flex flex-col justify-between"
+          class="lg:col-span-2 rounded-xl border p-4 sm:p-5 2xl:p-6 shadow-xs transition-colors flex flex-col justify-between"
           style="background-color: var(--bg-card); border-color: var(--border-subtle);"
         >
           <div>
@@ -334,7 +334,7 @@ const quickNav = [
 
         <!-- Right: Data Health Monitor (1 Column) -->
         <div
-          class="rounded-xl border p-4 sm:p-5 shadow-xs transition-colors flex flex-col justify-between"
+          class="rounded-xl border p-4 sm:p-5 2xl:p-6 shadow-xs transition-colors flex flex-col justify-between"
           style="background-color: var(--bg-card); border-color: var(--border-subtle);"
         >
           <div>

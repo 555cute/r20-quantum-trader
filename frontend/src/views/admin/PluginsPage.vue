@@ -24,7 +24,7 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="space-y-4 max-w-[2160px] mx-auto">
+  <div class="space-y-4 max-w-[2048px] mx-auto">
     <div class="flex items-center justify-between">
       <p class="text-xs font-mono" style="color: var(--text-muted);">内置插件健康状态；实盘控制面仅允许随仓库审计过的内置插件。</p>
       <span

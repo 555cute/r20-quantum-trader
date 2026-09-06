@@ -42,7 +42,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="space-y-4 max-w-[2160px] mx-auto">
+  <div class="space-y-4 max-w-[2048px] mx-auto">
     <div class="flex items-center justify-between">
       <p class="text-xs font-mono" style="color: var(--text-muted);">核对 AI 宏观基调与逐币动作，并审查交易、后台与任务调度三路实时日志流。</p>
       <span

@@ -211,7 +211,7 @@ onMounted(loadPlugins)
 </script>
 
 <template>
-  <div class="space-y-4 font-mono text-xs max-w-[2160px] mx-auto">
+  <div class="space-y-4 font-mono text-xs max-w-[2048px] mx-auto">
     <!-- Header & Action Bar -->
     <div class="panel-banner-compact">
       <div class="flex items-center space-x-2.5">

@@ -496,7 +496,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="space-y-4 max-w-4xl mx-auto font-sans text-xs">
+  <div class="space-y-4 max-w-4xl 2xl:max-w-6xl mx-auto font-sans text-xs">
     <!-- VIEW 1: 供应商列表页 (对应截图 1) -->
     <template v-if="currentView === 'list'">
       <!-- Top Title & Navigation Bar -->
