@@ -5,8 +5,10 @@ import { useAuthStore } from '../stores/auth'
 import { useTheme } from '../composables/useTheme'
 import { useI18n } from '../composables/useI18n'
 import AboutModal from '../components/AboutModal.vue'
+import CryptoLogo from '../components/CryptoLogo.vue'
 import {
   LayoutDashboard,
+  LayoutGrid,
   Cpu,
   Layers,
   Radio,
@@ -192,12 +194,7 @@ const showAboutModal = ref(false)
       <!-- Drawer Header -->
       <div class="px-4 py-3.5 border-b flex items-center justify-between" style="border-color: var(--border-subtle);">
         <div class="flex items-center space-x-2.5">
-          <div
-            class="w-7 h-7 rounded-md flex items-center justify-center font-mono font-black text-xs border shadow-xs"
-            style="background-color: var(--color-brand-bg); border-color: var(--color-brand-border); color: var(--color-brand);"
-          >
-            ₿
-          </div>
+          <CryptoLogo class="w-6 h-6 rounded-md shadow-xs" />
           <div>
             <div class="text-xs font-black tracking-wide font-mono" style="color: var(--text-main);">R20 CONTROL</div>
             <button
@@ -211,8 +208,8 @@ const showAboutModal = ref(false)
         </div>
         <button
           @click="mobileDrawerOpen = false"
-          class="w-8 h-8 rounded-lg flex items-center justify-center border cursor-pointer"
-          style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-muted);"
+          class="w-8 h-8 rounded-lg flex items-center justify-center border cursor-pointer transition-colors hover:bg-[var(--bg-card-hover)]"
+          style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-muted);"
           title="关闭抽屉"
         >
           <X class="w-4 h-4" />
@@ -250,11 +247,11 @@ const showAboutModal = ref(false)
       </nav>
 
       <!-- Drawer Footer User Info -->
-      <div class="p-3 border-t flex items-center justify-between" style="border-color: var(--border-subtle); background-color: var(--bg-card-subtle);">
+      <div class="p-3 border-t flex items-center justify-between" style="border-color: var(--border-subtle); background-color: var(--bg-card);">
         <div class="flex items-center space-x-2 min-w-0">
           <div
             class="w-6 h-6 rounded-md border flex items-center justify-center font-bold text-[10px]"
-            style="background-color: var(--bg-badge); border-color: var(--border-medium); color: var(--color-brand);"
+            style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--color-brand);"
           >
             {{ auth.user?.username?.charAt(0).toUpperCase() || 'A' }}
           </div>
@@ -283,12 +280,7 @@ const showAboutModal = ref(false)
         style="border-color: var(--border-subtle);"
       >
         <div class="flex items-center space-x-2.5">
-          <div
-            class="w-7 h-7 rounded-md flex items-center justify-center font-mono font-black text-xs border shadow-xs"
-            style="background-color: var(--color-brand-bg); border-color: var(--color-brand-border); color: var(--color-brand);"
-          >
-            ₿
-          </div>
+          <CryptoLogo class="w-6 h-6 rounded-md shadow-xs" />
           <div>
             <div class="text-xs font-black tracking-wide font-mono" style="color: var(--text-main);">
               R20 CONTROL
@@ -337,12 +329,12 @@ const showAboutModal = ref(false)
       <!-- Sidebar Footer User Profile (Desktop) -->
       <div
         class="px-3 py-2.5 border-t flex items-center justify-between text-xs font-mono"
-        style="border-color: var(--border-subtle); background-color: var(--bg-card-subtle);"
+        style="border-color: var(--border-subtle); background-color: var(--bg-card);"
       >
         <div class="flex items-center space-x-2 min-w-0">
           <div
             class="w-6 h-6 rounded-md border flex items-center justify-center font-bold text-[10px]"
-            style="background-color: var(--bg-badge); border-color: var(--border-medium); color: var(--color-brand);"
+            style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--color-brand);"
           >
             {{ auth.user?.username?.charAt(0).toUpperCase() || 'A' }}
           </div>
@@ -370,49 +362,48 @@ const showAboutModal = ref(false)
         style="background-color: var(--bg-header); border-color: var(--border-subtle); backdrop-filter: blur(12px);"
       >
         <!-- Mobile Drawer Hamburger + Breadcrumbs -->
-        <div class="flex items-center space-x-2.5 text-xs font-mono">
+        <div class="flex items-center space-x-2 text-xs font-mono min-w-0">
           <!-- Hamburger Button for Mobile -->
           <button
             @click="mobileDrawerOpen = !mobileDrawerOpen"
-            class="md:hidden flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg border transition-all cursor-pointer shadow-xs active:scale-95 touch-manipulation"
-            style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-main);"
+            class="md:hidden w-8 h-8 flex items-center justify-center rounded-lg border transition-all cursor-pointer shadow-xs active:scale-95 touch-manipulation shrink-0"
+            style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-main);"
             title="打开导航菜单"
           >
-            <Menu class="w-3.5 h-3.5 text-blue-400" />
-            <span class="text-[11px] font-bold">菜单</span>
+            <Menu class="w-4 h-4 text-blue-400" />
           </button>
 
-          <div class="flex items-center space-x-1.5 sm:space-x-2">
+          <div class="flex items-center space-x-1.5 sm:space-x-2 min-w-0">
             <span style="color: var(--text-faint);" class="hidden sm:inline">控制面</span>
             <ChevronRight class="w-3 h-3 hidden sm:inline" style="color: var(--text-faint);" />
             <span style="color: var(--text-muted);" class="hidden sm:inline">{{ currentGroupName }}</span>
             <ChevronRight class="w-3 h-3 hidden sm:inline" style="color: var(--text-faint);" />
-            <h2 class="text-xs sm:text-sm font-black font-mono uppercase tracking-wide flex items-center space-x-1.5" style="color: var(--text-main);">
-              <span>{{ currentLabel }}</span>
+            <h2 class="text-xs sm:text-sm font-black font-mono uppercase tracking-wide flex items-center space-x-1.5 truncate" style="color: var(--text-main);">
+              <span class="truncate">{{ currentLabel }}</span>
               <span
                 v-if="isNavigating"
-                class="inline-block w-1.5 h-1.5 rounded-full bg-blue-500 animate-ping"
+                class="inline-block w-1.5 h-1.5 rounded-full bg-blue-500 animate-ping shrink-0"
               ></span>
             </h2>
           </div>
         </div>
 
-        <div class="flex items-center space-x-1.5 sm:space-x-2.5 text-xs font-mono">
+        <div class="flex items-center gap-1.5 sm:gap-2 text-xs font-mono shrink-0">
           <!-- 🌐 Global Language Switcher Capsule -->
           <button
             @click="toggleLocale"
-            class="flex items-center h-7 space-x-1 px-2 rounded-lg border transition-all cursor-pointer shadow-xs font-bold select-none"
+            class="flex items-center h-8 space-x-1 px-2 sm:px-2.5 rounded-lg border transition-all cursor-pointer shadow-xs font-bold select-none"
             style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-main);"
             :title="t('nav.switchLang')"
           >
-            <Globe class="w-3.5 h-3.5 text-indigo-400" />
-            <span class="text-[11px] uppercase tracking-wider">{{ isEn ? 'EN' : '中' }}</span>
+            <Globe class="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+            <span class="text-[11px] tracking-tight">{{ isEn ? 'en/中' : '中/en' }}</span>
           </button>
 
           <!-- ☀️ / 🌙 Theme Toggle Button -->
           <button
             @click="toggleTheme"
-            class="flex items-center justify-center w-7 h-7 rounded-lg border transition-all cursor-pointer shadow-xs"
+            class="flex items-center justify-center w-8 h-8 rounded-lg border transition-all cursor-pointer shadow-xs shrink-0"
             style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-main);"
             :title="theme === 'dark' ? '切换为亮色模式' : '切换为暗色模式'"
           >
@@ -424,28 +415,31 @@ const showAboutModal = ref(false)
           <a
             href="/"
             target="_blank"
-            class="flex items-center space-x-1 px-2 sm:px-2.5 py-1 rounded-lg border transition-all cursor-pointer shadow-xs text-[11px] sm:text-xs"
+            class="flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-2.5 h-8 rounded-lg border transition-all cursor-pointer shadow-xs text-[11px] sm:text-xs shrink-0"
             style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-muted);"
+            :title="isEn ? 'Trading Terminal' : '实盘终端'"
           >
-            <span>{{ t('nav.tabMatrix') }}</span>
-            <ExternalLink class="w-3 h-3 opacity-60" />
+            <LayoutGrid class="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+            <span>{{ isEn ? 'Trading' : '实盘' }}</span>
+            <ExternalLink class="w-3 h-3 opacity-60 hidden sm:inline shrink-0" />
           </a>
 
           <!-- Docs -->
           <a
             href="/docs"
             target="_blank"
-            class="flex items-center space-x-1 px-2 sm:px-2.5 py-1 rounded-lg border transition-all cursor-pointer shadow-xs text-[11px] sm:text-xs"
+            class="flex items-center space-x-1 px-2 sm:px-2.5 h-8 rounded-lg border transition-all cursor-pointer shadow-xs text-[11px] sm:text-xs shrink-0"
             style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-muted);"
+            :title="t('nav.docs')"
           >
-            <BookOpen class="w-3 h-3" />
+            <BookOpen class="w-3.5 h-3.5 shrink-0" />
             <span class="hidden sm:inline">{{ t('nav.docs') }}</span>
           </a>
 
           <!-- Mobile Logout -->
           <button
             @click="handleLogout"
-            class="md:hidden flex items-center space-x-1 px-2 py-1 rounded-lg border cursor-pointer active:scale-95"
+            class="md:hidden flex items-center justify-center w-8 h-8 rounded-lg border cursor-pointer active:scale-95 shrink-0"
             style="background-color: var(--color-down-bg); color: var(--color-down); border-color: var(--color-down-border);"
             title="退出登录"
           >

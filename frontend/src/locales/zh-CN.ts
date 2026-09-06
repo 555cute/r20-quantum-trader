@@ -3,7 +3,7 @@ export const zhCN = {
   nav: {
     title: 'R20 QUANTUM',
     badge: '机构桌面端',
-    tabMatrix: '实盘矩阵',
+    tabMatrix: '实盘',
     tabRadar: 'AI全景推演',
     tabNews: '全网舆情',
     tabLab: 'AI自进化',

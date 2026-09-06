@@ -47,9 +47,10 @@ async function handleLogin() {
           @click="toggleLocale"
           class="flex items-center h-8 space-x-1 px-2.5 rounded-lg border transition-all cursor-pointer shadow-xs font-bold text-xs font-mono select-none"
           style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-main);"
+          :title="t('nav.switchLang')"
         >
           <Globe class="w-3.5 h-3.5 text-indigo-400" />
-          <span class="uppercase tracking-wider">{{ isEn ? 'EN' : '中' }}</span>
+          <span class="text-[11px] tracking-tight">{{ isEn ? 'en/中' : '中/en' }}</span>
         </button>
 
         <button
@@ -79,7 +80,7 @@ async function handleLogin() {
 
       <!-- Main Login Panel -->
       <div
-        class="rounded-xl border p-6 sm:p-7 shadow-xs transition-colors"
+        class="rounded-xl border p-6 sm:p-7 shadow-sm transition-colors"
         style="background-color: var(--bg-card); border-color: var(--border-subtle);"
       >
         <div
@@ -100,7 +101,7 @@ async function handleLogin() {
               v-model="username"
               type="text"
               autocomplete="username"
-              class="w-full rounded-lg px-3.5 py-2.5 text-xs font-mono outline-none border transition-colors"
+              class="w-full rounded-lg px-3.5 py-2.5 text-xs font-mono outline-none border transition-colors focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20"
               style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);"
             />
           </div>
@@ -114,7 +115,7 @@ async function handleLogin() {
               type="password"
               autocomplete="current-password"
               :placeholder="t('admin.password')"
-              class="w-full rounded-lg px-3.5 py-2.5 text-xs font-mono outline-none border transition-colors"
+              class="w-full rounded-lg px-3.5 py-2.5 text-xs font-mono outline-none border transition-colors focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20"
               style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);"
               @keyup.enter="handleLogin"
             />
