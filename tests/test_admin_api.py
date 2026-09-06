@@ -295,6 +295,31 @@ class AdminApiTests(unittest.TestCase):
         bad_create = self.client.post("/api/v1/admin/prompt-profiles", headers=root, json={"name": "   ", "source_id": "stable"})
         self.assertEqual(bad_create.status_code, 422)
 
+    def test_admin_update_endpoints_and_status(self):
+        root = self.login("admin", "InitialAdmin123456")
+        from unittest.mock import patch
+        fake_status = {"branch": "main", "local": "abc1234", "remote": "abc1234", "behind": 0, "ahead": 0, "dirty": False}
+        with patch.object(app_module, "update_status", return_value=fake_status):
+            # 1. GET /api/v1/admin/update-status
+            res1 = self.client.get("/api/v1/admin/update-status", headers=root)
+            self.assertEqual(res1.status_code, 200)
+            self.assertEqual(res1.json()["local"], "abc1234")
+
+            # 2. POST /api/v1/admin/update/check
+            res2 = self.client.post("/api/v1/admin/update/check", headers=root)
+            self.assertEqual(res2.status_code, 200)
+            self.assertEqual(res2.json()["remote"], "abc1234")
+
+            # 3. POST /api/v1/admin/update without correct confirmation -> 400
+            res_bad = self.client.post("/api/v1/admin/update", headers=root, json={"confirmation": "WRONG"})
+            self.assertEqual(res_bad.status_code, 400)
+
+            # 4. POST /api/v1/admin/update with correct confirmation
+            with patch.object(app_module, "git", return_value="Already up to date."):
+                res_ok = self.client.post("/api/v1/admin/update", headers=root, json={"confirmation": "UPDATE R20"})
+                self.assertEqual(res_ok.status_code, 200)
+                self.assertIn("git_output", res_ok.json())
+
 
 if __name__ == "__main__":
     unittest.main()
