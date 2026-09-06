@@ -376,6 +376,43 @@ td {
   .text-amber-400 {
     color: var(--color-warn) !important;
   }
+
+  /* Core frontdesk dashboard light-mode enhancements */
+  .hud-bento-card {
+    background-color: #FFFFFF !important;
+    border-color: var(--border-subtle) !important;
+    box-shadow: var(--shadow-card) !important;
+  }
+  .hud-bento-card:hover {
+    border-color: var(--border-medium) !important;
+  }
+
+  /* Tactical Desk light table zebra striping and crisp text */
+  .tactical-table tbody tr.tactical-row:nth-child(even) {
+    background-color: rgba(241, 245, 249, 0.45);
+  }
+  .tactical-table tbody tr.tactical-row:hover {
+    background-color: var(--bg-card-hover) !important;
+  }
+
+  /* InstrumentMatrix cards & calculus telemetry */
+  .matrix-ticker-card {
+    background-color: #FFFFFF !important;
+    box-shadow: var(--shadow-card) !important;
+  }
+  .matrix-ticker-card:hover {
+    background-color: #FFFFFF !important;
+    border-color: var(--border-strong) !important;
+    box-shadow: var(--shadow-float) !important;
+  }
+  .calculus-telemetry-grid {
+    background-color: #F8FAFC !important;
+    border-color: var(--border-subtle) !important;
+  }
+  .calculus-telemetry-grid .metric-label {
+    color: #64748B !important;
+    font-weight: 600 !important;
+  }
 }
 
 :root[data-theme="dark"] {
@@ -446,12 +483,41 @@ td {
   font-size: 10px;
   font-weight: 700;
   line-height: 1;
-  padding: 2px 5px;
-  border-radius: 3px;
+  padding: 2px 6px;
+  border-radius: 4px;
   background-color: var(--bg-badge);
   border: 1px solid var(--border-subtle);
   color: var(--text-main);
   letter-spacing: -0.02em;
+}
+
+/* OCO Stop-loss indicator badge */
+.badge-oco-sl {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  border: 1px solid var(--border-subtle);
+  background-color: var(--bg-badge);
+  line-height: 1.2;
+}
+
+/* Pending order badge */
+.badge-pending-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--color-brand-border);
+  background-color: var(--color-brand-bg);
+  color: var(--color-brand);
 }
 
 /* 2. Direction Capsules (Long / Short) */
@@ -462,8 +528,8 @@ td {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 11px;
   font-weight: 700;
-  padding: 2px 7px;
-  border-radius: 3px;
+  padding: 2.5px 8px;
+  border-radius: 4px;
   background-color: var(--color-up-bg);
   border: 1px solid var(--color-up-border);
   color: var(--color-up);
@@ -478,8 +544,8 @@ td {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 11px;
   font-weight: 700;
-  padding: 2px 7px;
-  border-radius: 3px;
+  padding: 2.5px 8px;
+  border-radius: 4px;
   background-color: var(--color-down-bg);
   border: 1px solid var(--color-down-border);
   color: var(--color-down);

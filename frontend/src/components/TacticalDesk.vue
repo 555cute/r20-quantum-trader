@@ -164,40 +164,43 @@ const allProtected = computed(() =>
 
     <!-- TAB CONTENT 1: POSITIONS -->
     <div v-if="activeTab === 'positions'">
-      <div v-if="filteredPositions.length === 0" class="py-12 2xl:py-16 text-center rounded-b-xl border-dashed">
+      <div v-if="filteredPositions.length === 0" class="py-14 2xl:py-20 text-center rounded-b-xl border-dashed">
         <div
-          class="w-10 h-10 2xl:w-12 2xl:h-12 mx-auto mb-2.5 2xl:mb-3 rounded-xl flex items-center justify-center border"
-          style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-muted);"
+          class="w-12 h-12 2xl:w-14 2xl:h-14 mx-auto mb-3 rounded-2xl flex items-center justify-center border shadow-xs"
+          style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-muted);"
         >
-          <Layers class="w-4 h-4 2xl:w-5 2xl:h-5" />
+          <Layers class="w-5 h-5 2xl:w-6 2xl:h-6" />
         </div>
-        <p class="text-xs 2xl:text-sm font-mono font-medium" style="color: var(--text-muted);">
+        <p class="text-xs 2xl:text-sm font-mono font-bold" style="color: var(--text-main);">
           {{ store.positions.length === 0 ? t('desk.noPositions') : 'No matching positions' }}
+        </p>
+        <p class="text-[11px] 2xl:text-xs font-mono mt-1" style="color: var(--text-muted);">
+          {{ store.positions.length === 0 ? '全市场监控中 · 策略等待高胜率盈亏比结构' : '请调整标的过滤条件以查看持仓' }}
         </p>
       </div>
 
-      <div v-else class="overflow-x-auto">
-        <table class="w-full text-left text-xs 2xl:text-sm font-mono whitespace-nowrap">
+      <div v-else class="overflow-x-auto table-scroll-container">
+        <table class="w-full text-left text-xs 2xl:text-sm font-mono whitespace-nowrap tactical-table">
           <thead>
             <tr
-              class="text-[11px] 2xl:text-xs uppercase tracking-wider border-b"
+              class="text-[11px] 2xl:text-xs uppercase tracking-wider border-b font-bold"
               style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-muted);"
             >
-              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[16%] 2xl:w-[15%]">{{ t('desk.colInstrument') }}</th>
-              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[10%] 2xl:w-[10%]">{{ t('desk.colSide') }}</th>
-              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[11%] 2xl:w-[11%]">{{ t('desk.colSize') }}</th>
-              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[13%] 2xl:w-[13%]">{{ t('desk.colEntryPx') }}</th>
-              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[14%] 2xl:w-[14%]">{{ t('desk.colMarkPx') }}</th>
-              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[13%] 2xl:w-[13%]">{{ t('desk.colMargin') }}</th>
-              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[13%] 2xl:w-[13%]">{{ t('desk.colOcoSl') }}</th>
-              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 text-right font-bold w-[10%] 2xl:w-[11%]">{{ t('desk.colPnl') }}</th>
+              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 w-[16%] 2xl:w-[15%]">{{ t('desk.colInstrument') }}</th>
+              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 w-[10%] 2xl:w-[10%]">{{ t('desk.colSide') }}</th>
+              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 w-[11%] 2xl:w-[11%]">{{ t('desk.colSize') }}</th>
+              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 w-[13%] 2xl:w-[13%]">{{ t('desk.colEntryPx') }}</th>
+              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 w-[14%] 2xl:w-[14%]">{{ t('desk.colMarkPx') }}</th>
+              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 w-[13%] 2xl:w-[13%]">{{ t('desk.colMargin') }}</th>
+              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 w-[13%] 2xl:w-[13%]">{{ t('desk.colOcoSl') }}</th>
+              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 text-right w-[10%] 2xl:w-[11%]">{{ t('desk.colPnl') }}</th>
             </tr>
           </thead>
           <tbody>
             <tr
               v-for="pos in filteredPositions"
               :key="pos.instId"
-              class="border-b last:border-b-0 transition-colors hover:bg-[var(--bg-card-hover)]"
+              class="border-b last:border-b-0 transition-colors tactical-row"
               style="border-color: var(--border-subtle);"
             >
               <!-- 标的 / 杠杆 -->
@@ -225,7 +228,7 @@ const allProtected = computed(() =>
               </td>
 
               <!-- 开仓均价 -->
-              <td class="py-3 px-4 2xl:px-6 2xl:py-3.5 font-mono num-tabular" style="color: var(--text-muted);">
+              <td class="py-3 px-4 2xl:px-6 2xl:py-3.5 font-mono num-tabular font-medium" style="color: var(--text-muted);">
                 ${{ fmt2(pos.avgPx) }}
               </td>
 
@@ -242,15 +245,13 @@ const allProtected = computed(() =>
               <!-- 云端止损防线 -->
               <td class="py-3 px-4 2xl:px-6 2xl:py-3.5">
                 <div
-                  class="inline-flex items-center space-x-1 px-2 py-0.5 2xl:px-2.5 2xl:py-1 rounded-[3px] border text-[11px] 2xl:text-xs"
+                  class="badge-oco-sl"
                   :style="{
-                    backgroundColor: 'var(--bg-badge)',
-                    borderColor: 'var(--border-subtle)',
                     color: pos.side === 'long' ? 'var(--color-down)' : 'var(--color-up)'
                   }"
                 >
-                  <ShieldCheck class="w-3 h-3 2xl:w-3.5 2xl:h-3.5 shrink-0" />
-                  <span class="font-bold num-tabular">${{ pos.displayStop || '--' }}</span>
+                  <ShieldCheck class="w-3.5 h-3.5 shrink-0" />
+                  <span class="font-bold font-mono num-tabular">${{ pos.displayStop || '--' }}</span>
                 </div>
               </td>
 
@@ -277,39 +278,42 @@ const allProtected = computed(() =>
 
     <!-- TAB CONTENT 2: PENDING ORDERS -->
     <div v-else>
-      <div v-if="filteredOrders.length === 0" class="py-12 2xl:py-16 text-center rounded-b-xl border-dashed">
+      <div v-if="filteredOrders.length === 0" class="py-14 2xl:py-20 text-center rounded-b-xl border-dashed">
         <div
-          class="w-10 h-10 2xl:w-12 2xl:h-12 mx-auto mb-2.5 2xl:mb-3 rounded-xl flex items-center justify-center border"
-          style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-muted);"
+          class="w-12 h-12 2xl:w-14 2xl:h-14 mx-auto mb-3 rounded-2xl flex items-center justify-center border shadow-xs"
+          style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-muted);"
         >
-          <Clock class="w-4 h-4 2xl:w-5 2xl:h-5" />
+          <Clock class="w-5 h-5 2xl:w-6 2xl:h-6" />
         </div>
-        <p class="text-xs 2xl:text-sm font-mono font-medium" style="color: var(--text-muted);">
+        <p class="text-xs 2xl:text-sm font-mono font-bold" style="color: var(--text-main);">
           {{ store.pendingOrders.length === 0 ? t('desk.noOrders') : 'No matching orders' }}
+        </p>
+        <p class="text-[11px] 2xl:text-xs font-mono mt-1" style="color: var(--text-muted);">
+          {{ store.pendingOrders.length === 0 ? '当前无挂单委托队列 · 处于全自动风控防护中' : '请调整筛选条件以查看挂单委托' }}
         </p>
       </div>
 
-      <div v-else class="overflow-x-auto">
-        <table class="w-full text-left text-xs 2xl:text-sm font-mono whitespace-nowrap">
+      <div v-else class="overflow-x-auto table-scroll-container">
+        <table class="w-full text-left text-xs 2xl:text-sm font-mono whitespace-nowrap tactical-table">
           <thead>
             <tr
-              class="text-[11px] 2xl:text-xs uppercase tracking-wider border-b"
+              class="text-[11px] 2xl:text-xs uppercase tracking-wider border-b font-bold"
               style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-muted);"
             >
-              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[18%] 2xl:w-[18%]">ID</th>
-              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[14%] 2xl:w-[14%]">{{ t('desk.colInstrument') }}</th>
-              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[13%] 2xl:w-[13%]">{{ t('desk.colOrderType') }}</th>
-              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[14%] 2xl:w-[14%]">{{ t('desk.colOrderPx') }}</th>
-              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[13%] 2xl:w-[13%]">{{ t('desk.colOrderSz') }}</th>
-              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[14%] 2xl:w-[14%]">{{ t('desk.colTime') }}</th>
-              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 text-right font-bold w-[14%] 2xl:w-[14%]">Status</th>
+              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 w-[18%] 2xl:w-[18%]">ID</th>
+              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 w-[14%] 2xl:w-[14%]">{{ t('desk.colInstrument') }}</th>
+              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 w-[13%] 2xl:w-[13%]">{{ t('desk.colOrderType') }}</th>
+              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 w-[14%] 2xl:w-[14%]">{{ t('desk.colOrderPx') }}</th>
+              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 w-[13%] 2xl:w-[13%]">{{ t('desk.colOrderSz') }}</th>
+              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 w-[14%] 2xl:w-[14%]">{{ t('desk.colTime') }}</th>
+              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 text-right w-[14%] 2xl:w-[14%]">Status</th>
             </tr>
           </thead>
           <tbody>
             <tr
               v-for="ord in filteredOrders"
               :key="ord.ordId"
-              class="border-b last:border-b-0 transition-colors hover:bg-[var(--bg-card-hover)]"
+              class="border-b last:border-b-0 transition-colors tactical-row"
               style="border-color: var(--border-subtle);"
             >
               <td class="py-3 px-4 2xl:px-6 2xl:py-3.5 font-mono text-xs 2xl:text-sm" style="color: var(--text-faint);">
@@ -329,11 +333,11 @@ const allProtected = computed(() =>
               <td class="py-3 px-4 2xl:px-6 2xl:py-3.5 font-bold num-tabular" style="color: var(--text-main);">
                 {{ ord.sz }} {{ t('desk.contracts') }}
               </td>
-              <td class="py-3 px-4 2xl:px-6 2xl:py-3.5 num-tabular" style="color: var(--text-muted);">
+              <td class="py-3 px-4 2xl:px-6 2xl:py-3.5 num-tabular font-medium" style="color: var(--text-muted);">
                 {{ ord.time || (ord.cTime ? new Date(parseInt(ord.cTime)).toLocaleTimeString() : '--') }}
               </td>
-              <td class="py-3 px-4 2xl:px-6 2xl:py-3.5 text-right font-bold" style="color: var(--text-main);">
-                <span class="inline-flex items-center space-x-1.5 text-[11px] 2xl:text-xs font-mono px-2 py-0.5 2xl:px-2.5 2xl:py-1 rounded-[3px] border" style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--color-brand);">
+              <td class="py-3 px-4 2xl:px-6 2xl:py-3.5 text-right font-bold">
+                <span class="badge-pending-status">
                   <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                   <span>PENDING</span>
                 </span>

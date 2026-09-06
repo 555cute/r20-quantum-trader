@@ -54,14 +54,14 @@ const allProtected = computed(() =>
     
     <!-- Card 1: 官方账户总权益 -->
     <div
-      class="rounded-xl border p-4 sm:p-5 2xl:p-6 flex flex-col justify-between space-y-3.5 2xl:space-y-4 transition-all shadow-xs"
+      class="hud-bento-card rounded-xl border p-4 sm:p-5 2xl:p-6 flex flex-col justify-between space-y-3.5 2xl:space-y-4 transition-all shadow-xs"
       style="background-color: var(--bg-card); border-color: var(--border-subtle);"
     >
       <div class="flex items-center justify-between">
         <div class="flex items-center space-x-2 2xl:space-x-2.5">
           <div
-            class="w-6 h-6 2xl:w-7 2xl:h-7 rounded-md flex items-center justify-center border"
-            style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--text-main);"
+            class="w-6 h-6 2xl:w-7 2xl:h-7 rounded-md flex items-center justify-center border shrink-0 transition-colors"
+            style="background-color: var(--bg-badge); border-color: var(--border-medium); color: var(--text-main);"
           >
             <Wallet class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
           </div>
@@ -92,12 +92,12 @@ const allProtected = computed(() =>
             <span>{{ t('hud.available') }}: <strong class="font-semibold" style="color: var(--text-main);">${{ availEq }}</strong></span>
             <span>{{ t('hud.marginRatio') }}: <strong class="num-tabular" :style="{ color: Number(marginUsage) > 50 ? 'var(--color-warn)' : 'var(--text-main)' }">{{ marginUsage }}%</strong></span>
           </div>
-          <div class="w-full h-1 2xl:h-1.5 rounded-full overflow-hidden" style="background-color: var(--bg-badge);">
+          <div class="w-full h-1.5 rounded-full overflow-hidden" style="background-color: var(--bg-badge);">
             <div
               class="h-full rounded-full transition-all duration-500"
               :style="{
                 width: `${Math.min(100, Math.max(0, Number(marginUsage)))}%`,
-                backgroundColor: Number(marginUsage) > 50 ? 'var(--color-warn)' : 'rgba(16, 185, 129, 0.75)'
+                backgroundColor: Number(marginUsage) > 50 ? 'var(--color-warn)' : 'var(--color-up)'
               }"
             ></div>
           </div>
@@ -107,13 +107,13 @@ const allProtected = computed(() =>
 
     <!-- Card 2: 基准净盈亏水线 -->
     <div
-      class="rounded-xl border p-4 sm:p-5 2xl:p-6 flex flex-col justify-between space-y-3.5 2xl:space-y-4 transition-all shadow-xs"
+      class="hud-bento-card rounded-xl border p-4 sm:p-5 2xl:p-6 flex flex-col justify-between space-y-3.5 2xl:space-y-4 transition-all shadow-xs"
       style="background-color: var(--bg-card); border-color: var(--border-subtle);"
     >
       <div class="flex items-center justify-between">
         <div class="flex items-center space-x-2 2xl:space-x-2.5">
           <div
-            class="w-6 h-6 2xl:w-7 2xl:h-7 rounded-md flex items-center justify-center border"
+            class="w-6 h-6 2xl:w-7 2xl:h-7 rounded-md flex items-center justify-center border shrink-0 transition-colors"
             :style="{
               backgroundColor: Number(benchmarkNetPnl) >= 0 ? 'var(--color-up-bg)' : 'var(--color-down-bg)',
               borderColor: Number(benchmarkNetPnl) >= 0 ? 'var(--color-up-border)' : 'var(--color-down-border)',
@@ -162,13 +162,13 @@ const allProtected = computed(() =>
 
     <!-- Card 3: 今日已结 (UTC+8) -->
     <div
-      class="rounded-xl border p-4 sm:p-5 2xl:p-6 flex flex-col justify-between space-y-3.5 2xl:space-y-4 transition-all shadow-xs"
+      class="hud-bento-card rounded-xl border p-4 sm:p-5 2xl:p-6 flex flex-col justify-between space-y-3.5 2xl:space-y-4 transition-all shadow-xs"
       style="background-color: var(--bg-card); border-color: var(--border-subtle);"
     >
       <div class="flex items-center justify-between">
         <div class="flex items-center space-x-2 2xl:space-x-2.5">
           <div
-            class="w-6 h-6 2xl:w-7 2xl:h-7 rounded-md flex items-center justify-center border"
+            class="w-6 h-6 2xl:w-7 2xl:h-7 rounded-md flex items-center justify-center border shrink-0 transition-colors"
             style="background-color: var(--bg-badge); border-color: var(--border-medium); color: var(--text-main);"
           >
             <Calendar class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
@@ -210,13 +210,13 @@ const allProtected = computed(() =>
 
     <!-- Card 4: 当前持仓净盈亏 -->
     <div
-      class="rounded-xl border p-4 sm:p-5 2xl:p-6 flex flex-col justify-between space-y-3.5 2xl:space-y-4 transition-all shadow-xs"
+      class="hud-bento-card rounded-xl border p-4 sm:p-5 2xl:p-6 flex flex-col justify-between space-y-3.5 2xl:space-y-4 transition-all shadow-xs"
       style="background-color: var(--bg-card); border-color: var(--border-subtle);"
     >
       <div class="flex items-center justify-between">
         <div class="flex items-center space-x-2 2xl:space-x-2.5">
           <div
-            class="w-6 h-6 2xl:w-7 2xl:h-7 rounded-md flex items-center justify-center border"
+            class="w-6 h-6 2xl:w-7 2xl:h-7 rounded-md flex items-center justify-center border shrink-0 transition-colors"
             style="background-color: var(--bg-badge); border-color: var(--border-medium); color: var(--text-main);"
           >
             <Activity class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />

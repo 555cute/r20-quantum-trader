@@ -106,9 +106,8 @@ function getActionLabel(action?: string) {
         v-for="item in store.factors"
         :key="item.instId"
         @click="openDetail(item)"
-        class="rounded-xl border p-3.5 transition-all duration-150 flex flex-col justify-between cursor-pointer group shadow-xs"
+        class="matrix-ticker-card rounded-xl border p-3.5 transition-all duration-150 flex flex-col justify-between cursor-pointer group shadow-xs"
         style="background-color: var(--bg-card); border-color: var(--border-subtle);"
-        :class="'hover:border-[var(--border-medium)] hover:bg-[var(--bg-card-hover)]'"
       >
         <!-- Top: Header Info -->
         <div>
@@ -117,7 +116,7 @@ function getActionLabel(action?: string) {
               <span class="font-mono font-black text-sm tracking-wide truncate" style="color: var(--text-main);">
                 {{ item.name }}
               </span>
-              <span class="text-[9px] font-mono px-1 py-0.2 rounded border shrink-0" style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--text-faint);">
+              <span class="text-[9px] font-mono px-1 py-0.2 rounded border shrink-0 font-bold" style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--text-muted);">
                 SWAP
               </span>
             </div>
@@ -138,33 +137,33 @@ function getActionLabel(action?: string) {
 
           <!-- Calculus Telemetry Grid -->
           <div
-            class="grid grid-cols-4 gap-1 my-2 py-1.5 px-2 rounded-lg border text-[10px] font-mono"
+            class="calculus-telemetry-grid grid grid-cols-4 gap-1 my-2 py-1.5 px-2 rounded-lg border text-[10px] font-mono"
             style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);"
           >
             <div class="min-w-0 text-center">
-              <div class="text-[8px] uppercase truncate" style="color: var(--text-faint);">{{ t('matrix.velocity') }}</div>
+              <div class="metric-label text-[8px] uppercase truncate" style="color: var(--text-muted);">{{ t('matrix.velocity') }}</div>
               <div
-                class="font-bold num-tabular truncate"
+                class="font-bold num-tabular truncate mt-0.5"
                 :style="{ color: (item.calculus?.velocity_1h ?? 0) >= 0 ? 'var(--color-up)' : 'var(--color-down)' }"
               >
                 {{ item.calculus?.velocity_1h ?? '--' }}
               </div>
             </div>
             <div class="min-w-0 text-center">
-              <div class="text-[8px] uppercase truncate" style="color: var(--text-faint);">{{ t('matrix.acceleration') }}</div>
-              <div class="font-bold num-tabular truncate" style="color: var(--text-main);">
+              <div class="metric-label text-[8px] uppercase truncate" style="color: var(--text-muted);">{{ t('matrix.acceleration') }}</div>
+              <div class="font-bold num-tabular truncate mt-0.5" style="color: var(--text-main);">
                 {{ item.calculus?.accel_1h ?? '--' }}
               </div>
             </div>
             <div class="min-w-0 text-center">
-              <div class="text-[8px] uppercase truncate" style="color: var(--text-faint);">Jerk j</div>
-              <div class="font-bold num-tabular truncate" style="color: var(--text-muted);">
+              <div class="metric-label text-[8px] uppercase truncate" style="color: var(--text-muted);">Jerk j</div>
+              <div class="font-bold num-tabular truncate mt-0.5" style="color: var(--text-muted);">
                 {{ item.calculus?.jerk_1h ?? '--' }}
               </div>
             </div>
             <div class="min-w-0 text-center">
-              <div class="text-[8px] uppercase truncate" style="color: var(--text-faint);">ADX</div>
-              <div class="font-bold num-tabular truncate" style="color: var(--color-brand);">
+              <div class="metric-label text-[8px] uppercase truncate" style="color: var(--text-muted);">ADX</div>
+              <div class="font-bold num-tabular truncate mt-0.5" style="color: var(--color-brand);">
                 {{ item.adx_1h ?? '--' }}
               </div>
             </div>
@@ -187,8 +186,8 @@ function getActionLabel(action?: string) {
               {{ getActionLabel(item.decision?.action || item.action) }}
             </span>
             <div class="flex items-center space-x-1 text-xs font-mono font-bold shrink-0" style="color: var(--text-muted);">
-              <span class="text-[10px]" style="color: var(--text-faint);">Conf:</span>
-              <span class="num-tabular" style="color: var(--text-main);">{{ item.decision?.confidence || item.confidence || 0 }}%</span>
+              <span class="text-[10px] font-medium" style="color: var(--text-muted);">Conf:</span>
+              <span class="num-tabular font-bold" style="color: var(--text-main);">{{ item.decision?.confidence || item.confidence || 0 }}%</span>
               <ArrowUpRight class="w-3.5 h-3.5 opacity-60 group-hover:opacity-100 transition-opacity" />
             </div>
           </div>
