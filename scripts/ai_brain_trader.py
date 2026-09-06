@@ -1020,6 +1020,7 @@ def execute_batch_ai_brain_cycle(
     model_name = os.environ.get("LLM_MODEL") or "gemini-3.8-flash-high"
     effort = os.environ.get("LLM_REASONING_EFFORT") or "high"
     api_format = "openai_chat"
+    thinking_timeout = float(os.environ.get("LLM_THINKING_TIMEOUT", os.environ.get("LLM_TIMEOUT_SECONDS", 120.0)))
     try:
         from r20_backend.llm_manager import get_active_llm_runtime, execute_llm_request
         active_llm = get_active_llm_runtime()
@@ -1028,6 +1029,7 @@ def execute_batch_ai_brain_cycle(
         api_format = active_llm.get("api_format", "openai_chat")
         base_url = active_llm.get("base_url") or base_url
         api_key = active_llm.get("api_key") or api_key
+        thinking_timeout = float(active_llm.get("thinking_timeout") or thinking_timeout)
     except Exception:
         execute_llm_request = None
 
@@ -1062,7 +1064,7 @@ def execute_batch_ai_brain_cycle(
                 brain_output = None
 
         if brain_output is None:
-            print(f"[AI Brain Batch] 🚀 正在发起单次全市场大模型宏观决策推演 ({model_name} / {api_format})...")
+            print(f"[AI Brain Batch] 🚀 正在发起单次全市场大模型宏观决策推演 ({model_name} / {api_format} / 思考上限 {thinking_timeout:.0f}s)...")
             if execute_llm_request:
                 content, _, usage_dict, _ = execute_llm_request(
                     messages=[
@@ -1076,7 +1078,7 @@ def execute_batch_ai_brain_cycle(
                     reasoning_effort=effort,
                     temperature=0.2,
                     response_format={"type": "json_object"},
-                    timeout=50.0,
+                    timeout=thinking_timeout,
                 )
                 raw_res = {"usage": usage_dict} if isinstance(usage_dict, dict) else {}
             else:
@@ -1096,7 +1098,7 @@ def execute_batch_ai_brain_cycle(
                     data=json.dumps(payload).encode("utf-8"),
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
                 )
-                with urllib.request.urlopen(req, timeout=50) as resp:
+                with urllib.request.urlopen(req, timeout=thinking_timeout) as resp:
                     res = json.loads(resp.read().decode("utf-8"))
                     content = res["choices"][0]["message"]["content"].strip()
                     raw_res = res

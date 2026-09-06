@@ -272,15 +272,17 @@ def call_llm_evolution_review(closed_trades: List[Dict[str, Any]], existing_memo
         api_format = active_llm.get("api_format", "openai_chat")
         base_url = active_llm.get("base_url") or base_url
         api_key = active_llm.get("api_key") or api_key
+        thinking_timeout = max(90.0, float(active_llm.get("thinking_timeout") or os.environ.get("LLM_THINKING_TIMEOUT", 120.0)))
     except Exception:
         execute_llm_request = None
+        thinking_timeout = max(90.0, float(os.environ.get("LLM_THINKING_TIMEOUT", os.environ.get("LLM_TIMEOUT_SECONDS", 120.0))))
 
     telemetry = ModelCallTelemetry(
         "self_improvement", model_name, str(effort), effective_evolution_system, effective_evolution_user
     )
     try:
         t0 = time.time()
-        log_msg(f"🚀 正在调用 {model_name} ({api_format}) 进行 AI 大脑深度认知复盘与策略参数优化...")
+        log_msg(f"🚀 正在调用 {model_name} ({api_format} / 思考上限 {thinking_timeout:.0f}s) 进行 AI 大脑深度认知复盘与策略参数优化...")
         raw_res = None
         content = ""
         if execute_llm_request:
@@ -296,7 +298,7 @@ def call_llm_evolution_review(closed_trades: List[Dict[str, Any]], existing_memo
                 reasoning_effort=effort,
                 temperature=0.2,
                 response_format={"type": "json_object"},
-                timeout=90.0,
+                timeout=thinking_timeout,
             )
             raw_res = {"usage": usage_dict} if isinstance(usage_dict, dict) else {}
         else:
@@ -316,7 +318,7 @@ def call_llm_evolution_review(closed_trades: List[Dict[str, Any]], existing_memo
                 data=json.dumps(payload).encode("utf-8"),
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
             )
-            with urllib.request.urlopen(req, timeout=90) as resp:
+            with urllib.request.urlopen(req, timeout=thinking_timeout) as resp:
                 res = json.loads(resp.read().decode("utf-8"))
                 content = res["choices"][0]["message"]["content"].strip()
                 raw_res = res

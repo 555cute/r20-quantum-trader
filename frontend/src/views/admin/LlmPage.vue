@@ -22,6 +22,8 @@ import {
   Image as ImageIcon,
   MessageSquare,
   Sparkles,
+  Clock,
+  Save,
 } from 'lucide-vue-next'
 
 const { api } = useApi()
@@ -83,11 +85,47 @@ const modelForm = ref<any>({
 // Copied feedback
 const copiedText = ref<string | null>(null)
 
+// Global Reasoning & Thinking Timeout State
+const thinkingTimeoutInput = ref<number>(120)
+const savingSettings = ref(false)
+const settingsResult = ref<any>(null)
+
+function setPresetTimeout(sec: number) {
+  thinkingTimeoutInput.value = sec
+}
+
+async function saveGlobalSettings() {
+  savingSettings.value = true
+  settingsResult.value = null
+  try {
+    const res = await api('/api/v1/admin/llm/settings', {
+      method: 'POST',
+      body: JSON.stringify({
+        thinking_timeout: Number(thinkingTimeoutInput.value) || 120,
+        active_model_id: cfg.value?.active_model_id,
+        reasoning_effort: cfg.value?.active_reasoning_effort,
+      }),
+    })
+    await loadConfig()
+    settingsResult.value = { ok: true, message: `推演参数已保存：思考上限设为 ${thinkingTimeoutInput.value} 秒` }
+    setTimeout(() => {
+      settingsResult.value = null
+    }, 3500)
+  } catch (err: any) {
+    settingsResult.value = { ok: false, error: err.message }
+  } finally {
+    savingSettings.value = false
+  }
+}
+
 // ----------------- Data Loading -----------------
 async function loadConfig() {
   loading.value = true
   try {
     cfg.value = await api('/api/v1/admin/llm/models')
+    if (cfg.value?.thinking_timeout) {
+      thinkingTimeoutInput.value = Number(cfg.value.thinking_timeout)
+    }
     if (selectedProvider.value) {
       const updated = cfg.value.providers?.find((p: any) => p.id === selectedProvider.value.id)
       if (updated) {
@@ -533,6 +571,141 @@ onMounted(() => {
           >
             <RefreshCw class="w-3.5 h-3.5" :class="loading ? 'animate-spin' : ''" />
           </button>
+        </div>
+      </div>
+
+      <!-- Global Reasoning & Thinking Timeout Configuration Card -->
+      <div
+        class="rounded-2xl border p-4 sm:p-5 shadow-xs transition-colors space-y-3"
+        style="background-color: var(--bg-card); border-color: var(--border-subtle);"
+      >
+        <div class="flex flex-wrap items-center justify-between gap-2 pb-3 border-b" style="border-color: var(--border-subtle);">
+          <div class="flex items-center space-x-2.5">
+            <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-blue-500/10 text-blue-400 border border-blue-500/20">
+              <Clock class="w-4 h-4" />
+            </div>
+            <div>
+              <div class="flex items-center space-x-2">
+                <h2 class="text-xs sm:text-[13px] font-bold font-mono" style="color: var(--text-main);">
+                  全局思考推演与超时上限 (Reasoning & Thinking Timeout)
+                </h2>
+                <span
+                  class="px-2 py-0.5 rounded text-[10px] font-mono font-bold border"
+                  style="background-color: var(--color-brand-bg); border-color: var(--color-brand-border); color: var(--color-brand);"
+                >
+                  当前上限: {{ cfg?.thinking_timeout || 120 }}s
+                </span>
+              </div>
+              <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);">
+                针对长思考链旗舰模型（o1/o3、DeepSeek-R1、Claude 3.7 Thinking、Gemini 3 Pro 等）自定义推演等待上限，杜绝硬编码超时过早截断。
+              </p>
+            </div>
+          </div>
+
+          <button
+            @click="saveGlobalSettings"
+            :disabled="savingSettings"
+            class="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold text-white transition-all cursor-pointer shadow-xs disabled:opacity-40"
+            style="background-color: #2563EB; border-color: #3B82F6;"
+          >
+            <RefreshCw v-if="savingSettings" class="w-3.5 h-3.5 animate-spin" />
+            <Save v-else class="w-3.5 h-3.5" />
+            <span>{{ savingSettings ? '保存中...' : '保存推演配置' }}</span>
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
+          <!-- Active Model & Reasoning Effort Status -->
+          <div class="p-3 rounded-xl border space-y-1.5 font-mono" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
+            <div class="text-[10px]" style="color: var(--text-faint);">当前主脑活跃模型</div>
+            <div class="text-xs font-bold truncate text-blue-400">
+              {{ cfg?.active_model_id || '未选择' }}
+            </div>
+            <div class="text-[10px] flex items-center space-x-1" style="color: var(--text-muted);">
+              <span>思考强度:</span>
+              <span class="font-bold uppercase text-emerald-400">{{ cfg?.active_reasoning_effort || 'HIGH' }}</span>
+            </div>
+          </div>
+
+          <!-- Thinking Timeout Input Field -->
+          <div class="p-3 rounded-xl border space-y-1.5 font-mono sm:col-span-1 lg:col-span-2" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
+            <div class="flex items-center justify-between">
+              <label class="text-[10px] font-bold" style="color: var(--text-muted);">
+                思考时间上限 (秒 / Seconds)
+              </label>
+              <span class="text-[10px]" style="color: var(--text-faint);">有效范围: 10 ~ 1800 秒</span>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <input
+                v-model.number="thinkingTimeoutInput"
+                type="number"
+                min="10"
+                max="1800"
+                step="5"
+                placeholder="120"
+                class="w-28 rounded-lg px-3 py-1.5 text-xs outline-none border font-bold font-mono"
+                style="background-color: var(--bg-card); border-color: var(--border-medium); color: var(--text-main);"
+              />
+              <span class="text-xs font-bold" style="color: var(--text-muted);">秒 (s)</span>
+
+              <!-- Quick Presets -->
+              <div class="flex flex-wrap items-center gap-1.5 pl-2">
+                <button
+                  type="button"
+                  @click="setPresetTimeout(30)"
+                  class="px-2 py-1 rounded text-[10px] border cursor-pointer transition-all"
+                  :class="thinkingTimeoutInput === 30 ? 'bg-blue-500/20 text-blue-400 border-blue-500 font-bold' : 'text-gray-400 hover:text-white border-transparent'"
+                >
+                  30s (极速)
+                </button>
+                <button
+                  type="button"
+                  @click="setPresetTimeout(60)"
+                  class="px-2 py-1 rounded text-[10px] border cursor-pointer transition-all"
+                  :class="thinkingTimeoutInput === 60 ? 'bg-blue-500/20 text-blue-400 border-blue-500 font-bold' : 'text-gray-400 hover:text-white border-transparent'"
+                >
+                  60s (标准)
+                </button>
+                <button
+                  type="button"
+                  @click="setPresetTimeout(120)"
+                  class="px-2 py-1 rounded text-[10px] border cursor-pointer transition-all"
+                  :class="thinkingTimeoutInput === 120 ? 'bg-blue-500/20 text-blue-400 border-blue-500 font-bold' : 'text-gray-400 hover:text-white border-transparent'"
+                >
+                  120s (推荐)
+                </button>
+                <button
+                  type="button"
+                  @click="setPresetTimeout(180)"
+                  class="px-2 py-1 rounded text-[10px] border cursor-pointer transition-all"
+                  :class="thinkingTimeoutInput === 180 ? 'bg-blue-500/20 text-blue-400 border-blue-500 font-bold' : 'text-gray-400 hover:text-white border-transparent'"
+                >
+                  180s (深度)
+                </button>
+                <button
+                  type="button"
+                  @click="setPresetTimeout(300)"
+                  class="px-2 py-1 rounded text-[10px] border cursor-pointer transition-all"
+                  :class="thinkingTimeoutInput === 300 ? 'bg-blue-500/20 text-blue-400 border-blue-500 font-bold' : 'text-gray-400 hover:text-white border-transparent'"
+                >
+                  300s (长思考链)
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Feedback Alert -->
+        <div
+          v-if="settingsResult"
+          class="p-2.5 rounded-lg border text-xs font-mono flex items-center space-x-2"
+          :style="settingsResult.ok
+            ? { backgroundColor: 'var(--color-up-bg)', borderColor: 'var(--color-up-border)', color: 'var(--color-up)' }
+            : { backgroundColor: 'var(--color-down-bg)', borderColor: 'var(--color-down-border)', color: 'var(--color-down)' }"
+        >
+          <CheckCircle2 v-if="settingsResult.ok" class="w-3.5 h-3.5 shrink-0" />
+          <AlertCircle v-else class="w-3.5 h-3.5 shrink-0" />
+          <span>{{ settingsResult.message || settingsResult.error }}</span>
         </div>
       </div>
 

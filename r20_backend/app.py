@@ -53,6 +53,7 @@ from r20_backend.llm_manager import (
     load_llm_config,
     get_active_llm_runtime,
     activate_provider_model,
+    update_llm_settings,
     upsert_provider,
     delete_provider,
     toggle_provider,
@@ -174,7 +175,14 @@ class AdminConfigUpdate(BaseModel):
 class LLMActivateRequest(BaseModel):
     model_id: str
     provider_id: str | None = None
-    reasoning_effort: str | None = Field(default=None, pattern=r"^(low|medium|high|minimal|none|auto)$")
+    reasoning_effort: str | None = Field(default=None, pattern=r"^(low|medium|high|minimal|none|auto|max|xhigh)$")
+    thinking_timeout: float | None = Field(default=None, ge=5.0, le=1800.0)
+
+
+class LLMSettingsUpdateRequest(BaseModel):
+    thinking_timeout: float = Field(default=120.0, ge=5.0, le=1800.0)
+    active_model_id: str | None = None
+    reasoning_effort: str | None = None
 
 
 class LLMTestRequest(BaseModel):
@@ -603,7 +611,7 @@ def update_status() -> dict[str, Any]:
     try:
         local = git(["rev-parse", "--short", "HEAD"])
         branch = git(["branch", "--show-current"])
-        dirty = bool(git(["status", "--porcelain"]))
+        dirty = bool(git(["status", "--porcelain", "-uno"]))
         remote = ""
         behind = ahead = 0
         try:
@@ -1136,13 +1144,35 @@ def admin_get_llm_models(x_r20_session: str | None = Header(default=None, alias=
 def admin_activate_llm_model(payload: LLMActivateRequest, x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
     actor = require_superadmin(x_r20_session)
     try:
-        result = activate_provider_model(payload.provider_id or "custom", payload.model_id, payload.reasoning_effort)
+        result = activate_provider_model(payload.provider_id or "custom", payload.model_id, payload.reasoning_effort, payload.thinking_timeout)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     audit_record("llm.model.activate", "success", {
         "actor": actor["username"],
         "model_id": payload.model_id,
         "reasoning_effort": result.get("active_reasoning_effort"),
+        "thinking_timeout": result.get("thinking_timeout"),
+    })
+    return result
+
+
+@app.post("/api/v1/admin/llm/settings")
+@app.put("/api/v1/admin/llm/settings")
+def admin_update_llm_settings(
+    payload: LLMSettingsUpdateRequest,
+    x_r20_session: str | None = Header(default=None, alias="X-R20-Session"),
+) -> dict[str, Any]:
+    actor = require_superadmin(x_r20_session)
+    result = update_llm_settings(
+        active_model_id=payload.active_model_id,
+        reasoning_effort=payload.reasoning_effort,
+        thinking_timeout=payload.thinking_timeout,
+    )
+    audit_record("llm.settings.update", "success", {
+        "actor": actor["username"],
+        "thinking_timeout": payload.thinking_timeout,
+        "active_model_id": payload.active_model_id,
+        "reasoning_effort": payload.reasoning_effort,
     })
     return result
 
@@ -1704,8 +1734,11 @@ def delete_admin_instrument(inst_id: str, payload: InstrumentDeleteRequest, x_r2
 
 
 @app.get("/api/v1/admin/about")
-def admin_about(x_r20_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
-    require_admin_header(x_r20_admin_token)
+def admin_about(
+    x_r20_admin_token: str | None = Header(default=None),
+    x_r20_session: str | None = Header(default=None, alias="X-R20-Session"),
+) -> dict[str, Any]:
+    require_admin_header(x_r20_admin_token, x_r20_session)
     import platform
     store = GatewayStore(GATEWAY_DB_PATH)
     return {
@@ -1723,16 +1756,25 @@ def admin_about(x_r20_admin_token: str | None = Header(default=None)) -> dict[st
 
 
 @app.get("/api/v1/admin/update-status")
-def admin_update_status(x_r20_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
+@app.post("/api/v1/admin/update/check")
+@app.get("/api/v1/admin/update/check")
+def admin_update_status(
+    x_r20_admin_token: str | None = Header(default=None),
+    x_r20_session: str | None = Header(default=None, alias="X-R20-Session"),
+) -> dict[str, Any]:
     refresh_settings()
-    require_admin_header(x_r20_admin_token)
+    require_admin_header(x_r20_admin_token, x_r20_session)
     return update_status()
 
 
 @app.post("/api/v1/admin/update")
-def update_application(payload: UpdateRequest, x_r20_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
+def update_application(
+    payload: UpdateRequest,
+    x_r20_admin_token: str | None = Header(default=None),
+    x_r20_session: str | None = Header(default=None, alias="X-R20-Session"),
+) -> dict[str, Any]:
     refresh_settings()
-    require_admin_header(x_r20_admin_token)
+    actor = require_admin_header(x_r20_admin_token, x_r20_session)
     if payload.confirmation.strip().upper() != "UPDATE R20":
         raise HTTPException(status_code=400, detail="确认短语必须精确为：UPDATE R20")
     status_before = update_status()
@@ -1747,14 +1789,15 @@ def update_application(payload: UpdateRequest, x_r20_admin_token: str | None = H
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=f"更新失败：{exc}") from exc
     status_after = update_status()
-    audit_record("application.update", "success", {"before": status_before.get("local"), "after": status_after.get("local")})
+    updated = status_before["local"] != status_after.get("local")
+    audit_record("application.update", "success", {"actor": actor.get("username", "admin"), "before": status_before.get("local"), "after": status_after.get("local")})
     return {
-        "updated": status_before["local"] != status_after.get("local"),
+        "updated": updated,
         "before": status_before,
         "after": status_after,
         "git_output": output,
-        "restart_required": True,
-        "restart_note": "请重启 r20-quantum 与 r20-scheduler 服务，让新代码接管后台与调度。",
+        "restart_required": updated,
+        "restart_note": "请重启 r20-quantum 与 r20-scheduler 服务，让新代码接管后台与调度。" if updated else "当前代码已是最新，无需重启服务。",
     }
 
 

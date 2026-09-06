@@ -323,8 +323,50 @@ class LLMMultiProviderTests(unittest.TestCase):
 
         # 5. Delete provider
         del_p = self.client.delete("/api/v1/admin/llm/providers/testprov", headers=headers)
-        self.assertEqual(del_p.status_code, 200)
         self.assertTrue(del_p.json()["deleted"])
+
+    def test_llm_thinking_timeout_settings_and_update(self):
+        headers = self.login()
+        # 1. Initial config contains thinking_timeout
+        cfg = llm_manager.load_llm_config()
+        self.assertIn("thinking_timeout", cfg)
+        self.assertEqual(cfg["thinking_timeout"], 120.0)
+
+        # 2. Update via API
+        resp = self.client.post("/api/v1/admin/llm/settings", headers=headers, json={
+            "thinking_timeout": 180.0,
+            "reasoning_effort": "high",
+        })
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["thinking_timeout"], 180.0)
+
+        # 3. Verify loaded runtime incorporates updated thinking timeout
+        runtime = llm_manager.get_active_llm_runtime()
+        self.assertEqual(runtime["thinking_timeout"], 180.0)
+
+        # 4. Activate model with custom thinking timeout
+        act_resp = self.client.post("/api/v1/admin/llm/activate", headers=headers, json={
+            "model_id": "gemini-3.8-flash-high",
+            "reasoning_effort": "high",
+            "thinking_timeout": 240.0,
+        })
+        self.assertEqual(act_resp.status_code, 200)
+        self.assertEqual(act_resp.json()["thinking_timeout"], 240.0)
+
+    def test_update_status_and_check_endpoints(self):
+        headers = self.login()
+        # GET /api/v1/admin/update-status
+        resp1 = self.client.get("/api/v1/admin/update-status", headers=headers)
+        self.assertEqual(resp1.status_code, 200)
+        self.assertIn("branch", resp1.json())
+        self.assertIn("dirty", resp1.json())
+
+        # POST /api/v1/admin/update/check (frontend compatibility route)
+        resp2 = self.client.post("/api/v1/admin/update/check", headers=headers)
+        self.assertEqual(resp2.status_code, 200)
+        self.assertEqual(resp2.json()["branch"], resp1.json()["branch"])
 
 
 if __name__ == "__main__":

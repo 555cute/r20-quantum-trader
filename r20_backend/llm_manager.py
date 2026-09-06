@@ -9,6 +9,7 @@ import copy
 import json
 import os
 import re
+import socket
 import tempfile
 import time
 import urllib.request
@@ -227,6 +228,9 @@ def init_llm_config() -> Dict[str, Any]:
 
     active_m_id = data.get("active_model_id") or cur_model or "gemini-3.8-flash-high"
     active_effort = data.get("active_reasoning_effort") or cur_effort or "high"
+    cur_timeout = getattr(settings, "llm_thinking_timeout", 120.0) or float(os.getenv("LLM_THINKING_TIMEOUT", os.getenv("LLM_TIMEOUT_SECONDS", "120.0")))
+    raw_timeout = data.get("thinking_timeout")
+    thinking_timeout = float(raw_timeout) if raw_timeout is not None else float(cur_timeout or 120.0)
 
     models_map: Dict[str, Dict[str, Any]] = {}
     for p in merged_providers:
@@ -271,6 +275,7 @@ def init_llm_config() -> Dict[str, Any]:
         "version": "3.1",
         "active_model_id": active_m_id,
         "active_reasoning_effort": active_effort,
+        "thinking_timeout": thinking_timeout,
         "providers": merged_providers,
         "models": flat_models,
     }
@@ -294,6 +299,7 @@ def load_llm_config(mask_keys: bool = True) -> Dict[str, Any]:
         "version": config.get("version", "3.1"),
         "active_model_id": active_mid,
         "active_reasoning_effort": active_effort,
+        "thinking_timeout": config.get("thinking_timeout", 120.0),
         "standard_reasoning_efforts": STANDARD_REASONING_EFFORTS,
         "supported_api_formats": SUPPORTED_API_FORMATS,
         "providers": [],
@@ -412,6 +418,14 @@ def get_active_llm_runtime() -> Dict[str, Any]:
     model_name = active_mid or getattr(settings, "llm_model", "gemini-3.8-flash-high")
     api_format = target_model.get("api_format") if target_model else _detect_api_format(base_url, model_name)
     reasoning_type = target_model.get("reasoning_type", "auto") if target_model else _detect_reasoning_type(model_name)
+    thinking_timeout = float(
+        target_model.get("thinking_timeout")
+        if target_model and target_model.get("thinking_timeout")
+        else config.get("thinking_timeout")
+        or os.getenv("LLM_THINKING_TIMEOUT")
+        or os.getenv("LLM_TIMEOUT_SECONDS")
+        or getattr(settings, "llm_thinking_timeout", 120.0)
+    )
 
     return {
         "model": model_name,
@@ -423,10 +437,11 @@ def get_active_llm_runtime() -> Dict[str, Any]:
         "api_format": api_format,
         "reasoning_effort": active_effort,
         "reasoning_type": reasoning_type,
+        "thinking_timeout": thinking_timeout,
     }
 
 
-def activate_provider_model(provider_id: str, model_id: str, reasoning_effort: Optional[str] = None) -> Dict[str, Any]:
+def activate_provider_model(provider_id: str, model_id: str, reasoning_effort: Optional[str] = None, thinking_timeout: Optional[float] = None) -> Dict[str, Any]:
     """One-click switch to activate a model. Updates config, .env, and encrypted store."""
     from .settings_store import update_env
     from .config import refresh_settings
@@ -477,6 +492,9 @@ def activate_provider_model(provider_id: str, model_id: str, reasoning_effort: O
 
     config["active_model_id"] = model_id
     config["active_reasoning_effort"] = effort
+    if thinking_timeout is not None:
+        timeout_val = max(5.0, min(float(thinking_timeout), 1800.0))
+        config["thinking_timeout"] = timeout_val
     _atomic_write_json(LLM_CONFIG_FILE, config)
 
     # Sync to .env and secrets
@@ -498,6 +516,9 @@ def activate_provider_model(provider_id: str, model_id: str, reasoning_effort: O
         "LLM_MODEL": model_id,
         "LLM_REASONING_EFFORT": effort,
     }
+    if thinking_timeout is not None:
+        timeout_val = max(5.0, min(float(thinking_timeout), 1800.0))
+        env_values["LLM_THINKING_TIMEOUT"] = str(int(timeout_val) if timeout_val.is_integer() else timeout_val)
     if api_key:
         env_values["LLM_API_KEY"] = api_key
         if save_secrets:
@@ -511,11 +532,50 @@ def activate_provider_model(provider_id: str, model_id: str, reasoning_effort: O
         "active_model_id": model_id,
         "active_model_name": target_model.get("name"),
         "active_reasoning_effort": effort,
+        "thinking_timeout": config.get("thinking_timeout", 120.0),
         "base_url": base_url,
         "api_format": target_model.get("api_format", "openai_chat"),
         "provider_name": target_model.get("provider_name", "自定义"),
         "active_provider_id": target_model.get("provider_id", "openai"),
         "active_provider_name": target_model.get("provider_name", "自定义"),
+    }
+
+
+def update_llm_settings(
+    active_model_id: Optional[str] = None,
+    reasoning_effort: Optional[str] = None,
+    thinking_timeout: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Update global LLM settings including model, reasoning effort, and thinking timeout limit."""
+    from .settings_store import update_env
+    from .config import refresh_settings
+
+    config = init_llm_config()
+    env_values: Dict[str, Any] = {}
+
+    if active_model_id:
+        config["active_model_id"] = active_model_id
+        env_values["LLM_MODEL"] = active_model_id
+
+    if reasoning_effort:
+        config["active_reasoning_effort"] = reasoning_effort
+        env_values["LLM_REASONING_EFFORT"] = reasoning_effort
+
+    if thinking_timeout is not None:
+        val = max(5.0, min(float(thinking_timeout), 1800.0))
+        config["thinking_timeout"] = val
+        env_values["LLM_THINKING_TIMEOUT"] = str(int(val) if val.is_integer() else val)
+
+    _atomic_write_json(LLM_CONFIG_FILE, config)
+    if env_values:
+        update_env(env_values)
+        refresh_settings()
+
+    return {
+        "success": True,
+        "active_model_id": config.get("active_model_id"),
+        "active_reasoning_effort": config.get("active_reasoning_effort"),
+        "thinking_timeout": config.get("thinking_timeout", 120.0),
     }
 
 
@@ -1060,7 +1120,7 @@ def execute_llm_request(
     reasoning_effort: Optional[str] = None,
     temperature: Optional[float] = 0.2,
     response_format: Optional[Dict[str, Any]] = None,
-    timeout: float = 50.0,
+    timeout: Optional[float] = None,
 ) -> Tuple[str, str, Dict[str, Any], int]:
     """Unified executor for LLM calls across all 3 protocols.
     Returns: (content, reasoning_content, usage_dict, latency_ms)
@@ -1072,6 +1132,7 @@ def execute_llm_request(
     target_format = api_format or runtime.get("api_format") or _detect_api_format(target_url, target_model)
     target_effort = reasoning_effort or runtime.get("reasoning_effort") or "high"
     target_rtype = runtime.get("reasoning_type", "auto")
+    effective_timeout = float(timeout) if (timeout is not None and float(timeout) > 0) else float(runtime.get("thinking_timeout") or 120.0)
 
     endpoint, headers, payload = build_request_spec(
         model=target_model,
@@ -1093,7 +1154,7 @@ def execute_llm_request(
     )
 
     try:
-        resp_handle = urllib.request.urlopen(req, timeout=timeout)
+        resp_handle = urllib.request.urlopen(req, timeout=effective_timeout)
     except urllib.error.HTTPError as exc:
         err_b = ""
         try:
@@ -1112,9 +1173,19 @@ def execute_llm_request(
                 data=json.dumps(fallback_payload).encode("utf-8"),
                 headers=headers,
             )
-            resp_handle = urllib.request.urlopen(fb_req, timeout=timeout)
+            resp_handle = urllib.request.urlopen(fb_req, timeout=effective_timeout)
         else:
             raise
+    except (TimeoutError, socket.timeout) as exc:
+        raise TimeoutError(
+            f"LLM 推演超时（已达到思考上限时间 {effective_timeout:.0f}s）：模型思考链过长未在时限内完成响应，可前往后台 AI 模型设置中调大思考上限时间"
+        ) from exc
+    except urllib.error.URLError as exc:
+        if isinstance(getattr(exc, "reason", None), (socket.timeout, TimeoutError)):
+            raise TimeoutError(
+                f"LLM 推演超时（已达到思考上限时间 {effective_timeout:.0f}s）：模型思考链过长未在时限内完成响应，可前往后台 AI 模型设置中调大思考上限时间"
+            ) from exc
+        raise
 
     with resp_handle as resp:
         latency_ms = int((time.perf_counter() - t0) * 1000)
