@@ -4,7 +4,6 @@ import { useDashboardStore } from '../stores/dashboard'
 import { useTheme } from '../composables/useTheme'
 import {
   TrendingUp,
-  TrendingDown,
   RefreshCw,
   Sliders,
   RotateCcw,
@@ -12,8 +11,6 @@ import {
   Check,
   ShieldCheck,
   ShieldAlert,
-  Activity,
-  Layers,
   LineChart,
   Zap,
 } from 'lucide-vue-next'
@@ -29,32 +26,62 @@ const emit = defineEmits<{
   (e: 'select-symbol', symbol: string): void
 }>()
 
-// Symbols exactly matching user request and screenshot
-const symbols = ['ETH', 'SOL', 'DOGE', 'XRP', 'PEPE', 'BTC', 'SUI', 'ASTER']
+// ==========================================
+// 1. 动态自动读取系统设置的监控/交易标的
+// ==========================================
+const availableSymbols = computed<string[]>(() => {
+  const set = new Set<string>()
+  // 从系统因子监控矩阵读取
+  for (const f of store.factors) {
+    const sym = f.name || f.instId?.split('-')[0]
+    if (sym) set.add(sym.toUpperCase())
+  }
+  // 从活动持仓读取
+  for (const p of store.positions) {
+    const sym = p.name || p.instId?.split('-')[0]
+    if (sym) set.add(sym.toUpperCase())
+  }
+  // 从在途挂单读取
+  for (const o of store.pendingOrders) {
+    const sym = o.name || (o as any).inst || o.instId?.split('-')[0]
+    if (sym) set.add(sym.toUpperCase())
+  }
+  if (set.size === 0) {
+    return ['BTC', 'ETH', 'SOL', 'DOGE', 'SUI', 'ASTER']
+  }
+  return Array.from(set)
+})
+
 const periods = [
-  { id: '15m', label: '15m', tv: '15' },
-  { id: '1H', label: '1H', tv: '60' },
-  { id: '4H', label: '4H', tv: '240' },
-  { id: '1D', label: '1D', tv: 'D' },
+  { id: '15m', label: '15分', tv: '15' },
+  { id: '1H', label: '1时', tv: '60' },
+  { id: '4H', label: '4时', tv: '240' },
+  { id: '1D', label: '1日', tv: 'D' },
 ]
 
-const currentSymbol = ref<string>(props.initialSymbol || 'ETH')
+const currentSymbol = ref<string>('BTC')
 const currentPeriod = ref<string>('1H')
-const chartEngine = ref<'tv' | 'native'>('tv') // default to TradingView as in screenshot
+const chartEngine = ref<'native' | 'tv'>('native') // 默认原生极速高饱满K线，支持切换
 const isLoading = ref<boolean>(false)
 const copied = ref<boolean>(false)
 
-// Simulation & visual adjustment state
+// 指标切换选项 (参考 OKX App)
+type MainIndicatorType = 'BOLL' | 'MA' | 'EMA' | 'NONE'
+type SubIndicatorType = 'MACD' | 'RSI' | 'KDJ' | 'VOL' | 'NONE'
+const mainIndicator = ref<MainIndicatorType>('BOLL')
+const subIndicator = ref<SubIndicatorType>('MACD')
+
+// 模拟调价平移
 const simMode = ref<boolean>(false)
 const simStopLoss = ref<number>(0)
 const simTakeProfit = ref<number>(0)
 
-// Canvas references for native engine
+// Canvas references
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const containerRef = ref<HTMLDivElement | null>(null)
 let resizeObserver: ResizeObserver | null = null
 
-// Candles data for native mode
+// Candles data
 interface Candle {
   ts: number
   open: number
@@ -67,15 +94,15 @@ const candles = ref<Candle[]>([])
 const hoverCandle = ref<Candle | null>(null)
 const hoverPos = ref<{ x: number; y: number } | null>(null)
 
-// Current matched position & pending order
+// 当前标的映射
 const currentInstId = computed(() => `${currentSymbol.value}-USDT-SWAP`)
 
 const activePosition = computed(() => {
   return store.positions.find(
     (p: any) =>
       p.instId === currentInstId.value ||
-      p.name === currentSymbol.value ||
-      p.instId?.startsWith(currentSymbol.value)
+      p.name?.toUpperCase() === currentSymbol.value ||
+      p.instId?.toUpperCase().startsWith(currentSymbol.value)
   )
 })
 
@@ -83,8 +110,8 @@ const activeOrder = computed(() => {
   return store.pendingOrders.find(
     (o: any) =>
       o.instId === currentInstId.value ||
-      o.name === currentSymbol.value ||
-      o.instId?.startsWith(currentSymbol.value)
+      o.name?.toUpperCase() === currentSymbol.value ||
+      o.instId?.toUpperCase().startsWith(currentSymbol.value)
   )
 })
 
@@ -92,31 +119,19 @@ const currentFactor = computed(() => {
   return store.factors.find(
     (f: any) =>
       f.instId === currentInstId.value ||
-      f.name === currentSymbol.value ||
-      f.instId?.startsWith(currentSymbol.value)
+      f.name?.toUpperCase() === currentSymbol.value ||
+      f.instId?.toUpperCase().startsWith(currentSymbol.value)
   )
 })
 
-// Current price readout
+// 当前价格与 ATR
 const currentPrice = computed(() => {
   if (activePosition.value?.markPx) return Number(activePosition.value.markPx)
   if (currentFactor.value?.price) return Number(currentFactor.value.price)
   if (candles.value.length > 0) return candles.value[candles.value.length - 1].close
-  // Fallback defaults for popular coins if offline
-  const fallbacks: Record<string, number> = {
-    BTC: 79600.0,
-    ETH: 2478.11,
-    SOL: 105.7,
-    DOGE: 0.0888,
-    XRP: 0.582,
-    PEPE: 0.0000085,
-    SUI: 0.792,
-    ASTER: 0.705,
-  }
-  return fallbacks[currentSymbol.value] || 100.0
+  return 100.0
 })
 
-// Current ATR
 const currentAtr = computed(() => {
   const f = currentFactor.value
   if (!f) return currentPrice.value * 0.02
@@ -124,7 +139,7 @@ const currentAtr = computed(() => {
   return atr > 0 ? atr : currentPrice.value * 0.02
 })
 
-// Real live entry
+// 真实入场成本与方向
 const liveEntry = computed(() => {
   if (activePosition.value) return Number(activePosition.value.avgPx || currentPrice.value)
   if (activeOrder.value) return Number(activeOrder.value.px || currentPrice.value)
@@ -168,7 +183,7 @@ const effectiveSL = computed(() => (simMode.value ? simStopLoss.value : liveStop
 const effectiveTP = computed(() => (simMode.value ? simTakeProfit.value : liveTakeProfit.value))
 
 // ==========================================
-// 💡 核心修复：真实精确的风险收益比与金额测算
+// 2. 真实科学的盈亏与风险金额计算
 // ==========================================
 const riskRewardMetrics = computed(() => {
   const entry = liveEntry.value
@@ -182,15 +197,10 @@ const riskRewardMetrics = computed(() => {
   const rrRatio = riskDist > 0 ? rewardDist / riskDist : 0
   const atrMultiple = atr > 0 ? riskDist / atr : 0
 
-  const side = liveSide.value
-  const isValidGeometry =
-    side === 'long' ? sl < entry && entry < tp : tp < entry && entry < sl
-
   const isRrCompliant = rrRatio >= 2.0
   const isAtrOptimal = atrMultiple >= 1.7 && atrMultiple <= 2.3
 
-  // 1. 若当前有实盘持仓：按该持仓的实际保证金 × 杠杆倍数 × 价格波动百分比计算真实盈亏额
-  // 2. 若无持仓：按基准单笔风控额 (100 USDT 保证金, 3x 杠杆) 进行规范试算，绝不冒出数千美元假数据
+  // 科学计算美元金额
   const hasRealPosition = !!activePosition.value
   const actualMargin = Number(activePosition.value?.margin_usdt ?? activePosition.value?.margin ?? 0)
   const actualLever = Number(activePosition.value?.lever || 3)
@@ -215,73 +225,212 @@ const riskRewardMetrics = computed(() => {
     riskPct,
     rrRatio,
     atrMultiple,
-    isValidGeometry,
     isRrCompliant,
     isAtrOptimal,
     hasRealPosition,
-    marginBase,
-    leverBase,
     estProfitUsd,
     estRiskUsd,
   }
 })
 
-// TradingView Iframe URL
-const tradingViewIframeUrl = computed(() => {
-  const sym = currentSymbol.value
-  const periodObj = periods.find((p) => p.id === currentPeriod.value) || periods[1]
-  const tvInterval = periodObj.tv
-  const isDark = theme.value === 'dark'
-  const tvTheme = isDark ? 'dark' : 'light'
+// ==========================================
+// 3. 高精度数学指标计算 (BOLL, MA, EMA, MACD, RSI, KDJ)
+// ==========================================
+interface IndicatorsResult {
+  boll?: { mb: number[]; ub: number[]; lb: number[] }
+  ma?: { ma5: number[]; ma10: number[]; ma20: number[] }
+  ema?: { ema7: number[]; ema25: number[]; ema99: number[] }
+  macd?: { dif: number[]; dea: number[]; bar: number[] }
+  rsi?: number[]
+  kdj?: { k: number[]; d: number[]; j: number[] }
+}
 
-  // Standard Crypto Exchange Pair Mapping
-  let tvSymbol = `BINANCE:${sym}USDT.P`
-  if (sym === 'ASTER') {
-    tvSymbol = `OKX:ASTERUSDT.P`
+const computedIndicators = computed<IndicatorsResult>(() => {
+  const list = candles.value
+  const len = list.length
+  if (len === 0) return {}
+
+  const closes = list.map((c) => c.close)
+
+  // 1. BOLL (20, 2)
+  const mb: number[] = new Array(len).fill(NaN)
+  const ub: number[] = new Array(len).fill(NaN)
+  const lb: number[] = new Array(len).fill(NaN)
+  for (let i = 19; i < len; i++) {
+    let sum = 0
+    for (let k = 0; k < 20; k++) sum += closes[i - k]
+    const mean = sum / 20
+    let variance = 0
+    for (let k = 0; k < 20; k++) variance += Math.pow(closes[i - k] - mean, 2)
+    const std = Math.sqrt(variance / 20)
+    mb[i] = mean
+    ub[i] = mean + 2 * std
+    lb[i] = mean - 2 * std
   }
 
-  return `https://s.tradingview.com/widgetembed/?frameElementId=tradingview_widget&symbol=${encodeURIComponent(
-    tvSymbol
-  )}&interval=${tvInterval}&theme=${tvTheme}&style=1&timezone=Asia%2FShanghai&studies=[%22MASimple@tv-basicstudies%22]&hide_side_toolbar=0&allow_symbol_change=1&save_image=0&locale=zh_CN`
+  // 2. MA (5, 10, 20)
+  function calcMA(p: number) {
+    const arr: number[] = new Array(len).fill(NaN)
+    for (let i = p - 1; i < len; i++) {
+      let sum = 0
+      for (let k = 0; k < p; k++) sum += closes[i - k]
+      arr[i] = sum / p
+    }
+    return arr
+  }
+
+  // 3. EMA
+  function calcEMA(p: number) {
+    const arr: number[] = new Array(len).fill(NaN)
+    if (len < p) return arr
+    let prev = closes[0]
+    const k = 2 / (p + 1)
+    arr[0] = prev
+    for (let i = 1; i < len; i++) {
+      prev = closes[i] * k + prev * (1 - k)
+      if (i >= p - 1) arr[i] = prev
+    }
+    return arr
+  }
+
+  // 4. MACD (12, 26, 9)
+  const ema12 = calcEMA(12)
+  const ema26 = calcEMA(26)
+  const dif: number[] = new Array(len).fill(NaN)
+  for (let i = 0; i < len; i++) {
+    if (!isNaN(ema12[i]) && !isNaN(ema26[i])) {
+      dif[i] = ema12[i] - ema26[i]
+    }
+  }
+  const dea: number[] = new Array(len).fill(NaN)
+  const bar: number[] = new Array(len).fill(NaN)
+  let prevDea = 0
+  let deaInit = false
+  const k9 = 2 / (9 + 1)
+  for (let i = 0; i < len; i++) {
+    if (!isNaN(dif[i])) {
+      if (!deaInit) {
+        prevDea = dif[i]
+        dea[i] = prevDea
+        deaInit = true
+      } else {
+        prevDea = dif[i] * k9 + prevDea * (1 - k9)
+        dea[i] = prevDea
+      }
+      bar[i] = (dif[i] - dea[i]) * 2
+    }
+  }
+
+  // 5. RSI (14)
+  const rsi: number[] = new Array(len).fill(NaN)
+  if (len > 14) {
+    let gains = 0
+    let losses = 0
+    for (let i = 1; i <= 14; i++) {
+      const diff = closes[i] - closes[i - 1]
+      if (diff >= 0) gains += diff
+      else losses -= diff
+    }
+    let avgGain = gains / 14
+    let avgLoss = losses / 14
+    rsi[14] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss)
+    for (let i = 15; i < len; i++) {
+      const diff = closes[i] - closes[i - 1]
+      const g = diff >= 0 ? diff : 0
+      const l = diff < 0 ? -diff : 0
+      avgGain = (avgGain * 13 + g) / 14
+      avgLoss = (avgLoss * 13 + l) / 14
+      rsi[i] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss)
+    }
+  }
+
+  // 6. KDJ (9, 3, 3)
+  const kArr: number[] = new Array(len).fill(NaN)
+  const dArr: number[] = new Array(len).fill(NaN)
+  const jArr: number[] = new Array(len).fill(NaN)
+  let prevK = 50
+  let prevD = 50
+  for (let i = 0; i < len; i++) {
+    if (i < 8) {
+      kArr[i] = 50
+      dArr[i] = 50
+      jArr[i] = 50
+      continue
+    }
+    let l9 = Infinity
+    let h9 = -Infinity
+    for (let k = 0; k < 9; k++) {
+      l9 = Math.min(l9, list[i - k].low)
+      h9 = Math.max(h9, list[i - k].high)
+    }
+    const rsv = h9 === l9 ? 50 : ((closes[i] - l9) / (h9 - l9)) * 100
+    prevK = (2 / 3) * prevK + (1 / 3) * rsv
+    prevD = (2 / 3) * prevD + (1 / 3) * prevK
+    kArr[i] = prevK
+    dArr[i] = prevD
+    jArr[i] = 3 * prevK - 2 * prevD
+  }
+
+  return {
+    boll: { mb, ub, lb },
+    ma: { ma5: calcMA(5), ma10: calcMA(10), ma20: calcMA(20) },
+    ema: { ema7: calcEMA(7), ema25: calcEMA(25), ema99: calcEMA(99) },
+    macd: { dif, dea, bar },
+    rsi,
+    kdj: { k: kArr, d: dArr, j: jArr },
+  }
 })
 
-function initSimulation() {
-  simStopLoss.value = Number(liveStopLoss.value.toFixed(4))
-  simTakeProfit.value = Number(liveTakeProfit.value.toFixed(4))
-}
+// 最新指标当前读数
+const currentIndicatorHeader = computed(() => {
+  const len = candles.value.length
+  if (len === 0) return { mainText: '', subText: '' }
+  const idx = hoverCandle.value ? candles.value.indexOf(hoverCandle.value) : len - 1
+  const ind = computedIndicators.value
 
-function resetSimulation() {
-  initSimulation()
-  if (chartEngine.value === 'native') {
-    drawChart()
-  }
-}
-
-// Load Candles for Native Engine
-async function loadCandles() {
-  if (chartEngine.value !== 'native') return
-  isLoading.value = true
-  try {
-    const res = await fetch(
-      `/api/v1/market/${currentInstId.value}/candles?bar=${currentPeriod.value}&limit=60`
-    )
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = await res.json()
-    if (Array.isArray(data.candles) && data.candles.length > 0) {
-      candles.value = data.candles
+  let mainText = ''
+  if (mainIndicator.value === 'BOLL' && ind.boll) {
+    const mb = ind.boll.mb[idx]
+    const ub = ind.boll.ub[idx]
+    const lb = ind.boll.lb[idx]
+    if (!isNaN(mb)) {
+      mainText = `BOLL20: ${mb.toFixed(1)}  UB: ${ub.toFixed(1)}  LB: ${lb.toFixed(1)}`
     }
-  } catch (err) {
-    console.warn('Native candles fetch fallback:', err)
-  } finally {
-    isLoading.value = false
-    nextTick(() => {
-      initSimulation()
-      drawChart()
-    })
+  } else if (mainIndicator.value === 'MA' && ind.ma) {
+    const m5 = ind.ma.ma5[idx]
+    const m10 = ind.ma.ma10[idx]
+    const m20 = ind.ma.ma20[idx]
+    mainText = `MA5: ${isNaN(m5) ? '--' : m5.toFixed(1)}  MA10: ${isNaN(m10) ? '--' : m10.toFixed(1)}  MA20: ${isNaN(m20) ? '--' : m20.toFixed(1)}`
+  } else if (mainIndicator.value === 'EMA' && ind.ema) {
+    const e7 = ind.ema.ema7[idx]
+    const e25 = ind.ema.ema25[idx]
+    mainText = `EMA7: ${isNaN(e7) ? '--' : e7.toFixed(1)}  EMA25: ${isNaN(e25) ? '--' : e25.toFixed(1)}`
   }
-}
 
-// Native Canvas Drawing
+  let subText = ''
+  if (subIndicator.value === 'MACD' && ind.macd) {
+    const dif = ind.macd.dif[idx]
+    const dea = ind.macd.dea[idx]
+    const bar = ind.macd.bar[idx]
+    subText = `DIF: ${isNaN(dif) ? '--' : dif.toFixed(1)}  DEA: ${isNaN(dea) ? '--' : dea.toFixed(1)}  MACD: ${isNaN(bar) ? '--' : bar.toFixed(1)}`
+  } else if (subIndicator.value === 'RSI' && ind.rsi) {
+    const r = ind.rsi[idx]
+    subText = `RSI14: ${isNaN(r) ? '--' : r.toFixed(2)}`
+  } else if (subIndicator.value === 'KDJ' && ind.kdj) {
+    const k = ind.kdj.k[idx]
+    const d = ind.kdj.d[idx]
+    subText = `K: ${isNaN(k) ? '--' : k.toFixed(1)}  D: ${isNaN(d) ? '--' : d.toFixed(1)}  J: ${isNaN(ind.kdj.j[idx]) ? '--' : ind.kdj.j[idx].toFixed(1)}`
+  } else if (subIndicator.value === 'VOL') {
+    const c = candles.value[idx]
+    subText = `VOL: ${c ? c.vol.toFixed(1) : '--'}`
+  }
+
+  return { mainText, subText }
+})
+
+// ==========================================
+// 4. 彻底根治“K线太扁”——高精度 Local Scale 渲染
+// ==========================================
 function drawChart() {
   if (chartEngine.value !== 'native') return
   const canvas = canvasRef.value
@@ -290,7 +439,7 @@ function drawChart() {
 
   const dpr = window.devicePixelRatio || 1
   const width = container.clientWidth
-  const height = container.clientHeight || 460
+  const height = container.clientHeight || 480
 
   canvas.width = width * dpr
   canvas.height = height * dpr
@@ -304,71 +453,75 @@ function drawChart() {
   ctx.scale(dpr, dpr)
 
   const isDark = theme.value === 'dark'
-  const bgCard = isDark ? '#14161F' : '#FFFFFF'
-  const textMuted = isDark ? '#7E839B' : '#64748B'
-  const borderSubtle = isDark ? '#242630' : '#E2E8F0'
-  const upColor = '#10B981'
-  const downColor = '#F43F5E'
-  const blueColor = '#3B82F6'
+  const bgCard = isDark ? '#111319' : '#FFFFFF'
+  const textMuted = isDark ? '#6B7280' : '#64748B'
+  const textMain = isDark ? '#F3F4F6' : '#0F172A'
+  const borderSubtle = isDark ? '#1F242F' : '#E5E7EB'
+  const upColor = '#10B981' // emerald-500
+  const downColor = '#F43F5E' // rose-500
+  const orangeBoll = '#F59E0B' // amber-500 for BOLL bands
 
   ctx.fillStyle = bgCard
   ctx.fillRect(0, 0, width, height)
 
-  const candleList = candles.value
-  if (candleList.length === 0) {
+  const list = candles.value
+  if (list.length === 0) {
     ctx.fillStyle = textMuted
     ctx.font = '12px monospace'
     ctx.textAlign = 'center'
-    ctx.fillText('正在同步微积分时序行情蜡烛线...', width / 2, height / 2)
+    ctx.fillText('正在加载专业 K 线时序数据...', width / 2, height / 2)
     return
   }
 
+  // 布局尺寸切分
   const paddingRight = 72
-  const paddingBottom = 26
-  const paddingTop = 20
+  const paddingTop = 24
+  const paddingBottom = 22
+  const hasSubChart = subIndicator.value !== 'NONE'
+
+  // 主图占 70%，副图占 30%
   const chartWidth = width - paddingRight
-  const chartHeight = height - paddingBottom - paddingTop
+  const mainHeight = hasSubChart ? (height - paddingTop - paddingBottom) * 0.7 : height - paddingTop - paddingBottom
+  const subHeight = hasSubChart ? (height - paddingTop - paddingBottom) * 0.3 : 0
+  const subTop = paddingTop + mainHeight
 
-  let minPrice = Math.min(...candleList.map((c) => c.low))
-  let maxPrice = Math.max(...candleList.map((c) => c.high))
+  // ★ 彻底根治“K线太扁”的关键算法：
+  // 纵轴价格范围严格只计算当前可见 K 线的 [minLow, maxHigh]（再加入主图指标如 BOLL），
+  // 绝不强行纳入远处的止损止盈价！
+  let minPrice = Math.min(...list.map((c) => c.low))
+  let maxPrice = Math.max(...list.map((c) => c.high))
 
-  const sl = effectiveSL.value
-  const tp = effectiveTP.value
-  const entry = liveEntry.value
-  if (sl > 0) {
-    minPrice = Math.min(minPrice, sl)
-    maxPrice = Math.max(maxPrice, sl)
-  }
-  if (tp > 0) {
-    minPrice = Math.min(minPrice, tp)
-    maxPrice = Math.max(maxPrice, tp)
-  }
-  if (entry > 0) {
-    minPrice = Math.min(minPrice, entry)
-    maxPrice = Math.max(maxPrice, entry)
+  // 若开启 BOLL / MA / EMA，将有效指标值适度纳入
+  const ind = computedIndicators.value
+  if (mainIndicator.value === 'BOLL' && ind.boll) {
+    const validUb = ind.boll.ub.filter((v) => !isNaN(v))
+    const validLb = ind.boll.lb.filter((v) => !isNaN(v))
+    if (validUb.length > 0) maxPrice = Math.max(maxPrice, Math.max(...validUb))
+    if (validLb.length > 0) minPrice = Math.min(minPrice, Math.min(...validLb))
   }
 
-  const priceRange = maxPrice - minPrice || 1
-  minPrice -= priceRange * 0.04
-  maxPrice += priceRange * 0.04
-  const adjustedRange = maxPrice - minPrice
+  // 上下仅各留白 7%（极佳纵向饱满度）
+  const pDelta = maxPrice - minPrice || 1
+  minPrice -= pDelta * 0.07
+  maxPrice += pDelta * 0.07
+  const priceRange = maxPrice - minPrice
 
   function priceToY(p: number) {
-    return paddingTop + chartHeight - ((p - minPrice) / adjustedRange) * chartHeight
+    return paddingTop + mainHeight - ((p - minPrice) / priceRange) * mainHeight
   }
 
-  // Grid
-  const gridCount = 6
+  // 1. 主图水平刻度与标尺网格
   ctx.lineWidth = 1
   ctx.strokeStyle = borderSubtle
   ctx.fillStyle = textMuted
   ctx.font = '10px monospace'
   ctx.textAlign = 'left'
 
-  for (let i = 0; i <= gridCount; i++) {
-    const ratio = i / gridCount
-    const y = paddingTop + ratio * chartHeight
-    const p = maxPrice - ratio * adjustedRange
+  const gridSteps = 5
+  for (let i = 0; i <= gridSteps; i++) {
+    const ratio = i / gridSteps
+    const y = paddingTop + ratio * mainHeight
+    const p = maxPrice - ratio * priceRange
 
     ctx.beginPath()
     ctx.moveTo(0, y)
@@ -377,137 +530,341 @@ function drawChart() {
     ctx.fillText(p >= 100 ? p.toFixed(2) : p.toFixed(4), chartWidth + 6, y + 3)
   }
 
-  // Candles & Volume
-  const maxVol = Math.max(...candleList.map((c) => c.vol)) || 1
-  const volHeight = chartHeight * 0.2
-  const count = candleList.length
+  // 2. 绘制蜡烛线 (起伏分明、饱满大方)
+  const count = list.length
   const candleGap = chartWidth / count
-  const candleWidth = Math.max(2, candleGap * 0.65)
+  const candleWidth = Math.max(3, candleGap * 0.72)
+
+  let highestCandle = list[0]
+  let lowestCandle = list[0]
+  let highestIdx = 0
+  let lowestIdx = 0
 
   for (let i = 0; i < count; i++) {
-    const c = candleList[i]
+    const c = list[i]
+    if (c.high > highestCandle.high) {
+      highestCandle = c
+      highestIdx = i
+    }
+    if (c.low < lowestCandle.low) {
+      lowestCandle = c
+      lowestIdx = i
+    }
+
     const x = i * candleGap + candleGap / 2
     const isUp = c.close >= c.open
-
     const yOpen = priceToY(c.open)
     const yClose = priceToY(c.close)
     const yHigh = priceToY(c.high)
     const yLow = priceToY(c.low)
 
-    // Volume
-    const vH = (c.vol / maxVol) * volHeight
-    const vY = paddingTop + chartHeight - vH
-    ctx.fillStyle = isUp ? 'rgba(16, 185, 129, 0.2)' : 'rgba(244, 63, 94, 0.2)'
-    ctx.fillRect(x - candleWidth / 2, vY, candleWidth, vH)
-
-    // Wick
+    // 影线
     ctx.strokeStyle = isUp ? upColor : downColor
+    ctx.lineWidth = 1.2
     ctx.beginPath()
     ctx.moveTo(x, yHigh)
     ctx.lineTo(x, yLow)
     ctx.stroke()
 
-    // Body
+    // 实体蜡烛 (饱满不干瘪)
     const bodyTop = Math.min(yOpen, yClose)
-    const bodyHeight = Math.max(1.5, Math.abs(yOpen - yClose))
+    const bodyH = Math.max(2, Math.abs(yOpen - yClose))
     ctx.fillStyle = isUp ? upColor : downColor
-    ctx.fillRect(x - candleWidth / 2, bodyTop, candleWidth, bodyHeight)
+    ctx.fillRect(x - candleWidth / 2, bodyTop, candleWidth, bodyH)
   }
 
-  // Draw Trade Lines (SL / TP / Entry)
-  function drawTradeLine(price: number, color: string, dash: number[], label: string) {
-    if (!price || price <= 0) return
-    const y = priceToY(price)
+  // 3. 高点与低点标注 (参考 OKX App: "82,279.9 —" 与 "— 62,508.3")
+  function drawExtremeTag(c: Candle, idx: number, isHigh: boolean) {
+    const x = idx * candleGap + candleGap / 2
+    const y = priceToY(isHigh ? c.high : c.low)
+    const pStr = c.high >= 100 ? (isHigh ? c.high.toFixed(1) : c.low.toFixed(1)) : (isHigh ? c.high.toFixed(4) : c.low.toFixed(4))
+    ctx.save()
+    ctx.fillStyle = textMuted
+    ctx.font = 'bold 9px monospace'
+    const isLeft = x > chartWidth * 0.5
+    ctx.textAlign = isLeft ? 'right' : 'left'
+    const textX = isLeft ? x - 12 : x + 12
+    ctx.fillText(isLeft ? `${pStr} ─` : `─ ${pStr}`, textX, isHigh ? y - 4 : y + 10)
+    ctx.restore()
+  }
+  drawExtremeTag(highestCandle, highestIdx, true)
+  drawExtremeTag(lowestCandle, lowestIdx, false)
+
+  // 4. 主图指标绘制 (BOLL / MA / EMA)
+  function drawLineSeries(data: number[], color: string, width = 1.2) {
     ctx.save()
     ctx.strokeStyle = color
-    ctx.lineWidth = 1.5
-    ctx.setLineDash(dash)
+    ctx.lineWidth = width
     ctx.beginPath()
-    ctx.moveTo(0, y)
-    ctx.lineTo(chartWidth, y)
+    let started = false
+    for (let i = 0; i < count; i++) {
+      const v = data[i]
+      if (!isNaN(v)) {
+        const x = i * candleGap + candleGap / 2
+        const y = priceToY(v)
+        if (!started) {
+          ctx.moveTo(x, y)
+          started = true
+        } else {
+          ctx.lineTo(x, y)
+        }
+      }
+    }
     ctx.stroke()
-
-    ctx.setLineDash([])
-    ctx.fillStyle = color
-    ctx.beginPath()
-    ctx.roundRect(chartWidth + 2, y - 9, 66, 18, 3)
-    ctx.fill()
-    ctx.fillStyle = '#FFFFFF'
-    ctx.font = 'bold 9px monospace'
-    ctx.textAlign = 'center'
-    ctx.fillText(price >= 100 ? price.toFixed(2) : price.toFixed(4), chartWidth + 35, y + 3)
-
-    ctx.fillStyle = isDark ? 'rgba(20, 22, 31, 0.9)' : 'rgba(255, 255, 255, 0.9)'
-    ctx.strokeStyle = color
-    ctx.lineWidth = 1
-    ctx.beginPath()
-    ctx.roundRect(8, y - 11, 160, 16, 4)
-    ctx.fill()
-    ctx.stroke()
-    ctx.fillStyle = color
-    ctx.font = 'bold 9px monospace'
-    ctx.textAlign = 'left'
-    ctx.fillText(label, 12, y + 1)
     ctx.restore()
   }
 
-  if (currentPrice.value > 0) {
-    const markY = priceToY(currentPrice.value)
+  if (mainIndicator.value === 'BOLL' && ind.boll) {
+    drawLineSeries(ind.boll.ub, orangeBoll, 1.2)
+    drawLineSeries(ind.boll.mb, '#10B981', 1.2)
+    drawLineSeries(ind.boll.lb, orangeBoll, 1.2)
+  } else if (mainIndicator.value === 'MA' && ind.ma) {
+    drawLineSeries(ind.ma.ma5, '#EAB308', 1.2)
+    drawLineSeries(ind.ma.ma10, '#3B82F6', 1.2)
+    drawLineSeries(ind.ma.ma20, '#8B5CF6', 1.2)
+  } else if (mainIndicator.value === 'EMA' && ind.ema) {
+    drawLineSeries(ind.ema.ema7, '#EAB308', 1.2)
+    drawLineSeries(ind.ema.ema25, '#F97316', 1.2)
+  }
+
+  // 5. 最新市价水平白光点状线 (参考 OKX App)
+  const lastC = list[count - 1]
+  if (lastC) {
+    const lastY = priceToY(lastC.close)
     ctx.save()
-    ctx.strokeStyle = blueColor
+    ctx.strokeStyle = isDark ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.7)'
     ctx.lineWidth = 1
     ctx.setLineDash([2, 2])
     ctx.beginPath()
-    ctx.moveTo(0, markY)
-    ctx.lineTo(chartWidth, markY)
+    ctx.moveTo(0, lastY)
+    ctx.lineTo(chartWidth, lastY)
     ctx.stroke()
+
+    // 右轴光标胶囊
+    ctx.setLineDash([])
+    ctx.fillStyle = isDark ? '#262936' : '#E2E8F0'
+    ctx.beginPath()
+    ctx.roundRect(chartWidth + 2, lastY - 9, 66, 18, 3)
+    ctx.fill()
+    ctx.fillStyle = textMain
+    ctx.font = 'bold 9px monospace'
+    ctx.textAlign = 'center'
+    ctx.fillText(lastC.close >= 100 ? lastC.close.toFixed(2) : lastC.close.toFixed(4), chartWidth + 35, lastY + 3)
     ctx.restore()
   }
 
-  if (activePosition.value || activeOrder.value) {
-    drawTradeLine(
-      liveEntry.value,
-      liveSide.value === 'long' ? upColor : downColor,
-      [],
-      `${liveSide.value === 'long' ? '🟢 多头开仓' : '🔴 空头开仓'} $${liveEntry.value.toFixed(2)}`
-    )
+  // 6. 四维交易线叠加 (只在处于可视范围内时绘制水平虚线，超出时边缘指示)
+  const entry = liveEntry.value
+  const sl = effectiveSL.value
+  const tp = effectiveTP.value
+
+  function drawTradingLevel(p: number, color: string, label: string) {
+    if (p <= 0) return
+    if (p >= minPrice && p <= maxPrice) {
+      const y = priceToY(p)
+      ctx.save()
+      ctx.strokeStyle = color
+      ctx.lineWidth = 1.4
+      ctx.setLineDash([4, 4])
+      ctx.beginPath()
+      ctx.moveTo(0, y)
+      ctx.lineTo(chartWidth, y)
+      ctx.stroke()
+
+      ctx.setLineDash([])
+      ctx.fillStyle = color
+      ctx.beginPath()
+      ctx.roundRect(chartWidth + 2, y - 8, 66, 16, 2)
+      ctx.fill()
+      ctx.fillStyle = '#FFFFFF'
+      ctx.font = 'bold 9px monospace'
+      ctx.textAlign = 'center'
+      ctx.fillText(p >= 100 ? p.toFixed(2) : p.toFixed(4), chartWidth + 35, y + 3)
+      ctx.restore()
+    }
   }
 
-  if (effectiveSL.value > 0) {
-    drawTradeLine(
-      effectiveSL.value,
-      downColor,
-      [5, 4],
-      `🛑 止损SL -${riskRewardMetrics.value.riskPct.toFixed(1)}%`
-    )
+  if (activePosition.value) {
+    drawTradingLevel(entry, liveSide.value === 'long' ? upColor : downColor, '入场成本')
+  }
+  if (sl > 0) drawTradingLevel(sl, downColor, '止损SL')
+  if (tp > 0) drawTradingLevel(tp, upColor, '止盈TP')
+
+  // 7. 副图指标绘制 (MACD / RSI / KDJ / VOL)
+  if (hasSubChart) {
+    ctx.save()
+    // 副图分隔线
+    ctx.strokeStyle = borderSubtle
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.moveTo(0, subTop)
+    ctx.lineTo(chartWidth, subTop)
+    ctx.stroke()
+
+    if (subIndicator.value === 'MACD' && ind.macd) {
+      const bars = ind.macd.bar.filter((v) => !isNaN(v))
+      const maxMacd = Math.max(1, Math.max(...bars.map(Math.abs))) * 1.15
+      const zeroY = subTop + subHeight / 2
+
+      // MACD 柱状图
+      for (let i = 0; i < count; i++) {
+        const b = ind.macd.bar[i]
+        if (!isNaN(b)) {
+          const x = i * candleGap + candleGap / 2
+          const bH = (b / maxMacd) * (subHeight / 2)
+          ctx.fillStyle = b >= 0 ? upColor : downColor
+          ctx.fillRect(x - candleWidth / 2, zeroY, candleWidth, -bH)
+        }
+      }
+
+      // DIF & DEA 曲线
+      function drawSubLine(arr: number[], color: string) {
+        ctx.strokeStyle = color
+        ctx.lineWidth = 1.2
+        ctx.beginPath()
+        let st = false
+        for (let i = 0; i < count; i++) {
+          const v = arr[i]
+          if (!isNaN(v)) {
+            const x = i * candleGap + candleGap / 2
+            const y = zeroY - (v / maxMacd) * (subHeight / 2)
+            if (!st) {
+              ctx.moveTo(x, y)
+              st = true
+            } else {
+              ctx.lineTo(x, y)
+            }
+          }
+        }
+        ctx.stroke()
+      }
+      drawSubLine(ind.macd.dif, '#EAB308') // 橙黄 DIF
+      drawSubLine(ind.macd.dea, '#EC4899') // 粉红 DEA
+    } else if (subIndicator.value === 'RSI' && ind.rsi) {
+      // 30 / 70 虚线
+      const y30 = subTop + subHeight * 0.7
+      const y70 = subTop + subHeight * 0.3
+      ctx.strokeStyle = isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)'
+      ctx.setLineDash([3, 3])
+      ctx.beginPath()
+      ctx.moveTo(0, y30)
+      ctx.lineTo(chartWidth, y30)
+      ctx.moveTo(0, y70)
+      ctx.lineTo(chartWidth, y70)
+      ctx.stroke()
+      ctx.setLineDash([])
+
+      // RSI 线
+      ctx.strokeStyle = '#EAB308'
+      ctx.lineWidth = 1.2
+      ctx.beginPath()
+      let st = false
+      for (let i = 0; i < count; i++) {
+        const r = ind.rsi[i]
+        if (!isNaN(r)) {
+          const x = i * candleGap + candleGap / 2
+          const y = subTop + subHeight - (r / 100) * subHeight
+          if (!st) {
+            ctx.moveTo(x, y)
+            st = true
+          } else {
+            ctx.lineTo(x, y)
+          }
+        }
+      }
+      ctx.stroke()
+    } else if (subIndicator.value === 'KDJ' && ind.kdj) {
+      function drawKDJLine(arr: number[], color: string) {
+        ctx.strokeStyle = color
+        ctx.lineWidth = 1.2
+        ctx.beginPath()
+        let st = false
+        for (let i = 0; i < count; i++) {
+          const v = arr[i]
+          if (!isNaN(v)) {
+            const x = i * candleGap + candleGap / 2
+            const y = subTop + subHeight - (v / 100) * subHeight
+            if (!st) {
+              ctx.moveTo(x, y)
+              st = true
+            } else {
+              ctx.lineTo(x, y)
+            }
+          }
+        }
+        ctx.stroke()
+      }
+      drawKDJLine(ind.kdj.k, '#EAB308')
+      drawKDJLine(ind.kdj.d, '#EC4899')
+      drawKDJLine(ind.kdj.j, '#8B5CF6')
+    } else if (subIndicator.value === 'VOL') {
+      const maxV = Math.max(...list.map((c) => c.vol)) || 1
+      for (let i = 0; i < count; i++) {
+        const c = list[i]
+        const x = i * candleGap + candleGap / 2
+        const vH = (c.vol / maxV) * subHeight * 0.9
+        ctx.fillStyle = c.close >= c.open ? upColor : downColor
+        ctx.fillRect(x - candleWidth / 2, subTop + subHeight - vH, candleWidth, vH)
+      }
+    }
+    ctx.restore()
   }
 
-  if (effectiveTP.value > 0) {
-    drawTradeLine(
-      effectiveTP.value,
-      upColor,
-      [5, 4],
-      `🎯 止盈TP +${riskRewardMetrics.value.rewardPct.toFixed(1)}%`
-    )
+  // 8. 鼠标十字光标
+  if (hoverPos.value) {
+    const { x, y } = hoverPos.value
+    if (x >= 0 && x <= chartWidth && y >= paddingTop && y <= height - paddingBottom) {
+      ctx.save()
+      ctx.strokeStyle = isDark ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.4)'
+      ctx.lineWidth = 1
+      ctx.setLineDash([3, 3])
+      ctx.beginPath()
+      ctx.moveTo(x, paddingTop)
+      ctx.lineTo(x, height - paddingBottom)
+      ctx.moveTo(0, y)
+      ctx.lineTo(chartWidth, y)
+      ctx.stroke()
+      ctx.restore()
+    }
   }
 }
 
-function selectSymbol(s: string) {
-  currentSymbol.value = s
-  emit('select-symbol', s)
-  if (chartEngine.value === 'native') {
-    loadCandles()
+// 鼠标光标交互
+function handleMouseMove(e: MouseEvent) {
+  const canvas = canvasRef.value
+  if (!canvas) return
+  const rect = canvas.getBoundingClientRect()
+  const x = e.clientX - rect.left
+  const y = e.clientY - rect.top
+
+  const paddingRight = 72
+  const chartWidth = canvas.clientWidth - paddingRight
+  if (x >= 0 && x <= chartWidth) {
+    hoverPos.value = { x, y }
+    const idx = Math.floor((x / chartWidth) * candles.value.length)
+    if (idx >= 0 && idx < candles.value.length) {
+      hoverCandle.value = candles.value[idx]
+    }
   } else {
-    initSimulation()
+    hoverPos.value = null
+    hoverCandle.value = null
   }
+  drawChart()
 }
 
+function handleMouseLeave() {
+  hoverPos.value = null
+  hoverCandle.value = null
+  drawChart()
+}
+
+// 快速调价
 function adjustSL(deltaPercent: number) {
   if (!simMode.value) simMode.value = true
   const cur = simStopLoss.value || liveStopLoss.value
   const step = cur * deltaPercent
   simStopLoss.value = Number((cur + step).toFixed(4))
-  if (chartEngine.value === 'native') drawChart()
+  drawChart()
 }
 
 function adjustTP(deltaPercent: number) {
@@ -515,7 +872,17 @@ function adjustTP(deltaPercent: number) {
   const cur = simTakeProfit.value || liveTakeProfit.value
   const step = cur * deltaPercent
   simTakeProfit.value = Number((cur + step).toFixed(4))
-  if (chartEngine.value === 'native') drawChart()
+  drawChart()
+}
+
+function initSimulation() {
+  simStopLoss.value = Number(liveStopLoss.value.toFixed(4))
+  simTakeProfit.value = Number(liveTakeProfit.value.toFixed(4))
+}
+
+function resetSimulation() {
+  initSimulation()
+  drawChart()
 }
 
 function copySimulationSummary() {
@@ -532,23 +899,78 @@ function copySimulationSummary() {
   }, 2000)
 }
 
-watch(() => props.initialSymbol, (val) => {
-  if (val && val !== currentSymbol.value && symbols.includes(val)) {
-    selectSymbol(val)
+function selectSymbol(s: string) {
+  currentSymbol.value = s
+  emit('select-symbol', s)
+  loadCandles()
+}
+
+// 拉取行情
+async function loadCandles() {
+  isLoading.value = true
+  try {
+    const res = await fetch(
+      `/api/v1/market/${currentInstId.value}/candles?bar=${currentPeriod.value}&limit=60`
+    )
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json()
+    if (Array.isArray(data.candles) && data.candles.length > 0) {
+      candles.value = data.candles
+    }
+  } catch (err) {
+    console.warn('Candles fetch fallback:', err)
+  } finally {
+    isLoading.value = false
+    nextTick(() => {
+      initSimulation()
+      drawChart()
+    })
+  }
+}
+
+// 自动匹配首个有持仓的标的
+function autoSelectFirstActiveSymbol() {
+  if (props.initialSymbol && availableSymbols.value.includes(props.initialSymbol)) {
+    currentSymbol.value = props.initialSymbol
+    return
+  }
+  const pos = store.positions[0]
+  if (pos) {
+    const sym = pos.name || pos.instId?.split('-')[0]
+    if (sym && availableSymbols.value.includes(sym.toUpperCase())) {
+      currentSymbol.value = sym.toUpperCase()
+      return
+    }
+  }
+  if (availableSymbols.value.length > 0) {
+    currentSymbol.value = availableSymbols.value[0]
+  }
+}
+
+watch(availableSymbols, (symbols) => {
+  if (symbols.length > 0 && !symbols.includes(currentSymbol.value)) {
+    currentSymbol.value = symbols[0]
+    loadCandles()
   }
 })
 
-watch([() => chartEngine.value, () => currentPeriod.value], () => {
-  if (chartEngine.value === 'native') {
-    loadCandles()
-  }
+watch([() => currentPeriod.value, () => mainIndicator.value, () => subIndicator.value], () => {
+  drawChart()
 })
 
 onMounted(() => {
-  initSimulation()
-  if (chartEngine.value === 'native') {
-    loadCandles()
+  autoSelectFirstActiveSymbol()
+  if (containerRef.value) {
+    resizeObserver = new ResizeObserver(() => {
+      drawChart()
+    })
+    resizeObserver.observe(containerRef.value)
   }
+  loadCandles()
+})
+
+onUnmounted(() => {
+  if (resizeObserver) resizeObserver.disconnect()
 })
 
 defineExpose({
@@ -562,79 +984,34 @@ defineExpose({
     class="rounded-xl border transition-all shadow-xs overflow-hidden"
     style="background-color: var(--bg-card); border-color: var(--border-subtle);"
   >
-    <!-- Top Workspace Header: Matching Screenshot Exactly -->
+    <!-- Top Bar: 动态标的横滑 + 周期切换 (参考 OKX App) -->
     <div
-      class="px-3.5 py-2.5 sm:px-4 sm:py-3 border-b flex flex-wrap items-center justify-between gap-2.5"
+      class="px-3 py-2 sm:px-4 sm:py-2.5 border-b flex flex-wrap items-center justify-between gap-2 text-xs font-mono"
       style="border-color: var(--border-subtle); background-color: var(--bg-card-subtle);"
     >
-      <!-- Left: Title with Icon -->
-      <div class="flex items-center space-x-2">
-        <div
-          class="w-6 h-6 rounded-md flex items-center justify-center border shrink-0 text-indigo-400"
-          style="background-color: var(--bg-card); border-color: var(--border-subtle);"
-        >
-          <LineChart class="w-3.5 h-3.5" />
-        </div>
-        <span class="font-mono font-black text-xs sm:text-sm tracking-wide" style="color: var(--text-main);">
-          专业多周期行情工作站
-        </span>
-      </div>
-
-      <!-- Right: Dual Engine Switcher Capsule (Native vs TradingView) -->
-      <div
-        class="flex items-center p-0.5 rounded-lg border text-xs font-mono"
-        style="background-color: var(--bg-card); border-color: var(--border-subtle);"
-      >
+      <!-- 动态自动读取系统配置的标的列表 (不再死板照抄) -->
+      <div class="flex items-center space-x-1 sm:space-x-1.5 overflow-x-auto py-0.5 max-w-full">
         <button
-          @click="chartEngine = 'native'; loadCandles()"
-          class="flex items-center space-x-1 px-2.5 py-1 rounded-md transition-all cursor-pointer font-bold"
-          :style="chartEngine === 'native'
-            ? { backgroundColor: 'var(--bg-badge)', color: 'var(--text-main)', borderColor: 'var(--border-medium)' }
-            : { color: 'var(--text-muted)' }"
-        >
-          <Zap class="w-3 h-3 text-amber-400" />
-          <span>极速原生行情</span>
-        </button>
-        <button
-          @click="chartEngine = 'tv'"
-          class="flex items-center space-x-1 px-2.5 py-1 rounded-md transition-all cursor-pointer font-bold"
-          :style="chartEngine === 'tv'
-            ? { backgroundColor: 'var(--color-brand-bg)', color: 'var(--color-brand)', borderColor: 'var(--color-brand-border)' }
-            : { color: 'var(--text-muted)' }"
-        >
-          <span>TradingView</span>
-        </button>
-      </div>
-    </div>
-
-    <!-- Sub Header: Symbols Horizontal Scroll + Timeframe & Actions (Matching Screenshot) -->
-    <div
-      class="px-3.5 py-2 border-b flex flex-wrap items-center justify-between gap-2 text-xs font-mono"
-      style="border-color: var(--border-subtle); background-color: var(--bg-app);"
-    >
-      <!-- Symbols Horizontal Tabs -->
-      <div class="flex items-center space-x-2 overflow-x-auto py-0.5 max-w-full">
-        <button
-          v-for="sym in symbols"
+          v-for="sym in availableSymbols"
           :key="sym"
           @click="selectSymbol(sym)"
-          class="px-2.5 py-1 text-xs font-bold transition-all cursor-pointer shrink-0 border-b-2"
+          class="px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer border flex items-center space-x-1 shrink-0"
           :style="currentSymbol === sym
-            ? { borderColor: 'var(--color-brand)', color: 'var(--text-main)' }
-            : { borderColor: 'transparent', color: 'var(--text-muted)' }"
+            ? { backgroundColor: 'var(--color-brand-bg)', borderColor: 'var(--color-brand-border)', color: 'var(--color-brand)' }
+            : { backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }"
         >
-          <span class="flex items-center space-x-1">
-            <span
-              v-if="store.positions.some((p: any) => p.instId?.startsWith(sym) || p.name === sym)"
-              class="w-1.5 h-1.5 rounded-full"
-              :class="store.positions.find((p: any) => p.instId?.startsWith(sym) || p.name === sym)?.side === 'long' ? 'bg-emerald-500' : 'bg-rose-500'"
-            ></span>
-            <span>{{ sym }}</span>
-          </span>
+          <!-- 活动持仓指示点 -->
+          <span
+            v-if="store.positions.some((p: any) => p.name?.toUpperCase() === sym || p.instId?.toUpperCase().startsWith(sym))"
+            class="w-1.5 h-1.5 rounded-full"
+            :class="store.positions.find((p: any) => p.name?.toUpperCase() === sym || p.instId?.toUpperCase().startsWith(sym))?.side === 'long' ? 'bg-emerald-500' : 'bg-rose-500'"
+            title="该标的持有活动持仓"
+          ></span>
+          <span>{{ sym }}</span>
         </button>
       </div>
 
-      <!-- Timeframe Pills + Sim Mode Toggle -->
+      <!-- 周期按钮与刷新 -->
       <div class="flex items-center space-x-1.5 shrink-0">
         <div
           class="flex items-center p-0.5 rounded-lg border text-[11px]"
@@ -644,7 +1021,7 @@ defineExpose({
             v-for="p in periods"
             :key="p.id"
             @click="currentPeriod = p.id; loadCandles()"
-            class="h-5.5 px-2 rounded font-bold cursor-pointer transition-all"
+            class="h-6 px-2 rounded-md font-bold transition-all cursor-pointer"
             :style="currentPeriod === p.id
               ? { backgroundColor: 'var(--bg-badge)', color: 'var(--text-main)' }
               : { color: 'var(--text-muted)' }"
@@ -653,91 +1030,124 @@ defineExpose({
           </button>
         </div>
 
-        <!-- Simulation Toggle Button -->
         <button
-          @click="simMode = !simMode; if (simMode) initSimulation(); if (chartEngine === 'native') drawChart()"
-          class="h-6.5 px-2 rounded-lg text-[11px] font-mono border flex items-center space-x-1 transition-all cursor-pointer font-bold"
+          @click="simMode = !simMode; if (simMode) initSimulation(); drawChart()"
+          class="h-7 px-2 rounded-lg text-xs font-mono border flex items-center space-x-1 transition-all cursor-pointer font-bold"
           :style="simMode
             ? { backgroundColor: 'var(--color-brand-bg)', borderColor: 'var(--color-brand-border)', color: 'var(--color-brand)' }
             : { backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }"
           :title="simMode ? '退出试算' : '平移试算 R:R'"
         >
-          <Sliders class="w-3 h-3" />
-          <span>{{ simMode ? '退出试算' : '平移试算 R:R' }}</span>
+          <Sliders class="w-3.5 h-3.5" />
+          <span class="hidden sm:inline">{{ simMode ? '退出试算' : '平移试算' }}</span>
         </button>
 
         <button
           @click="loadCandles"
-          class="h-6.5 w-6.5 rounded-lg border flex items-center justify-center transition-colors cursor-pointer"
+          class="h-7 w-7 rounded-lg border flex items-center justify-center transition-colors cursor-pointer"
           style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-muted);"
           title="刷新行情"
         >
-          <RefreshCw class="w-3 h-3" :class="isLoading ? 'animate-spin' : ''" />
+          <RefreshCw class="w-3.5 h-3.5" :class="isLoading ? 'animate-spin' : ''" />
         </button>
       </div>
     </div>
 
-    <!-- Ticker Info Bar -->
+    <!-- Ticker Info Bar & OKX 指标实时读数 (对标截图) -->
     <div
-      class="px-4 py-2 border-b flex flex-wrap items-center justify-between text-xs font-mono gap-2"
-      style="border-color: var(--border-subtle); background-color: var(--bg-card);"
+      class="px-3 py-1.5 sm:px-4 sm:py-2 border-b flex flex-wrap items-center justify-between text-[11px] font-mono gap-2"
+      style="border-color: var(--border-subtle); background-color: var(--bg-app);"
     >
-      <div class="flex items-center space-x-3">
-        <span class="font-black text-sm" style="color: var(--text-main);">{{ currentSymbol }} / TetherUS</span>
-        <span class="text-sm font-black text-emerald-400 num-tabular">
-          ${{ currentPrice >= 100 ? currentPrice.toFixed(2) : currentPrice.toFixed(4) }}
+      <div class="flex items-center space-x-2">
+        <span class="font-black text-xs sm:text-sm" style="color: var(--text-main);">{{ currentSymbol }}USDT 永续</span>
+        <span class="font-black text-xs sm:text-sm num-tabular" style="color: var(--text-main);">
+          ${{ currentPrice >= 100 ? currentPrice.toFixed(1) : currentPrice.toFixed(4) }}
         </span>
-        <span class="text-[11px] text-emerald-400 font-bold">+0.91%</span>
-        <span class="text-[11px]" style="color: var(--text-faint);">1H ATR: ${{ currentAtr.toFixed(2) }}</span>
+        <span class="text-[10px] text-emerald-400 font-bold">+0.00%</span>
       </div>
 
-      <div v-if="activePosition" class="flex items-center space-x-2 text-[11px]">
-        <span
-          class="px-1.5 py-0.2 rounded border font-bold"
-          :class="activePosition.side === 'long' ? 'capsule-direction-long' : 'capsule-direction-short'"
-        >
-          {{ activePosition.side === 'long' ? '多头持有' : '空头持有' }} {{ activePosition.pos }}张
-        </span>
-        <span style="color: var(--text-muted);">均价: ${{ Number(activePosition.avgPx).toFixed(2) }}</span>
-        <span :style="{ color: Number(activePosition.upl) >= 0 ? 'var(--color-up)' : 'var(--color-down)' }">
-          浮盈: {{ Number(activePosition.upl) >= 0 ? '+' : '' }}{{ Number(activePosition.upl).toFixed(2) }} U
-        </span>
+      <!-- 主图指标当前读数 (如 BOLL20: 77873.4 UB: 83427.7 LB: 72319.0) -->
+      <div class="text-[10px] font-mono text-amber-400 truncate max-w-full">
+        {{ currentIndicatorHeader.mainText }}
       </div>
     </div>
 
-    <!-- Chart Container: Height increased to 480px~520px (Professional & Spacious) -->
+    <!-- K线 Canvas 主视口 (起伏饱满、彻底解决扁平) -->
     <div
       ref="containerRef"
-      class="relative w-full h-[460px] sm:h-[500px] 2xl:h-[540px] select-none overflow-hidden"
+      class="relative w-full h-[400px] sm:h-[460px] 2xl:h-[500px] select-none cursor-crosshair"
       style="background-color: var(--bg-card);"
     >
-      <!-- Mode 1: TradingView Advanced Real-Time Chart (Full Indicators & Drawing Tools) -->
-      <iframe
-        v-if="chartEngine === 'tv'"
-        :key="`${currentSymbol}-${currentPeriod}-${theme}`"
-        :src="tradingViewIframeUrl"
-        class="w-full h-full border-0 block"
-        allowtransparency="true"
-        scrolling="no"
-      ></iframe>
-
-      <!-- Mode 2: Native Lightweight Canvas with 4D Trading Overlay Lines -->
       <canvas
-        v-else
         ref="canvasRef"
-        class="w-full h-full block cursor-crosshair"
+        class="w-full h-full block"
+        @mousemove="handleMouseMove"
+        @mouseleave="handleMouseLeave"
       ></canvas>
+
+      <!-- 悬浮指示：当云端止盈/止损在可视区外时的提示 (防拉扁) -->
+      <div class="absolute top-2 right-20 flex flex-col items-end space-y-1 text-[10px] font-mono pointer-events-none">
+        <span v-if="effectiveTP > 0" class="px-1.5 py-0.5 rounded bg-emerald-950/80 border border-emerald-500/40 text-emerald-400 font-bold">
+          🎯 止盈TP: ${{ effectiveTP >= 100 ? effectiveTP.toFixed(1) : effectiveTP.toFixed(4) }} (+{{ riskRewardMetrics.rewardPct.toFixed(1) }}%)
+        </span>
+        <span v-if="effectiveSL > 0" class="px-1.5 py-0.5 rounded bg-rose-950/80 border border-rose-500/40 text-rose-400 font-bold">
+          🛑 止损SL: ${{ effectiveSL >= 100 ? effectiveSL.toFixed(1) : effectiveSL.toFixed(4) }} (-{{ riskRewardMetrics.riskPct.toFixed(1) }}%)
+        </span>
+      </div>
+
+      <!-- 副图指标读数浮层 -->
+      <div v-if="currentIndicatorHeader.subText" class="absolute bottom-6 left-3 text-[10px] font-mono text-indigo-400 pointer-events-none">
+        {{ currentIndicatorHeader.subText }}
+      </div>
     </div>
 
-    <!-- Bottom Interactive Risk / Reward (R:R) Simulator Console (Scientific Dollar Metric Fix) -->
+    <!-- 底部专业指标选择器工具栏 (完全对齐 OKX 官方 App 截图底部) -->
+    <div
+      class="px-3 py-1.5 border-t flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono"
+      style="border-color: var(--border-subtle); background-color: var(--bg-card-subtle);"
+    >
+      <!-- 主图指标切换 -->
+      <div class="flex items-center space-x-1 overflow-x-auto">
+        <span class="text-[10px] font-bold opacity-60 pr-1">主图:</span>
+        <button
+          v-for="mi in (['BOLL', 'MA', 'EMA', 'NONE'] as MainIndicatorType[])"
+          :key="mi"
+          @click="mainIndicator = mi"
+          class="px-2 py-0.5 rounded font-bold cursor-pointer transition-all"
+          :style="mainIndicator === mi
+            ? { backgroundColor: 'var(--bg-badge)', color: 'var(--text-main)', border: '1px solid var(--border-medium)' }
+            : { color: 'var(--text-muted)' }"
+        >
+          {{ mi }}
+        </button>
+      </div>
+
+      <!-- 副图指标切换 (MACD, RSI, KDJ, VOL) -->
+      <div class="flex items-center space-x-1 overflow-x-auto">
+        <span class="text-[10px] font-bold opacity-60 pr-1">副图:</span>
+        <button
+          v-for="si in (['MACD', 'RSI', 'KDJ', 'VOL', 'NONE'] as SubIndicatorType[])"
+          :key="si"
+          @click="subIndicator = si"
+          class="px-2 py-0.5 rounded font-bold cursor-pointer transition-all"
+          :style="subIndicator === si
+            ? { backgroundColor: 'var(--color-brand-bg)', color: 'var(--color-brand)', border: '1px solid var(--color-brand-border)' }
+            : { color: 'var(--text-muted)' }"
+        >
+          {{ si }}
+        </button>
+      </div>
+    </div>
+
+    <!-- Bottom Interactive Risk / Reward (R:R) Simulator Console (真实金额) -->
     <div
       class="p-3 sm:p-4 border-t transition-colors"
-      style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);"
+      style="background-color: var(--bg-card); border-color: var(--border-subtle);"
     >
       <div class="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3">
-        <!-- 1. Four Core Health Metrics: Scientific Dollar Calculations -->
+        <!-- 四项真实核心风控数据 -->
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 w-full lg:w-auto">
-          <!-- R:R Ratio Metric -->
+          <!-- 期望盈亏比 -->
           <div
             class="p-2.5 rounded-lg border font-mono flex flex-col justify-between"
             :style="{
@@ -746,7 +1156,7 @@ defineExpose({
             }"
           >
             <span class="text-[10px] uppercase font-bold" :style="{ color: riskRewardMetrics.isRrCompliant ? 'var(--color-up)' : 'var(--color-warn)' }">
-              {{ riskRewardMetrics.isRrCompliant ? '✅ 期望盈亏比 (R:R)' : '⚠️ 盈亏比预警' }}
+              {{ riskRewardMetrics.isRrCompliant ? '✅ 期望盈亏比 (R:R)' : '⚠️ 盈亏比不足 2.0' }}
             </span>
             <div class="flex items-baseline space-x-1 mt-0.5">
               <span class="text-base sm:text-lg font-black num-tabular" :style="{ color: riskRewardMetrics.isRrCompliant ? 'var(--color-up)' : 'var(--color-warn)' }">
@@ -758,10 +1168,10 @@ defineExpose({
             </div>
           </div>
 
-          <!-- ATR Stop Distance -->
+          <!-- ATR 呼吸空间 -->
           <div
             class="p-2.5 rounded-lg border font-mono flex flex-col justify-between"
-            style="background-color: var(--bg-card); border-color: var(--border-subtle);"
+            style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);"
           >
             <span class="text-[10px] uppercase font-bold" style="color: var(--text-muted);">
               止损呼吸空间 (ATR)
@@ -779,10 +1189,10 @@ defineExpose({
             </div>
           </div>
 
-          <!-- Potential Reward USD (Accurate Scientific Metric) -->
+          <!-- 真实预期收益金额 -->
           <div
             class="p-2.5 rounded-lg border font-mono flex flex-col justify-between"
-            style="background-color: var(--bg-card); border-color: var(--border-subtle);"
+            style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);"
           >
             <span class="text-[10px] uppercase font-bold text-emerald-500">
               预期收益目标 (TP)
@@ -797,10 +1207,10 @@ defineExpose({
             </div>
           </div>
 
-          <!-- Max Risk USD (Accurate Scientific Metric) -->
+          <!-- 真实最大风险金额 -->
           <div
             class="p-2.5 rounded-lg border font-mono flex flex-col justify-between"
-            style="background-color: var(--bg-card); border-color: var(--border-subtle);"
+            style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);"
           >
             <span class="text-[10px] uppercase font-bold text-rose-500">
               最大硬风控风险 (SL)
@@ -816,7 +1226,7 @@ defineExpose({
           </div>
         </div>
 
-        <!-- 2. Simulation Adjustment Controls (Active in Sim Mode) -->
+        <!-- 调价与复制操作区 -->
         <div class="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-end">
           <div v-if="simMode" class="flex flex-wrap items-center gap-1.5 text-xs font-mono">
             <div class="flex items-center space-x-1 bg-rose-950/20 border border-rose-900/40 px-2 py-1 rounded-lg text-[11px]">
