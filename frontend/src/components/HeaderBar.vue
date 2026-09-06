@@ -86,16 +86,16 @@ const tabs = computed(() => [
         </span>
       </div>
 
-      <!-- Center: High-Precision Tab Switcher (Visible on large screens xl:flex, to avoid bursting 1080p/laptop screens) -->
+      <!-- Center: High-Precision Tab Switcher (Visible on desktop/laptop md:flex) -->
       <nav
-        class="hidden xl:flex items-center p-0.5 rounded-xl border shrink-0 transition-colors"
+        class="hidden md:flex items-center p-0.5 rounded-xl border shrink-0 transition-colors"
         style="background-color: var(--bg-badge); border-color: var(--border-subtle);"
       >
         <button
           v-for="tab in tabs"
           :key="tab.id"
           @click="store.activeTab = tab.id as any"
-          class="h-7 flex items-center space-x-1.5 px-2.5 2xl:px-3 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer whitespace-nowrap"
+          class="h-7 flex items-center space-x-1 sm:space-x-1.5 px-2 lg:px-2.5 2xl:px-3 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer whitespace-nowrap"
           :style="store.activeTab === tab.id
             ? { backgroundColor: 'var(--bg-card)', color: 'var(--text-main)', borderColor: 'var(--border-medium)', boxShadow: 'var(--shadow-card)' }
             : { color: 'var(--text-muted)' }"
