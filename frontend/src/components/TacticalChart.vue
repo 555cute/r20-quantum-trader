@@ -276,6 +276,37 @@ const riskRewardMetrics = computed(() => {
   }
 })
 
+// 动态根据标的价格计算自适应价格刻度精度 (彻底解决 SUI/ASTER/DOGE 价格标签全是 0.80 的重叠Bug)
+function getSymbolPrecision(sym: string, price: number): { precision: number; minMove: number } {
+  const upper = sym.toUpperCase()
+  if (upper.includes('BTC')) return { precision: 1, minMove: 0.1 }
+  if (upper.includes('ETH') || upper.includes('SOL')) return { precision: 2, minMove: 0.01 }
+  if (price >= 100) return { precision: 2, minMove: 0.01 }
+  if (price >= 10) return { precision: 3, minMove: 0.005 }
+  if (price >= 1) return { precision: 3, minMove: 0.001 }
+  // SUI, ASTER, DOGE, ADA 等低价币种强制 4 位小数！
+  return { precision: 4, minMove: 0.0001 }
+}
+
+function applyPricePrecision(price: number) {
+  if (!candleSeries) return
+  const { precision, minMove } = getSymbolPrecision(currentSymbol.value, price)
+  const formatOptions = {
+    priceFormat: {
+      type: 'price' as const,
+      precision,
+      minMove,
+    },
+  }
+  candleSeries.applyOptions(formatOptions)
+  ma5Series?.applyOptions(formatOptions)
+  ma10Series?.applyOptions(formatOptions)
+  ma20Series?.applyOptions(formatOptions)
+  bollUbSeries?.applyOptions(formatOptions)
+  bollMbSeries?.applyOptions(formatOptions)
+  bollLbSeries?.applyOptions(formatOptions)
+}
+
 // ==========================================
 // 3. TradingView Lightweight Charts 极简干净初始化 (对标 OKX 官方)
 // ==========================================
@@ -330,17 +361,17 @@ function initTradingViewChart() {
       borderColor,
       autoScale: true,
       scaleMargins: {
-        top: 0.08,
-        bottom: 0.20, // 预留底部给成交量
+        top: 0.12, // ★ 留出 12% 顶部空间，确保止盈线 (TP) 极佳呈现！
+        bottom: 0.22, // 预留底部给成交量
       },
     },
     timeScale: {
       borderColor,
       timeVisible: true,
       secondsVisible: false,
-      barSpacing: 11, // ★ 放大蜡烛宽度与间距，实体宽大饱满，拒绝细小干瘪！
+      barSpacing: 10,
       minBarSpacing: 3,
-      rightOffset: 10,
+      rightOffset: 2, // ★ 紧贴 K 线框右侧刻度轴，彻底消除原本空出的 110px 大空白！
     },
   })
 
@@ -351,6 +382,26 @@ function initTradingViewChart() {
     borderVisible: false,
     wickUpColor: '#10B981',
     wickDownColor: '#F43F5E',
+    autoscaleInfoProvider: (original: any) => {
+      const res = original ? original() : null
+      if (!res || !res.priceRange) return res
+      let minPrice = res.priceRange.minValue
+      let maxPrice = res.priceRange.maxValue
+
+      // ★ 核心增强：确保止盈线 (TP) 与止损线 (SL) 即使高于/低于蜡烛极值，也 100% 完整纳入可视区！
+      const sl = effectiveSL.value
+      const tp = effectiveTP.value
+      if (sl > 0) minPrice = Math.min(minPrice, sl)
+      if (tp > 0) maxPrice = Math.max(maxPrice, tp)
+
+      const padding = (maxPrice - minPrice) * 0.05
+      return {
+        priceRange: {
+          minValue: minPrice - padding,
+          maxValue: maxPrice + padding,
+        },
+      }
+    },
   })
 
   // 2. 彻底修复的 VOL 成交量系列 (高对比度柱状图，视觉 LLM 极佳读取)
@@ -523,6 +574,9 @@ function renderChartData() {
     bollLbData.push({ time, value: mean - 2 * std })
   }
 
+  // 动态应用标的价格精度，防止低价币所有指标与刻度四舍五入重叠
+  applyPricePrecision(currentPrice.value)
+
   // 批量应用与可见性控制 (支持多指标独立共存)
   candleSeries.setData(candleData)
 
@@ -560,12 +614,12 @@ function renderChartData() {
   }
 
   updateTradingPriceLines()
+  // 紧贴右侧
+  chart?.timeScale().scrollToRealtime()
 }
 
-// 刷新原生价格线
-function updateTradingPriceLines() {
+function clearTradingPriceLines() {
   if (!candleSeries) return
-
   if (entryPriceLine) {
     try { candleSeries.removePriceLine(entryPriceLine) } catch {}
     entryPriceLine = null
@@ -578,6 +632,12 @@ function updateTradingPriceLines() {
     try { candleSeries.removePriceLine(tpPriceLine) } catch {}
     tpPriceLine = null
   }
+}
+
+// 刷新原生价格线
+function updateTradingPriceLines() {
+  if (!candleSeries) return
+  clearTradingPriceLines()
 
   if (activePosition.value || activeOrder.value) {
     const entryPx = liveEntry.value
@@ -588,7 +648,7 @@ function updateTradingPriceLines() {
         lineWidth: 1,
         lineStyle: LineStyle.Solid,
         axisLabelVisible: true,
-        title: liveSide.value === 'long' ? '多头入场' : '空头入场',
+        title: liveSide.value === 'long' ? (isEn ? 'Entry Long' : '多头入场') : (isEn ? 'Entry Short' : '空头入场'),
       })
     }
   }
@@ -601,7 +661,7 @@ function updateTradingPriceLines() {
       lineWidth: 1,
       lineStyle: LineStyle.Dashed,
       axisLabelVisible: true,
-      title: `🛑 止损SL -${riskRewardMetrics.value.riskPct.toFixed(1)}%`,
+      title: `🛑 ${isEn ? 'SL' : '止损SL'} -${riskRewardMetrics.value.riskPct.toFixed(1)}%`,
     })
   }
 
@@ -613,7 +673,7 @@ function updateTradingPriceLines() {
       lineWidth: 1,
       lineStyle: LineStyle.Dashed,
       axisLabelVisible: true,
-      title: `🎯 止盈TP +${riskRewardMetrics.value.rewardPct.toFixed(1)}%`,
+      title: `🎯 ${isEn ? 'TP' : '止盈TP'} +${riskRewardMetrics.value.rewardPct.toFixed(1)}%`,
     })
   }
 }
@@ -666,7 +726,7 @@ function updateLiveTick() {
 }
 
 // 拉取 150 根行情数据 (彻底填满 PC 端视口，支持 3s 静默增量对齐)
-async function loadCandles(silent = false) {
+async function loadCandles(silent = false, resetScale = false) {
   if (!silent) isLoading.value = true
   try {
     const res = await fetch(
@@ -677,6 +737,10 @@ async function loadCandles(silent = false) {
     if (Array.isArray(data.candles) && data.candles.length > 0) {
       candles.value = data.candles
       renderChartData()
+      if (resetScale && chart) {
+        chart.timeScale().fitContent()
+        chart.timeScale().scrollToRealtime()
+      }
     }
   } catch (err) {
     console.warn('Candles fetch fallback:', err)
@@ -686,9 +750,29 @@ async function loadCandles(silent = false) {
 }
 
 function selectSymbol(s: string) {
-  currentSymbol.value = s.toUpperCase()
-  emit('select-symbol', s.toUpperCase())
-  loadCandles()
+  const sym = s.toUpperCase()
+  if (sym === currentSymbol.value) return
+  currentSymbol.value = sym
+  emit('select-symbol', sym)
+
+  // 1. 立即清除旧币种残留的价格线，防止旧币种的万刀价格污染新标的坐标轴！
+  clearTradingPriceLines()
+  // 2. 清空当前 Series 数据，杜绝残存跨度
+  candleSeries?.setData([])
+  volumeSeries?.setData([])
+  volMaSeries?.setData([])
+  ma5Series?.setData([])
+  ma10Series?.setData([])
+  ma20Series?.setData([])
+  bollUbSeries?.setData([])
+  bollMbSeries?.setData([])
+  bollLbSeries?.setData([])
+
+  // 3. 重置时间轴
+  chart?.timeScale().resetTimeScale()
+
+  // 4. 加载新标的蜡烛并重塑缩放
+  loadCandles(false, true)
 }
 
 // 调价
