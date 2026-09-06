@@ -18,7 +18,7 @@ SCRIPTS_DIR = ROOT / "scripts"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from fastapi import Body, FastAPI, File, Header, HTTPException, Request, UploadFile
+from fastapi import Body, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
@@ -2625,14 +2625,30 @@ def run_backup(payload: BackupRequest, x_r20_admin_token: str | None = Header(de
 
 
 @app.get("/api/v1/admin/backups/download/{filename:path}")
-def download_backup_archive(filename: str, x_r20_admin_token: str | None = Header(default=None), x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> FileResponse:
+def download_backup_archive(
+    filename: str,
+    token: str | None = Query(default=None),
+    session: str | None = Query(default=None),
+    x_r20_admin_token: str | None = Header(default=None),
+    x_r20_session: str | None = Header(default=None, alias="X-R20-Session"),
+) -> FileResponse:
     refresh_settings()
-    require_admin_header(x_r20_admin_token, x_r20_session)
+    effective_session = (
+        (x_r20_session if isinstance(x_r20_session, str) else None)
+        or (token if isinstance(token, str) else None)
+        or (session if isinstance(session, str) else None)
+    )
+    effective_admin_token = x_r20_admin_token if isinstance(x_r20_admin_token, str) else None
+    require_admin_header(effective_admin_token, effective_session)
     clean_name = Path(filename).name
     backups_dir = ROOT / "backups"
     candidate = backups_dir / clean_name
     if not candidate.exists():
         candidate = backups_dir / "local" / clean_name
+    if not candidate.exists():
+        rel_candidate = (backups_dir / filename).resolve()
+        if rel_candidate.is_relative_to(backups_dir.resolve()) and rel_candidate.exists():
+            candidate = rel_candidate
     if not candidate.exists() or not candidate.is_file():
         raise HTTPException(status_code=404, detail="备份文件不存在或已清理")
     audit_record("backup.download", "success", {"filename": clean_name})

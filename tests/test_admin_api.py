@@ -320,6 +320,44 @@ class AdminApiTests(unittest.TestCase):
                 self.assertEqual(res_ok.status_code, 200)
                 self.assertIn("git_output", res_ok.json())
 
+    def test_backup_archive_download_header_and_query_token(self):
+        # 1. Without auth -> 401
+        self.assertEqual(self.client.get("/api/v1/admin/backups/download/nonexistent.tar.gz").status_code, 401)
+
+        root = self.login("admin", "InitialAdmin123456")
+        token = root["X-R20-Session"]
+
+        # Create a dummy backup file in backups/local/
+        backups_dir = app_module.ROOT / "backups" / "local"
+        backups_dir.mkdir(parents=True, exist_ok=True)
+        test_file = backups_dir / "test_download_archive.tar.gz"
+        test_file.write_bytes(b"dummy-tar-gz-content")
+
+        try:
+            # 2. Download via Header -> 200
+            res_hdr = self.client.get(f"/api/v1/admin/backups/download/{test_file.name}", headers=root)
+            self.assertEqual(res_hdr.status_code, 200)
+            self.assertEqual(res_hdr.content, b"dummy-tar-gz-content")
+            self.assertIn('attachment; filename="test_download_archive.tar.gz"', res_hdr.headers.get("content-disposition", ""))
+            self.assertEqual(res_hdr.headers.get("content-type"), "application/gzip")
+
+            # 3. Download via Query parameter ?token=... (for native browser download link) -> 200
+            res_token = self.client.get(f"/api/v1/admin/backups/download/{test_file.name}?token={token}")
+            self.assertEqual(res_token.status_code, 200)
+            self.assertEqual(res_token.content, b"dummy-tar-gz-content")
+
+            # 4. Download via relative path "local/test_download_archive.tar.gz"
+            res_rel = self.client.get(f"/api/v1/admin/backups/download/local/{test_file.name}?token={token}")
+            self.assertEqual(res_rel.status_code, 200)
+            self.assertEqual(res_rel.content, b"dummy-tar-gz-content")
+
+            # 5. Non-existent file -> 404
+            res_404 = self.client.get(f"/api/v1/admin/backups/download/does_not_exist_file.tar.gz?token={token}")
+            self.assertEqual(res_404.status_code, 404)
+        finally:
+            if test_file.exists():
+                test_file.unlink()
+
 
 if __name__ == "__main__":
     unittest.main()

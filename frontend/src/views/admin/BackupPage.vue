@@ -10,6 +10,7 @@ const auth = useAuthStore()
 const loading = ref(true)
 const busy = ref<'test' | 'save' | 'run' | 'restore' | 'upload' | ''>('')
 const bannerMsg = ref<{ text: string; type: 'ok' | 'warn' | 'err' } | null>(null)
+const downloadingArchive = ref<string>('')
 
 const simple = ref<any>(null)
 const targetTypes = ref<any[]>([])
@@ -113,17 +114,30 @@ async function runNow() {
 }
 
 async function downloadArchive(archiveName: string) {
+  const clean = archiveName.split('/').pop() || archiveName
+  downloadingArchive.value = clean
+  bannerMsg.value = { text: `正在连接并准备下载归档文件 ${clean}...`, type: 'ok' }
+
+  const token = auth.token || localStorage.getItem('r20.admin.session.id') || ''
+  const directUrl = `/api/v1/admin/backups/download/${encodeURIComponent(clean)}${token ? `?token=${encodeURIComponent(token)}` : ''}`
+
   try {
-    const clean = archiveName.split('/').pop() || archiveName
-    const url = `/api/v1/admin/backups/download/${encodeURIComponent(clean)}`
-    const resp = await fetch(url, {
+    // 双通道策略 1：通过 Fetch Blob 在内存中获取并检查状态
+    const resp = await fetch(directUrl, {
       headers: {
-        ...(auth.token ? { 'X-R20-Session': auth.token } : {})
+        ...(token ? { 'X-R20-Session': token } : {})
       }
     })
+
     if (!resp.ok) {
-      throw new Error(`下载失败 HTTP ${resp.status}`)
+      let errMsg = `HTTP ${resp.status}`
+      try {
+        const errJson = await resp.json()
+        errMsg = errJson.detail || errMsg
+      } catch {}
+      throw new Error(errMsg)
     }
+
     const blob = await resp.blob()
     const blobUrl = window.URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -131,11 +145,28 @@ async function downloadArchive(archiveName: string) {
     a.download = clean
     document.body.appendChild(a)
     a.click()
-    a.remove()
-    window.URL.revokeObjectURL(blobUrl)
+    setTimeout(() => {
+      a.remove()
+      window.URL.revokeObjectURL(blobUrl)
+    }, 2000)
+
     bannerMsg.value = { text: `✅ 归档文件 ${clean} 已成功触发下载`, type: 'ok' }
   } catch (e: any) {
-    bannerMsg.value = { text: `下载失败：${e.message}`, type: 'err' }
+    // 双通道策略 2：若 Blob 或 Fetch 产生跨域或浏览器安全拦截，降级采用原生链接直连触发
+    try {
+      const fallbackA = document.createElement('a')
+      fallbackA.href = directUrl
+      fallbackA.download = clean
+      fallbackA.target = '_blank'
+      document.body.appendChild(fallbackA)
+      fallbackA.click()
+      setTimeout(() => fallbackA.remove(), 1000)
+      bannerMsg.value = { text: `✅ 已切换直接下载通道触发归档 ${clean} 下载`, type: 'ok' }
+    } catch (fallbackErr: any) {
+      bannerMsg.value = { text: `下载失败：${e.message}`, type: 'err' }
+    }
+  } finally {
+    downloadingArchive.value = ''
   }
 }
 
@@ -343,10 +374,12 @@ onMounted(load)
                     <div class="flex items-center justify-center space-x-2">
                       <button
                         @click="downloadArchive(a.name)"
-                        class="p-1 rounded hover:bg-[var(--bg-badge)] text-[var(--color-brand)] transition-colors cursor-pointer"
+                        :disabled="downloadingArchive === (a.name.split('/').pop() || a.name)"
+                        class="p-1 rounded hover:bg-[var(--bg-badge)] text-[var(--color-brand)] transition-colors cursor-pointer disabled:opacity-50"
                         title="下载归档到本地"
                       >
-                        <Download class="w-3.5 h-3.5" />
+                        <RefreshCw v-if="downloadingArchive === (a.name.split('/').pop() || a.name)" class="w-3.5 h-3.5 animate-spin" />
+                        <Download v-else class="w-3.5 h-3.5" />
                       </button>
                       <button
                         v-if="auth.isSuperadmin"
