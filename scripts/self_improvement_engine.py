@@ -430,6 +430,14 @@ def run_self_evolution(force: bool = False):
             preserve_existing_memory = True
             log_msg(f"Memory publication rejected; retaining authority: {exc}")
 
+    # Keep the legacy markdown mirror in lock-step with the authority so the
+    # public dashboard can never freeze on a hand-edited snapshot.
+    try:
+        if memory_service.sync_markdown_mirror():
+            log_msg("🪞 AI_TRADING_MEMORY.md 已同步至结构化心法权威库")
+    except Exception as exc:
+        log_msg(f"Markdown mirror sync skipped: {exc}")
+
     # Persist asset multipliers to data/asset_multipliers.json so brain trader can consume
     try:
         mults_payload = {

@@ -1594,7 +1594,7 @@ def execute_portfolio():
     try:
         harvester_script = os.path.join(WORKSPACE_DIR, "scripts", "news_sentiment_harvester.py")
         if os.path.exists(harvester_script):
-            subprocess.run(f"python3 {harvester_script}", shell=True, capture_output=True, text=True, timeout=12)
+            subprocess.run(f"python3 {harvester_script}", shell=True, capture_output=True, text=True, timeout=25)
     except Exception as e:
         print(f"News Harvester sync warning: {e}")
 

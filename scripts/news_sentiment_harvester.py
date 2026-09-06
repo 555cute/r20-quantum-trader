@@ -41,11 +41,22 @@ BLACK_SWAN_PATTERNS = [
     (r"(全面取缔所有加密|宣布比特币非法|宣布数字货币交易非法|爆发核危机|宣战)", "国家级极端不可抗力/战争")
 ]
 
-def run_json_cmd(cmd: str, timeout: int = 15, retries: int = 2):
+_HARVEST_START = time.time()
+# The trader shells out to this script with a hard budget before a cycle starts;
+# never let upstream retries push the whole harvest past that budget.
+UPSTREAM_BUDGET_SECONDS = 9.0
+
+
+def run_json_cmd(cmd: str, timeout: int = 5, retries: int = 1):
     """Run an OKX CLI command and parse JSON. Transient upstream failures are retried
-    with backoff and logged, so a single hiccup cannot silently freeze the news feed."""
+    with backoff and logged, so a single hiccup cannot silently freeze the news feed.
+    Retries degrade to a single short attempt once the global upstream budget is spent."""
     last_err = ""
     for attempt in range(retries + 1):
+        elapsed = time.time() - _HARVEST_START
+        if elapsed >= UPSTREAM_BUDGET_SECONDS:
+            timeout = min(timeout, 3)
+            retries = attempt  # no further attempts
         try:
             res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
             out = (res.stdout or "").strip()
@@ -68,7 +79,7 @@ def run_json_cmd(cmd: str, timeout: int = 15, retries: int = 2):
         except Exception as exc:
             last_err = f"{type(exc).__name__}: {exc}"
         if attempt < retries:
-            time.sleep(1.5 * (attempt + 1))
+            time.sleep(min(1.5 * (attempt + 1), max(0.5, UPSTREAM_BUDGET_SECONDS - (time.time() - _HARVEST_START))))
     print(f"[news-harvester] WARN upstream failed after {retries + 1} attempts: {cmd[:60]} -> {last_err}", file=sys.stderr)
     return None
 

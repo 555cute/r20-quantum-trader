@@ -237,6 +237,52 @@ def render_trading_memory(legacy_md=None, legacy_json=None):
     return "======================= 【R20 启发式实战认知与长期记忆】 =======================\n" + text
 
 
+def sync_markdown_mirror() -> bool:
+    """Refresh the derived AI_TRADING_MEMORY.md mirror from the structured authority.
+
+    The markdown file is a read-only compatibility artifact for legacy readers
+    (notably the public dashboard). It must never drift behind the authority, or
+    the homepage freezes on a stale snapshot while the engine keeps revising.
+    The structured store remains the single authority; this mirror is rewritten
+    after every review cycle.
+    """
+    snapshot = read_memory_snapshot()
+    if not snapshot["exists"]:
+        return False
+    body = render_trading_memory()
+    if not body.strip():
+        return False
+    lessons = snapshot["lessons"]
+    stamps = [i.get("created_at") for i in lessons if i.get("created_at")]
+    newest = max(stamps) if stamps else ""
+    if newest:
+        try:
+            local = datetime.datetime.fromisoformat(newest).astimezone(
+                datetime.timezone(datetime.timedelta(hours=8))
+            ).strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            local = str(newest)[:19]
+    else:
+        local = "--"
+    doc = (
+        "# R20 AI 交易实战长期心法 (Heuristic Long-Term Memory)\n\n"
+        f"> 状态：由自进化防污染认知中枢实时纳管 | 更新基准: {local} (UTC+8)\n"
+        f"> 权威来源: structured_trading_memory.json | 修订 {str(snapshot.get('version'))[:8]} | 共 {len(lessons)} 条心法\n"
+        "> 宪法安全护栏：已通过极端离群值过滤 (Outlier Rejection) 与防偏见白盒审查。\n\n"
+        + body
+        + "\n"
+    )
+    tmp = AI_MEMORY_MD_FILE.with_suffix(f".md.tmp.{os.getpid()}")
+    try:
+        AI_MEMORY_MD_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(doc, encoding="utf-8")
+        os.replace(tmp, AI_MEMORY_MD_FILE)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+    return True
+
+
 @contextmanager
 def _memory_lock():
     STRUCTURED_MEMORY_FILE.parent.mkdir(parents=True, exist_ok=True)
