@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useI18n } from '../composables/useI18n'
 import {
   Code,
   BookOpen,
@@ -21,6 +22,7 @@ const emit = defineEmits<{
   (e: 'close'): void
 }>()
 
+const { isEn } = useI18n()
 const copiedTarget = ref<string | null>(null)
 
 async function copyToClipboard(text: string, targetName: string) {
@@ -82,7 +84,7 @@ async function copyToClipboard(text: string, targetName: string) {
 
         <!-- Description -->
         <p class="text-xs font-sans leading-relaxed" style="color: var(--text-muted);">
-          面向 OKX 永续合约的 LLM 原生高频量化交易系统。集成高阶微积分物理动能推演、多模型委员会协同决策、100% 交易所云端 OCO 止盈止损防线、智能 Maker 挂单与每日 20:00 闭环自进化认知复盘。
+          {{ isEn ? 'An LLM-native institutional crypto quant workstation for OKX perpetual contracts. Powered by differential equations kinematics, multi-agent investment council, 100% exchange cloud OCO risk protection, and autonomous self-evolution.' : '面向 OKX 永续合约的 LLM 原生高频量化交易系统。集成高阶微积分物理动能推演、多模型委员会协同决策、100% 交易所云端 OCO 止盈止损防线、智能 Maker 挂单与每 6 小时闭环自进化认知复盘。' }}
         </p>
 
         <!-- Links Grid -->

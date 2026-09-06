@@ -3,11 +3,13 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import { useTheme } from '../../composables/useTheme'
-import { LogIn, AlertCircle, RefreshCw, Sun, Moon, ArrowLeft } from 'lucide-vue-next'
+import { useI18n } from '../../composables/useI18n'
+import { LogIn, AlertCircle, RefreshCw, Sun, Moon, ArrowLeft, Globe } from 'lucide-vue-next'
 
 const auth = useAuthStore()
 const router = useRouter()
 const { theme, toggleTheme } = useTheme()
+const { t, isEn, toggleLocale } = useI18n()
 
 const username = ref('admin')
 const password = ref('')
@@ -36,18 +38,29 @@ async function handleLogin() {
         style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-muted);"
       >
         <ArrowLeft class="w-3.5 h-3.5" />
-        <span>返回实盘终端</span>
+        <span>{{ isEn ? 'Back to Terminal' : '返回实盘终端' }}</span>
       </a>
 
-      <button
-        @click="toggleTheme"
-        class="flex items-center justify-center w-8 h-8 rounded-lg border transition-all cursor-pointer shadow-xs"
-        style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-main);"
-        :title="theme === 'dark' ? '切换为亮色模式' : '切换为暗色模式'"
-      >
-        <Sun v-if="theme === 'dark'" class="w-4 h-4 text-amber-400 hover:rotate-45 transition-transform" />
-        <Moon v-else class="w-4 h-4 text-slate-700 hover:-rotate-12 transition-transform" />
-      </button>
+      <div class="flex items-center space-x-2">
+        <button
+          @click="toggleLocale"
+          class="flex items-center h-8 space-x-1 px-2.5 rounded-lg border transition-all cursor-pointer shadow-xs font-bold text-xs font-mono select-none"
+          style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-main);"
+        >
+          <Globe class="w-3.5 h-3.5 text-indigo-400" />
+          <span class="uppercase tracking-wider">{{ isEn ? 'EN' : '中' }}</span>
+        </button>
+
+        <button
+          @click="toggleTheme"
+          class="flex items-center justify-center w-8 h-8 rounded-lg border transition-all cursor-pointer shadow-xs"
+          style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-main);"
+          :title="theme === 'dark' ? '切换为亮色模式' : '切换为暗色模式'"
+        >
+          <Sun v-if="theme === 'dark'" class="w-4 h-4 text-amber-400 hover:rotate-45 transition-transform" />
+          <Moon v-else class="w-4 h-4 text-slate-700 hover:-rotate-12 transition-transform" />
+        </button>
+      </div>
     </div>
 
     <!-- Center: Login Card -->
@@ -61,10 +74,10 @@ async function handleLogin() {
           R
         </div>
         <div class="text-base font-black font-mono tracking-wide" style="color: var(--text-main);">
-          R20 QUANTUM CONTROL
+          {{ t('admin.loginTitle') }}
         </div>
         <div class="text-xs font-mono mt-0.5" style="color: var(--text-muted);">
-          管理员身份鉴权与安全审计
+          {{ t('admin.loginSubtitle') }}
         </div>
       </div>
 
@@ -85,7 +98,7 @@ async function handleLogin() {
         <div class="space-y-4">
           <div>
             <label class="block text-xs font-mono font-bold mb-1.5" style="color: var(--text-muted);">
-              管理员账号
+              {{ t('admin.username') }}
             </label>
             <input
               v-model="username"
@@ -98,13 +111,13 @@ async function handleLogin() {
 
           <div>
             <label class="block text-xs font-mono font-bold mb-1.5" style="color: var(--text-muted);">
-              密码
+              {{ t('admin.password') }}
             </label>
             <input
               v-model="password"
               type="password"
               autocomplete="current-password"
-              placeholder="输入管理员密码"
+              :placeholder="t('admin.password')"
               class="w-full rounded-lg px-3.5 py-2.5 text-xs font-mono outline-none border transition-colors"
               style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);"
               @keyup.enter="handleLogin"
@@ -119,12 +132,12 @@ async function handleLogin() {
           >
             <LogIn v-if="!loading" class="w-3.5 h-3.5" />
             <RefreshCw v-else class="w-3.5 h-3.5 animate-spin" />
-            <span>{{ loading ? '鉴权登录中...' : '登录管理控制面' }}</span>
+            <span>{{ loading ? t('admin.loggingIn') : t('admin.loginBtn') }}</span>
           </button>
         </div>
 
         <p class="mt-4 text-[10px] font-mono leading-relaxed" style="color: var(--text-faint);">
-          默认账号为 admin；连续失败 5 次会自动临时锁定 15 分钟。所有登录动作与 IP 将持久化记录于操作审计日志中。
+          {{ isEn ? 'Default account: admin. Automatically locks for 15 minutes after 5 consecutive failures. All login attempts and IPs are permanently recorded in audit logs.' : '默认账号为 admin；连续失败 5 次会自动临时锁定 15 分钟。所有登录动作与 IP 将持久化记录于操作审计日志中。' }}
         </p>
       </div>
     </div>

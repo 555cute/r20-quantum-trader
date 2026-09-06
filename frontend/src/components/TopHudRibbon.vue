@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useDashboardStore } from '../stores/dashboard'
+import { useI18n } from '../composables/useI18n'
 import { Wallet, TrendingUp, Calendar, Activity, ShieldCheck, ArrowDownRight } from 'lucide-vue-next'
 
 const store = useDashboardStore()
+const { t } = useI18n()
 const account = computed(() => store.data?.account || {})
 const today = computed(() => store.data?.today_stats || {})
 
@@ -63,7 +65,7 @@ const allProtected = computed(() =>
           >
             <Wallet class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
           </div>
-          <span class="text-xs 2xl:text-sm font-bold font-mono" style="color: var(--text-main);">官方账户总权益</span>
+          <span class="text-xs 2xl:text-sm font-bold font-mono" style="color: var(--text-main);">{{ t('hud.accountEquity') }}</span>
         </div>
         <span
           class="text-[9px] 2xl:text-[10px] font-mono px-1.5 py-0.5 rounded border font-bold"
@@ -87,8 +89,8 @@ const allProtected = computed(() =>
           style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);"
         >
           <div class="flex items-center justify-between" style="color: var(--text-muted);">
-            <span>可用: <strong class="font-semibold" style="color: var(--text-main);">${{ availEq }}</strong></span>
-            <span>占用率: <strong class="num-tabular" :style="{ color: Number(marginUsage) > 50 ? 'var(--color-warn)' : 'var(--text-main)' }">{{ marginUsage }}%</strong></span>
+            <span>{{ t('hud.available') }}: <strong class="font-semibold" style="color: var(--text-main);">${{ availEq }}</strong></span>
+            <span>{{ t('hud.marginRatio') }}: <strong class="num-tabular" :style="{ color: Number(marginUsage) > 50 ? 'var(--color-warn)' : 'var(--text-main)' }">{{ marginUsage }}%</strong></span>
           </div>
           <div class="w-full h-1 2xl:h-1.5 rounded-full overflow-hidden" style="background-color: var(--bg-badge);">
             <div
@@ -121,10 +123,10 @@ const allProtected = computed(() =>
             <TrendingUp v-if="Number(benchmarkNetPnl) >= 0" class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
             <ArrowDownRight v-else class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
           </div>
-          <span class="text-xs 2xl:text-sm font-bold font-mono" style="color: var(--text-main);">基准净盈亏水线</span>
+          <span class="text-xs 2xl:text-sm font-bold font-mono" style="color: var(--text-main);">{{ t('hud.pnlWaterline') }}</span>
         </div>
         <span class="text-[10px] 2xl:text-[11px] font-mono" style="color: var(--text-faint);">
-          基准 ${{ initialCap }}
+          {{ t('hud.base') }} ${{ initialCap }}
         </span>
       </div>
 
@@ -152,8 +154,8 @@ const allProtected = computed(() =>
           class="mt-3 2xl:mt-4 p-2 2xl:p-3 rounded-lg flex items-center justify-between border text-[11px] 2xl:text-xs font-mono"
           style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-muted);"
         >
-          <span>已结净额: <strong class="num-tabular" :style="{ color: Number(cumRealizedPnl) >= 0 ? 'var(--color-up)' : 'var(--color-down)' }">{{ Number(cumRealizedPnl) >= 0 ? '+' : '' }}{{ cumRealizedPnl }} U</strong></span>
-          <span>扣除费率: <strong class="font-semibold" style="color: var(--text-main);">100% 实盘</strong></span>
+          <span>{{ t('hud.settledNet') }}: <strong class="num-tabular" :style="{ color: Number(cumRealizedPnl) >= 0 ? 'var(--color-up)' : 'var(--color-down)' }">{{ Number(cumRealizedPnl) >= 0 ? '+' : '' }}{{ cumRealizedPnl }} U</strong></span>
+          <span>{{ t('hud.deductFee') }}: <strong class="font-semibold" style="color: var(--text-main);">100% {{ t('hud.realProd') }}</strong></span>
         </div>
       </div>
     </div>
@@ -171,7 +173,7 @@ const allProtected = computed(() =>
           >
             <Calendar class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
           </div>
-          <span class="text-xs 2xl:text-sm font-bold font-mono" style="color: var(--text-main);">今日已结 (UTC+8)</span>
+          <span class="text-xs 2xl:text-sm font-bold font-mono" style="color: var(--text-main);">{{ t('hud.todaySettled') }}</span>
         </div>
         <span
           class="text-[10px] 2xl:text-[11px] font-mono font-bold px-1.5 py-0.5 2xl:px-2 rounded border num-tabular"
@@ -181,7 +183,7 @@ const allProtected = computed(() =>
             color: Number(todayNet) >= 0 ? 'var(--color-up)' : 'var(--color-down)'
           }"
         >
-          胜率 {{ todayWinrate }}%
+          {{ t('hud.winRate') }} {{ todayWinrate }}%
         </span>
       </div>
 
@@ -200,8 +202,8 @@ const allProtected = computed(() =>
           class="mt-3 2xl:mt-4 p-2 2xl:p-3 rounded-lg flex items-center justify-between border text-[11px] 2xl:text-xs font-mono"
           style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-muted);"
         >
-          <span>平仓: <strong class="font-semibold num-tabular" style="color: var(--text-main);">{{ todayTrades }} 笔 ({{ today.win_trades || 0 }}胜/{{ today.loss_trades || 0 }}负)</strong></span>
-          <span>手续费: <strong class="num-tabular" style="color: var(--text-main);">{{ today.fees_paid || 0 }} U</strong></span>
+          <span>{{ t('hud.closedTrades') }}: <strong class="font-semibold num-tabular" style="color: var(--text-main);">{{ todayTrades }} {{ t('hud.tradesCount') }} ({{ today.win_trades || 0 }}{{ t('hud.win') }}/{{ today.loss_trades || 0 }}{{ t('hud.loss') }})</strong></span>
+          <span>{{ t('hud.totalFees') }}: <strong class="num-tabular" style="color: var(--text-main);">{{ today.fees_paid || 0 }} U</strong></span>
         </div>
       </div>
     </div>
@@ -219,13 +221,13 @@ const allProtected = computed(() =>
           >
             <Activity class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
           </div>
-          <span class="text-xs 2xl:text-sm font-bold font-mono" style="color: var(--text-main);">当前持仓净盈亏</span>
+          <span class="text-xs 2xl:text-sm font-bold font-mono" style="color: var(--text-main);">{{ t('hud.unrealizedPnl') }}</span>
         </div>
         <span
           class="text-[10px] 2xl:text-[11px] font-mono px-1.5 py-0.5 rounded border font-bold"
           style="background-color: var(--bg-badge); color: var(--text-muted); border-color: var(--border-subtle);"
         >
-          持仓 {{ store.positions.length }}/6 (多{{ longCount }}/空{{ shortCount }})
+          {{ t('hud.holding') }} {{ store.positions.length }}/6 ({{ t('hud.long') }}{{ longCount }}/{{ t('hud.short') }}{{ shortCount }})
         </span>
       </div>
 
@@ -255,15 +257,15 @@ const allProtected = computed(() =>
           class="mt-3 2xl:mt-4 p-2 2xl:p-3 rounded-lg flex items-center justify-between border text-[11px] 2xl:text-xs font-mono"
           style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-muted);"
         >
-          <span>占用保证金: <strong class="font-semibold num-tabular" style="color: var(--text-main);">${{ totalPosMargin }} U</strong></span>
+          <span>{{ t('hud.marginOccupied') }}: <strong class="font-semibold num-tabular" style="color: var(--text-main);">${{ totalPosMargin }} U</strong></span>
           <span v-if="store.positions.length > 0" class="flex items-center space-x-1">
             <ShieldCheck class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" :style="{ color: allProtected ? 'var(--color-up)' : 'var(--color-warn)' }" />
             <strong :style="{ color: allProtected ? 'var(--color-up)' : 'var(--color-warn)' }">
-              {{ allProtected ? '100% OCO' : '部分保护' }}
+              {{ allProtected ? '100% OCO' : 'Protected' }}
             </strong>
           </span>
           <span v-else style="color: var(--text-faint);">
-            状态: <strong>空仓待机</strong>
+            <strong>STANDBY</strong>
           </span>
         </div>
       </div>

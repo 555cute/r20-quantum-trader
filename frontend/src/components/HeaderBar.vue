@@ -2,6 +2,7 @@
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useDashboardStore } from '../stores/dashboard'
 import { useTheme } from '../composables/useTheme'
+import { useI18n } from '../composables/useI18n'
 import AboutModal from './AboutModal.vue'
 import {
   LayoutGrid,
@@ -15,10 +16,12 @@ import {
   Sun,
   Moon,
   Clock,
+  Globe,
 } from 'lucide-vue-next'
 
 const store = useDashboardStore()
 const { theme, toggleTheme } = useTheme()
+const { t, isEn, toggleLocale } = useI18n()
 
 const currentTime = ref('')
 let timer: any = null
@@ -37,13 +40,13 @@ onUnmounted(() => {
   if (timer) clearInterval(timer)
 })
 
-const tabs = [
-  { id: 'trading', label: '实盘矩阵', icon: LayoutGrid },
-  { id: 'factors', label: 'AI全景推演', icon: Cpu },
-  { id: 'news', label: '全网舆情', icon: Newspaper },
-  { id: 'lab', label: 'AI自进化', icon: Sparkles },
-  { id: 'history', label: '交易台账', icon: Receipt },
-] as const
+const tabs = computed(() => [
+  { id: 'trading', label: t('nav.tabMatrix'), icon: LayoutGrid },
+  { id: 'factors', label: t('nav.tabRadar'), icon: Cpu },
+  { id: 'news', label: t('nav.tabNews'), icon: Newspaper },
+  { id: 'lab', label: t('nav.tabLab'), icon: Sparkles },
+  { id: 'history', label: t('nav.tabLedger'), icon: Receipt },
+])
 </script>
 
 <template>
@@ -63,28 +66,28 @@ const tabs = [
             ₿
           </div>
           <span class="font-mono font-black text-xs sm:text-sm tracking-wide whitespace-nowrap" style="color: var(--text-main);">
-            R20 QUANTUM
+            {{ t('nav.title') }}
           </span>
         </div>
         <button
           @click="store.showAboutModal = true"
           class="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold border transition-colors cursor-pointer"
           style="background-color: var(--bg-card-subtle); color: var(--text-muted); border-color: var(--border-subtle);"
-          title="查看系统版本与开源主仓信息"
+          :title="t('nav.aboutTitle')"
         >
           v7.4.2
         </button>
         <span
           class="w-1.5 h-1.5 rounded-full shrink-0"
           :class="store.isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'"
-          title="OKX V5 PROD 运行状态"
+          title="OKX V5 PROD"
         ></span>
         <span
           v-if="store.isStale"
           class="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold border animate-pulse"
           style="background-color: var(--color-warn-bg); color: var(--color-warn); border-color: var(--color-warn-border);"
         >
-          STALE
+          {{ t('nav.stale') }}
         </span>
       </div>
 
@@ -114,19 +117,30 @@ const tabs = [
         <div
           class="hidden lg:flex items-center h-7.5 space-x-1.5 px-2.5 rounded-lg border text-[11px]"
           style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-muted);"
-          title="北京时间 (UTC+8)"
+          :title="t('nav.utcClock')"
         >
           <Clock class="w-3.5 h-3.5" style="color: var(--text-faint);" />
           <span class="num-tabular font-medium">{{ currentTime }}</span>
           <span class="text-[9px] font-bold opacity-60">UTC+8</span>
         </div>
 
+        <!-- 🌐 Global Language Switcher Capsule -->
+        <button
+          @click="toggleLocale"
+          class="flex items-center h-7.5 space-x-1 px-2 rounded-lg border transition-all cursor-pointer shadow-xs shrink-0 font-bold select-none"
+          style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-main);"
+          :title="t('nav.switchLang')"
+        >
+          <Globe class="w-3.5 h-3.5 text-indigo-400" />
+          <span class="text-[11px] uppercase tracking-wider">{{ isEn ? 'EN' : '中' }}</span>
+        </button>
+
         <!-- ☀️ / 🌙 Theme Toggle Button -->
         <button
           @click="toggleTheme"
           class="flex items-center justify-center w-7.5 h-7.5 rounded-lg border transition-all cursor-pointer shadow-xs shrink-0"
           style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-main);"
-          :title="theme === 'dark' ? '切换为亮色模式' : '切换为暗色模式'"
+          :title="t('nav.switchTheme')"
         >
           <Sun v-if="theme === 'dark'" class="w-3.5 h-3.5 text-amber-400 hover:rotate-45 transition-transform" />
           <Moon v-else class="w-3.5 h-3.5 text-slate-700 hover:-rotate-12 transition-transform" />
@@ -137,10 +151,10 @@ const tabs = [
           href="/docs"
           class="flex items-center h-7.5 space-x-1 px-2.5 rounded-lg border transition-colors cursor-pointer shadow-xs"
           style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-muted);"
-          title="系统架构与使用文档"
+          :title="t('nav.docs')"
         >
           <BookOpen class="w-3.5 h-3.5" />
-          <span class="hidden sm:inline font-medium">文档</span>
+          <span class="hidden sm:inline font-medium">{{ t('nav.docs') }}</span>
         </a>
 
         <!-- Control Plane Button -->
@@ -151,7 +165,7 @@ const tabs = [
           style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-main);"
         >
           <ShieldCheck class="w-3.5 h-3.5" />
-          <span>控制面</span>
+          <span>{{ t('nav.controlPlane') }}</span>
           <ExternalLink class="w-3 h-3 opacity-60 hidden sm:inline" />
         </a>
       </div>

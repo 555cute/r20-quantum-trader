@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useDashboardStore } from '../stores/dashboard'
+import { useI18n } from '../composables/useI18n'
 import {
   ShieldCheck,
   ShieldAlert,
@@ -10,6 +11,7 @@ import {
 } from 'lucide-vue-next'
 
 const store = useDashboardStore()
+const { t } = useI18n()
 
 const activeTab = ref<'positions' | 'orders'>('positions')
 const selectedSymbol = ref<string>('ALL')
@@ -94,7 +96,7 @@ const allProtected = computed(() =>
           :class="activeTab === 'positions' ? 'border shadow-xs' : 'hover:text-[var(--text-main)]'"
         >
           <Activity class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
-          <span>在途实盘持仓</span>
+          <span>{{ t('desk.activePositions') }}</span>
           <span
             class="px-1.5 py-0.2 2xl:px-2 rounded-full text-[10px] 2xl:text-xs font-mono font-bold"
             :style="activeTab === 'positions'
@@ -114,7 +116,7 @@ const allProtected = computed(() =>
           :class="activeTab === 'orders' ? 'border shadow-xs' : 'hover:text-[var(--text-main)]'"
         >
           <Clock class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
-          <span>在途限价挂单</span>
+          <span>{{ t('desk.pendingOrders') }}</span>
           <span
             class="px-1.5 py-0.2 2xl:px-2 rounded-full text-[10px] 2xl:text-xs font-mono font-bold"
             :style="activeTab === 'orders'
@@ -154,7 +156,7 @@ const allProtected = computed(() =>
         >
           <ShieldCheck v-if="allProtected" class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
           <ShieldAlert v-else class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
-          <span class="hidden md:inline">{{ allProtected ? '100% 交易所云端 OCO 止损' : '部分仓位未设止损' }}</span>
+          <span class="hidden md:inline">{{ allProtected ? t('desk.ocoProtected', '100% 交易所云端 OCO 止损') : '部分仓位未设止损' }}</span>
           <span class="md:hidden">{{ allProtected ? '100% OCO' : '未全覆盖' }}</span>
         </div>
       </div>
@@ -170,7 +172,7 @@ const allProtected = computed(() =>
           <Layers class="w-4 h-4 2xl:w-5 2xl:h-5" />
         </div>
         <p class="text-xs 2xl:text-sm font-mono font-medium" style="color: var(--text-muted);">
-          {{ store.positions.length === 0 ? '当前无在途实盘持仓 · AI 引擎空仓防御与等待中' : '无符合当前筛选条件的持仓' }}
+          {{ store.positions.length === 0 ? t('desk.noPositions') : 'No matching positions' }}
         </p>
       </div>
 
@@ -181,14 +183,14 @@ const allProtected = computed(() =>
               class="text-[11px] 2xl:text-xs uppercase tracking-wider border-b"
               style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-muted);"
             >
-              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[16%] 2xl:w-[15%]">标的 / 杠杆</th>
-              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[10%] 2xl:w-[10%]">方向</th>
-              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[11%] 2xl:w-[11%]">持仓量</th>
-              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[13%] 2xl:w-[13%]">开仓均价</th>
-              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[14%] 2xl:w-[14%]">最新标记价</th>
-              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[13%] 2xl:w-[13%]">保证金占用</th>
-              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[13%] 2xl:w-[13%]">云端止损防线</th>
-              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 text-right font-bold w-[10%] 2xl:w-[11%]">未结盈亏 / ROI</th>
+              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[16%] 2xl:w-[15%]">{{ t('desk.colInstrument') }}</th>
+              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[10%] 2xl:w-[10%]">{{ t('desk.colSide') }}</th>
+              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[11%] 2xl:w-[11%]">{{ t('desk.colSize') }}</th>
+              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[13%] 2xl:w-[13%]">{{ t('desk.colEntryPx') }}</th>
+              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[14%] 2xl:w-[14%]">{{ t('desk.colMarkPx') }}</th>
+              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[13%] 2xl:w-[13%]">{{ t('desk.colMargin') }}</th>
+              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[13%] 2xl:w-[13%]">{{ t('desk.colOcoSl') }}</th>
+              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 text-right font-bold w-[10%] 2xl:w-[11%]">{{ t('desk.colPnl') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -213,7 +215,7 @@ const allProtected = computed(() =>
               <!-- 方向 -->
               <td class="py-3 px-4 2xl:px-6 2xl:py-3.5">
                 <span :class="pos.side === 'long' ? 'capsule-direction-long' : 'capsule-direction-short'">
-                  <span>{{ pos.side === 'long' ? '多头 BUY' : '空头 SELL' }}</span>
+                  <span>{{ pos.side === 'long' ? t('desk.longBuy') : t('desk.shortSell') }}</span>
                 </span>
               </td>
 
@@ -283,7 +285,7 @@ const allProtected = computed(() =>
           <Clock class="w-4 h-4 2xl:w-5 2xl:h-5" />
         </div>
         <p class="text-xs 2xl:text-sm font-mono font-medium" style="color: var(--text-muted);">
-          {{ store.pendingOrders.length === 0 ? '当前无在途限价挂单 · 挂单池就绪 (AI 周期动态调整)' : '无符合当前筛选条件的在途挂单' }}
+          {{ store.pendingOrders.length === 0 ? t('desk.noOrders') : 'No matching orders' }}
         </p>
       </div>
 
@@ -294,13 +296,13 @@ const allProtected = computed(() =>
               class="text-[11px] 2xl:text-xs uppercase tracking-wider border-b"
               style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-muted);"
             >
-              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[18%] 2xl:w-[18%]">订单号</th>
-              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[14%] 2xl:w-[14%]">标的</th>
-              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[13%] 2xl:w-[13%]">操作类型</th>
-              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[14%] 2xl:w-[14%]">挂单限价</th>
-              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[13%] 2xl:w-[13%]">委托数量</th>
-              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[14%] 2xl:w-[14%]">挂单时间</th>
-              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 text-right font-bold w-[14%] 2xl:w-[14%]">状态</th>
+              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[18%] 2xl:w-[18%]">ID</th>
+              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[14%] 2xl:w-[14%]">{{ t('desk.colInstrument') }}</th>
+              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[13%] 2xl:w-[13%]">{{ t('desk.colOrderType') }}</th>
+              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[14%] 2xl:w-[14%]">{{ t('desk.colOrderPx') }}</th>
+              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[13%] 2xl:w-[13%]">{{ t('desk.colOrderSz') }}</th>
+              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 font-bold w-[14%] 2xl:w-[14%]">{{ t('desk.colTime') }}</th>
+              <th class="py-2.5 px-4 2xl:px-6 2xl:py-3.5 text-right font-bold w-[14%] 2xl:w-[14%]">Status</th>
             </tr>
           </thead>
           <tbody>
@@ -318,14 +320,14 @@ const allProtected = computed(() =>
               </td>
               <td class="py-3 px-4 2xl:px-6 2xl:py-3.5">
                 <span :class="(ord.side_raw === 'buy' || ord.side === 'buy' || String(ord.side).includes('多')) ? 'capsule-direction-long' : 'capsule-direction-short'">
-                  <span>{{ (ord.side_raw === 'buy' || ord.side === 'buy' || String(ord.side).includes('多')) ? '买入开多' : '卖出开空' }}</span>
+                  <span>{{ (ord.side_raw === 'buy' || ord.side === 'buy' || String(ord.side).includes('多')) ? t('desk.longBuy') : t('desk.shortSell') }}</span>
                 </span>
               </td>
               <td class="py-3 px-4 2xl:px-6 2xl:py-3.5 font-mono font-black num-tabular text-sm 2xl:text-base" style="color: var(--text-main);">
                 ${{ ord.px }}
               </td>
               <td class="py-3 px-4 2xl:px-6 2xl:py-3.5 font-bold num-tabular" style="color: var(--text-main);">
-                {{ ord.sz }} 张
+                {{ ord.sz }} {{ t('desk.contracts') }}
               </td>
               <td class="py-3 px-4 2xl:px-6 2xl:py-3.5 num-tabular" style="color: var(--text-muted);">
                 {{ ord.time || (ord.cTime ? new Date(parseInt(ord.cTime)).toLocaleTimeString() : '--') }}
@@ -333,7 +335,7 @@ const allProtected = computed(() =>
               <td class="py-3 px-4 2xl:px-6 2xl:py-3.5 text-right font-bold" style="color: var(--text-main);">
                 <span class="inline-flex items-center space-x-1.5 text-[11px] 2xl:text-xs font-mono px-2 py-0.5 2xl:px-2.5 2xl:py-1 rounded-[3px] border" style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--color-brand);">
                   <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <span>挂单中</span>
+                  <span>PENDING</span>
                 </span>
               </td>
             </tr>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useDashboardStore } from '../stores/dashboard'
+import { useI18n } from '../composables/useI18n'
 import { TrendingUp, TrendingDown, ArrowUpRight, Compass, Cpu, Activity } from 'lucide-vue-next'
 import FactorDetailModal from './FactorDetailModal.vue'
 
@@ -13,6 +14,7 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const store = useDashboardStore()
+const { t } = useI18n()
 const selectedInstrument = ref<any | null>(null)
 const drawerVisible = ref(false)
 
@@ -51,9 +53,9 @@ function getActionStyle(action?: string) {
 }
 
 function getActionLabel(action?: string) {
-  if (action === 'BUY_LONG') return '顺势做多 BUY'
-  if (action === 'SELL_SHORT') return '顺势做空 SELL'
-  return '空仓等待 WAIT'
+  if (action === 'BUY_LONG') return t('desk.longBuy', '顺势做多 BUY')
+  if (action === 'SELL_SHORT') return t('desk.shortSell', '顺势做空 SELL')
+  return 'WAIT'
 }
 </script>
 
@@ -73,7 +75,7 @@ function getActionLabel(action?: string) {
       <div class="flex-1 min-w-0">
         <div class="flex items-center justify-between">
           <span class="text-[11px] font-bold font-mono uppercase tracking-wider" style="color: var(--color-brand);">
-            宏观多周期推演基调
+            {{ t('tabs.macroOverview') }}
           </span>
           <span class="text-[10px] font-mono" style="color: var(--text-faint);">
             {{ store.data?.timestamp ? String(store.data.timestamp).slice(11, 19) : '' }}
@@ -90,11 +92,11 @@ function getActionLabel(action?: string) {
       <div class="flex items-center space-x-2">
         <Activity class="w-3.5 h-3.5" style="color: var(--color-brand);" />
         <h2 class="text-xs font-mono font-black uppercase tracking-wider" style="color: var(--text-main);">
-          {{ store.factors.length ? `${store.factors.length} 标的因果动力学与微结构雷达` : '动态资产池因果动力学与微结构雷达' }}
+          {{ store.factors.length ? `${store.factors.length} ${t('matrix.radarTitle')}` : t('matrix.radarTitle') }}
         </h2>
       </div>
       <span class="text-[10px] font-mono" style="color: var(--text-faint);">
-        点击卡片下钻微积分推演
+        {{ t('matrix.subTitle') }}
       </span>
     </div>
 
@@ -140,7 +142,7 @@ function getActionLabel(action?: string) {
             style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);"
           >
             <div class="min-w-0 text-center">
-              <div class="text-[8px] uppercase truncate" style="color: var(--text-faint);">速度 v</div>
+              <div class="text-[8px] uppercase truncate" style="color: var(--text-faint);">{{ t('matrix.velocity') }}</div>
               <div
                 class="font-bold num-tabular truncate"
                 :style="{ color: (item.calculus?.velocity_1h ?? 0) >= 0 ? 'var(--color-up)' : 'var(--color-down)' }"
@@ -149,13 +151,13 @@ function getActionLabel(action?: string) {
               </div>
             </div>
             <div class="min-w-0 text-center">
-              <div class="text-[8px] uppercase truncate" style="color: var(--text-faint);">加速 a</div>
+              <div class="text-[8px] uppercase truncate" style="color: var(--text-faint);">{{ t('matrix.acceleration') }}</div>
               <div class="font-bold num-tabular truncate" style="color: var(--text-main);">
                 {{ item.calculus?.accel_1h ?? '--' }}
               </div>
             </div>
             <div class="min-w-0 text-center">
-              <div class="text-[8px] uppercase truncate" style="color: var(--text-faint);">冲击 j</div>
+              <div class="text-[8px] uppercase truncate" style="color: var(--text-faint);">Jerk j</div>
               <div class="font-bold num-tabular truncate" style="color: var(--text-muted);">
                 {{ item.calculus?.jerk_1h ?? '--' }}
               </div>
@@ -170,8 +172,8 @@ function getActionLabel(action?: string) {
 
           <!-- Microstructure Flow -->
           <div class="flex items-center justify-between text-[10px] font-mono mb-2 px-0.5 gap-1" style="color: var(--text-muted);">
-            <span class="truncate">聪明钱: <strong class="num-tabular" style="color: var(--text-main);">{{ item.smart_money?.weighted_long_pct ?? 50 }}%多</strong></span>
-            <span class="truncate text-right">净流: <strong class="num-tabular" style="color: var(--text-main);">{{ item.smart_money?.net_flow_usdt ?? '0 U' }}</strong></span>
+            <span class="truncate">{{ t('matrix.smartMoney') }}: <strong class="num-tabular" style="color: var(--text-main);">{{ item.smart_money?.weighted_long_pct ?? 50 }}%</strong></span>
+            <span class="truncate text-right">Net: <strong class="num-tabular" style="color: var(--text-main);">{{ item.smart_money?.net_flow_usdt ?? '0 U' }}</strong></span>
           </div>
         </div>
 
@@ -185,7 +187,7 @@ function getActionLabel(action?: string) {
               {{ getActionLabel(item.decision?.action || item.action) }}
             </span>
             <div class="flex items-center space-x-1 text-xs font-mono font-bold shrink-0" style="color: var(--text-muted);">
-              <span class="text-[10px]" style="color: var(--text-faint);">置信:</span>
+              <span class="text-[10px]" style="color: var(--text-faint);">Conf:</span>
               <span class="num-tabular" style="color: var(--text-main);">{{ item.decision?.confidence || item.confidence || 0 }}%</span>
               <ArrowUpRight class="w-3.5 h-3.5 opacity-60 group-hover:opacity-100 transition-opacity" />
             </div>

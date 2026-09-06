@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useDashboardStore } from '../stores/dashboard'
+import { useI18n } from '../composables/useI18n'
 import HeaderBar from '../components/HeaderBar.vue'
 import TopHudRibbon from '../components/TopHudRibbon.vue'
 import TacticalDesk from '../components/TacticalDesk.vue'
@@ -25,6 +26,7 @@ import {
 const router = useRouter()
 const route = useRoute()
 const store = useDashboardStore()
+const { t } = useI18n()
 const layoutMode = ref<'dual' | 'stacked'>('stacked')
 
 // Sync initial tab from route path
@@ -98,9 +100,9 @@ function setLayout(mode: 'dual' | 'stacked') {
         <div class="flex items-center justify-between px-1">
           <div class="flex items-center space-x-2 text-xs font-mono">
             <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span class="font-bold tracking-wider" style="color: var(--text-main);">量子量化实盘监控</span>
+            <span class="font-bold tracking-wider" style="color: var(--text-main);">{{ t('nav.liveMonitoring') }}</span>
             <span style="color: var(--text-faint);">·</span>
-            <span style="color: var(--text-muted);">自动决策周期：15m</span>
+            <span style="color: var(--text-muted);">{{ t('nav.autoCycle') }}</span>
           </div>
 
           <!-- Layout Mode Switcher (Desktop) -->
@@ -114,10 +116,10 @@ function setLayout(mode: 'dual' | 'stacked') {
               :style="layoutMode === 'stacked'
                 ? { backgroundColor: 'var(--color-brand-bg)', color: 'var(--color-brand)', fontWeight: 'bold' }
                 : { color: 'var(--text-muted)' }"
-              title="标准全景布局：自上而下沉浸式展开资产、操盘台与六币动力学雷达"
+              :title="t('nav.allViews')"
             >
               <Rows class="w-3.5 h-3.5" />
-              <span>全景视图</span>
+              <span>{{ t('nav.allViews') }}</span>
             </button>
             <button
               @click="setLayout('dual')"
@@ -125,10 +127,10 @@ function setLayout(mode: 'dual' | 'stacked') {
               :style="layoutMode === 'dual'
                 ? { backgroundColor: 'var(--color-brand-bg)', color: 'var(--color-brand)', fontWeight: 'bold' }
                 : { color: 'var(--text-muted)' }"
-              title="双翼工作台：左翼操盘中心，右翼微结构雷达"
+              :title="t('nav.dualViews')"
             >
               <Columns class="w-3.5 h-3.5" />
-              <span>双翼分栏</span>
+              <span>{{ t('nav.dualViews') }}</span>
             </button>
           </div>
         </div>
@@ -218,7 +220,7 @@ function setLayout(mode: 'dual' | 'stacked') {
           :style="{ color: store.activeTab === 'trading' ? 'var(--color-brand)' : 'var(--text-muted)' }"
         >
           <LayoutGrid class="w-4 h-4 mb-0.5" />
-          <span class="text-[10px] font-bold">实盘</span>
+          <span class="text-[10px] font-bold">{{ t('nav.tabMatrix') }}</span>
         </button>
         <button
           @click="store.activeTab = 'factors'"
@@ -226,7 +228,7 @@ function setLayout(mode: 'dual' | 'stacked') {
           :style="{ color: store.activeTab === 'factors' ? 'var(--color-brand)' : 'var(--text-muted)' }"
         >
           <Cpu class="w-4 h-4 mb-0.5" />
-          <span class="text-[10px] font-bold">AI推演</span>
+          <span class="text-[10px] font-bold">{{ t('nav.tabRadar') }}</span>
         </button>
         <button
           @click="store.activeTab = 'news'"
@@ -234,7 +236,7 @@ function setLayout(mode: 'dual' | 'stacked') {
           :style="{ color: store.activeTab === 'news' ? 'var(--color-brand)' : 'var(--text-muted)' }"
         >
           <Newspaper class="w-4 h-4 mb-0.5" />
-          <span class="text-[10px] font-bold">舆情</span>
+          <span class="text-[10px] font-bold">{{ t('nav.tabNews') }}</span>
         </button>
         <button
           @click="store.activeTab = 'lab'"
@@ -242,7 +244,7 @@ function setLayout(mode: 'dual' | 'stacked') {
           :style="{ color: store.activeTab === 'lab' ? 'var(--color-brand)' : 'var(--text-muted)' }"
         >
           <Sparkles class="w-4 h-4 mb-0.5" />
-          <span class="text-[10px] font-bold">自进化</span>
+          <span class="text-[10px] font-bold">{{ t('nav.tabLab') }}</span>
         </button>
         <button
           @click="store.activeTab = 'history'"
@@ -250,7 +252,7 @@ function setLayout(mode: 'dual' | 'stacked') {
           :style="{ color: store.activeTab === 'history' ? 'var(--color-brand)' : 'var(--text-muted)' }"
         >
           <Receipt class="w-4 h-4 mb-0.5" />
-          <span class="text-[10px] font-bold">台账</span>
+          <span class="text-[10px] font-bold">{{ t('nav.tabLedger') }}</span>
         </button>
       </div>
     </nav>

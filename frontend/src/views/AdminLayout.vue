@@ -3,6 +3,7 @@ import { computed, ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useTheme } from '../composables/useTheme'
+import { useI18n } from '../composables/useI18n'
 import AboutModal from '../components/AboutModal.vue'
 import {
   LayoutDashboard,
@@ -28,52 +29,54 @@ import {
   Menu,
   X,
   Sparkles,
+  Globe,
 } from 'lucide-vue-next'
 
 const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
 const { theme, toggleTheme } = useTheme()
+const { t, isEn, toggleLocale } = useI18n()
 
-const navGroups = [
+const navGroups = computed(() => [
   {
-    label: '系统总览',
+    label: t('admin.sysOverview'),
     items: [
-      { id: 'overview', label: '运行总览', icon: LayoutDashboard },
-      { id: 'decisions', label: '决策日志', icon: Radio },
+      { id: 'overview', label: t('admin.dashboard'), icon: LayoutDashboard },
+      { id: 'decisions', label: t('admin.runtimeTelemetry', '决策日志'), icon: Radio },
     ],
   },
   {
-    label: '策略配置',
+    label: t('admin.strategyConfig'),
     items: [
-      { id: 'promptlib', label: '提示词策略', icon: FileText },
-      { id: 'evolution', label: '自进化配置', icon: Sparkles },
-      { id: 'interceptors', label: '物理拦截插件', icon: ShieldCheck },
-      { id: 'council', label: '模型委员会', icon: Users },
-      { id: 'policy', label: '策略版本快照', icon: Layers },
-      { id: 'llm', label: '模型连接', icon: Cpu },
+      { id: 'promptlib', label: t('admin.promptStudio', '提示词策略'), icon: FileText },
+      { id: 'evolution', label: t('admin.evolutionConfig', '自进化配置'), icon: Sparkles },
+      { id: 'interceptors', label: t('admin.interceptors', '物理拦截插件'), icon: ShieldCheck },
+      { id: 'council', label: t('admin.councilSettings', '模型委员会'), icon: Users },
+      { id: 'policy', label: t('admin.policySnapshots', '策略版本快照'), icon: Layers },
+      { id: 'llm', label: t('admin.llmConnections', '模型连接'), icon: Cpu },
       { id: 'agents', label: '运行单元', icon: Package },
       { id: 'plugins', label: '系统插件', icon: FileCode },
     ],
   },
   {
-    label: '交易与网关',
+    label: t('admin.tradingGateway'),
     items: [
-      { id: 'security', label: 'OKX 账户与标的池', icon: Wallet },
-      { id: 'gateway', label: '任务网关', icon: RefreshCw },
-      { id: 'notify', label: '消息通知', icon: Radio },
-      { id: 'backup', label: '备份与还原', icon: FileCode },
+      { id: 'security', label: t('admin.accountInstruments', 'OKX 账户与标的池'), icon: Wallet },
+      { id: 'gateway', label: t('admin.gatewayJobs', '任务网关'), icon: RefreshCw },
+      { id: 'notify', label: t('admin.notifications', '消息通知'), icon: Radio },
+      { id: 'backup', label: t('admin.backups', '备份与还原'), icon: FileCode },
     ],
   },
   {
-    label: '系统管理',
+    label: t('admin.systemAdmin'),
     items: [
-      { id: 'audit', label: '操作审计', icon: Scroll },
-      { id: 'adminsys', label: '管理员与密码', icon: UserCog },
+      { id: 'audit', label: t('admin.auditLogs', '操作审计'), icon: Scroll },
+      { id: 'adminsys', label: t('admin.securityAuth', '管理员与密码'), icon: UserCog },
       { id: 'about', label: '版本与更新', icon: Info },
     ],
   },
-] as const
+])
 
 const mobileDrawerOpen = ref(false)
 const isNavigating = ref(false)
@@ -91,16 +94,16 @@ const activeView = computed<string>(() => {
 })
 
 const currentGroupName = computed<string>(() => {
-  for (const group of navGroups) {
-    const hit = (group.items as readonly { id: string; label: string }[]).find((i) => i.id === activeView.value)
+  for (const group of navGroups.value) {
+    const hit = group.items.find((i: any) => i.id === activeView.value)
     if (hit) return group.label
   }
-  return '管理控制'
+  return 'CONTROL'
 })
 
 const currentLabel = computed<string>(() => {
-  for (const group of navGroups) {
-    const hit = (group.items as readonly { id: string; label: string }[]).find((i) => i.id === activeView.value)
+  for (const group of navGroups.value) {
+    const hit = group.items.find((i: any) => i.id === activeView.value)
     if (hit) return hit.label
   }
   return activeView.value
@@ -395,6 +398,17 @@ const showAboutModal = ref(false)
         </div>
 
         <div class="flex items-center space-x-1.5 sm:space-x-2.5 text-xs font-mono">
+          <!-- 🌐 Global Language Switcher Capsule -->
+          <button
+            @click="toggleLocale"
+            class="flex items-center h-7 space-x-1 px-2 rounded-lg border transition-all cursor-pointer shadow-xs font-bold select-none"
+            style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-main);"
+            :title="t('nav.switchLang')"
+          >
+            <Globe class="w-3.5 h-3.5 text-indigo-400" />
+            <span class="text-[11px] uppercase tracking-wider">{{ isEn ? 'EN' : '中' }}</span>
+          </button>
+
           <!-- ☀️ / 🌙 Theme Toggle Button -->
           <button
             @click="toggleTheme"
@@ -413,7 +427,7 @@ const showAboutModal = ref(false)
             class="flex items-center space-x-1 px-2 sm:px-2.5 py-1 rounded-lg border transition-all cursor-pointer shadow-xs text-[11px] sm:text-xs"
             style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-muted);"
           >
-            <span>实盘</span>
+            <span>{{ t('nav.tabMatrix') }}</span>
             <ExternalLink class="w-3 h-3 opacity-60" />
           </a>
 
@@ -425,7 +439,7 @@ const showAboutModal = ref(false)
             style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-muted);"
           >
             <BookOpen class="w-3 h-3" />
-            <span class="hidden sm:inline">文档</span>
+            <span class="hidden sm:inline">{{ t('nav.docs') }}</span>
           </a>
 
           <!-- Mobile Logout -->
