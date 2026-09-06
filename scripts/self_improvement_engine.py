@@ -346,7 +346,9 @@ def call_llm_evolution_review(closed_trades: List[Dict[str, Any]], existing_memo
     except Exception as e:
         telemetry.finish("failed", error=e)
         log_msg(f"Error in LLM evolution review: {e}")
-        return {}
+        # Surface the upstream failure in the dashboard report instead of silently
+        # degrading to an unexplained NO_CHANGE (which looks like a stale cache).
+        return {"__llm_error__": f"{type(e).__name__}: {e}"}
 
 @single_evolution_cycle
 def run_self_evolution(force: bool = False):
@@ -456,7 +458,8 @@ def run_self_evolution(force: bool = False):
         "diagnosis_insights": insights,
         "memory_overwrites_reason": llm_review.get("memory_overwrites_reason", ""),
         "actions_taken": actions_taken,
-        "core_lessons": long_term_memory
+        "core_lessons": long_term_memory,
+        "llm_error": str(llm_review.get("__llm_error__") or ""),
     }
 
     atomic_write_json(REPORT_JSON_FILE, report_payload)

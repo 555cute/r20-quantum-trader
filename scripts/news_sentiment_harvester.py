@@ -41,13 +41,35 @@ BLACK_SWAN_PATTERNS = [
     (r"(全面取缔所有加密|宣布比特币非法|宣布数字货币交易非法|爆发核危机|宣战)", "国家级极端不可抗力/战争")
 ]
 
-def run_json_cmd(cmd: str, timeout: int = 15):
-    try:
-        res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
-        if res.stdout.strip():
-            return json.loads(res.stdout.strip())
-    except Exception:
-        pass
+def run_json_cmd(cmd: str, timeout: int = 15, retries: int = 2):
+    """Run an OKX CLI command and parse JSON. Transient upstream failures are retried
+    with backoff and logged, so a single hiccup cannot silently freeze the news feed."""
+    last_err = ""
+    for attempt in range(retries + 1):
+        try:
+            res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+            out = (res.stdout or "").strip()
+            if out:
+                try:
+                    parsed = json.loads(out)
+                except Exception as je:
+                    last_err = f"invalid JSON: {je}"
+                else:
+                    if isinstance(parsed, dict):
+                        det = parsed.get("details")
+                        if isinstance(det, list) and not det:
+                            last_err = "empty details[]"
+                        else:
+                            return parsed
+                    else:
+                        return parsed
+            else:
+                last_err = (res.stderr or "").strip()[:200] or f"empty stdout (rc={res.returncode})"
+        except Exception as exc:
+            last_err = f"{type(exc).__name__}: {exc}"
+        if attempt < retries:
+            time.sleep(1.5 * (attempt + 1))
+    print(f"[news-harvester] WARN upstream failed after {retries + 1} attempts: {cmd[:60]} -> {last_err}", file=sys.stderr)
     return None
 
 def trigger_circuit_breaker(headline: str, keyword: str):
@@ -254,7 +276,9 @@ def fetch_and_analyze_news_sentiment():
         "macro_sentiment": macro_env,
         "circuit_breaker": cb_info if cb_active else {"active": False},
         "coins_sentiment": coin_sentiments,
-        "latest_news": parsed_news[:10]
+        "latest_news": parsed_news[:10],
+        # Freshness of the *content* (newest item time), not of this run.
+        "news_fresh_at": (parsed_news[0]["time"] if parsed_news else None),
     }
 
     # Fail-closed: an upstream hiccup must not wipe a good cache into an empty page.
@@ -266,6 +290,9 @@ def fetch_and_analyze_news_sentiment():
                 if previous.get("latest_news") or previous.get("coins_sentiment"):
                     if not payload["latest_news"] and previous.get("latest_news"):
                         payload["latest_news"] = previous["latest_news"]
+                        payload["news_fresh_at"] = previous.get("news_fresh_at") or (
+                            previous["latest_news"][0].get("time") if previous["latest_news"] else None
+                        )
                     if not payload["coins_sentiment"] and previous.get("coins_sentiment"):
                         payload["coins_sentiment"] = {k: v for k, v in previous["coins_sentiment"].items() if k in target_coins}
                         bull_count = sum(1 for s in payload["coins_sentiment"].values() if float(s.get("sentiment_factor_score", 0)) > 0.25)

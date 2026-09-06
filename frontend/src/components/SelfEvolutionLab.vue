@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useDashboardStore } from '../stores/dashboard'
-import { Sparkles, Brain, Cpu } from 'lucide-vue-next'
+import { Sparkles, Brain, Cpu, AlertTriangle } from 'lucide-vue-next'
 
 const store = useDashboardStore()
 const review = computed(() => store.data?.review || {})
@@ -28,6 +28,20 @@ const memoryMd = computed(() => store.data?.ai_trading_memory_md || '')
       <div class="flex items-center space-x-2 text-xs 2xl:text-sm font-mono h-7 2xl:h-8 px-2.5 2xl:px-3 rounded-[4px] border" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
         <span style="color: var(--text-muted);">自进化主脑:</span>
         <span class="font-bold font-mono" style="color: var(--color-brand);">{{ store.llmRuntime.model }}</span>
+      </div>
+    </div>
+
+    <!-- Upstream LLM failure notice: explains why the memory library is unchanged -->
+    <div
+      v-if="review.llm_error"
+      class="rounded-xl border p-3 sm:p-3.5 flex items-start space-x-2 font-mono text-[11px] 2xl:text-xs"
+      style="background-color: var(--color-warn-bg); border-color: var(--color-warn-border); color: var(--color-warn);"
+    >
+      <AlertTriangle class="w-3.5 h-3.5 shrink-0 mt-0.5" />
+      <div class="space-y-0.5">
+        <div class="font-bold">最近一轮 {{ review.timestamp || '--' }} 复盘未能完成：大模型网关返回错误，本轮按 NO_CHANGE 保留原有心法，记忆库因此没有新增条目。</div>
+        <div style="color: var(--text-muted);">错误详情：{{ review.llm_error }}</div>
+        <div style="color: var(--text-faint);">系统已自动重试；下一周期（每 6 小时）将再次尝试提炼。可在后台「AI 模型」切换可用模型后立即手动触发。</div>
       </div>
     </div>
 

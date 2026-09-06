@@ -1153,39 +1153,83 @@ def execute_llm_request(
         headers=headers,
     )
 
-    try:
-        resp_handle = urllib.request.urlopen(req, timeout=effective_timeout)
-    except urllib.error.HTTPError as exc:
-        err_b = ""
-        try:
-            err_b = exc.read().decode("utf-8", errors="replace")
-        except Exception:
-            pass
+    # Transient upstream faults (gateway route flaps, bot/rate shields, 5xx) must not
+    # silently degrade a trading or self-evolution cycle into NO_CHANGE. Retry with backoff.
+    TRANSIENT_MARKERS = (
+        "unknown provider", "model_not_found", "no provider", "upstream",
+        "temporarily unavailable", "overloaded", "rate limit", "too many requests",
+        "capacity", "busy", "bad gateway", "gateway timeout",
+    )
 
-        # Adaptive fallback retry on rejected parameter
-        if exc.code == 400 and any(kw in err_b.lower() for kw in ["reasoning_effort", "temperature", "response_format", "invalid parameter"]):
-            fallback_payload = {
-                "model": target_model,
-                "messages": messages,
-            }
-            fb_req = urllib.request.Request(
-                endpoint,
-                data=json.dumps(fallback_payload).encode("utf-8"),
-                headers=headers,
-            )
-            resp_handle = urllib.request.urlopen(fb_req, timeout=effective_timeout)
-        else:
-            raise
-    except (TimeoutError, socket.timeout) as exc:
-        raise TimeoutError(
-            f"LLM 推演超时（已达到思考上限时间 {effective_timeout:.0f}s）：模型思考链过长未在时限内完成响应，可前往后台 AI 模型设置中调大思考上限时间"
-        ) from exc
-    except urllib.error.URLError as exc:
-        if isinstance(getattr(exc, "reason", None), (socket.timeout, TimeoutError)):
+    def _is_transient(code: int, body: str) -> bool:
+        low = (body or "").lower()
+        if code in (408, 409, 425, 429, 500, 502, 503, 504):
+            return True
+        if code in (400, 401, 402, 403) and any(m in low for m in TRANSIENT_MARKERS):
+            return True
+        return False
+
+    resp_handle = None
+    last_exc: Exception | None = None
+    for attempt in range(3):
+        try:
+            resp_handle = urllib.request.urlopen(req, timeout=effective_timeout)
+            break
+        except urllib.error.HTTPError as exc:
+            err_b = ""
+            try:
+                err_b = exc.read().decode("utf-8", errors="replace")
+            except Exception:
+                pass
+            last_exc = exc
+
+            # Adaptive fallback retry on rejected parameter
+            if exc.code == 400 and any(kw in err_b.lower() for kw in ["reasoning_effort", "temperature", "response_format", "invalid parameter"]):
+                fallback_payload = {
+                    "model": target_model,
+                    "messages": messages,
+                }
+                fb_req = urllib.request.Request(
+                    endpoint,
+                    data=json.dumps(fallback_payload).encode("utf-8"),
+                    headers=headers,
+                )
+                try:
+                    resp_handle = urllib.request.urlopen(fb_req, timeout=effective_timeout)
+                    last_exc = None
+                    break
+                except Exception as fb_exc:
+                    if not _is_transient(getattr(fb_exc, "code", 0) or 0, getattr(fb_exc, "msg", "")):
+                        raise
+                    exc = fb_exc
+                    last_exc = fb_exc
+
+            if _is_transient(exc.code, err_b) and attempt < 2:
+                time.sleep(2.0 * (attempt + 1))
+                continue
+            raise RuntimeError(
+                f"LLM 网关返回 HTTP {exc.code}（模型 {target_model}）：{(err_b or '')[:280]}"
+            ) from exc
+        except (TimeoutError, socket.timeout) as exc:
+            last_exc = exc
+            if attempt < 2:
+                time.sleep(2.0 * (attempt + 1))
+                continue
             raise TimeoutError(
                 f"LLM 推演超时（已达到思考上限时间 {effective_timeout:.0f}s）：模型思考链过长未在时限内完成响应，可前往后台 AI 模型设置中调大思考上限时间"
             ) from exc
-        raise
+        except urllib.error.URLError as exc:
+            last_exc = exc
+            if isinstance(getattr(exc, "reason", None), (socket.timeout, TimeoutError)):
+                if attempt < 2:
+                    time.sleep(2.0 * (attempt + 1))
+                    continue
+                raise TimeoutError(
+                    f"LLM 推演超时（已达到思考上限时间 {effective_timeout:.0f}s）：模型思考链过长未在时限内完成响应，可前往后台 AI 模型设置中调大思考上限时间"
+                ) from exc
+            raise
+    if resp_handle is None:
+        raise last_exc if last_exc is not None else RuntimeError("LLM 请求未获得响应")
 
     with resp_handle as resp:
         latency_ms = int((time.perf_counter() - t0) * 1000)

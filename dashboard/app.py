@@ -40,6 +40,58 @@ AI_HISTORY_FILE = os.path.join(DATA_DIR, "ai_brain_history.json")
 AI_LAST_PROMPT_FILE = os.path.join(DATA_DIR, "ai_brain_last_prompt.txt")
 FACTOR_LIBRARY_FILE = os.path.join(DATA_DIR, "factor_library_snapshot.json")
 AI_MEMORY_MD_FILE = os.path.join(DATA_DIR, "AI_TRADING_MEMORY.md")
+
+
+def load_trading_memory_md() -> str:
+    """Render the live heuristic memory library.
+
+    The structured store (data/structured_trading_memory.json) is the single
+    authority written by the self-evolution engine; the legacy markdown file is
+    only a fallback. Reading the file alone freezes the homepage panel on the
+    last hand-edited snapshot while the engine keeps revising lessons.
+    """
+    rendered = ""
+    try:
+        from scripts.evolution_shield import render_trading_memory
+        rendered = render_trading_memory(AI_MEMORY_MD_FILE, os.path.join(DATA_DIR, "ai_trading_memory.json")) or ""
+    except Exception:
+        rendered = ""
+    if rendered.strip():
+        return rendered + _memory_freshness_note()
+    if os.path.exists(AI_MEMORY_MD_FILE):
+        try:
+            with open(AI_MEMORY_MD_FILE, "r", encoding="utf-8") as f:
+                return f.read()
+        except Exception:
+            return ""
+    return ""
+
+
+def _memory_freshness_note() -> str:
+    """One-line provenance footer so the panel visibly tracks engine revisions."""
+    structured = os.path.join(DATA_DIR, "structured_trading_memory.json")
+    try:
+        with open(structured, "r", encoding="utf-8") as f:
+            store = json.load(f)
+        lessons = store.get("lessons") or []
+        stamps = [i.get("created_at") for i in lessons if i.get("created_at")]
+        newest = max(stamps) if stamps else ""
+        if newest:
+            try:
+                local = datetime.datetime.fromisoformat(newest).astimezone(
+                    datetime.timezone(datetime.timedelta(hours=8))
+                ).strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                local = str(newest)[:19]
+            return (
+                f"\n\n> 权威来源: structured_trading_memory.json"
+                f" | 修订 {str(store.get('revision'))[:8]} | 共 {len(lessons)} 条心法"
+                f" | 最近更新 {local} (UTC+8)"
+            )
+        return f"\n\n> 权威来源: structured_trading_memory.json | 共 {len(lessons)} 条心法"
+    except Exception:
+        return ""
+
 DASHBOARD_CACHE_FILE = os.path.join(DATA_DIR, "dashboard_last_good.json")
 
 
@@ -302,13 +354,11 @@ def _inject_local_data_into_stale(stale, positions, timestamp_full):
         except Exception:
             pass
 
-    # AI trading memory — local file
-    if os.path.exists(AI_MEMORY_MD_FILE):
-        try:
-            with open(AI_MEMORY_MD_FILE, "r", encoding="utf-8") as f:
-                stale["ai_trading_memory_md"] = f.read()
-        except Exception:
-            pass
+    # AI trading memory — structured store first, legacy markdown as fallback
+    try:
+        stale["ai_trading_memory_md"] = load_trading_memory_md()
+    except Exception:
+        pass
 
     # Log lines — local file
     if os.path.exists(LOG_FILE):
@@ -1071,13 +1121,7 @@ def update_cache_cycle():
         except Exception:
             pass
 
-    ai_memory_md_content = ""
-    if os.path.exists(AI_MEMORY_MD_FILE):
-        try:
-            with open(AI_MEMORY_MD_FILE, "r", encoding="utf-8") as f:
-                ai_memory_md_content = f.read()
-        except Exception:
-            pass
+    ai_memory_md_content = load_trading_memory_md()
 
     ai_last_prompt_text = ""
     if os.path.exists(AI_LAST_PROMPT_FILE):

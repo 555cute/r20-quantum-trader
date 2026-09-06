@@ -9,6 +9,8 @@ const newsItems = computed<any[]>(() => intel.value.latest_news || [])
 const coinsSentiment = computed<[string, any][]>(() => Object.entries(intel.value.coins_sentiment || {}))
 const macro = computed<string>(() => intel.value.macro_sentiment || '--')
 const breakerActive = computed<boolean>(() => !!intel.value.circuit_breaker?.active)
+// Upstream harvest failed this cycle -> the list below is the last good cache.
+const isStaleFeed = computed<boolean>(() => !!intel.value.stale_sections)
 
 function labelClass(label: string) {
   if (label === 'bullish') return 'color: var(--color-up); background-color: var(--color-up-bg); border-color: var(--color-up-border);'
@@ -45,13 +47,24 @@ function importanceCn(imp: string) {
             <h2 class="text-xs sm:text-[13px] 2xl:text-sm font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
               全网加密重大舆情与流动性情报
             </h2>
-            <span class="hidden md:inline-flex items-center space-x-1 text-[10px] 2xl:text-[11px] font-mono px-2 py-0.5 rounded-[4px] border" style="background-color: var(--color-up-bg); border-color: var(--color-up-border); color: var(--color-up);">
+            <span
+              v-if="isStaleFeed"
+              class="hidden md:inline-flex items-center space-x-1 text-[10px] 2xl:text-[11px] font-mono px-2 py-0.5 rounded-[4px] border"
+              style="background-color: var(--color-warn-bg); border-color: var(--color-warn-border); color: var(--color-warn);"
+              title="上游资讯源本轮抓取失败，页面展示的是最近一次成功的缓存内容"
+            >
+              <span class="w-1.5 h-1.5 rounded-full" style="background-color: var(--color-warn);"></span>
+              <span>数据源延迟 · 展示缓存</span>
+            </span>
+            <span v-else class="hidden md:inline-flex items-center space-x-1 text-[10px] 2xl:text-[11px] font-mono px-2 py-0.5 rounded-[4px] border" style="background-color: var(--color-up-bg); border-color: var(--color-up-border); color: var(--color-up);">
               <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
               <span>错峰自动更新中</span>
             </span>
           </div>
           <p class="text-[11px] 2xl:text-xs font-mono mt-0.5" style="color: var(--text-muted);">
-            主流财经与链上异动 · 更新于 {{ intel.updated_at || '--' }} (UTC+8)
+            主流财经与链上异动 · 抓取于 {{ intel.updated_at || '--' }}
+            <span v-if="intel.news_fresh_at" style="color: var(--text-faint);">· 最新快讯 {{ intel.news_fresh_at }}</span>
+            (UTC+8)
           </p>
         </div>
       </div>
