@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useDashboardStore } from '../stores/dashboard'
 import { useI18n } from '../composables/useI18n'
+import TacticalChart from './TacticalChart.vue'
 import {
   ShieldCheck,
   ShieldAlert,
   Layers,
   Clock,
   Activity,
+  LineChart,
+  Sliders,
 } from 'lucide-vue-next'
 
 const store = useDashboardStore()
@@ -16,6 +19,35 @@ const { t } = useI18n()
 const activeTab = ref<'positions' | 'orders'>('positions')
 const selectedSymbol = ref<string>('ALL')
 const searchQuery = ref<string>('')
+const showChart = ref<boolean>(true)
+const selectedChartSymbol = ref<string>('BTC')
+const chartRef = ref<any>(null)
+
+function focusChartOn(symbol: string) {
+  if (!symbol) return
+  selectedChartSymbol.value = symbol
+  showChart.value = true
+  if (chartRef.value?.selectSymbol) {
+    chartRef.value.selectSymbol(symbol)
+  }
+}
+
+onMounted(() => {
+  // If active positions exist, focus chart on the first active position
+  if (store.positions.length > 0) {
+    const firstPos = store.positions[0]
+    const sym = firstPos.name || firstPos.instId?.split('-')[0]
+    if (sym) {
+      selectedChartSymbol.value = sym
+    }
+  } else if (store.pendingOrders.length > 0) {
+    const firstOrd = store.pendingOrders[0]
+    const sym = firstOrd.name || firstOrd.inst || firstOrd.instId?.split('-')[0]
+    if (sym) {
+      selectedChartSymbol.value = sym
+    }
+  }
+})
 
 const availableSymbols = computed(() => {
   const set = new Set<string>()
@@ -159,7 +191,33 @@ const allProtected = computed(() =>
           <span class="hidden md:inline">{{ allProtected ? t('desk.ocoProtected', '100% 交易所云端 OCO 止损') : '部分仓位未设止损' }}</span>
           <span class="md:hidden">{{ allProtected ? '100% OCO' : '未全覆盖' }}</span>
         </div>
+
+        <!-- Toggle Chart Deck Button -->
+        <button
+          @click="showChart = !showChart"
+          class="h-7.5 2xl:h-8.5 px-2.5 2xl:px-3 rounded-lg border text-xs 2xl:text-sm font-mono flex items-center space-x-1.5 transition-all cursor-pointer font-bold shrink-0"
+          :style="showChart
+            ? { backgroundColor: 'var(--color-brand-bg)', borderColor: 'var(--color-brand-border)', color: 'var(--color-brand)' }
+            : { backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }"
+          title="展开/收起 K线与四维交易线可视化操盘画板"
+        >
+          <LineChart class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
+          <span>{{ showChart ? '收起图表' : 'K线操盘台' }}</span>
+        </button>
       </div>
+    </div>
+
+    <!-- Integrated Interactive Tactical Chart Deck -->
+    <div
+      v-show="showChart"
+      class="p-2.5 sm:p-3 border-b transition-all"
+      style="border-color: var(--border-subtle); background-color: var(--bg-app);"
+    >
+      <TacticalChart
+        ref="chartRef"
+        :initial-symbol="selectedChartSymbol"
+        @select-symbol="(sym) => selectedChartSymbol = sym"
+      />
     </div>
 
     <!-- TAB CONTENT 1: POSITIONS -->
@@ -200,8 +258,10 @@ const allProtected = computed(() =>
             <tr
               v-for="pos in filteredPositions"
               :key="pos.instId"
-              class="border-b last:border-b-0 transition-colors tactical-row"
+              @click="focusChartOn(pos.name)"
+              class="border-b last:border-b-0 transition-colors tactical-row cursor-pointer hover:bg-slate-800/10"
               style="border-color: var(--border-subtle);"
+              title="点击在上方K线图表中聚焦该标的"
             >
               <!-- 标的 / 杠杆 -->
               <td class="py-3 px-4 2xl:px-6 2xl:py-3.5">
@@ -313,8 +373,10 @@ const allProtected = computed(() =>
             <tr
               v-for="ord in filteredOrders"
               :key="ord.ordId"
-              class="border-b last:border-b-0 transition-colors tactical-row"
+              @click="focusChartOn(ord.name || ord.inst || ord.instId?.split('-')[0])"
+              class="border-b last:border-b-0 transition-colors tactical-row cursor-pointer hover:bg-slate-800/10"
               style="border-color: var(--border-subtle);"
+              title="点击在上方K线图表中聚焦该标的"
             >
               <td class="py-3 px-4 2xl:px-6 2xl:py-3.5 font-mono text-xs 2xl:text-sm" style="color: var(--text-faint);">
                 {{ ord.ordId }}

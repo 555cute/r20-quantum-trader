@@ -365,6 +365,23 @@ class AdminApiTests(unittest.TestCase):
             if test_file.exists():
                 test_file.unlink()
 
+    def test_market_candles_endpoint(self):
+        # Invalid instrument without -SWAP suffix
+        bad = self.client.get("/api/v1/market/BTC-USDT/candles")
+        self.assertEqual(bad.status_code, 400)
+
+        # Valid instrument request
+        resp = self.client.get("/api/v1/market/BTC-USDT-SWAP/candles?bar=1H&limit=10")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["instId"], "BTC-USDT-SWAP")
+        self.assertEqual(data["bar"], "1H")
+        self.assertIn("candles", data)
+        self.assertGreater(len(data["candles"]), 0)
+        c0 = data["candles"][0]
+        for k in ("ts", "open", "high", "low", "close", "vol"):
+            self.assertIn(k, c0)
+
 
 if __name__ == "__main__":
     unittest.main()
