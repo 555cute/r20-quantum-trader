@@ -12,6 +12,7 @@
 ```
 
 [![Release](https://img.shields.io/badge/release-v7.5.0-orange.svg?style=flat-square)](https://github.com/555cute/r20-quantum-trader/releases/tag/v7.5.0)
+[![LINUX DO](https://img.shields.io/badge/Community-LINUX%20DO-F97316?style=flat-square&logo=linux&logoColor=white)](https://linux.do/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg?style=flat-square)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688.svg?style=flat-square)](https://fastapi.tiangolo.com/)
@@ -22,11 +23,11 @@
 **新一代机构级加密货币波段量化决策与执行系统 · AI 投委会大模型驱动**  
 *全栈策略自由编排 · 白盒自进化认知复盘 · Fail-Closed 物理硬拦截 · 多模型决策委员会 · 原生云端 OCO 风控*
 
-[系统前后台一览](#-系统全景一览) · [1. 提示词策略工作室](#1-提示词策略工作室-prompt-studio) · [2. 自进化认知中枢](#2-启发式自进化认知中枢-self-evolution) · [3. 物理拦截插件](#3-fail-closed-python-物理硬拦截管线-interceptors) · [4. 多模型投委会](#4-对冲基金多模型决策委员会-council-pro) · [5. 模型网关配置](#5-大模型网关与全局推理配置中心-llm-hub) · [快速上手](#-极速部署指南) · [发行版日志](https://github.com/555cute/r20-quantum-trader/releases)
+[系统前后台一览](#-系统全景一览) · [1. 提示词策略工作室](#1-提示词策略工作室-prompt-studio) · [2. 自进化认知中枢](#2-启发式自进化认知中枢-self-evolution) · [3. 物理拦截插件](#3-fail-closed-python-物理硬拦截管线-interceptors) · [4. 多模型投委会](#4-对冲基金多模型决策委员会-council-pro) · [5. 模型网关配置](#5-大模型网关与全局推理配置中心-llm-hub) · [🐧 LINUX DO 社区](https://linux.do/) · [快速上手](#-极速部署指南) · [发行版日志](https://github.com/555cute/r20-quantum-trader/releases)
 
 <br/>
 
-> 💬 **官方交流 QQ 群**：**`655973677`** ｜ 欢迎量化交易员、提示词工程师、大模型 Agent 开发者进群交流探讨实战心得！
+> 💬 **官方交流 QQ 群**：**`655973677`** ｜ 🐧 **开源社区**：**[LINUX DO (linux.do)](https://linux.do/)** ｜ 欢迎量化交易员、提示词工程师、大模型 Agent 开发者共同交流探讨实战心得！
 
 </div>
 
