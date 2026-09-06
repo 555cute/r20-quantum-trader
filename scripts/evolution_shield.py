@@ -433,15 +433,12 @@ def admin_mutate(operation, *, texts=None, index=None, lesson_id=None, expected_
                 if target is None:
                     raise IndexError("Memory id not found")
                 removed = target["rule_text"]
+                lessons = [i for i in old if i["id"] != lesson_id]
             else:
                 if index is None or index < 0 or index >= len(active):
                     raise IndexError("Memory index not found")
                 removed = active.pop(index)
-            # Deletion is a tombstone, so later review cannot resurrect it.
-            lessons = copy.deepcopy(old)
-            for item in lessons:
-                if item["rule_text"] == removed:
-                    item["enabled"] = False
+                lessons = [i for i in old if i["rule_text"] != removed]
         elif operation in {"add", "replace"}:
             candidates = list(texts or [])
             if operation == "add":
