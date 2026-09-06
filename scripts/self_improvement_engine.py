@@ -245,7 +245,13 @@ def call_llm_evolution_review(closed_trades: List[Dict[str, Any]], existing_memo
     profile = active_profile()
     runtime_context = {
         "decision_timestamp": now_bj_str, "timestamp": now_bj_str,
+        "timestamp_beijing": now_bj_str,
         "trading_memory": existing_memory_md.strip(),
+        "existing_memory_markdown": existing_memory_md.strip() or "当前长期记忆库为空 (系统初始冷启动状态)",
+        "total": total, "wins": len(wins), "losses": len(losses), "win_rate": win_rate,
+        "total_net": f"{total_net:+.2f}", "total_fees": f"{total_fees:.2f}",
+        "target_instruments": ", ".join(TARGET_INSTRUMENTS),
+        "closed_trades_json": json.dumps(closed_trades, indent=2, ensure_ascii=False),
         "active_instruments": ",".join(TARGET_INSTRUMENTS),
         "profile_name": profile.get("name", ""), "timezone": "Asia/Shanghai",
         "strategy_version": os.getenv("R20_VERSION", "6.8.1"),
