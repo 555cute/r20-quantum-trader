@@ -83,21 +83,45 @@ const { t, isEn } = useI18n()
 // 1. 标的池与周期切换 (动态读取系统监控池)
 // ==========================================
 const availableSymbols = computed(() => {
-  const set = new Set<string>()
+  const holdingSet = new Set<string>()
+  const otherSet = new Set<string>()
+
+  // 1. 优先提取当前持仓标的 (去重)
   if (Array.isArray(store.positions)) {
     store.positions.forEach((p) => {
-      if (p.instId) set.add(p.instId.replace('-USDT-SWAP', '').replace('-USDT', ''))
+      const sym = (p.name || p.instId?.replace('-USDT-SWAP', '').replace('-USDT', '') || '').toUpperCase()
+      if (sym) holdingSet.add(sym)
     })
   }
+
+  // 2. 优先提取挂单标的 (去重)
+  if (Array.isArray(store.pendingOrders)) {
+    store.pendingOrders.forEach((o) => {
+      const sym = (o.name || o.instId?.replace('-USDT-SWAP', '').replace('-USDT', '') || '').toUpperCase()
+      if (sym) holdingSet.add(sym)
+    })
+  }
+
+  // 3. 提取全部监控池标的
   if (Array.isArray(store.factorLibrary)) {
     store.factorLibrary.forEach((f) => {
-      if (f.instId) set.add(f.instId.replace('-USDT-SWAP', '').replace('-USDT', ''))
+      const sym = (f.instId?.replace('-USDT-SWAP', '').replace('-USDT', '') || '').toUpperCase()
+      if (sym && !holdingSet.has(sym)) {
+        otherSet.add(sym)
+      }
     })
   }
-  if (set.size === 0) {
-    return ['BTC', 'ETH', 'SOL', 'DOGE', 'SUI', 'ADA']
-  }
-  return Array.from(set)
+
+  // 兜底标的
+  const defaults = ['BTC', 'ETH', 'SOL', 'DOGE', 'SUI', 'ADA']
+  defaults.forEach((d) => {
+    if (!holdingSet.has(d) && !otherSet.has(d)) {
+      otherSet.add(d)
+    }
+  })
+
+  // 持仓/挂单标的绝对排在最前面，其余监控标的紧随其后全部保留！
+  return [...Array.from(holdingSet), ...Array.from(otherSet)]
 })
 
 const periods = computed(() => [
@@ -184,11 +208,19 @@ const liveChangePct = computed(() => Number(factorItem.value?.c_1h_ret || 0) * 1
 // 实盘在手持仓与在途委托
 const activePosition = computed(() => {
   if (!Array.isArray(store.positions)) return undefined
-  return store.positions.find((p) => p.instId === currentInstId.value || p.name === currentSymbol.value)
+  const target = currentSymbol.value.toUpperCase()
+  return store.positions.find((p) => {
+    const sym = (p.name || p.instId?.replace('-USDT-SWAP', '').replace('-USDT', '') || '').toUpperCase()
+    return sym === target || p.instId === currentInstId.value
+  })
 })
 const activeOrder = computed(() => {
   if (!Array.isArray(store.pendingOrders)) return undefined
-  return store.pendingOrders.find((o) => o.instId === currentInstId.value)
+  const target = currentSymbol.value.toUpperCase()
+  return store.pendingOrders.find((o) => {
+    const sym = (o.name || o.inst || o.instId?.replace('-USDT-SWAP', '').replace('-USDT', '') || '').toUpperCase()
+    return sym === target || o.instId === currentInstId.value
+  })
 })
 
 // 真实最新价格 (纯从蜡烛与盘口同源获取，防止跳动过大)
@@ -550,7 +582,7 @@ function getChartStyles(): DeepPartial<Styles> {
 function syncIndicators() {
   if (!klineChart) return
 
-  // 1. 同步主图指标 (全部挂在 candle_pane 上，isStack = false 叠加在蜡烛图内部)
+  // 1. 同步主图指标 (全部挂在 candle_pane 上，isStack = true 保证多指标自由叠加共存！)
   mainIndicators.forEach((ind) => {
     const isActive = !!activeIndicators.value[ind.key]
     const currentOnChart = klineChart?.getIndicators({ id: `main_${ind.key}` }) || []
@@ -563,7 +595,7 @@ function syncIndicators() {
             paneId: 'candle_pane',
             calcParams: ind.defaultParams || [],
           },
-          false // 叠加在 candle_pane 上
+          true // 必须为 true，允许多个主图指标同时叠加同屏渲染！
         )
       }
     } else {
@@ -903,8 +935,18 @@ watch(isDark, () => {
   klineChart?.setStyles(getChartStyles())
 })
 
+watch(() => props.symbol, (newSym) => {
+  if (newSym && newSym.toUpperCase() !== currentSymbol.value) {
+    selectSymbol(newSym)
+  }
+})
+
 watch([() => activePosition.value, () => activeOrder.value], () => {
   updatePriceLines()
+})
+
+defineExpose({
+  selectSymbol,
 })
 
 let timer: any = null

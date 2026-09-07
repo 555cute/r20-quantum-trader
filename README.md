@@ -23,11 +23,23 @@
 **新一代机构级加密货币波段量化决策与执行系统 · AI 投委会大模型驱动**  
 *全栈策略自由编排 · 白盒自进化认知复盘 · Fail-Closed 物理硬拦截 · 多模型决策委员会 · 原生云端 OCO 风控*
 
-[系统前后台一览](#-系统全景一览) · [1. 提示词策略工作室](#1-提示词策略工作室-prompt-studio) · [2. 自进化认知中枢](#2-启发式自进化认知中枢-self-evolution) · [3. 物理拦截插件](#3-fail-closed-python-物理硬拦截管线-interceptors) · [4. 多模型投委会](#4-对冲基金多模型决策委员会-council-pro) · [5. 模型网关配置](#5-大模型网关与全局推理配置中心-llm-hub) · [🐧 LINUX DO 社区](https://linux.do/) · [快速上手](#-极速部署指南) · [发行版日志](https://github.com/555cute/r20-quantum-trader/releases)
+[系统前后台一览](#-系统全景一览) · [1. 提示词策略工作室](#1-提示词策略工作室-prompt-studio) · [2. 自进化认知中枢](#2-启发式自进化认知中枢-self-evolution) · [3. 物理拦截插件](#3-fail-closed-python-物理硬拦截管线-interceptors) · [4. 多模型投委会](#4-对冲基金多模型决策委员会-council-pro) · [5. 模型网关配置](#5-大模型网关与全局推理配置中心-llm-hub) · [☕ 赞赏支持](#-赞助与支持-sponsor--donate) · [🐧 LINUX DO 社区](https://linux.do/) · [快速上手](#-极速部署指南) · [发行版日志](https://github.com/555cute/r20-quantum-trader/releases)
 
 <br/>
 
 > 💬 **官方交流 QQ 群**：**`655973677`** ｜ 🐧 **开源社区**：**[LINUX DO (linux.do)](https://linux.do/)** ｜ 欢迎量化交易员、提示词工程师、大模型 Agent 开发者共同交流探讨实战心得！
+
+<table align="center">
+  <tr>
+    <td align="center" style="border: none;">
+      <a href="#-赞助与支持-sponsor--donate">
+        <img src="docs/images/wechat_reward_qrcode.png" width="160" alt="微信赞赏码 · 梁文绷" style="border-radius: 8px;" />
+      </a>
+      <br/>
+      <span style="font-size: 12px; color: #888;">☕ <b>支持作者</b> · 微信扫码赞赏 (梁文绷)</span>
+    </td>
+  </tr>
+</table>
 
 </div>
 

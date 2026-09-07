@@ -215,6 +215,7 @@ const allProtected = computed(() =>
     >
       <TacticalChart
         ref="chartRef"
+        :symbol="selectedChartSymbol"
         :initial-symbol="selectedChartSymbol"
         @select-symbol="(sym) => selectedChartSymbol = sym"
       />
