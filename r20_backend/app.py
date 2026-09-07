@@ -3006,7 +3006,11 @@ _CANDLES_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 
 
 @app.get("/api/v1/market/{inst_id}/candles")
-def market_candles(inst_id: str, bar: str = "1H", limit: int = 150) -> dict[str, Any]:
+def market_candles(inst_id: str, bar: str = "1H", limit: int = 150, response: Response = None) -> dict[str, Any]:
+    if response:
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
     if not inst_id.endswith("-SWAP"):
         raise HTTPException(status_code=400, detail="only SWAP instrument ids are accepted")
     valid_bars = {"1m", "5m", "15m", "1H", "4H", "1D"}
