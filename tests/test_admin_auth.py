@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+import sqlite3
 
 from r20_backend.admin_auth import AdminAuthStore
 
@@ -14,6 +15,17 @@ class AdminAuthTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp.cleanup()
+
+    def test_connection_is_closed_after_success_or_failure(self):
+        with self.store.connect() as connection:
+            connection.execute("SELECT 1")
+        with self.assertRaises(sqlite3.ProgrammingError):
+            connection.execute("SELECT 1")
+        with self.assertRaisesRegex(RuntimeError, "transaction interrupted"):
+            with self.store.connect() as failed_connection:
+                raise RuntimeError("transaction interrupted")
+        with self.assertRaises(sqlite3.ProgrammingError):
+            failed_connection.execute("SELECT 1")
 
     def test_legacy_initialization_and_login_session(self):
         self.assertTrue(self.store.initialize_from_legacy("LegacyToken123456"))

@@ -7,6 +7,8 @@ import re
 import secrets
 import sqlite3
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -72,11 +74,16 @@ class AdminAuthStore:
             connection.executescript(SCHEMA)
         os.chmod(self.path, 0o600)
 
-    def connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self.path, timeout=10)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys=ON")
-        return connection
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys=ON")
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def has_users(self) -> bool:
         with self.connect() as connection:
