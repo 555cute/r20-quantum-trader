@@ -371,17 +371,18 @@ function initTradingViewChart() {
       borderColor,
       autoScale: true,
       scaleMargins: {
-        top: 0.10,
-        bottom: 0.20,
+        top: 0.12,
+        bottom: 0.22,
       },
     },
     timeScale: {
       borderColor,
       timeVisible: true,
       secondsVisible: false,
-      barSpacing: 8,
-      minBarSpacing: 3,
+      barSpacing: 10,
+      minBarSpacing: 4,
       rightOffset: 3,
+      fixLeftEdge: true,
     },
   })
 
@@ -931,7 +932,7 @@ defineExpose({
           <button
             v-for="p in periods"
             :key="p.id"
-            @click="currentPeriod = p.id; loadCandles()"
+            @click="currentPeriod = p.id; loadCandles(false, true)"
             class="h-6 px-2 rounded-md font-bold transition-all cursor-pointer"
             :style="currentPeriod === p.id
               ? { backgroundColor: 'var(--bg-badge)', color: 'var(--text-main)' }
