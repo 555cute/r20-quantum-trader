@@ -33,7 +33,7 @@ if str(_THIS_DIR) not in sys.path:
 try:
     from r20_backend.version import __version__
 except Exception:
-    __version__ = "7.5.1"
+    __version__ = "7.5.3"
 
 from okx_runtime import freeze_environment as freeze_okx_environment, replace_cli_prefix as okx_private_command, unfreeze_environment as unfreeze_okx_environment, selected_environment
 import json
@@ -53,6 +53,7 @@ LOGS_DIR = os.path.join(WORKSPACE_DIR, "logs")
 LEDGER_JSON_FILE = os.path.join(DATA_DIR, "trading_ledger.json")
 LOG_FILE = os.path.join(LOGS_DIR, "ai_factor_trader.log")
 POSITION_TRACKER_FILE = os.path.join(DATA_DIR, "position_trackers.json")
+SIGNAL_JOURNAL_FILE = os.path.join(DATA_DIR, "signal_journal.json")
 STOP_COOLDOWN_FILE = os.path.join(DATA_DIR, "stop_cooldown.json")
 CIRCUIT_BREAKER_FILE = os.path.join(DATA_DIR, "circuit_breaker.json")
 NEWS_SENTIMENT_FILE = os.path.join(DATA_DIR, "news_sentiment.json")
@@ -113,7 +114,8 @@ ASSET_CLASS_PROFILES = {
 }
 
 MAX_CONCURRENT_POSITIONS = len(TARGET_INSTRUMENTS)
-MAX_SAME_DIRECTION_POSITIONS = 6
+# 与提示词铁律「全系统同向单上限严控 3 笔」保持单一口径，防止提示词比代码更严造成认知偏差
+MAX_SAME_DIRECTION_POSITIONS = 3
 TAKER_FEE_RATE = 0.0005
 MAKER_FEE_RATE = 0.0002 # Limit Order Maker Fee (60% Lower Than Market Taker)
 MAX_DAILY_LOSS_USDT = 150.0
@@ -523,6 +525,56 @@ def ensure_cloud_position_protection(inst_id: str, pos_side: str, size: float, t
         if verified_coverage + max(1e-12, float(size) * 0.001) >= float(size):
             return True, f"cloud OCO repaired and verified ({verified_coverage:g}/{size:g})"
     return False, "cloud OCO repair was submitted but full coverage could not be verified"
+
+
+def build_signal_snapshot(f: dict) -> dict:
+    """抽取开仓时刻的因果动力学与数理快照，供自进化复盘做真实因果归因（而非事后倒推）。"""
+    calc = f.get("calculus_dynamics") or {}
+    prob = f.get("probability_theory") or {}
+    integ = f.get("definite_integrals") or {}
+    micro = f.get("microstructure") or {}
+    money = f.get("smart_money_derivatives") or {}
+    trend = f.get("trend_momentum") or {}
+    return {
+        "price": f.get("price"),
+        "atr": f.get("atr"),
+        "velocity": calc.get("velocity"),
+        "acceleration": calc.get("acceleration"),
+        "jerk": calc.get("jerk"),
+        "impulse": calc.get("impulse"),
+        "curvature": calc.get("curvature"),
+        "power": calc.get("power"),
+        "power_regime": calc.get("power_regime"),
+        "regime": calc.get("regime"),
+        "dynamics_quality": calc.get("quality"),
+        "continuation_prob_pct": prob.get("continuation_prob_pct"),
+        "breakdown_prob_pct": prob.get("breakdown_prob_pct"),
+        "var_95_pct": prob.get("var_95_pct"),
+        "cvar_95_pct": prob.get("cvar_95_pct"),
+        "prob_regime": prob.get("prob_regime"),
+        "is_fat_tail": prob.get("is_fat_tail"),
+        "energy_integral": integ.get("energy_integral"),
+        "deviation_area_integral": integ.get("deviation_area_integral"),
+        "adx": trend.get("adx"),
+        "rsi": trend.get("rsi"),
+        "funding_rate": micro.get("funding_rate"),
+        "composite_alpha_score": f.get("composite_alpha_score"),
+        "smart_money_net": money.get("net_flow") or money.get("taker_net"),
+    }
+
+
+def record_signal_snapshot(snap: dict) -> None:
+    """把开仓时刻的数理快照写入 signal_journal.json，保留最近 500 条供复盘 join。"""
+    try:
+        journal = []
+        if os.path.exists(SIGNAL_JOURNAL_FILE):
+            with open(SIGNAL_JOURNAL_FILE, "r", encoding="utf-8") as handle:
+                journal = json.load(handle)
+        journal.append(snap)
+        with open(SIGNAL_JOURNAL_FILE, "w", encoding="utf-8") as handle:
+            json.dump(journal[-500:], handle, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"Failed to record signal snapshot: {e}")
 
 
 def record_trade(trade_data):
@@ -1005,8 +1057,20 @@ def manage_position_tp_and_trailing(f, curr_pos, trackers, timestamp_full, execu
             "lowWaterMark": cur_px,
             "trailingStopPx": round((entry_px - atr * profile["sl_atr_mult"]) if is_long else (entry_px + atr * profile["sl_atr_mult"]), prec),
             "takeProfitPx": round((entry_px + max(atr * profile["tp_atr_mult"], entry_px * profile["min_profit_ratio"])) if is_long else (entry_px - max(atr * profile["tp_atr_mult"], entry_px * profile["min_profit_ratio"])), prec),
+            "signal_snapshot": build_signal_snapshot(f),
             "stage_desc": "持有监控中"
         }
+        record_signal_snapshot({
+            "instId": inst_id,
+            "name": name,
+            "side": curr_pos["side"],
+            "entryTs": now_ts,
+            "entryTime": timestamp_full,
+            "entryPx": entry_px,
+            "sz": pos_sz,
+            "policy_version": f.get("policy_version", ""),
+            "snapshot": trackers[pos_key]["signal_snapshot"],
+        })
 
     t = trackers[pos_key]
     if not t.get("policy_version") and f.get("policy_version"):
@@ -2087,7 +2151,7 @@ def execute_portfolio():
     except Exception as e:
         print(f"[Ledger Sync Warning] {e}")
 
-    log_entry = f"[{timestamp_full}] ⚡ R20 Quantum Trader v7.2.1 巡检完成 | 持仓 {active_pos_count}/{MAX_CONCURRENT_POSITIONS} (多{long_count}/空{short_count}) | 动作: {', '.join(executed_actions) if executed_actions else '无开平仓操作'}\n"
+    log_entry = f"[{timestamp_full}] ⚡ R20 Quantum Trader v{__version__} 巡检完成 | 持仓 {active_pos_count}/{MAX_CONCURRENT_POSITIONS} (多{long_count}/空{short_count}) | 动作: {', '.join(executed_actions) if executed_actions else '无开平仓操作'}\n"
     with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(log_entry)
     print(log_entry.strip())

@@ -11,6 +11,7 @@ import sys
 import tempfile
 import time
 import urllib.request
+from urllib.parse import urlparse
 from pathlib import Path
 from typing import Any
 
@@ -2943,6 +2944,13 @@ def update_admin_memory_all(payload: MemoryUpdateAllRequest, x_r20_admin_token: 
 @app.get("/health", include_in_schema=False)
 @app.get("/api/v1/health")
 def health() -> dict[str, Any]:
+    # 数据流向透明化：显式暴露当前 LLM 出口主机名，便于审计者确认提示词与持仓数据发往何处。
+    _raw_base = settings.llm_base_url or os.getenv("LLM_BASE_URL") or os.getenv("OPENAI_BASE_URL") or ""
+    _host = ""
+    try:
+        _host = urlparse(_raw_base).netloc if _raw_base else ""
+    except Exception:
+        _host = ""
     return {
         "service": "r20-standalone-backend",
         "version": __version__,
@@ -2953,13 +2961,17 @@ def health() -> dict[str, Any]:
             "llm_configured": bool(settings.llm_api_key),
             "simulated_trading": settings.okx_simulated,
         },
+        "data_flow": {
+            "llm_endpoint_host": _host or "NOT_CONFIGURED",
+            "note": "所有决策提示词（含持仓与权益）仅发送至该主机；系统不内置任何默认第三方中继。",
+        },
     }
 
 
 @app.get("/api/v1/status")
 def status() -> dict[str, Any]:
     return {
-        "version": "6.6.2",
+        "version": __version__,
         "mode": "read_only_control_plane",
         "scripts": [
             script_state("ai_factor_trader.py"),

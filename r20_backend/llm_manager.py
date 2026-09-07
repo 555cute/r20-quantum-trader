@@ -105,7 +105,7 @@ DEFAULT_PROVIDERS = [
         "enabled": True,
         "multi_key_enabled": False,
         "response_api_enabled": False,
-        "base_url": "https://cpa.r20.cn/v1",
+        "base_url": "https://api.openai.com/v1",
         "api_key": "",
         "api_format": "openai_chat",
         "api_path": "/chat/completions",
@@ -180,7 +180,8 @@ def init_llm_config() -> Dict[str, Any]:
             data = {}
 
     # Extract current settings from .env / settings
-    cur_url = getattr(settings, "llm_base_url", "") or os.getenv("LLM_BASE_URL") or "https://cpa.r20.cn/v1"
+    # 安全约束：不再内置任何私有中继网关作为静默默认，出口地址必须由用户显式配置。
+    cur_url = getattr(settings, "llm_base_url", "") or os.getenv("LLM_BASE_URL") or ""
     cur_key = getattr(settings, "llm_api_key", "") or os.getenv("LLM_API_KEY") or ""
     cur_model = getattr(settings, "llm_model", "") or os.getenv("LLM_MODEL") or "gemini-3.8-flash-high"
     cur_effort = getattr(settings, "llm_reasoning_effort", "") or os.getenv("LLM_REASONING_EFFORT") or "high"
@@ -412,7 +413,12 @@ def get_active_llm_runtime() -> Dict[str, Any]:
             if not provider_id:
                 provider_id = prov.get("id", "openai")
 
-    base_url = (base_url or os.getenv("LLM_BASE_URL", "https://cpa.r20.cn/v1")).rstrip("/")
+    base_url = (base_url or os.getenv("LLM_BASE_URL", "")).rstrip("/")
+    if not base_url:
+        raise RuntimeError(
+            "LLM 出口未配置：请在 .env 设置 LLM_BASE_URL，或在后台「LLM Providers」中选择/新建供应商。"
+            "出于数据流向透明要求，系统不再内置任何默认第三方中继网关。"
+        )
     api_key = api_key or os.getenv("LLM_API_KEY", "")
 
     model_name = active_mid or getattr(settings, "llm_model", "gemini-3.8-flash-high")
@@ -477,7 +483,7 @@ def activate_provider_model(provider_id: str, model_id: str, reasoning_effort: O
             "id": model_id,
             "name": model_id,
             "provider_name": "自定义",
-            "base_url": os.getenv("LLM_BASE_URL", "https://cpa.r20.cn/v1"),
+            "base_url": os.getenv("LLM_BASE_URL") or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1",
             "api_key": os.getenv("LLM_API_KEY", ""),
             "api_format": "openai_chat",
             "reasoning_type": _detect_reasoning_type(model_id),
@@ -509,7 +515,7 @@ def activate_provider_model(provider_id: str, model_id: str, reasoning_effort: O
             if not base_url:
                 base_url = prov.get("base_url", "")
 
-    base_url = (base_url or os.getenv("LLM_BASE_URL", "https://cpa.r20.cn/v1")).rstrip("/")
+    base_url = (base_url or os.getenv("LLM_BASE_URL") or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
 
     env_values = {
         "LLM_BASE_URL": base_url,
@@ -1127,7 +1133,7 @@ def execute_llm_request(
     """
     runtime = get_active_llm_runtime()
     target_model = model or runtime.get("model") or "gemini-3.8-flash-high"
-    target_url = base_url or runtime.get("base_url") or "https://cpa.r20.cn/v1"
+    target_url = base_url or runtime.get("base_url") or os.getenv("LLM_BASE_URL") or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
     target_key = api_key if api_key is not None else runtime.get("api_key", "")
     target_format = api_format or runtime.get("api_format") or _detect_api_format(target_url, target_model)
     target_effort = reasoning_effort or runtime.get("reasoning_effort") or "high"
@@ -1292,7 +1298,7 @@ def test_llm_connection(
             "latency_ms": 0,
             "model": model,
             "error": "Base URL 格式无效，必须以 http:// 或 https:// 开头",
-            "recommendation": "请检查并填写正确的服务 Base URL，例如 https://cpa.r20.cn/v1",
+            "recommendation": "请检查并填写正确的服务 Base URL，例如 https://api.openai.com/v1",
         }
 
     test_messages = [

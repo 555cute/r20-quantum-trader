@@ -964,7 +964,7 @@ onMounted(() => {
             <label class="block text-xs font-bold mb-1.5" style="color: var(--text-muted);">API Base URL</label>
             <input
               v-model="providerForm.base_url"
-              placeholder="https://cpa.r20.cn/v1"
+              placeholder="https://api.openai.com/v1 或自建中继地址"
               class="w-full rounded-xl px-4 py-2.5 text-xs outline-none border transition-colors font-mono"
               style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-main);"
             />
