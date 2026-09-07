@@ -11,8 +11,7 @@
                                                                                                |___/ 
 ```
 
-[![Release](https://img.shields.io/badge/release-v7.5.4-orange.svg?style=flat-square)](https://github.com/555cute/r20-quantum-trader/releases/tag/v7.5.4)
-
+[![Release](https://img.shields.io/badge/release-v7.5.5-orange.svg?style=flat-square)](https://github.com/555cute/r20-quantum-trader/releases/tag/v7.5.5)
 [![LINUX DO](https://img.shields.io/badge/Community-LINUX%20DO-F97316?style=flat-square&logo=linux&logoColor=white)](https://linux.do/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg?style=flat-square)](https://www.python.org/)
@@ -263,7 +262,8 @@ cp env.example .env
 docker compose up -d
 ```
 
-指定版本：`R20_IMAGE=ghcr.io/cnlimiter/r20-quantum-trader:7.5.4 docker compose up -d`。离线复用已拉取镜像：`R20_PULL_POLICY=missing docker compose up -d`。
+指定版本：`R20_IMAGE=ghcr.io/cnlimiter/r20-quantum-trader:latest docker compose up -d`。离线复用已拉取镜像：`R20_PULL_POLICY=missing docker compose up -d`。
+
 
 
 从当前源码构建（独立 overlay，镜像名为 `r20-quantum-trader:local`，不拉 GHCR）：

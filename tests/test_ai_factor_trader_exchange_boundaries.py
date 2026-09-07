@@ -281,5 +281,25 @@ class AccountStateIsolationTests(unittest.TestCase):
                 self.assertNotIn("LEGACY", loaded)
 
 
+class ScaleInMarginCapTests(unittest.TestCase):
+    def test_effective_single_asset_margin_tightens_on_small_equity(self):
+        self.assertEqual(aft.effective_single_asset_margin(100.0), 30.0)
+        self.assertEqual(aft.effective_single_asset_margin(100000.0), aft.MAX_SINGLE_ASSET_MARGIN)
+
+    def test_scale_in_gate_uses_planned_margin_and_adaptive_cap(self):
+        planned_margin = 20.0
+        curr_margin = 5.0
+        cap = aft.effective_single_asset_margin(100.0)
+        self.assertTrue((curr_margin + planned_margin) <= cap)
+        self.assertFalse((curr_margin + 20.0) <= aft.effective_single_asset_margin(50.0))
+
+
+    def test_entry_remaining_cap_follows_adaptive_asset_margin(self):
+        usdt_available = 100.0
+        curr_margin = 10.0
+        remaining = max(0.0, aft.effective_single_asset_margin(usdt_available) - curr_margin)
+        self.assertEqual(remaining, 20.0)
+
+
 if __name__ == "__main__":
     unittest.main()
