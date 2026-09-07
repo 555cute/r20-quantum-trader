@@ -8,6 +8,8 @@ COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 
 COPY frontend/ ./
+RUN rm -rf public/images
+COPY docs/images/ ./public/images/
 RUN npm run build
 
 # ==========================================
