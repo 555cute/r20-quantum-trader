@@ -206,12 +206,19 @@ PowerShell 使用 `$env:R20_GATEWAY_WORKER_ENABLED="0"` 和 `$env:R20_DASHBOARD_
 无需在宿主机配置复杂的 Python 和 Node.js 环境，秒级交付：
 
 ```bash
-# 1. 配置环境变量
+# 1. 配置环境变量（宿主机 .env 仅作启动注入）
 cp env.example .env
 
 # 2. 一键构建并启动多阶段容器
 docker compose up -d --build
 ```
+
+宿主机 `.env` 通过 compose `env_file` 注入初始值（含 worker 开关）。后台写入的配置落在已挂载的 `./data/config/.env`（容器内 `/app/data/config/.env`，由 `R20_ENV_FILE` 指定），并覆盖这些初始值。不要把单个 `.env` 文件 bind-mount 进容器。源码部署默认仍是项目根目录 `.env`，不要为原生安装设置 `R20_ENV_FILE`。
+
+- `docker compose stop` / `start`：复用同一容器，数据卷与后台配置都还在。
+- `docker compose up -d --force-recreate` 或 `down` 后 `up`：容器层被替换，但 `./data` 卷保留，后台保存的交易所选择等设置仍在。旧镜像把后台配置写在容器内 `/app/.env`，重建会丢失。
+- 已在运行的旧容器若改过后台配置，升级或重建前请自行把容器内 `/app/.env` 安全导出到数据卷的 `data/config/.env`。不要把明文凭证写入归档或提交到版本库。
+- 打包的 data 备份会排除该配置文件，须单独安全保管。
 
 ---
 

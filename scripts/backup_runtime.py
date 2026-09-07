@@ -19,6 +19,38 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
+from r20_backend.config_path import env_file_path
+
+NESTED_ENV_FILE = "data/config/.env"
+MANDATORY_EXCLUDES = (
+    ".git/**", ".env", NESTED_ENV_FILE, ".okx/**", ".bypy/**", "backups/**", "logs/**",
+    "data/r20_admin.db*", "data/*.enc", "data/.*_key", "data/credentials/**",
+    "data/*.db-wal", "data/*.db-shm", "**/__pycache__/**", "*.pyc",
+)
+
+
+def _posix_rel_under_root(root: Path, path: Path) -> str | None:
+    """Return a posix relative path when `path` is inside `root`. No I/O."""
+    root = Path(os.path.normpath(root))
+    candidate = Path(os.path.normpath(path if path.is_absolute() else root / path))
+    try:
+        rel = candidate.relative_to(root)
+    except ValueError:
+        return None
+    parts = rel.parts
+    if not parts or parts[0] == "..":
+        return None
+    return rel.as_posix()
+
+
+def secret_env_exclude_patterns(root: Path) -> tuple[str, ...]:
+    """Mandatory env-file excludes for packable data archives."""
+    patterns = [NESTED_ENV_FILE]
+    rel = _posix_rel_under_root(root, env_file_path(root))
+    if rel and rel not in patterns:
+        patterns.append(rel)
+    return tuple(patterns)
+
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKUPS = ROOT / "backups"
@@ -27,11 +59,6 @@ SQLITE_DIR = BACKUPS / "sqlite"
 MANIFEST_DIR = BACKUPS / "manifests"
 BJ_TZ = timezone(timedelta(hours=8))
 MAGIC = b"R20GCM2\x00"
-MANDATORY_EXCLUDES = (
-    ".git/**", ".env", ".okx/**", ".bypy/**", "backups/**", "logs/**",
-    "data/r20_admin.db*", "data/*.enc", "data/.*_key", "data/credentials/**",
-    "data/*.db-wal", "data/*.db-shm", "**/__pycache__/**", "*.pyc",
-)
 SCOPE_PATHS = {
     "data": ("data",),
     "scripts": ("scripts",),
@@ -141,8 +168,12 @@ def calculate_sha256(path: Path) -> str:
 
 
 def _excluded(relative: str, patterns: list[str]) -> bool:
-    rel = relative.replace(os.sep, "/").lstrip("./")
-    return any(fnmatch.fnmatch(rel, pattern) or fnmatch.fnmatch(f"{rel}/", pattern) for pattern in [*MANDATORY_EXCLUDES, *patterns])
+    rel = relative.replace(os.sep, "/")
+    while rel.startswith("./"):
+        rel = rel[2:]
+    rel = rel.lstrip("/")
+    extra = secret_env_exclude_patterns(ROOT)
+    return any(fnmatch.fnmatch(rel, pattern) or fnmatch.fnmatch(f"{rel}/", pattern) for pattern in [*MANDATORY_EXCLUDES, *extra, *patterns])
 
 
 def _tar_filter(patterns: list[str]):

@@ -2,11 +2,11 @@
 from __future__ import annotations
 import os
 import tempfile
-from pathlib import Path
 from typing import Mapping
 from .config import ROOT, refresh_settings
+from .config_path import env_file_path
 
-ENV_FILE = ROOT / ".env"
+ENV_FILE = env_file_path(ROOT)
 MANAGED_KEYS = {
     "OKX_BASE_URL",
     "R20_EXCHANGE",
@@ -65,6 +65,7 @@ def mask_url(url: str, visible_tail: int = 6) -> str:
 
 def remove_env(keys: set[str] | list[str] | tuple[str, ...]) -> None:
     targets = set(keys)
+    ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
     existing = ENV_FILE.read_text(encoding="utf-8").splitlines() if ENV_FILE.exists() else []
     result = []
     for line in existing:

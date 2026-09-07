@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 import os
 from pathlib import Path
+from .config_path import env_file_path
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -30,10 +31,12 @@ def load_dotenv(path: Path) -> None:
             continue
         key, value = line.split("=", 1)
         key = key.strip()
+        if key == "R20_ENV_FILE":
+            continue
         os.environ[key] = _STARTUP_WORKER_OVERRIDES.get(key, value.strip().strip('"').strip("'"))
 
 
-load_dotenv(ROOT / ".env")
+load_dotenv(env_file_path(ROOT))
 load_encrypted_secrets()
 
 
@@ -66,7 +69,7 @@ class Settings:
 
 
 def refresh_settings() -> Settings:
-    load_dotenv(ROOT / ".env")
+    load_dotenv(env_file_path(ROOT))
     load_encrypted_secrets()
     settings.host = os.getenv("DASHBOARD_HOST", "0.0.0.0")
     settings.port = int(os.getenv("DASHBOARD_PORT", "8080"))

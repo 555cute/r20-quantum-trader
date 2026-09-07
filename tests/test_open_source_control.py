@@ -106,7 +106,7 @@ class NotificationChannelRemovalTests(unittest.TestCase):
     def test_dotenv_still_overrides_stale_process_environment(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp); (root/".env").write_text("R20_NOTIFY_QQ_ENABLED=1\n")
-            with patch.object(notifications, "ROOT", root), patch.dict(os.environ, {"R20_NOTIFY_QQ_ENABLED":"0"}, clear=True):
+            with patch.object(notifications, "ROOT", root), patch("r20_backend.config_path._ENV_FILE_OVERRIDE", None), patch.dict(os.environ, {"R20_NOTIFY_QQ_ENABLED":"0"}, clear=True):
                 self.assertEqual(notifications._env()["R20_NOTIFY_QQ_ENABLED"], "1")
 
 

@@ -56,6 +56,8 @@ COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
 RUN mkdir -p /app/data /app/logs /app/backups
 
+ENV R20_ENV_FILE=/app/data/config/.env
+
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

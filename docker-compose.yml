@@ -17,6 +17,8 @@ services:
       R20_GATEWAY_WORKER_ENABLED: ${R20_GATEWAY_WORKER_ENABLED:-1}
       R20_DASHBOARD_WORKER_ENABLED: ${R20_DASHBOARD_WORKER_ENABLED:-1}
       R20_MANUAL_CLOSE_ENABLED: ${R20_MANUAL_CLOSE_ENABLED:-0}
+      # Host .env is bootstrap only; persist admin-saved settings on the data volume.
+      R20_ENV_FILE: /app/data/config/.env
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
