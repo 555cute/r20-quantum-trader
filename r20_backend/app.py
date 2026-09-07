@@ -39,6 +39,7 @@ from r20_backend.account_baseline import load_account_baseline, update_initial_c
 from r20_backend.backup_secrets import credential_status as backup_credential_status, save_credentials as save_backup_credentials
 from r20_backend.prompt_views import EVOLUTION_USER_TEMPLATE, TRADING_USER_TEMPLATE, rendered_snapshots
 from r20_backend.settings_store import mask, remove_env, update_env
+from r20_backend import risk_config
 from r20_backend.notifications import _env as notification_env, diagnose_channel, test_channel
 from r20_backend.audit import recent as recent_audit, record as audit_record
 from r20_backend.client_ip import client_ip as resolve_client_ip, user_agent as resolve_user_agent
@@ -1062,6 +1063,78 @@ def admin_update_account_baseline(payload: InitialCapitalUpdate, x_r20_session: 
 
 
 _OKX_RUNTIME_CACHE: dict[str, Any] = {"at": 0.0, "mode": "", "payload": None}
+
+
+# ── 风控管理页：执行层硬风控参数的可视化配置 ──────────────────────
+class RiskConfigUpdate(BaseModel):
+    values: dict[str, Any] = Field(default_factory=dict)
+    suite_id: str = ""
+
+
+class RiskResetRequest(BaseModel):
+    confirmation: str = ""
+
+
+@app.get("/api/v1/admin/risk")
+def admin_risk_get(x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
+    refresh_settings()
+    require_admin_header(x_r20_session=x_r20_session)
+    return {
+        "schema": risk_config.schema(),
+        "suites": risk_config.SUITES,
+        "values": risk_config.current_values(),
+        "effect": "交易引擎每 15 分钟一个巡检周期；子进程启动时重新读取 .env，保存后下一周期自动生效，无需重启后台。",
+    }
+
+
+@app.post("/api/v1/admin/risk")
+def admin_risk_update(payload: RiskConfigUpdate, x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
+    refresh_settings()
+    actor = require_superadmin(x_r20_session)
+    merged: dict[str, Any] = {}
+    if payload.suite_id:
+        try:
+            merged.update(risk_config.suite_values(payload.suite_id))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    merged.update(payload.values)  # 显式提交值优先于套件
+    if not merged:
+        raise HTTPException(status_code=400, detail="没有需要保存的修改")
+    before = risk_config.current_values()
+    try:
+        env_updates = risk_config.normalize(merged)
+    except ValueError as exc:
+        audit_record("risk.config.update", "failed", {"actor": actor["username"], "suite": payload.suite_id, "reason": str(exc)})
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    update_env(env_updates)
+    refresh_settings()
+    audit_record("risk.config.update", "success", {
+        "actor": actor["username"],
+        "suite": payload.suite_id or None,
+        "changed": {k: {"before": before.get(k), "after": float(v)} for k, v in env_updates.items()},
+    })
+    return {
+        "updated": sorted(env_updates.keys()),
+        "applied_suite": payload.suite_id or None,
+        "values": risk_config.current_values(),
+        "effect": "已写入 .env；下一交易巡检周期（≤15 分钟）起对新开仓/加仓/时间止损全面生效，AI 主脑提示词中的风控口径同步对齐。",
+    }
+
+
+@app.post("/api/v1/admin/risk/reset")
+def admin_risk_reset(payload: RiskResetRequest, x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
+    refresh_settings()
+    actor = require_superadmin(x_r20_session)
+    if payload.confirmation.strip().upper() != "RESET RISK":
+        raise HTTPException(status_code=400, detail="确认短语必须精确为：RESET RISK")
+    remove_env(set(risk_config.reset_keys()))
+    refresh_settings()
+    audit_record("risk.config.reset", "success", {"actor": actor["username"]})
+    return {
+        "reset": True,
+        "values": risk_config.current_values(),
+        "effect": "全部自定义风控覆盖值已清除，执行层回退到代码默认基线。",
+    }
 
 
 @app.get("/api/v1/admin/okx/runtime")

@@ -54,9 +54,10 @@ class PromptAntiDrawdownTakeProfitTests(unittest.TestCase):
     def test_system_prompt_contains_anti_drawdown_directives(self):
         profile = abt.active_profile()
         sys_prompt = profile.get("trading_system", "")
-        self.assertIn("反浮盈回吐·三阶动态棘轮与果断主动止盈", sys_prompt)
-        self.assertIn("峰值回撤硬止盈", sys_prompt)
-        self.assertIn("动力学负功率耗散止盈", sys_prompt)
+        # v7.6.0 重写后的标准措辞（语义不变：三阶棘轮 + 峰值回撤/动能耗散主动止盈 + CLOSE_MARKET 指令）
+        self.assertIn("三阶利润棘轮", sys_prompt)
+        self.assertIn("峰值回撤", sys_prompt)
+        self.assertIn("动能耗散", sys_prompt)
         self.assertIn("CLOSE_MARKET", sys_prompt)
 
 

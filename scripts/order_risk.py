@@ -1,15 +1,22 @@
 """Shared deterministic safety checks for trade quotes and risk gates.
-No configuration, no state, no price repair.
+No state, no price repair. The R:R floor comes from the single source of truth
+in scripts/risk_constants.py (configurable via the admin risk-control page / .env).
 """
 from __future__ import annotations
 
 import math
 from typing import Any, Tuple
 
+try:
+    from scripts.risk_constants import MIN_RISK_REWARD_RATIO
+except ImportError:  # flat import when scripts/ itself is on sys.path
+    from risk_constants import MIN_RISK_REWARD_RATIO
+
 
 def validate_quote_geometry_and_rr(action: str, entry: Any, tp: Any, sl: Any) -> Tuple[bool, str, float]:
     """Validates that opening quote prices are positive, finite numbers satisfying
-    action-specific geometry, and that the calculated risk-reward ratio meets or exceeds 2.0.
+    action-specific geometry, and that the calculated risk-reward ratio meets or exceeds
+    the configurable floor (R20_MIN_RISK_REWARD, default 2.0).
     Returns (is_valid, failure_reason, rr_ratio).
     """
     raw_act = str(action or "").upper()
@@ -47,7 +54,7 @@ def validate_quote_geometry_and_rr(action: str, entry: Any, tp: Any, sl: Any) ->
     if not math.isfinite(rr):
         return False, "核心风控拦截：盈亏比计算异常", 0.0
 
-    if rr < 2.0:
-        return False, f"核心风控拦截：盈亏比不足 2.0 (当前 R:R = {rr:.2f}:1，底线 2.0:1)", rr
+    if rr < MIN_RISK_REWARD_RATIO:
+        return False, f"核心风控拦截：盈亏比不足 {MIN_RISK_REWARD_RATIO:.1f} (当前 R:R = {rr:.2f}:1，底线 {MIN_RISK_REWARD_RATIO:.1f}:1)", rr
 
     return True, "", rr

@@ -33,7 +33,7 @@ if str(_THIS_DIR) not in sys.path:
 try:
     from r20_backend.version import __version__
 except Exception:
-    __version__ = "7.5.9"
+    __version__ = "7.6.0"
 
 from okx_runtime import freeze_environment as freeze_okx_environment, replace_cli_prefix as okx_private_command, unfreeze_environment as unfreeze_okx_environment, selected_environment
 import json
@@ -46,6 +46,26 @@ import fcntl
 from typing import Tuple, Dict, Any, List, Optional
 from concurrent.futures import ThreadPoolExecutor
 from market_data_service import fetch_candles, fetch_ticker
+
+# 执行层风控参数单一事实源（后台「风控管理页」写入 .env，本进程 import 时读取生效）
+from risk_constants import (
+    MAX_CONCURRENT_POSITIONS_CAP,
+    MAX_MARGIN_EQUITY_RATIO,
+    MAX_SCALE_IN_COUNT,
+    MAX_SINGLE_ASSET_MARGIN,
+    MAX_LEVERAGE,
+    MIN_ENTRY_CONFIDENCE,
+    MIN_SCALE_IN_CONFIDENCE,
+    MIN_SCALE_IN_PROFIT_RATIO,
+    DAILY_LOSS_EQUITY_RATIO,
+    MAX_DAILY_LOSS_USDT,
+    RISK_PER_TRADE_EQUITY_RATIO,
+    SINGLE_ASSET_EQUITY_RATIO,
+    STOP_COOLDOWN_MINUTES,
+    TIME_STOP_ATR_BAND,
+    TIME_STOP_HOURS,
+    effective_max_positions,
+)
 
 WORKSPACE_DIR = str(_PROJECT_ROOT)
 DATA_DIR = os.path.join(WORKSPACE_DIR, "data")
@@ -114,21 +134,11 @@ ASSET_CLASS_PROFILES = {
     }
 }
 
-MAX_CONCURRENT_POSITIONS = len(TARGET_INSTRUMENTS)
-# 与提示词铁律「全系统同向单上限严控 3 笔」保持单一口径，防止提示词比代码更严造成认知偏差
-MAX_SAME_DIRECTION_POSITIONS = 3
+# 并发/同向持仓上限：后台风控管理页可配 (R20_MAX_CONCURRENT_POSITIONS=0 表示自动跟随标的池容量)
+MAX_CONCURRENT_POSITIONS, MAX_SAME_DIRECTION_POSITIONS = effective_max_positions(len(TARGET_INSTRUMENTS))
 TAKER_FEE_RATE = 0.0005
 MAKER_FEE_RATE = 0.0002 # Limit Order Maker Fee (60% Lower Than Market Taker)
-# 风控上限按「实际可用余额」自适应：绝对值只作为大账户的封顶，小资金账户按权益比例收紧，
-# 避免 80U 账户下 150U 熔断线永不触发（等于没有熔断）。可用环境变量显式覆盖。
-MAX_DAILY_LOSS_USDT = float(os.getenv("R20_MAX_DAILY_LOSS_USDT", "150.0"))
-DAILY_LOSS_EQUITY_RATIO = float(os.getenv("R20_DAILY_LOSS_EQUITY_RATIO", "0.05"))
-
-# 🚀 Pyramiding Scale-In Hard Risk Gateways (顺势浮盈金字塔加仓风控硬门禁)
-MAX_SINGLE_ASSET_MARGIN = float(os.getenv("R20_MAX_SINGLE_ASSET_MARGIN_USDT", "600.0"))   # 单标的最大累计占用保证金封顶 (USDT)
-SINGLE_ASSET_EQUITY_RATIO = float(os.getenv("R20_SINGLE_ASSET_EQUITY_RATIO", "0.30"))      # 单标的累计保证金占可用余额比例
-MAX_SCALE_IN_COUNT = 1            # 单标的最大顺势加仓次数 (底仓+最多1次顺势追加)
-MIN_SCALE_IN_PROFIT_RATIO = 0.008 # 允许顺势加仓的最小底仓浮盈率 (+0.8%)
+# 日亏熔断/单标的保证金/金字塔加仓等阈值均由 risk_constants 单一事实源注入（.env 可配）。
 
 
 def effective_daily_loss_limit(usdt_available: float = None) -> float:
@@ -147,10 +157,8 @@ def effective_single_asset_margin(usdt_available: float = None) -> float:
     return cap
 
 
-# 单笔 1R 风险额按可用余额自适应：池内绝对值仅作大账户封顶，小资金账户按 2% 权益收紧。
-RISK_PER_TRADE_EQUITY_RATIO = float(os.getenv("R20_RISK_PER_TRADE_RATIO", "0.02"))
-# 单笔下单保证金占可用余额的硬顶，与提示词 {{risk_budget}} 的「强信号 20%」保持同口径。
-MAX_MARGIN_EQUITY_RATIO = float(os.getenv("R20_MAX_MARGIN_EQUITY_RATIO", "0.20"))
+# 单笔 1R 风险额与单笔保证金占比 (RISK_PER_TRADE_EQUITY_RATIO / MAX_MARGIN_EQUITY_RATIO)
+# 由 risk_constants 单一事实源注入，与提示词 {{risk_budget}} 保持同口径。
 
 
 def effective_risk_per_trade(pool_risk_usd: float, usdt_available: float = None) -> float:
@@ -185,7 +193,7 @@ def max_size_within_margin(usdt_available: float, leverage: float, price: float,
     max_margin = float(usdt_available) * MAX_MARGIN_EQUITY_RATIO
     raw = (max_margin * max(1.0, float(leverage or 1.0))) / (float(price) * float(ct_val))
     return quantize_size(raw, min_sz)
-MIN_SCALE_IN_CONFIDENCE = 75.0    # 顺势加仓必须达到的最低 AI 置信度门槛
+# MIN_SCALE_IN_CONFIDENCE (顺势加仓最低 AI 置信度) 由 risk_constants 单一事实源注入
 
 def is_tradfi_market_liquid(asset_type: str) -> bool:
     """Strict US Regular Trading Window (BJ 21:30 ~ 次日 04:00)"""
@@ -297,7 +305,7 @@ def is_in_stop_cooldown(inst_id: str, side: str) -> bool:
     cooldowns = load_stop_cooldowns()
     key = f"{inst_id}_{side}"
     if key in cooldowns:
-        rem_sec = 1800 - (int(time.time()) - cooldowns[key].get("ts", 0))
+        rem_sec = STOP_COOLDOWN_MINUTES * 60 - (int(time.time()) - cooldowns[key].get("ts", 0))
         if rem_sec > 0:
             return True
     return False
@@ -1225,15 +1233,15 @@ def manage_position_tp_and_trailing(f, curr_pos, trackers, timestamp_full, execu
         return True, "保护失效安全退出"
     t["cloudProtection"] = {"verifiedAt": timestamp_full, "detail": protection_detail}
 
-    # 2. Volatility Time-Stop Exit (After 8 Hours dead consolidation without expansion)
+    # 2. Volatility Time-Stop Exit (持仓超最长持仓时间且缩量横盘 → 时间止损，参数见后台风控管理页)
     hold_duration_sec = now_ts - t["entryTs"]
-    if hold_duration_sec > 28800 and abs(cur_profit_px) < 0.15 * atr:
+    if hold_duration_sec > TIME_STOP_HOURS * 3600 and abs(cur_profit_px) < TIME_STOP_ATR_BAND * atr:
         closed, close_detail = close_position_confirmed(inst_id, "long" if is_long else "short", pos_sz)
         if not closed:
             executed_actions.append(f"[{name}] 时间止损平仓失败，仓位仍保留: {close_detail}")
             return False, "平仓失败"
         close_fee = (pos_sz * ct_val * cur_px) * TAKER_FEE_RATE
-        executed_actions.append(f"[{name}] ⌛ 超过 8 小时无波动横盘，时间止损平仓释放保证金")
+        executed_actions.append(f"[{name}] ⌛ 超过 {TIME_STOP_HOURS:g} 小时无波动横盘，时间止损平仓释放保证金")
         record_trade({
             "is_trade": True,
             "time": timestamp_full,
@@ -1248,7 +1256,7 @@ def manage_position_tp_and_trailing(f, curr_pos, trackers, timestamp_full, execu
             "price": cur_px,
             "fee": close_fee,
             "pnl": curr_pos["upl"],
-            "remark": "持仓超 3.5 小时无突破，主动平仓释放配比"
+            "remark": f"持仓超 {TIME_STOP_HOURS:g} 小时无突破，主动平仓释放配比"
         })
         if notify_trade_close:
             notify_trade_close(inst=name, pnl=float(curr_pos.get("upl", 0.0) or 0.0), stage="时间止损平仓", exit_px=cur_px)
@@ -1956,6 +1964,8 @@ def execute_portfolio():
             actual_sz = f["sz"]
             ai_margin = float(ai_decision.get("margin_usdt", 0.0) or 0.0)
             ai_lever = float(ai_decision.get("leverage", 3) or 3)
+            # 杠杆硬钳制：无论 AI 裁决多激进，执行层不超过后台风控管理页配置的杠杆上限
+            ai_lever = max(1.0, min(ai_lever, MAX_LEVERAGE))
             step_sz = float(f.get("minSz", 1) or 1)
 
             # If AI planned margin & leverage, calculate custom contract size
@@ -1967,7 +1977,7 @@ def execute_portfolio():
                     min_allowed_sz = max(step_sz, quantize_size(f["sz"] * 0.5, step_sz))
                     max_allowed_sz = max(min_allowed_sz, quantize_size(f["sz"] * 2.0, step_sz))
                     actual_sz = max(min_allowed_sz, min(max_allowed_sz, calculated_sz))
-                    # 可用余额硬顶：单笔保证金不得超过可用余额 20%，付不起则直接归零跳过而非放大
+                    # 可用余额硬顶：单笔保证金不得超过风控页配置的余额占比，付不起则直接归零跳过而非放大
                     afford_sz = max_size_within_margin(usdt_available, ai_lever, f["price"], ct_val, step_sz)
                     if afford_sz is not None and afford_sz < float("inf"):
                         actual_sz = min(actual_sz, afford_sz)
@@ -1986,7 +1996,7 @@ def execute_portfolio():
 
                 # Case A: Standard Initial Entry (No existing position & slot available)
                 if not curr_pos and inst_id not in pending_inst_ids and reserved_slot_count < MAX_CONCURRENT_POSITIONS and reserved_long_count < MAX_SAME_DIRECTION_POSITIONS:
-                    if ai_conf >= 80.0:
+                    if ai_conf >= MIN_ENTRY_CONFIDENCE:
                         allow_entry = True
                     else:
                         print(f"[首发开多拦截] {f['name']} AI置信度 {ai_conf:.1f}% 未达 80% 门禁，宁缺毋滥，拦截入场")
@@ -2090,7 +2100,7 @@ def execute_portfolio():
 
                 # Case A: Standard Initial Entry
                 if not curr_pos and inst_id not in pending_inst_ids and reserved_slot_count < MAX_CONCURRENT_POSITIONS and reserved_short_count < MAX_SAME_DIRECTION_POSITIONS:
-                    if ai_conf >= 80.0:
+                    if ai_conf >= MIN_ENTRY_CONFIDENCE:
                         allow_entry = True
                     else:
                         print(f"[首发开空拦截] {f['name']} AI置信度 {ai_conf:.1f}% 未达 80% 门禁，宁缺毋滥，拦截入场")

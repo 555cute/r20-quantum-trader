@@ -213,6 +213,7 @@ export const enUS = {
     tradingGateway: 'Trading & Gateway',
     accountInstruments: 'OKX & Asset Pool',
     interceptors: 'Risk Interceptors',
+    riskControl: 'Risk Control',
     gatewayJobs: 'Gateway Jobs',
     systemAdmin: 'System Admin',
     securityAuth: 'Security & Auth',

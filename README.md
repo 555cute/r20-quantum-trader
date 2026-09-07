@@ -11,20 +11,20 @@
                                                                                                |___/ 
 ```
 
-[![Release](https://img.shields.io/badge/release-v7.5.9-orange.svg?style=flat-square)](https://github.com/555cute/r20-quantum-trader/releases/tag/v7.5.9)
+[![Release](https://img.shields.io/badge/release-v7.6.0-orange.svg?style=flat-square)](https://github.com/555cute/r20-quantum-trader/releases/tag/v7.6.0)
 [![LINUX DO](https://img.shields.io/badge/Community-LINUX%20DO-F97316?style=flat-square&logo=linux&logoColor=white)](https://linux.do/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg?style=flat-square)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688.svg?style=flat-square)](https://fastapi.tiangolo.com/)
 [![Vue 3](https://img.shields.io/badge/Vue-3.5%2B-4FC08D.svg?style=flat-square)](https://vuejs.org/)
 [![Chart](https://img.shields.io/badge/Chart-KLineChart%20v10%20Native-blue.svg?style=flat-square)](https://klinecharts.com/)
-[![Tests](https://img.shields.io/badge/tests-325%20passed-brightgreen.svg?style=flat-square)](tests/)
+[![Tests](https://img.shields.io/badge/tests-390%20passed-brightgreen.svg?style=flat-square)](tests/)
 
 **新一代机构级加密货币波段量化决策与执行系统 · AI 投委会大模型驱动**  
 🔥 **核心亮点：全栈策略全要素 100% 深度可自定义 · 拒绝死板硬编码 · 0.5s 策略快照原子回滚**  
 *插槽化自由编排 · 白盒自进化认知复盘 · Fail-Closed 物理硬拦截 · 多模型决策委员会 · 原生云端 OCO 风控*
 
-[📸 系统全景一览](#-系统全景一览) · [🎯 策略全要素 100% 自定义](#-核心设计哲学策略全要素-100-深度可自定义-full-stack-customizability) · [1. 提示词策略工作室](#1--提示词策略工作室-prompt-studio) · [2. 自进化认知中枢](#2--启发式自进化认知中枢-self-evolution) · [3. 物理拦截插件](#3-️-fail-closed-python-物理硬拦截管线-interceptors) · [4. 多模型投委会](#4--对冲基金多模型决策委员会-council-pro) · [5. 模型网关配置](#5--大模型网关与全局推理配置中心-llm-hub) · [6. 策略大一统版本快照](#6--策略大一统版本快照归档与-05s-原子回滚-policy-snapshot) · [☕ 赞赏支持](#-赞助与支持-sponsor--donate) · [🐧 LINUX DO 社区](https://linux.do/) · [🚀 极速部署](#-极速部署指南) · [发行版日志](https://github.com/555cute/r20-quantum-trader/releases)
+[📸 系统全景一览](#-系统全景一览) · [🎯 策略全要素 100% 自定义](#-核心设计哲学策略全要素-100-深度可自定义-full-stack-customizability) · [1. 提示词策略工作室](#1--提示词策略工作室-prompt-studio) · [2. 自进化认知中枢](#2--启发式自进化认知中枢-self-evolution) · [3. 物理拦截插件](#3-️-fail-closed-python-物理硬拦截管线-interceptors) · [4. 多模型投委会](#4--对冲基金多模型决策委员会-council-pro) · [5. 模型网关配置](#5--大模型网关与全局推理配置中心-llm-hub) · [6. 策略大一统版本快照](#6--策略大一统版本快照归档与-05s-原子回滚-policy-snapshot) · [7. 执行层风控管理中心](#7-️-执行层风控管理中心与优质预设套件-risk-control-center) · [☕ 赞赏支持](#-赞助与支持-sponsor--donate) · [🐧 LINUX DO 社区](https://linux.do/) · [🚀 极速部署](#-极速部署指南) · [发行版日志](https://github.com/555cute/r20-quantum-trader/releases)
 
 <br/>
 
@@ -99,7 +99,7 @@ R20 量子交易系统由**前台双翼量化操盘终端**与**后台机构级�
 └──────────────────┘  └──────────────────┘        └──────────────────┘          └──────────────────┘  └──────────────────┘
 ```
 
-### 🛠️ 6 大维度全流程深度自定义一览表
+### 🛠️ 7 大维度全流程深度自定义一览表
 
 | 维度 | 自定义支持范围 | 配置与生效方式 | 业务收益 |
 | :--- | :--- | :--- | :--- |
@@ -109,6 +109,7 @@ R20 量子交易系统由**前台双翼量化操盘终端**与**后台机构级�
 | **4. 语义变量插槽联动** | 内置 `{{macro_4h}}`、`{{calculus_1h}}`、`{{smart_money}}`、`{{account_positions}}`、`{{trading_memory}}` 数据插槽 | 一键点击或键入插槽变量，毫秒级绑定底层实时特征 | 自由组合输入特征，大模型上下文仅传输精炼高信息密度数据 |
 | **5. 物理风控拦截插件** | 4H 顺势铁律、75%~85% 动态置信度门禁、1H ADX 趋势杂波过滤、2.0R 真实盈亏比门禁、自定义 Python 拦截插件 | 独立 Python 插件文件，支持前台在线沙箱单步模拟单测 | 策略规则完全透明可见，杜绝模型幻觉，底座代码物理兜底 |
 | **6. 多模型投委会与模型矩阵** | 参谋席位自由增删（进攻官/风控官/数理官/宏观官/舆情官/自定义专家）、席位独立绑定不同大模型与温度、10~1800s 思考超时预算 | 前台 Council Pro 席位编辑与模型网关直连，支持双轮辩论与单模型极速直出 | 彻底终结单模型认知偏见，长思考链大模型与极速模型混部调度 |
+| **7. 执行层风控管理中心** | 最高持仓数、同向敞口、单笔保证金占比、单标的保证金封顶、杠杆上限、1R 风险额、R:R 硬底线、开仓/加仓置信度门禁、日亏熔断、最长持仓时间、止损冷静期、金字塔加仓门禁等 17 项 | 后台风控管理页集中配置或三套优质预设一键应用，`.env` 持久化，下一巡检周期热生效 | 告别写死在 py 里的黑盒阈值，风控口径提示词/执行层/管理页三位一体 |
 
 ---
 
@@ -192,6 +193,17 @@ R20 量子交易系统由**前台双翼量化操盘终端**与**后台机构级�
 - **策略方案具名归档**：支持将当前调试满意的全套自定义策略一键归档为独立文件（如“激进突破版”、“牛市趋势追随版”），随时切换；
 - **0.5s 秒级一键原子回滚**：当新策略表现不佳时，可在控制面一键秒级回滚到任意历史归档版本。回滚采用原子操作，前置自动快照备份并校验哈希，杜绝局部状态残留；
 - **全链路台账 100% 溯源绑定**：每一笔开仓与平仓订单，后台均强制锁定记录开仓当时的 `policy_version` 与 `policy_hash`，真正实现“哪笔交易用了哪套策略，毫秒级精准溯源”。
+
+---
+
+### 7. 🎛️ 执行层风控管理中心与优质预设套件 (Risk Control Center)
+
+v7.6.0 起，全部执行层硬风控参数从 py 源码中彻底剥离，收敛至后台「风控管理页」集中可视化配置：
+
+- **17 项硬风控全量可配**：最高持仓数、同向敞口上限、单笔保证金占比、单标的累计保证金封顶、杠杆上限、单笔 1R 风险额、最小盈亏比 R:R 硬底线、开仓/加仓 AI 置信度门禁、日亏熔断（比例+绝对双封顶）、最长持仓时间（时间止损）、止损冷静期、金字塔加仓三重门禁等；
+- **三套优质预设一键应用**：🛡️ 稳健防守（新账户/恶劣行情：禁加仓、3x 杠杆、85% 高门禁）、⚖️ 均衡波段（推荐基线：攻守兼备）、🚀 进取猎手（单边趋势市：同向 4 仓、2 次浮盈加仓、16h 大波段呼吸空间）；
+- **单一事实源架构**：`scripts/risk_constants.py` 为唯一参数源，执行引擎、AI 主脑提示词（`{{risk_budget}}` 与系统军规中的同向笔数/门禁/杠杆）全部同源插值——**提示词口径永远等于代码口径**，改一处全链路对齐；
+- **15 分钟热生效**：保存即写入 `.env`，交易引擎下一巡检周期自动加载，无需重启；越界值服务端物理拒绝，全部变更进入操作审计。
 
 ---
 

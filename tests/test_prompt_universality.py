@@ -121,13 +121,20 @@ class AdaptiveRiskLimitTests(unittest.TestCase):
 
     def test_limits_are_env_overridable(self):
         import os, importlib
+        import r20_backend.config as backend_config
+        import risk_constants
         import ai_factor_trader as aft
         os.environ["R20_MAX_DAILY_LOSS_USDT"] = "99"
+        original_loader = backend_config.load_dotenv
+        backend_config.load_dotenv = lambda path: None  # 屏蔽仓库 .env 覆盖测试环境变量
         try:
+            importlib.reload(risk_constants)  # v7.6 起常量单一事实源在 risk_constants
             importlib.reload(aft)
             self.assertEqual(aft.MAX_DAILY_LOSS_USDT, 99.0)
         finally:
+            backend_config.load_dotenv = original_loader
             del os.environ["R20_MAX_DAILY_LOSS_USDT"]
+            importlib.reload(risk_constants)
             importlib.reload(aft)
 
 

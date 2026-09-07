@@ -54,12 +54,19 @@ class AdaptiveRiskPerTradeTests(unittest.TestCase):
         self.assertEqual(aft.effective_risk_per_trade(15.0, None), 15.0)
 
     def test_env_override(self):
+        import r20_backend.config as backend_config
+        import risk_constants
         os.environ["R20_RISK_PER_TRADE_RATIO"] = "0.05"
+        original_loader = backend_config.load_dotenv
+        backend_config.load_dotenv = lambda path: None  # 屏蔽仓库 .env 覆盖测试环境变量
         try:
+            importlib.reload(risk_constants)  # v7.6 起常量单一事实源在 risk_constants
             mod = importlib.reload(aft)
             self.assertAlmostEqual(mod.effective_risk_per_trade(15.0, 20.0), 1.0, places=4)
         finally:
+            backend_config.load_dotenv = original_loader
             del os.environ["R20_RISK_PER_TRADE_RATIO"]
+            importlib.reload(risk_constants)
             importlib.reload(aft)
 
 
