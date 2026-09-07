@@ -1740,6 +1740,11 @@ def execute_portfolio():
                 position_payload = dict(position)
                 tracker = trackers.get(f"{f['instId']}_{position.get('side', '')}", {})
                 position_payload["trailingStopPx"] = tracker.get("trailingStopPx")
+                position_payload["highWaterMark"] = tracker.get("highWaterMark")
+                position_payload["lowWaterMark"] = tracker.get("lowWaterMark")
+                position_payload["takeProfitPx"] = tracker.get("takeProfitPx")
+                position_payload["stage_desc"] = tracker.get("stage_desc", "")
+                position_payload["atr"] = f.get("atr", 0.0)
                 active_pos_list.append(position_payload)
             brain_cache = execute_batch_ai_brain_cycle(pos_desc, active_pos_list, usdt_available=usdt_available) or {}
             if brain_cache:
