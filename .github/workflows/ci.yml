@@ -8,10 +8,12 @@ on:
 
 jobs:
   test:
-    name: Run Test Suite (Python 3.11 & 3.12)
-    runs-on: ubuntu-latest
+    name: Test (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
         python-version: ["3.11", "3.12"]
 
     steps:
@@ -22,27 +24,31 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          cache: 'pip'
+          cache: pip
 
       - name: Set up Node.js for Frontend
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install httpx
 
       - name: Build Frontend (Vue3 + Vite)
+        working-directory: frontend
         run: |
-          cd frontend
-          npm install
+          npm ci
           npm run build
 
       - name: Run Full Test Suite
         env:
           R20_TESTING: "1"
-        run: |
-          python -m unittest discover -s tests
+          R20_GATEWAY_WORKER_ENABLED: "0"
+          R20_DASHBOARD_WORKER_ENABLED: "0"
+          R20_OKX_ENV: demo
+          R20_MANUAL_CLOSE_ENABLED: "0"
+        run: python -m unittest discover -s tests
