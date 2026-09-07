@@ -79,23 +79,3 @@ jobs:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
-
-  make-package-public:
-    name: Make GHCR package public
-    needs: build-and-push-image
-    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
-    runs-on: ubuntu-latest
-    permissions:
-      packages: write
-      contents: read
-    steps:
-      - name: Set container package visibility to public
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          owner="${GITHUB_REPOSITORY_OWNER}"
-          pkg="${GITHUB_REPOSITORY##*/}"
-          gh api --method POST \
-            -H "Accept: application/vnd.github+json" \
-            "/users/${owner}/packages/container/${pkg}/visibility" \
-            -f visibility=public
