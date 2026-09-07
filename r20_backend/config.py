@@ -5,6 +5,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# Service-manager ownership must outrank .env refreshes.
+_STARTUP_WORKER_OVERRIDES = {
+    key: os.environ[key]
+    for key in ("R20_GATEWAY_WORKER_ENABLED", "R20_DASHBOARD_WORKER_ENABLED")
+    if key in os.environ
+}
+
 
 def load_encrypted_secrets() -> None:
     try:
@@ -22,7 +29,8 @@ def load_dotenv(path: Path) -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        os.environ[key.strip()] = value.strip().strip('"').strip("'")
+        key = key.strip()
+        os.environ[key] = _STARTUP_WORKER_OVERRIDES.get(key, value.strip().strip('"').strip("'"))
 
 
 load_dotenv(ROOT / ".env")
