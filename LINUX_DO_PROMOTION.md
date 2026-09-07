@@ -11,14 +11,14 @@
 
 # [开源] R20 量子交易系统 v7.5.1
 
+* 🖥️ **在线实盘操盘大屏预览**：https://www.r20.cn
 * 🌐 **项目 GitHub**：https://github.com/555cute/r20-quantum-trader
 * 📜 **开源协议**：MIT License (100% 完整开源)
 * 💬 **官方交流群**：`655973677`
-* 🐧 **社区合作**：LINUX DO (linux.do)
 
 ---
 
-![三大体系技术架构硬核对比与部署](https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v751_features_summary.png)
+![三大量化范式技术架构与实战能力深度横向对比](https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v751_features_summary.png)
 
 ![前台双翼量化操盘大屏实机截图](https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v751_live_dashboard.png)
 

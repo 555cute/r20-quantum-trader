@@ -10,6 +10,7 @@
 
 它不再是一个固定写死的交易程序，而是一套**全策略插槽化、语义变量数据联动、零幻觉物理硬拦截、且具备自进化闭环能力**的量化决策底座。
 
+* 🖥️ **在线实盘操盘大屏预览**：https://www.r20.cn
 * 🌐 **GitHub 仓库**：https://github.com/555cute/r20-quantum-trader (欢迎 Star / Fork)
 * 🧪 **自动化单测**：**325 项全栈单测 100% 绿灯全过**（覆盖微积分因果动力学、Fail-Closed 风控、事件总线与云端 OCO 联动）
 * 📜 **开源协议**：MIT License (100% 完整开源，无任何闭门或付费版本)
@@ -131,5 +132,6 @@ docker-compose up -d --build
 
 代码已 100% 完整开源在 GitHub，欢迎各位 V 友 Star 关注、拍砖指正、提 Issue 和 PR：
 
+* 🖥️ **在线实盘大屏演示**：https://www.r20.cn
 * 🌐 **项目 GitHub**：https://github.com/555cute/r20-quantum-trader
 * 💬 **官方交流群**：`655973677`
