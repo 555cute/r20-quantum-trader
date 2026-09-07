@@ -302,7 +302,7 @@ def call_llm_evolution_review(closed_trades: List[Dict[str, Any]], existing_memo
     except OSError:
         pass
 
-    model_name = os.environ.get("LLM_MODEL") or "gemini-3.8-flash-high"
+    model_name = os.environ.get("LLM_MODEL") or ""
     effort = os.environ.get("LLM_REASONING_EFFORT") or "high"
     api_format = "openai_chat"
     try:

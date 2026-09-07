@@ -1389,7 +1389,7 @@ onMounted(() => {
             <input
               v-model="modelForm.id"
               :readonly="!!editingModel"
-              placeholder="gemini-3.8-flash-high"
+              placeholder="例如 gemini-3.7-flash-high / deepseek-chat"
               class="w-full rounded-xl px-3.5 py-2 text-xs outline-none border font-mono"
               style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-main);"
             />

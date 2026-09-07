@@ -36,7 +36,7 @@ except ImportError:
 try:
     from r20_backend.version import __version__
 except Exception:
-    __version__ = "7.5.3"
+    __version__ = "7.5.4"
 
 
 def _get_system_version_tag() -> str:
@@ -1060,7 +1060,7 @@ def execute_batch_ai_brain_cycle(
     except Exception:
         pass
 
-    model_name = os.environ.get("LLM_MODEL") or "gemini-3.8-flash-high"
+    model_name = os.environ.get("LLM_MODEL") or ""
     effort = os.environ.get("LLM_REASONING_EFFORT") or "high"
     api_format = "openai_chat"
     thinking_timeout = float(os.environ.get("LLM_THINKING_TIMEOUT", os.environ.get("LLM_TIMEOUT_SECONDS", 120.0)))

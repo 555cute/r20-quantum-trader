@@ -60,7 +60,7 @@ const overwriteReason = computed(() => review.value?.memory_overwrites_reason ||
         <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg border" style="background-color: var(--bg-badge); border-color: var(--border-subtle);">
           <Cpu class="w-3.5 h-3.5 text-purple-400" />
           <span style="color: var(--text-muted);">{{ t('lab.engineModel') }}:</span>
-          <strong class="text-indigo-300">{{ store.llmRuntime.model }}</strong>
+          <strong class="text-indigo-300">{{ store.llmRuntime.model || '未配置模型' }}</strong>
         </div>
       </div>
     </div>

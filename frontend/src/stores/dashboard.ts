@@ -61,12 +61,8 @@ export const useDashboardStore = defineStore('dashboard', () => {
     })
   })
   const macroAssessment = computed(() => data.value?.macro_assessment || '全市场宏观多周期多因子矩阵扫描中...')
-  const llmRuntime = computed(() => data.value?.llm_runtime || {
-    model: 'gemini-3.8-flash-high',
-    provider_name: 'Google Gemini',
-    reasoning_effort: 'high',
-    api_format: 'openai_chat',
-  })
+  // 不再伪造默认模型名：数据缺失时返回空对象，由视图显式呈现「未配置」，避免界面谎报正在使用的模型。
+  const llmRuntime = computed(() => data.value?.llm_runtime || {})
   const logs = computed(() => data.value?.logs || [])
   const isStale = computed(() => data.value?.is_stale ?? false)
 

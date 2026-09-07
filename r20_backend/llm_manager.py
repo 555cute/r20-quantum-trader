@@ -183,7 +183,7 @@ def init_llm_config() -> Dict[str, Any]:
     # 安全约束：不再内置任何私有中继网关作为静默默认，出口地址必须由用户显式配置。
     cur_url = getattr(settings, "llm_base_url", "") or os.getenv("LLM_BASE_URL") or ""
     cur_key = getattr(settings, "llm_api_key", "") or os.getenv("LLM_API_KEY") or ""
-    cur_model = getattr(settings, "llm_model", "") or os.getenv("LLM_MODEL") or "gemini-3.8-flash-high"
+    cur_model = getattr(settings, "llm_model", "") or os.getenv("LLM_MODEL") or ""
     cur_effort = getattr(settings, "llm_reasoning_effort", "") or os.getenv("LLM_REASONING_EFFORT") or "high"
 
     existing_providers = data.get("providers", [])
@@ -227,7 +227,7 @@ def init_llm_config() -> Dict[str, Any]:
         if not any(dp["id"] == epid for dp in DEFAULT_PROVIDERS):
             merged_providers.append(ep)
 
-    active_m_id = data.get("active_model_id") or cur_model or "gemini-3.8-flash-high"
+    active_m_id = data.get("active_model_id") or cur_model or ""
     active_effort = data.get("active_reasoning_effort") or cur_effort or "high"
     cur_timeout = getattr(settings, "llm_thinking_timeout", 120.0) or float(os.getenv("LLM_THINKING_TIMEOUT", os.getenv("LLM_TIMEOUT_SECONDS", "120.0")))
     raw_timeout = data.get("thinking_timeout")
@@ -293,7 +293,7 @@ def load_llm_config(mask_keys: bool = True) -> Dict[str, Any]:
     """Return clean model configurations and configured providers matching modern client architecture."""
     config = init_llm_config()
     providers_list = config.get("providers", [])
-    active_mid = config.get("active_model_id", "gemini-3.8-flash-high")
+    active_mid = config.get("active_model_id", "")
     active_effort = config.get("active_reasoning_effort", "high")
 
     res: Dict[str, Any] = {
@@ -421,7 +421,7 @@ def get_active_llm_runtime() -> Dict[str, Any]:
         )
     api_key = api_key or os.getenv("LLM_API_KEY", "")
 
-    model_name = active_mid or getattr(settings, "llm_model", "gemini-3.8-flash-high")
+    model_name = active_mid or getattr(settings, "llm_model", "") or os.getenv("LLM_MODEL", "")
     api_format = target_model.get("api_format") if target_model else _detect_api_format(base_url, model_name)
     reasoning_type = target_model.get("reasoning_type", "auto") if target_model else _detect_reasoning_type(model_name)
     thinking_timeout = float(
@@ -1132,7 +1132,12 @@ def execute_llm_request(
     Returns: (content, reasoning_content, usage_dict, latency_ms)
     """
     runtime = get_active_llm_runtime()
-    target_model = model or runtime.get("model") or "gemini-3.8-flash-high"
+    target_model = model or runtime.get("model") or os.getenv("LLM_MODEL") or ""
+    if not target_model:
+        raise RuntimeError(
+            "LLM 模型未配置：请在后台「LLM Providers」选择模型，或在 .env 设置 LLM_MODEL。"
+            "系统不再内置任何默认模型名，避免界面谎报当前实际使用的模型。"
+        )
     target_url = base_url or runtime.get("base_url") or os.getenv("LLM_BASE_URL") or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
     target_key = api_key if api_key is not None else runtime.get("api_key", "")
     target_format = api_format or runtime.get("api_format") or _detect_api_format(target_url, target_model)
