@@ -27,11 +27,18 @@ export const useDashboardStore = defineStore('dashboard', () => {
     return rawFactors.map((f: any) => {
       const lib = libMap.get(f.instId) || {}
       const calc = lib.calculus_dynamics || {}
+      const vol = lib.volatility_channel || {}
       const sm = lib.smart_money_derivatives || f.smart_money || {}
       const trend = lib.trend_momentum || {}
       return {
         ...f,
         adx_1h: f.adx_1h ?? trend.adx_1h,
+        // ATR 只存在于快照的 volatility_channel 中；此前未透出，导致图表头部显示 $0.0
+        // 且风控面板 atrMultiple 恒为 0（永远判定"ATR 非最优"）。
+        atr_1h: f.atr_1h ?? vol.atr_1h,
+        atr_14: f.atr_14 ?? vol.atr_14,
+        atr_pct: f.atr_pct ?? vol.atr_pct ?? vol.atr_1h_pct,
+        volatility_regime: vol.volatility_regime,
         calculus: {
           velocity_1h: calc.velocity,
           accel_1h: calc.acceleration,

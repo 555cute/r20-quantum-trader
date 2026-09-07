@@ -17,6 +17,9 @@ function fmt4(v: any): string {
 const allProtected = computed(() =>
   store.positions.length > 0 && store.positions.every((p: any) => p.protectionStatus === 'fully_protected' || Number(p.protectionCoveragePct || 0) >= 100)
 )
+// 并发持仓上限等于标的池规模（执行层 MAX_CONCURRENT_POSITIONS = len(池)），
+// 此前模板把分母写死成 6，扩池后会出现 "11 / 6" 这类荒谬显示。
+const poolCapacity = computed(() => Math.max(store.factors?.length || 0, 1))
 </script>
 
 <template>
@@ -35,7 +38,7 @@ const allProtected = computed(() =>
           class="px-2 py-0.5 rounded text-xs font-mono font-bold border"
           style="background-color: var(--bg-badge); color: var(--color-brand); border-color: var(--border-subtle);"
         >
-          {{ store.positions.length }} / 6 在途
+          {{ store.positions.length }} / {{ poolCapacity }} 在途
         </span>
       </div>
 

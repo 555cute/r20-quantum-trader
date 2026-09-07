@@ -442,7 +442,7 @@ onUnmounted(() => {
                 <tr class="hover:bg-[var(--bg-card-hover)] transition-colors">
                   <td class="p-3 font-bold" style="color: var(--text-main);">&#123;&#123;market_matrix&#125;&#125;</td>
                   <td class="p-3" style="color: var(--text-main);">微积分数理</td>
-                  <td class="p-3" style="color: var(--text-muted);">注入 6 币种最新价、微积分动力学 (v/a/j)、1H ADX 与聪明钱净流</td>
+                  <td class="p-3" style="color: var(--text-muted);">注入标的池全部币种最新价、微积分动力学 (v/a/j/κ/Φ)、1H ADX 与聪明钱净流</td>
                 </tr>
                 <tr class="hover:bg-[var(--bg-card-hover)] transition-colors">
                   <td class="p-3 font-bold" style="color: var(--color-warn);">&#123;&#123;account_positions&#125;&#125;</td>

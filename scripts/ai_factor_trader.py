@@ -33,7 +33,7 @@ if str(_THIS_DIR) not in sys.path:
 try:
     from r20_backend.version import __version__
 except Exception:
-    __version__ = "7.5.7"
+    __version__ = "7.5.8"
 
 from okx_runtime import freeze_environment as freeze_okx_environment, replace_cli_prefix as okx_private_command, unfreeze_environment as unfreeze_okx_environment, selected_environment
 import json
