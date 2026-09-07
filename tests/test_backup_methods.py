@@ -429,6 +429,38 @@ class BackupMethodTests(unittest.TestCase):
         self.assertEqual(sconn.execute("SELECT symbol FROM orders").fetchone()[0], "BTC-USDT")
         sconn.close()
 
+    def test_local_backup_reports_paths_when_root_is_windows_short_name(self):
+        short_root = self.root
+        if os.name == "nt":
+            import ctypes
+            buf = ctypes.create_unicode_buffer(32768)
+            length = ctypes.windll.kernel32.GetShortPathNameW(str(self.root), buf, 32768)
+            self.assertGreater(length, 0)
+            short_root = Path(buf.value)
+        runtime.ROOT = short_root
+        runtime.BACKUPS = short_root / "backups"
+        runtime.LOCAL_DIR = short_root / "backups" / "local"
+        runtime.SQLITE_DIR = short_root / "backups" / "sqlite"
+        runtime.MANIFEST_DIR = short_root / "backups" / "manifests"
+        job = {
+            "id": "short-root-job",
+            "name": "short-root",
+            "enabled": True,
+            "scope": ["data"],
+            "sqlite": {"enabled": True, "retention": 1},
+            "targets": [
+                {"id": "loc-short", "type": "local", "enabled": True, "path": "backups/local", "retention": 1}
+            ],
+        }
+        result = runtime.run_backup_job(job)
+        self.assertEqual(result["status"], "success", result)
+        self.assertTrue(result["targets"][0]["success"], result["targets"])
+        resolved_root = Path(os.path.realpath(self.root))
+        self.assertTrue((resolved_root / result["manifest"]).is_file())
+        self.assertTrue((resolved_root / result["targets"][0]["destination"]).exists())
+        self.assertTrue(all((resolved_root / item).exists() for item in result["sqlite"]))
+
+
     def test_nightly_backup_cli_clean_and_missing_directories(self):
         # 1. Non-existent job-id returns exit code 2 and structured json
         with patch("sys.argv", ["nightly_backup_and_clean.py", "--job-id", "non-existent-id"]):

@@ -52,6 +52,10 @@ def secret_env_exclude_patterns(root: Path) -> tuple[str, ...]:
     return tuple(patterns)
 
 
+def _relative_to_root(path: Path) -> str:
+    return str(Path(os.path.realpath(path)).relative_to(Path(os.path.realpath(ROOT))))
+
+
 ROOT = Path(__file__).resolve().parents[1]
 BACKUPS = ROOT / "backups"
 LOCAL_DIR = BACKUPS / "local"
@@ -546,7 +550,8 @@ def deliver_target(source: Path, target: dict[str, Any]) -> dict[str, Any]:
         return {
             "success": True,
             "attempts": 1,
-            "destination": str(retain_local_archive(source, int(target.get("retention", 3)), destination).relative_to(ROOT)),
+            "destination": str(_relative_to_root(retain_local_archive(source, int(target.get("retention", 3)), destination))),
+
         }
     upload = upload_s3 if target_type == "s3" else upload_oss if target_type == "oss" else upload_webdav if target_type in {"webdav", "aliyundrive", "quark"} else None
     if not upload:
@@ -611,7 +616,8 @@ def run_backup_job(job: dict[str, Any]) -> dict[str, Any]:
                 result["targets"].append({"id": target.get("id", "target"), "type": target.get("type", "unknown"), **target_result})
         if job.get("sqlite", {}).get("enabled"):
             sqlite_dir = SQLITE_DIR / safe_id
-            result["sqlite"] = [str(x.relative_to(ROOT)) for x in sqlite_hot_backups(stamp, int(job["sqlite"].get("retention", 7)), sqlite_dir)]
+            result["sqlite"] = [_relative_to_root(x) for x in sqlite_hot_backups(stamp, int(job["sqlite"].get("retention", 7)), sqlite_dir)]
+
         target_success = [x for x in result["targets"] if x.get("success")]
         target_failure = [x for x in result["targets"] if not x.get("success")]
         any_success = bool(target_success or result["sqlite"])
@@ -632,5 +638,6 @@ def run_backup_job(job: dict[str, Any]) -> dict[str, Any]:
     manifest = MANIFEST_DIR / f"{safe_id}_{stamp}.json"
     manifest.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     os.chmod(manifest, 0o600)
-    result["manifest"] = str(manifest.relative_to(ROOT))
+    result["manifest"] = _relative_to_root(manifest)
+
     return result
