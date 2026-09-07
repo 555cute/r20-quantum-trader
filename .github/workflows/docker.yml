@@ -49,11 +49,14 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha
             type=ref,event=branch
+          flavor: |
+            latest=false
+
           labels: |
             org.opencontainers.image.title=R20 Quantum Trader
             org.opencontainers.image.description=R20 Quantum Trading System
