@@ -17,8 +17,8 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg?style=flat-square)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688.svg?style=flat-square)](https://fastapi.tiangolo.com/)
 [![Vue 3](https://img.shields.io/badge/Vue-3.5%2B-4FC08D.svg?style=flat-square)](https://vuejs.org/)
-[![TradingView](https://img.shields.io/badge/Chart-TradingView%20Native-blue.svg?style=flat-square)](https://github.com/tradingview/lightweight-charts)
-[![Tests](https://img.shields.io/badge/tests-316%20passed-brightgreen.svg?style=flat-square)](tests/)
+[![KLineCharts](https://img.shields.io/badge/Chart-KLineCharts-blue.svg?style=flat-square)](https://klinecharts.com/)
+[![CI](https://github.com/555cute/r20-quantum-trader/actions/workflows/ci.yml/badge.svg)](https://github.com/555cute/r20-quantum-trader/actions/workflows/ci.yml)
 
 **新一代机构级加密货币波段量化决策与执行系统 · AI 投委会大模型驱动**  
 *全栈策略自由编排 · 白盒自进化认知复盘 · Fail-Closed 物理硬拦截 · 多模型决策委员会 · 原生云端 OCO 风控*
@@ -154,7 +154,9 @@ R20 量子交易系统由**前台双翼量化操盘终端**与**后台机构级�
 
 ## 🚀 极速部署指南
 
-### 方式 A：源码直接部署 (Python 3.10+ / Node.js 18+)
+完整进程所有权与恢复说明见 [STANDALONE.md](STANDALONE.md) 和 [RECOVERY_GUIDE.md](RECOVERY_GUIDE.md)。控制面包含会执行交易的管理接口，不是只读服务。模型输出仍须通过基础风控和执行层检查；可配置插件不等于所有规则都不可关闭。交易所受理订单不等于成交，保护委托不能保证零损失。
+
+### 方式 A：源码直接部署 (Python 3.11/3.12 / Node.js 22.12+)
 
 #### 1. 克隆代码与配置环境变量
 ```bash
@@ -168,18 +170,23 @@ vim .env  # 填写您的 OKX API 与大模型凭据 (例如 OpenAI / Gemini / De
 #### 2. 安装依赖并启动
 ```bash
 # 1. 安装后端 Python 依赖
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
+npm install -g @okx_ai/okx-trade-cli@^1.4.4
 
 # 2. 编译打包现代化 Vue 3 前端操盘终端 (基于原生高性能 KLineChart)
 cd frontend
-npm install
+npm ci
 npm run build
 cd ..
 
-# 3. 一键启动后端控制面与交易主脑
-python -m uvicorn r20_backend.app:app --host 0.0.0.0 --port 8080
-# 或者直接运行一键启动脚本: ./start.sh
+# 3. 首次仅启动控制面，不自动交易或轮询账户
+R20_GATEWAY_WORKER_ENABLED=0 R20_DASHBOARD_WORKER_ENABLED=0 \
+  python -m uvicorn r20_backend.app:app --host 127.0.0.1 --port 8080
 ```
+
+PowerShell 使用 `$env:R20_GATEWAY_WORKER_ENABLED="0"` 和 `$env:R20_DASHBOARD_WORKER_ENABLED="0"` 设置开关，再启动 Python。默认启用 worker 时，后端会拉起 Gateway 调度交易。仅选一个管理方：后端托管，或配套 systemd 的独立 Gateway；不得同时运行旧 scheduler、QwenPaw cron、独立 dashboard。行情 REST 主路径仍有 CLI 依赖，不能视为完全零子进程。
 
 ---
 
@@ -210,10 +217,11 @@ docker compose up -d --build
 系统配备了涵盖物理风控几何拦截、策略版本快照、多模型仲裁、OKX 鉴权与前后端 API 契约的完整自动化测试套件：
 
 ```bash
-python3 -m unittest discover -s tests -p "test_*.py"
+R20_GATEWAY_WORKER_ENABLED=0 R20_DASHBOARD_WORKER_ENABLED=0 R20_TESTING=1 \
+  python3 -m unittest discover -s tests -p "test_*.py"
 ```
 
-*当前自动化单测覆盖：316 项用例 100% 全部通过。*
+测试结果以当前命令输出为准，静态数量不代表通过。测试需要隔离数据和外部请求；关闭 worker 不会拦截显式调用的网络方法。回测使用独立 MA 参考策略，并非 LLM/投委会实盘回放；缺失行情返回 incomplete/非零退出，不生成合成行情或覆盖成功报告。图表行情失败也不生成模拟蜡烛，已有真实缓存可明确标记为 stale。
 
 ---
 

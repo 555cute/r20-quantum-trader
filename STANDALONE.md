@@ -1,14 +1,31 @@
-# R20 Quantum Trader v6.1.0 Preview Standalone Deployment
+# R20 Standalone Deployment
 
-v6.1.0-preview removes the runtime dependency on QwenPaw. The product is now composed of:
+R20 runs without QwenPaw. The current application consists of a FastAPI control plane (`r20_backend.app`), the mounted dashboard, and a Gateway worker that schedules isolated strategy processes and delivers queued notifications.
 
-- `r20_backend.app`: standalone FastAPI control plane and read-only monitoring API.
-- `r20_gateway.worker`: the R20-native, single-owner scheduler and durable notification-delivery worker for the 15-minute trader, 60-second factor refresh, 10-minute news refresh, daily reports, evolution review, and nightly backup.
-- `scripts/`: strategy and execution modules, run as isolated Python processes.
-- `.env` + encrypted R20 Secret Store: LLM, optional OKX API Key, and notification credentials.
-- Official `okx` CLI: required by the strategy execution path. CLI OAuth is an optional local credential source and is bound to the Linux service user's `HOME`.
+## Safety boundary
+
+Starting the backend normally starts the Gateway, which can execute trading jobs. The dashboard refresh worker can query private account data. Importing the dashboard alone no longer starts refresh threads.
+
+For a control-plane-only session, explicitly disable both workers before starting Python:
+
+```sh
+R20_GATEWAY_WORKER_ENABLED=0 R20_DASHBOARD_WORKER_ENABLED=0 \
+  python -m uvicorn r20_backend.app:app --host 127.0.0.1 --port 8080
+```
+
+PowerShell:
+
+```powershell
+$env:R20_GATEWAY_WORKER_ENABLED = "0"
+$env:R20_DASHBOARD_WORKER_ENABLED = "0"
+python -m uvicorn r20_backend.app:app --host 127.0.0.1 --port 8080
+```
+
+These switches disable automatic workers, not authenticated HTTP actions. Account refresh, model tests, notification tests and manual jobs can still perform external operations when explicitly requested through their endpoints. Do not expose the admin console without access controls.
 
 ## Install
+
+Use Python 3.11 or 3.12 and Node.js 22.12+.
 
 ```sh
 python3 -m venv .venv
@@ -17,70 +34,65 @@ pip install -r requirements.txt
 npm install -g @okx_ai/okx-trade-cli@^1.4.4
 cp env.example .env
 chmod 600 .env
-python scripts/r20_okx_setup.py  # read-only preflight; READY is required
+npm --prefix frontend ci
+npm --prefix frontend run build
 ```
 
-Set `LLM_*` and `OKX_*` credentials in `.env`. Never commit this file.
+Set a random `R20_SETUP_TOKEN` before first startup. When no administrator exists, the setup token initializes the `admin` account password. Existing accounts authenticate with a server-side session; the setup token is not a permanent bypass. Configure a permanent password through the admin console.
 
-Before the first launch, set a random `R20_SETUP_TOKEN` in `.env`. Open `/admin`, enter it to unlock the setup page, then set a permanent administrator token. The page never displays configured secret values. `.env` is written atomically and set to permission mode `0600`.
+OKX supports separate LIVE/DEMO API keys or local CLI OAuth. Never grant withdrawal permission. Both static-key groups must match their selected environment. The `.env` example defaults to demo. The strategy path and optional OKX news enrichment require the official CLI.
 
-R20 does not execute QwenPaw Skills. The strategy process calls the official `okx` CLI directly, while the control plane prefers signed OKX V5 requests when an environment-specific API Key is configured and otherwise uses safe CLI fallback paths.
+CLI OAuth is tied to the service user's HOME. Complete authorization as that user. Never copy another installation's `~/.okx/`. `python scripts/r20_okx_setup.py` performs an external read-only preflight; run it deliberately before enabling trading, not as an automatic installation step.
 
-Choose one credential model:
+## Choose exactly one Gateway owner
 
-1. **Environment-specific API Key (recommended for servers):** create separate LIVE and DEMO keys, configure them in `/admin`, never grant withdrawal permission, and bind the key to the server IP where possible.
-2. **CLI OAuth (personal single-user deployment):** as the same Linux user that runs both services, run `okx config show --json`, `okx auth status --json`, explicitly choose `global` / `eea` / `us` / `tr`, then run `okx auth login --manual --site <site>`. Complete the browser device flow and run `python scripts/r20_okx_setup.py`.
+### Backend-owned: local process or Docker
 
-Never copy or publish another installation's `~/.okx/`; it contains machine-local authorization state. Both services must use the same `User`, `HOME`, and a `PATH` containing the `okx` binary. The supplied systemd units use the dedicated `r20` user and `/home/r20`; adjust both units together if your deployment user differs.
-
-## Run Locally
-
-Terminal 1:
+With `R20_GATEWAY_WORKER_ENABLED=1` (default), launch only:
 
 ```sh
-. .venv/bin/activate
-python -m uvicorn r20_backend.app:app --host 0.0.0.0 --port 8080
+python -m uvicorn r20_backend.app:app --host 127.0.0.1 --port 8080
 ```
 
-Terminal 2:
+Do not additionally launch `python -m r20_gateway.worker`, a legacy scheduler, QwenPaw trading cron, or `dashboard/start.sh`. Avoid `--reload` and multiple Uvicorn workers for trading deployments.
 
-```sh
-. .venv/bin/activate
-python -m r20_gateway.worker
-```
+### systemd-owned: two explicitly coordinated services
 
-The backend exposes only read-only control-plane endpoints:
+The supplied `deploy/r20-quantum.service` sets `R20_GATEWAY_WORKER_ENABLED=0` in its ExecStart environment. This process-manager setting takes precedence over `.env`. `deploy/r20-gateway.service` is then the only Gateway owner.
 
-- `GET /api/v1/health`
-- `GET /api/v1/status`
-- `GET /api/v1/cache/{decisions|factors|ledger|sentiment|self-improvement}`
-- `GET /api/v1/market/{instId}`
-- `GET /api/v1/account/positions`
-
-No HTTP trade-trigger endpoint is exposed except the separately enabled, confirmation-protected manual close action. The admin console also supports a protected update check and `git pull --ff-only`; it refuses to update a dirty worktree and never restarts services automatically.
-
-## QwenPaw Container Coexistence
-
-When `www.r20.cn` is already reverse-proxied into a QwenPaw container, keep QwenPaw on its existing port and let the R20 standalone gateway own port `8080`. `r20_backend.app` mounts the existing dashboard at `/`, while `/admin` and `/api/v1/*` remain R20-native routes. This preserves the hostname, reverse-proxy rules, dashboard paths, QwenPaw process, and QwenPaw backup layout.
-
-Add the `[program:r20-backend]` block from the container supervisor configuration and restart the container during a maintenance window so supervisord adopts it. Do not run the legacy `dashboard.app` Uvicorn process at the same time as `r20_backend.app`.
-
-## systemd
-
-Copy `deploy/r20-quantum.service` and `deploy/r20-gateway.service` to `/etc/systemd/system/`, update `WorkingDirectory` and `EnvironmentFile`, then:
+Adjust both units together: User/Group, HOME, PATH, WorkingDirectory, EnvironmentFile and Python executable. They must refer to the same installation and credential owner. Install and enable the pair only after disabling legacy trading cron and `r20-scheduler.service`.
 
 ```sh
 sudo systemctl daemon-reload
 sudo systemctl enable --now r20-quantum r20-gateway
 ```
 
-Before enabling `r20-gateway`, disable the old QwenPaw cron jobs to prevent duplicate execution. Do not run both schedulers simultaneously. The current Gateway worker owns the scheduler; the legacy `r20_backend.scheduler` and `deploy/r20-scheduler.service` are retained only for compatibility and must not run alongside it.
+`r20_backend.scheduler` remains a legacy entry point. Its lock does not coordinate its schedule with Gateway scheduling. Do not run them together.
 
-Before starting the Gateway, verify dependency visibility under the exact service identity:
+## HTTP surface
+
+- `/`, `/trading`, `/factors`, `/news`, `/lab`, `/history`: monitoring SPA.
+- `/admin/`: authenticated management SPA.
+- `/api/docs`: API documentation.
+- `/api/all` and `/api/overview`: public monitoring snapshots from the mounted dashboard.
+- `/api/v1/health` and `/api/v1/status`: process health and status.
+- `/api/v1/admin/*`: management, including configuration mutations and manual Gateway jobs.
+
+The control plane is **not read-only**. `POST /api/v1/admin/gateway/jobs/{job_id}/run` can invoke the trading script. Manual close has a separate enable switch, administrator authorization, password verification, a position-bound token, confirmation and a trading-cycle lock.
+
+## Persistence and recovery
+
+Preserve `.env`, the encrypted secret stores and their encryption keys, JSON configuration/state, and SQLite databases. Gateway uses `data/r20_gateway.db`, authentication uses `data/r20_admin.db`, and the trade database is `data/r20_quant.db`. Use the backup subsystem to obtain consistent SQLite copies. See [RECOVERY_GUIDE.md](RECOVERY_GUIDE.md).
+
+Docker requires a running Linux container engine (Docker Desktop/WSL2 on Windows). Its image contains the Python backend, built Vue assets and Node/OKX CLI runtime. Runtime secrets are excluded from the build context and injected at deployment. A bind mount over `/app/data` hides image seed files; use the checkout's initialized data directory or initialize it explicitly.
+
+## Offline verification
+
+Disable both workers before running the test suite. Tests must supply temporary data and mocked external boundaries; the switches alone do not block explicitly invoked network methods.
 
 ```sh
-sudo -u r20 env HOME=/home/r20 PATH=/opt/r20-quantum-trader/.venv/bin:/usr/local/bin:/usr/bin:/bin \
-  /opt/r20-quantum-trader/.venv/bin/python /opt/r20-quantum-trader/scripts/r20_okx_setup.py
+R20_GATEWAY_WORKER_ENABLED=0 R20_DASHBOARD_WORKER_ENABLED=0 R20_TESTING=1 \
+  python -m unittest discover -s tests
 ```
 
-If this is not `READY`, keep the Gateway stopped. Do not solve it by copying a developer's `.okx` directory.
+The GitHub Actions workflow is `.github/workflows/ci.yml`. Test counts are determined by the current run, not by a static README badge.
