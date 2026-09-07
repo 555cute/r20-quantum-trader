@@ -69,8 +69,8 @@ class SelfEvolutionSafetyTests(unittest.TestCase):
         self.start_patch(patch("io.open", guarded_open(io.open)))
         self.json_path = Path(self.engine.AI_MEMORY_FILE)
         self.md_path = Path(self.engine.AI_MEMORY_MD_FILE)
-        self.json_path.write_text('{"core_lessons": ["old lesson"], "version": "old"}\n')
-        self.md_path.write_text("# OLD MEMORY\nuntouched legacy content\n")
+        self.json_path.write_text('{"core_lessons": ["old lesson"], "version": "old"}\n', encoding="utf-8")
+        self.md_path.write_text("# OLD MEMORY\nuntouched legacy content\n", encoding="utf-8")
         self.old = self.snapshot()
         self.json_write = self.start_patch(patch.object(self.engine, "atomic_write_json", wraps=self.engine.atomic_write_json))
         self.replace = self.start_patch(patch.object(self.engine.os, "replace", wraps=self.engine.os.replace))
@@ -89,7 +89,7 @@ class SelfEvolutionSafetyTests(unittest.TestCase):
         self.llm.assert_called_once()
         self.network.assert_not_called()
         self.urlopen.assert_not_called()
-        self.assertEqual(json.loads(Path(self.engine.REPORT_JSON_FILE).read_text()), report)
+        self.assertEqual(json.loads(Path(self.engine.REPORT_JSON_FILE).read_text(encoding="utf-8")), report)
         return report
 
     def assert_preserved(self, report):
@@ -197,7 +197,7 @@ class SelfEvolutionSafetyTests(unittest.TestCase):
         self.assertEqual(report["core_lessons"], [i["rule_text"] for i in shield.BASELINE_LESSONS])
 
     def test_empty_authority_no_change_ignores_legacy(self):
-        shield.STRUCTURED_MEMORY_FILE.write_text("[]")
+        shield.STRUCTURED_MEMORY_FILE.write_text("[]", encoding="utf-8")
         self.llm.return_value["change_status"] = "NO_CHANGE"
         report = self.run_cycle()
         self.assertEqual(report["core_lessons"], [])
@@ -273,8 +273,8 @@ class UnifiedMemoryTests(unittest.TestCase):
     def test_missing_and_empty_reads_are_pure(self):
         self.assertEqual(shield.load_structured_memory(), [])
         self.assertEqual(list(self.root.iterdir()), [])
-        shield.STRUCTURED_MEMORY_FILE.write_text("[]")
-        shield.AI_MEMORY_MD_FILE.write_text("- OLD LEGACY")
+        shield.STRUCTURED_MEMORY_FILE.write_text("[]", encoding="utf-8")
+        shield.AI_MEMORY_MD_FILE.write_text("- OLD LEGACY", encoding="utf-8")
         before = shield.STRUCTURED_MEMORY_FILE.stat()
         self.assertEqual(shield.render_trading_memory(), "")
         self.assertEqual(shield.admin_memory_view()["items"], [])
@@ -284,13 +284,13 @@ class UnifiedMemoryTests(unittest.TestCase):
     def test_corrupt_reads_and_mutations_preserve_file(self):
         for text in ("{", "{}", '[{"id":"x"}]', "null"):
             with self.subTest(text=text):
-                shield.STRUCTURED_MEMORY_FILE.write_text(text)
+                shield.STRUCTURED_MEMORY_FILE.write_text(text, encoding="utf-8")
                 before = shield.STRUCTURED_MEMORY_FILE.stat().st_mtime_ns
                 for action in (shield.load_structured_memory, shield.render_trading_memory,
                                shield.rollback_to_baseline):
                     with self.assertRaises(shield.MemoryCorruptError):
                         action()
-                self.assertEqual(shield.STRUCTURED_MEMORY_FILE.read_text(), text)
+                self.assertEqual(shield.STRUCTURED_MEMORY_FILE.read_text(encoding="utf-8"), text)
                 self.assertEqual(shield.STRUCTURED_MEMORY_FILE.stat().st_mtime_ns, before)
 
     def test_atomic_replace_failure_preserves_authority(self):
@@ -314,8 +314,8 @@ class UnifiedMemoryTests(unittest.TestCase):
     def test_cross_process_cas_has_one_winner(self):
         shield.add_safe_lesson(SAFE)
         version = shield.read_memory_snapshot()["version"]
-        # fork avoids importing the application or any production dependencies.
-        ctx = multiprocessing.get_context("fork")
+        # The worker imports only the shield and explicitly binds temporary paths.
+        ctx = multiprocessing.get_context("spawn")
         barrier = ctx.Barrier(2)
         queue = ctx.Queue()
         children = [ctx.Process(target=_cas_worker, args=(str(shield.STRUCTURED_MEMORY_FILE), version, barrier, queue, str(n))) for n in range(2)]
@@ -343,7 +343,7 @@ class UnifiedMemoryTests(unittest.TestCase):
     def test_backend_handlers_audit_crud_without_app_import(self):
         # Compile only reviewed endpoint functions: no app startup/auth/config reads.
         source = Path(__file__).resolve().parents[1] / "r20_backend" / "app.py"
-        tree = ast.parse(source.read_text())
+        tree = ast.parse(source.read_text(encoding="utf-8"))
         names = {"_memory_service_call", "get_admin_memory", "add_admin_memory_item",
                  "delete_admin_memory_item", "update_admin_memory_all",
                  "toggle_admin_memory_lesson", "rollback_admin_memory_lessons"}
@@ -362,7 +362,7 @@ class UnifiedMemoryTests(unittest.TestCase):
                  "audit_record": Mock()}
         exec(compile(ast.Module(body=nodes, type_ignores=[]), str(source), "exec"), scope)
         from types import SimpleNamespace
-        shield.STRUCTURED_MEMORY_FILE.write_text("[]")
+        shield.STRUCTURED_MEMORY_FILE.write_text("[]", encoding="utf-8")
         self.assertEqual(scope["get_admin_memory"]()["structured_lessons"], [])
         for name, payload in (("add_admin_memory_item", SimpleNamespace(text=POISON, expected_version=shield.read_memory_snapshot()["version"])),
                               ("update_admin_memory_all", SimpleNamespace(items=[SAFE, POISON], expected_version=shield.read_memory_snapshot()["version"]))):
@@ -391,30 +391,30 @@ class UnifiedMemoryTests(unittest.TestCase):
 
     def test_empty_bulk_update_is_valid_and_does_not_read_legacy(self):
         shield.add_safe_lesson(SAFE)
-        shield.AI_MEMORY_MD_FILE.write_text("- old legacy")
+        shield.AI_MEMORY_MD_FILE.write_text("- old legacy", encoding="utf-8")
         shield.admin_mutate("replace", texts=[], expected_version=shield.read_memory_snapshot()["version"])
         self.assertEqual(shield.load_structured_memory(), [])
         self.assertEqual(shield.render_trading_memory(), "")
 
     def test_read_render_entrypoints_without_runtime_imports(self):
         root = Path(__file__).resolve().parents[1]
-        trader = ast.parse((root / "scripts" / "ai_brain_trader.py").read_text())
+        trader = ast.parse((root / "scripts" / "ai_brain_trader.py").read_text(encoding="utf-8"))
         # Execute only the actual consumer import and assignment, not production functions.
         nodes = [node for node in ast.walk(trader) if
                  (isinstance(node, ast.ImportFrom) and node.module == "scripts.evolution_shield") or
                  (isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "memory_lessons" for t in node.targets))]
         self.assertEqual(len(nodes), 2)
-        shield.STRUCTURED_MEMORY_FILE.write_text("[]")
-        shield.AI_MEMORY_MD_FILE.write_text("- stale legacy")
+        shield.STRUCTURED_MEMORY_FILE.write_text("[]", encoding="utf-8")
+        shield.AI_MEMORY_MD_FILE.write_text("- stale legacy", encoding="utf-8")
         scope = {"AI_MEMORY_MD_FILE": shield.AI_MEMORY_MD_FILE, "AI_MEMORY_FILE": self.root / "legacy.json"}
         exec(compile(ast.Module(body=nodes, type_ignores=[]), "isolated_trader_memory", "exec"), scope)
         self.assertEqual(scope["memory_lessons"], "")
-        shield.STRUCTURED_MEMORY_FILE.write_text("{")
+        shield.STRUCTURED_MEMORY_FILE.write_text("{", encoding="utf-8")
         with self.assertRaises(shield.MemoryCorruptError):
             exec(compile(ast.Module(body=nodes, type_ignores=[]), "isolated_trader_memory", "exec"), scope)
 
     def test_legacy_backend_is_read_only_without_initialization(self):
-        shield.AI_MEMORY_MD_FILE.write_text("- legacy lesson")
+        shield.AI_MEMORY_MD_FILE.write_text("- legacy lesson", encoding="utf-8")
         self.assertTrue(shield.admin_memory_view()["legacy_read_only"])
         with self.assertRaises(shield.MemoryConflictError):
             shield.admin_mutate("add", texts=[SAFE], expected_version=shield.read_memory_snapshot()["version"])

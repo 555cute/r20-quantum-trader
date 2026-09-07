@@ -25,9 +25,9 @@ import scripts.prompt_library as prompts
 
 # Read code only, before installing the runtime IO fence.
 PROJECT = Path(__file__).resolve().parents[1]
-TRADER_TREE = ast.parse((PROJECT / "scripts/ai_brain_trader.py").read_text())
-APP_TREE = ast.parse((PROJECT / "r20_backend/app.py").read_text())
-OLD_TREE = ast.parse((PROJECT / "tests/test_control_plane_v2.py").read_text())
+TRADER_TREE = ast.parse((PROJECT / "scripts/ai_brain_trader.py").read_text(encoding="utf-8"))
+APP_TREE = ast.parse((PROJECT / "r20_backend/app.py").read_text(encoding="utf-8"))
+OLD_TREE = ast.parse((PROJECT / "tests/test_control_plane_v2.py").read_text(encoding="utf-8"))
 
 
 class Sandbox(unittest.TestCase):
@@ -143,7 +143,7 @@ class RenderingTests(Sandbox):
     def test_storage_roundtrip_retains_slots(self):
         profile = prompts._clean_profile(self.profile, "custom-test")
         prompts.save_library({"version": 2, "profiles": {"custom-test": profile}, "active_profile_id": "custom-test", "revisions": []})
-        disk = json.loads(prompts.LIBRARY_FILE.read_text())
+        disk = json.loads(prompts.LIBRARY_FILE.read_text(encoding="utf-8"))
         for value in (disk["profiles"]["custom-test"]["trading_user"], prompts.active_profile()["trading_user"]):
             self.assertIn("{{account_balance}}", value)
             self.assertIn("{{account_positions}}", value)
@@ -192,7 +192,7 @@ class RenderingTests(Sandbox):
 
     def test_sandbox_blocks_files_network_and_processes(self):
         with self.assertRaises(AssertionError):
-            Path("/blocked-business-data").read_text()
+            Path("/blocked-business-data").read_text(encoding="utf-8")
         with self.assertRaises(AssertionError):
             socket.create_connection(("example.invalid", 443))
         with self.assertRaises(AssertionError):

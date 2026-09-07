@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+import os
 from unittest.mock import patch
 
 import r20_gateway.secrets as secrets
@@ -40,8 +41,9 @@ class GatewayRuntimePrivacyTests(unittest.TestCase):
                 secrets.save_secrets({"LLM_API_KEY": "PRIVATE-KEY-123", "NOT_ALLOWED": "ignored"})
                 self.assertNotIn(b"PRIVATE-KEY-123", secrets.STORE_FILE.read_bytes())
                 self.assertEqual(secrets.load_secrets(), {"LLM_API_KEY": "PRIVATE-KEY-123"})
-                self.assertEqual(secrets.KEY_FILE.stat().st_mode & 0o777, 0o600)
-                self.assertEqual(secrets.STORE_FILE.stat().st_mode & 0o777, 0o600)
+                if os.name == "posix":
+                    self.assertEqual(secrets.KEY_FILE.stat().st_mode & 0o777, 0o600)
+                    self.assertEqual(secrets.STORE_FILE.stat().st_mode & 0o777, 0o600)
             finally:
                 secrets.KEY_FILE, secrets.STORE_FILE = original_key, original_store
 
