@@ -134,15 +134,26 @@ class PromptModuleTests(unittest.TestCase):
 
 class GatewayFDTests(unittest.TestCase):
     def test_connections_are_closed(self):
-        import gc
+        import sqlite3
         with tempfile.TemporaryDirectory() as tmp:
-            store=GatewayStore(Path(tmp)/"gateway.db")
-            gc.collect()
-            before=len(os.listdir("/proc/self/fd"))
-            for i in range(150): store.set_state("x",str(i)); store.get_state("x"); store.stats()
-            gc.collect()
-            after=len(os.listdir("/proc/self/fd"))
-            self.assertLessEqual(after-before,10)
+            store = GatewayStore(Path(tmp) / "gateway.db")
+            with store.connect() as connection:
+                connection.execute("SELECT 1").fetchone()
+            with self.assertRaises(sqlite3.ProgrammingError):
+                connection.execute("SELECT 1")
+
+    def test_failed_transaction_rolls_back_and_closes_connection(self):
+        import sqlite3
+        with tempfile.TemporaryDirectory() as tmp:
+            store = GatewayStore(Path(tmp) / "gateway.db")
+            store.set_state("value", "before")
+            with self.assertRaisesRegex(RuntimeError, "interrupted"):
+                with store.connect() as connection:
+                    connection.execute("UPDATE runtime_state SET value='after' WHERE key='value'")
+                    raise RuntimeError("interrupted")
+            self.assertEqual(store.get_state("value"), "before")
+            with self.assertRaises(sqlite3.ProgrammingError):
+                connection.execute("SELECT 1")
 
 
 if __name__ == "__main__": unittest.main()
