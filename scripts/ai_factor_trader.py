@@ -154,7 +154,25 @@ def effective_single_asset_margin(usdt_available: float = None) -> float:
         cap = min(cap, max(round(float(usdt_available) * SINGLE_ASSET_EQUITY_RATIO, 2), 1.0))
     return cap
 
+
+def planned_entry_margin(ai_margin: float, risk_notional: float, ai_lever: float) -> float:
+    margin = float(ai_margin or 0.0)
+    if margin > 0:
+        return margin
+    lever = max(1.0, float(ai_lever or 0.0))
+    return float(risk_notional or 0.0) / lever
+
+
+def remaining_asset_margin(usdt_available: float, curr_margin: float = 0.0) -> float:
+    return max(0.0, effective_single_asset_margin(usdt_available) - float(curr_margin or 0.0))
+
+
+def within_asset_margin_cap(curr_margin: float, planned_margin: float, usdt_available: float) -> bool:
+    return (float(curr_margin or 0.0) + float(planned_margin or 0.0)) <= effective_single_asset_margin(usdt_available)
+
+
 MIN_SCALE_IN_CONFIDENCE = 75.0    # 顺势加仓必须达到的最低 AI 置信度门槛
+
 
 
 def is_tradfi_market_liquid(asset_type: str) -> bool:
@@ -2033,7 +2051,8 @@ def submit_entry_with_confirmed_leverage(
         executed_actions.append(f"[{f['name']}] 杠杆未在交易所确认，拒绝开仓: {lev_err}")
         return "uncertain" if is_uncertain_submit(lev_err) else "rejected"
 
-    remaining_cap = max(0.0, effective_single_asset_margin(usdt_available) - float(curr_margin or 0.0))
+    remaining_cap = remaining_asset_margin(usdt_available, curr_margin)
+
 
     usable_margin = min(
         _as_decimal(planned_margin) if planned_margin and planned_margin > 0 else _as_decimal(usdt_available),
@@ -2330,7 +2349,8 @@ def execute_portfolio():
             ai_margin = float(ai_decision.get("margin_usdt", 0.0) or 0.0)
             ai_lever = float(ai_decision.get("leverage", 3) or 3)
             risk_notional = float(_as_decimal(f.get("sz") or 0) * _as_decimal(f.get("price") or 0))
-            planned_margin = ai_margin if ai_margin > 0 else (risk_notional / max(1.0, ai_lever) if ai_lever else 0.0)
+            planned_margin = planned_entry_margin(ai_margin, risk_notional, ai_lever)
+
 
             opposite = "short" if action == "BUY_LONG" else "long"
             if opposite in pending_sides.get(inst_id, set()):
@@ -2371,7 +2391,8 @@ def execute_portfolio():
                     p_cont = float(p_th.get("continuation_prob_pct", 50.0) or 50.0)
                     calculus_accel_ok = (c_accel >= -0.25 and p_cont >= 40.0)
                     is_profit_or_breakeven = (pos_upl > 0 and pos_upl_ratio >= MIN_SCALE_IN_PROFIT_RATIO) or (trailing_sl > 0 and trailing_sl >= pos_avg_px)
-                    within_margin_cap = (curr_margin + planned_margin) <= ASSET_MARGIN_CAP
+                    within_margin_cap = within_asset_margin_cap(curr_margin, planned_margin, usdt_available)
+
 
                     if is_profit_or_breakeven and scale_count < MAX_SCALE_IN_COUNT and within_margin_cap and ai_conf >= MIN_SCALE_IN_CONFIDENCE and calculus_accel_ok:
                         allow_entry = True
@@ -2416,7 +2437,8 @@ def execute_portfolio():
                     scale_count = int(tracker.get("scale_count", 0))
                     trailing_sl = float(tracker.get("trailingStopPx", 0.0) or 0.0)
                     is_profit_or_breakeven = (pos_upl > 0 and pos_upl_ratio >= MIN_SCALE_IN_PROFIT_RATIO) or (trailing_sl > 0 and trailing_sl <= pos_avg_px)
-                    within_margin_cap = (curr_margin + planned_margin) <= ASSET_MARGIN_CAP
+                    within_margin_cap = within_asset_margin_cap(curr_margin, planned_margin, usdt_available)
+
 
                     c_dyn = f.get("calculus", {})
                     c_accel = float(c_dyn.get("acceleration", 0.0) or 0.0)

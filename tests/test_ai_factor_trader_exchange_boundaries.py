@@ -286,19 +286,19 @@ class ScaleInMarginCapTests(unittest.TestCase):
         self.assertEqual(aft.effective_single_asset_margin(100.0), 30.0)
         self.assertEqual(aft.effective_single_asset_margin(100000.0), aft.MAX_SINGLE_ASSET_MARGIN)
 
-    def test_scale_in_gate_uses_planned_margin_and_adaptive_cap(self):
-        planned_margin = 20.0
-        curr_margin = 5.0
-        cap = aft.effective_single_asset_margin(100.0)
-        self.assertTrue((curr_margin + planned_margin) <= cap)
-        self.assertFalse((curr_margin + 20.0) <= aft.effective_single_asset_margin(50.0))
+    def test_planned_entry_margin_prefers_ai_budget_else_notional_over_leverage(self):
+        self.assertEqual(aft.planned_entry_margin(40.0, 1000.0, 10.0), 40.0)
+        self.assertEqual(aft.planned_entry_margin(0.0, 1000.0, 10.0), 100.0)
+        self.assertEqual(aft.planned_entry_margin(0.0, 1000.0, 0.0), 1000.0)
 
+    def test_within_asset_margin_cap_blocks_over_equity_ratio(self):
+        self.assertTrue(aft.within_asset_margin_cap(5.0, 20.0, 100.0))
+        self.assertFalse(aft.within_asset_margin_cap(15.0, 20.0, 50.0))
 
-    def test_entry_remaining_cap_follows_adaptive_asset_margin(self):
-        usdt_available = 100.0
-        curr_margin = 10.0
-        remaining = max(0.0, aft.effective_single_asset_margin(usdt_available) - curr_margin)
-        self.assertEqual(remaining, 20.0)
+    def test_remaining_asset_margin_shrinks_by_open_margin(self):
+        self.assertEqual(aft.remaining_asset_margin(100.0, 10.0), 20.0)
+        self.assertEqual(aft.remaining_asset_margin(100.0, 40.0), 0.0)
+
 
 
 if __name__ == "__main__":
