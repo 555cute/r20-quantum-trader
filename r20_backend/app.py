@@ -3016,7 +3016,7 @@ def market_candles(inst_id: str, bar: str = "1H", limit: int = 150) -> dict[str,
     cache_key = f"{inst_id}:{bar}:{limit}"
     now_ts = time.time()
     cached = _CANDLES_CACHE.get(cache_key)
-    if cached and (now_ts - cached[0] < 2.5):
+    if cached and (now_ts - cached[0] < 1.0):
         return {"instId": inst_id, "bar": bar, "candles": cached[1], "source": "cache"}
     try:
         url = f"https://www.okx.com/api/v5/market/candles?instId={inst_id}&bar={bar}&limit={limit}"

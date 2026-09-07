@@ -203,7 +203,16 @@ const factorItem = computed(() => {
 })
 
 const currentAtr = computed(() => Number(factorItem.value?.atr1h || 0))
-const liveChangePct = computed(() => Number(factorItem.value?.c_1h_ret || 0) * 100)
+// 涨跌幅：当前蜡烛价格相比其开盘价的实时变化百分比
+const liveChangePct = computed(() => {
+  if (candles.value.length > 0) {
+    const last = candles.value[candles.value.length - 1]
+    if (last && last.open > 0) {
+      return ((currentPrice.value - last.open) / last.open) * 100
+    }
+  }
+  return Number(factorItem.value?.c_1h_ret || 0) * 100
+})
 
 // 实盘在手持仓与在途委托
 const activePosition = computed(() => {
@@ -223,13 +232,8 @@ const activeOrder = computed(() => {
   })
 })
 
-// 真实最新价格 (纯从蜡烛与盘口同源获取，防止跳动过大)
-const currentPrice = computed(() => {
-  if (candles.value.length > 0 && candles.value[candles.value.length - 1]?.close) {
-    return Number(candles.value[candles.value.length - 1].close)
-  }
-  return Number(factorItem.value?.price || 0)
-})
+// 真实最新价格 (纯从当前已加载的实时蜡烛最后一根获取，与K线和最新Tick 100% 同源)
+const currentPrice = ref<number>(0)
 
 // 真实开仓成本与方向
 const liveEntry = computed(() => {
@@ -870,6 +874,10 @@ async function loadCandles(silent = false, resetTime = false) {
       })
 
       // 增量精准更新 vs 全量初始化
+      const lastCandle = klineList[klineList.length - 1]
+      if (lastCandle) {
+        currentPrice.value = Number(lastCandle.close)
+      }
       if (resetTime || klineChart.getDataList().length === 0) {
         // 全量加载
         klineChart.setDataLoader({
