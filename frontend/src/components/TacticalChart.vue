@@ -697,6 +697,10 @@ function initChart() {
         const data = await res.json()
         if (Array.isArray(data.candles) && data.candles.length > 0) {
           candles.value = data.candles
+          const lastC = data.candles[data.candles.length - 1]
+          if (lastC) {
+            currentPrice.value = Number(lastC.close)
+          }
           const klineList: KLineData[] = data.candles.map((c: any) => ({
             timestamp: c.ts,
             open: c.open,
@@ -888,18 +892,12 @@ async function loadCandles(silent = false, resetTime = false) {
         klineChart.scrollToRealTime()
       } else {
         // 定时轮询更新：直接精准喂入最新最后一根/多根未结蜡烛，驱动 K 线毫秒级实时跳动！
-        const lastCandle = klineList[klineList.length - 1]
         if (lastCandle) {
           const storeImp = (klineChart as any)._chartStore
           if (storeImp && typeof storeImp._addData === 'function') {
             storeImp._addData(lastCandle, 'update')
-          } else {
-            // fallback
-            klineChart.setDataLoader({
-              getBars: ({ callback }) => {
-                callback(klineList, false)
-              },
-            })
+            // 确保十字星与右轴最新价标签即时重绘
+            ;(klineChart as any).updatePane?.(1)
           }
         }
       }
