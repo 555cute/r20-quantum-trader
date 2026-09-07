@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
+    "klinecharts": "^10.0.3",
     "lightweight-charts": "^5.2.1",
     "lucide-vue-next": "^1.0.0",
     "pinia": "^4.0.3",

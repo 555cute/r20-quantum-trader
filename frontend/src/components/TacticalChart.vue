@@ -4,185 +4,199 @@ import { useDashboardStore } from '../stores/dashboard'
 import { useTheme } from '../composables/useTheme'
 import { useI18n } from '../composables/useI18n'
 import {
-  createChart,
-  CandlestickSeries,
-  HistogramSeries,
-  LineSeries,
-  ColorType,
-  CrosshairMode,
-  LineStyle,
-  type IChartApi,
-  type ISeriesApi,
-  type IPriceLine,
-  type UTCTimestamp,
-} from 'lightweight-charts'
+  init as initKLineChart,
+  dispose as disposeKLineChart,
+  registerIndicator,
+  type Chart as KLineChartType,
+  type KLineData,
+  type DeepPartial,
+  type Styles,
+} from 'klinecharts'
 import {
-  TrendingUp,
-  RefreshCw,
   Sliders,
-  RotateCcw,
+  RefreshCw,
   Copy,
   Check,
-  ShieldCheck,
-  ShieldAlert,
-  LineChart,
-  Layers,
-  Activity,
-  Maximize2,
+  RotateCcw,
+  Zap,
+  TrendingUp,
+  SlidersHorizontal,
+  ChevronDown,
 } from 'lucide-vue-next'
 
-const store = useDashboardStore()
-const { theme } = useTheme()
+// ==========================================
+// 0. 注册原生 VWAP 指标 (基于成交量加权平均价)
+// ==========================================
+registerIndicator({
+  name: 'VWAP',
+  shortName: 'VWAP',
+  series: 'price',
+  precision: 2,
+  figures: [{ key: 'vwap', title: 'VWAP: ', type: 'line' }],
+  styles: {
+    lines: [{ style: 'solid', smooth: false, size: 1.5, color: '#06B6D4' }], // 青蓝色
+  },
+  calc: (dataList: KLineData[]) => {
+    let cumTypicalVol = 0
+    let cumVol = 0
+    let lastDay = -1
+
+    return dataList.map((kLine) => {
+      const d = new Date(kLine.timestamp)
+      const day = d.getUTCDate()
+      // 每天重置或者连续累计
+      if (lastDay !== -1 && day !== lastDay) {
+        cumTypicalVol = 0
+        cumVol = 0
+      }
+      lastDay = day
+
+      const typicalPrice = (kLine.high + kLine.low + kLine.close) / 3
+      const vol = Number(kLine.volume || 0)
+      cumTypicalVol += typicalPrice * vol
+      cumVol += vol
+
+      return {
+        vwap: cumVol > 0 ? cumTypicalVol / cumVol : typicalPrice,
+      }
+    })
+  },
+})
 
 const props = defineProps<{
+  symbol?: string
   initialSymbol?: string
+  fullscreen?: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'select-symbol', symbol: string): void
+  (e: 'toggle-fullscreen'): void
 }>()
 
+const store = useDashboardStore()
+const { theme } = useTheme()
+const isDark = computed(() => theme.value === 'dark')
+const { t, isEn } = useI18n()
+
 // ==========================================
-// 1. 动态自动读取系统设置的监控/交易标的
+// 1. 标的池与周期切换 (动态读取系统监控池)
 // ==========================================
-const availableSymbols = computed<string[]>(() => {
+const availableSymbols = computed(() => {
   const set = new Set<string>()
-  for (const f of store.factors) {
-    const sym = f.name || f.instId?.split('-')[0]
-    if (sym) set.add(sym.toUpperCase())
+  if (Array.isArray(store.positions)) {
+    store.positions.forEach((p) => {
+      if (p.instId) set.add(p.instId.replace('-USDT-SWAP', '').replace('-USDT', ''))
+    })
   }
-  for (const p of store.positions) {
-    const sym = p.name || p.instId?.split('-')[0]
-    if (sym) set.add(sym.toUpperCase())
-  }
-  for (const o of store.pendingOrders) {
-    const sym = o.name || (o as any).inst || o.instId?.split('-')[0]
-    if (sym) set.add(sym.toUpperCase())
+  if (Array.isArray(store.factorLibrary)) {
+    store.factorLibrary.forEach((f) => {
+      if (f.instId) set.add(f.instId.replace('-USDT-SWAP', '').replace('-USDT', ''))
+    })
   }
   if (set.size === 0) {
-    return ['BTC', 'ETH', 'SOL', 'DOGE', 'SUI', 'ASTER']
+    return ['BTC', 'ETH', 'SOL', 'DOGE', 'SUI', 'ADA']
   }
   return Array.from(set)
 })
 
-const { t } = useI18n()
-
 const periods = computed(() => [
-  { id: '15m', label: t('chart.timeframe15m', '15分'), sec: 900 },
-  { id: '1H', label: t('chart.timeframe1h', '1时'), sec: 3600 },
-  { id: '4H', label: t('chart.timeframe4h', '4时'), sec: 14400 },
-  { id: '1D', label: t('chart.timeframe1d', '1日'), sec: 86400 },
+  { id: '15m', label: t('chart.timeframe15m', '15分'), span: 15, type: 'minute' as const },
+  { id: '1H', label: t('chart.timeframe1h', '1时'), span: 1, type: 'hour' as const },
+  { id: '4H', label: t('chart.timeframe4h', '4时'), span: 4, type: 'hour' as const },
+  { id: '1D', label: t('chart.timeframe1d', '1日'), span: 1, type: 'day' as const },
 ])
 
 const currentSymbol = ref<string>('BTC')
 const currentPeriod = ref<string>('1H')
-
-// ==========================================
-// 2. 指标多选共存系统 (可同时开启多个，专为视觉LLM与专业看盘优化)
-// ==========================================
-const indMA = ref<boolean>(true) // MA5 / MA10 / MA20
-const indBOLL = ref<boolean>(false) // BOLL 上中下轨
-const indVOL = ref<boolean>(true) // VOL 成交量柱状图 (修复比例与量价对比)
-const indMACD = ref<boolean>(false) // MACD 柱与双线
-const indRSI = ref<boolean>(false) // RSI 14 强弱指标
-
 const isLoading = ref<boolean>(false)
-const copied = ref<boolean>(false)
-const candleCountdown = ref<string>('00:00')
+const chartContainer = ref<HTMLElement | null>(null)
 
-let pollTimer: any = null
-let tickTimer: any = null
+// ==========================================
+// 2. 指标配置中心 (主图与副图严密区分)
+// ==========================================
+const showIndicatorMenu = ref<boolean>(false)
 
-// 调价试算平移
-const simMode = ref<boolean>(false)
-const simStopLoss = ref<number>(0)
-const simTakeProfit = ref<number>(0)
-
-// TradingView Lightweight Charts References
-const chartContainerRef = ref<HTMLDivElement | null>(null)
-let chart: IChartApi | null = null
-let candleSeries: ISeriesApi<'Candlestick'> | null = null
-
-// 指标系列实例
-let volumeSeries: ISeriesApi<'Histogram'> | null = null
-let volMaSeries: ISeriesApi<'Line'> | null = null
-let ma5Series: ISeriesApi<'Line'> | null = null
-let ma10Series: ISeriesApi<'Line'> | null = null
-let ma20Series: ISeriesApi<'Line'> | null = null
-let bollUbSeries: ISeriesApi<'Line'> | null = null
-let bollMbSeries: ISeriesApi<'Line'> | null = null
-let bollLbSeries: ISeriesApi<'Line'> | null = null
-
-// 价格线
-let entryPriceLine: IPriceLine | null = null
-let slPriceLine: IPriceLine | null = null
-let tpPriceLine: IPriceLine | null = null
-
-let resizeObserver: ResizeObserver | null = null
-
-// Raw Candle Data (150 根以上，确保 PC 端铺满视口)
-interface Candle {
-  ts: number
-  open: number
-  high: number
-  low: number
-  close: number
-  vol: number
+// 主图叠加指标 (Overlay on Main Candle Pane)
+interface IndicatorOption {
+  key: string
+  name: string
+  label: string
+  desc: string
+  color: string
+  defaultParams?: any[]
+  isSub: boolean
 }
-const candles = ref<Candle[]>([])
-const hoverCandle = ref<Candle | null>(null)
 
-// 当前标的映射
+const mainIndicators: IndicatorOption[] = [
+  { key: 'VWAP', name: 'VWAP', label: 'VWAP', desc: '成交量加权均价线', color: '#06B6D4', isSub: false },
+  { key: 'MA', name: 'MA', label: 'MA', desc: '均线 (5, 10, 20)', color: '#F59E0B', defaultParams: [5, 10, 20], isSub: false },
+  { key: 'EMA', name: 'EMA', label: 'EMA', desc: '指数均线 (12, 26, 50)', color: '#38BDF8', defaultParams: [12, 26, 50], isSub: false },
+  { key: 'BOLL', name: 'BOLL', label: 'BOLL', desc: '布林带轨道 (20, 2)', color: '#818CF8', defaultParams: [20, 2], isSub: false },
+  { key: 'SAR', name: 'SAR', label: 'SAR', desc: '抛物线转向', color: '#EC4899', isSub: false },
+  { key: 'BBI', name: 'BBI', label: 'BBI', desc: '多空多均线综合', color: '#10B981', isSub: false },
+]
+
+// 副图独立窗格指标 (Sub Panes)
+const subIndicators: IndicatorOption[] = [
+  { key: 'VOL', name: 'VOL', label: 'VOL', desc: '成交量与柱形量能', color: '#10B981', isSub: true },
+  { key: 'MACD', name: 'MACD', label: 'MACD', desc: '异同移动平均线', color: '#3B82F6', defaultParams: [12, 26, 9], isSub: true },
+  { key: 'RSI', name: 'RSI', label: 'RSI', desc: '相对强弱动量 (6, 12, 24)', color: '#F97316', defaultParams: [6, 12, 24], isSub: true },
+  { key: 'KDJ', name: 'KDJ', label: 'KDJ', desc: '随机摆动指标 (9, 3, 3)', color: '#A855F7', defaultParams: [9, 3, 3], isSub: true },
+  { key: 'OBV', name: 'OBV', label: 'OBV', desc: '能量潮累积线', color: '#EAB308', isSub: true },
+  { key: 'WR', name: 'WR', label: 'WR', desc: '威廉超买超卖 (14)', color: '#6366F1', defaultParams: [14], isSub: true },
+]
+
+// 默认激活指标：默认开启 VOL 与 VWAP
+const activeIndicators = ref<Record<string, boolean>>({
+  VWAP: true,
+  VOL: true,
+  MA: false,
+  EMA: false,
+  BOLL: false,
+  SAR: false,
+  BBI: false,
+  MACD: false,
+  RSI: false,
+  KDJ: false,
+  OBV: false,
+  WR: false,
+})
+
+// 记录已挂载的指标 Pane ID，以便精准开关
+const mountedPanes = new Map<string, string>()
+
+// 当前标的计算
 const currentInstId = computed(() => `${currentSymbol.value}-USDT-SWAP`)
-
-const activePosition = computed(() => {
-  return store.positions.find(
-    (p: any) =>
-      p.instId === currentInstId.value ||
-      p.name?.toUpperCase() === currentSymbol.value ||
-      p.instId?.toUpperCase().startsWith(currentSymbol.value)
-  )
-})
-
-const activeOrder = computed(() => {
-  return store.pendingOrders.find(
-    (o: any) =>
-      o.instId === currentInstId.value ||
-      o.name?.toUpperCase() === currentSymbol.value ||
-      o.instId?.toUpperCase().startsWith(currentSymbol.value)
-  )
-})
-
-const currentFactor = computed(() => {
-  return store.factors.find(
-    (f: any) =>
+const factorItem = computed(() => {
+  if (!Array.isArray(store.factorLibrary)) return undefined
+  return store.factorLibrary.find(
+    (f) =>
       f.instId === currentInstId.value ||
-      f.name?.toUpperCase() === currentSymbol.value ||
-      f.instId?.toUpperCase().startsWith(currentSymbol.value)
+      f.instId === `${currentSymbol.value}-USDT` ||
+      f.instId?.startsWith(currentSymbol.value)
   )
 })
 
-// 当前价格与 ATR
+const currentAtr = computed(() => Number(factorItem.value?.atr1h || 0))
+const liveChangePct = computed(() => Number(factorItem.value?.c_1h_ret || 0) * 100)
+
+// 实盘在手持仓与在途委托
+const activePosition = computed(() => {
+  if (!Array.isArray(store.positions)) return undefined
+  return store.positions.find((p) => p.instId === currentInstId.value || p.name === currentSymbol.value)
+})
+const activeOrder = computed(() => {
+  if (!Array.isArray(store.pendingOrders)) return undefined
+  return store.pendingOrders.find((o) => o.instId === currentInstId.value)
+})
+
+// 真实最新价格 (纯从蜡烛与盘口同源获取，防止跳动过大)
 const currentPrice = computed(() => {
-  if (activePosition.value?.markPx) return Number(activePosition.value.markPx)
-  if (currentFactor.value?.price) return Number(currentFactor.value.price)
-  if (candles.value.length > 0) return candles.value[candles.value.length - 1].close
-  return 100.0
-})
-
-const currentAtr = computed(() => {
-  const f = currentFactor.value
-  if (!f) return currentPrice.value * 0.02
-  const atr = Number(f.atr1h ?? f.atr ?? 0)
-  return atr > 0 ? atr : currentPrice.value * 0.02
-})
-
-const liveChangePct = computed(() => {
-  if (candles.value.length < 2) return 0.0
-  const first = candles.value[0]
-  const last = candles.value[candles.value.length - 1]
-  if (!first || !last || first.open <= 0) return 0.0
-  return ((last.close - first.open) / first.open) * 100
+  if (candles.value.length > 0 && candles.value[candles.value.length - 1]?.close) {
+    return Number(candles.value[candles.value.length - 1].close)
+  }
+  return Number(factorItem.value?.price || 0)
 })
 
 // 真实开仓成本与方向
@@ -216,11 +230,6 @@ const liveStopLoss = computed(() => {
     const s = Number(activeOrder.value.sl_px ?? 0)
     if (s > 0) return s
   }
-  if (activePosition.value || activeOrder.value) {
-    return liveSide.value === 'long'
-      ? liveEntry.value - currentAtr.value * 2.0
-      : liveEntry.value + currentAtr.value * 2.0
-  }
   return 0
 })
 
@@ -238,55 +247,86 @@ const liveTakeProfit = computed(() => {
     const tp = Number(activeOrder.value.tp_px ?? 0)
     if (tp > 0) return tp
   }
-  if (activePosition.value || activeOrder.value) {
-    return liveSide.value === 'long'
-      ? liveEntry.value + currentAtr.value * 4.0
-      : liveEntry.value - currentAtr.value * 4.0
-  }
   return 0
 })
 
-const effectiveSL = computed(() => (simMode.value ? simStopLoss.value : liveStopLoss.value))
-const effectiveTP = computed(() => (simMode.value ? simTakeProfit.value : liveTakeProfit.value))
+// ==========================================
+// 3. 调价试算控制器 (Sim Mode)
+// ==========================================
+const simMode = ref<boolean>(false)
+const simEntryPrice = ref<number>(0)
+const simSL = ref<number>(0)
+const simTP = ref<number>(0)
+const copied = ref<boolean>(false)
 
-// 科学计算真实美元金额
+const effectiveEntry = computed(() => simMode.value ? simEntryPrice.value : liveEntry.value)
+const effectiveSL = computed(() => simMode.value ? simSL.value : liveStopLoss.value)
+const effectiveTP = computed(() => simMode.value ? simTP.value : liveTakeProfit.value)
+
+function initSimulation() {
+  const px = currentPrice.value
+  const atr = currentAtr.value > 0 ? currentAtr.value : px * 0.015
+  simEntryPrice.value = px
+  if (liveSide.value === 'long') {
+    simSL.value = Math.max(0, px - atr * 2.0)
+    simTP.value = px + atr * 4.4
+  } else {
+    simSL.value = px + atr * 2.0
+    simTP.value = Math.max(0, px - atr * 4.4)
+  }
+}
+
+function resetSimulation() {
+  initSimulation()
+  updatePriceLines()
+}
+
+// 真实数学风控测算模型
 const riskRewardMetrics = computed(() => {
-  const entry = liveEntry.value
+  const entry = effectiveEntry.value
   const sl = effectiveSL.value
   const tp = effectiveTP.value
+  const side = liveSide.value
   const atr = currentAtr.value
 
-  const riskDist = Math.abs(entry - sl)
-  const rewardDist = Math.abs(tp - entry)
+  let riskDist = 0
+  let rewardDist = 0
 
+  if (side === 'long') {
+    riskDist = Math.max(0, entry - sl)
+    rewardDist = Math.max(0, tp - entry)
+  } else {
+    riskDist = Math.max(0, sl - entry)
+    rewardDist = Math.max(0, entry - tp)
+  }
+
+  const riskPct = entry > 0 ? (riskDist / entry) * 100 : 0
+  const rewardPct = entry > 0 ? (rewardDist / entry) * 100 : 0
   const rrRatio = riskDist > 0 ? rewardDist / riskDist : 0
   const atrMultiple = atr > 0 ? riskDist / atr : 0
 
   const isRrCompliant = rrRatio >= 2.0
-  const isAtrOptimal = atrMultiple >= 1.7 && atrMultiple <= 2.3
+  const isAtrOptimal = atrMultiple >= 1.8 && atrMultiple <= 2.2
 
   const hasRealPosition = !!activePosition.value
-  const actualMargin = Number(activePosition.value?.margin_usdt ?? activePosition.value?.margin ?? 0)
-  const actualLever = Number(activePosition.value?.lever || 3)
+  let activeMargin = 100.0
+  let activeLeverage = 3.0
 
-  const marginBase = hasRealPosition && actualMargin > 0 ? actualMargin : 100.0
-  const leverBase = hasRealPosition && actualMargin > 0 ? actualLever : 3.0
-  const notionalUsd = marginBase * leverBase
+  if (hasRealPosition && activePosition.value) {
+    const rawMargin = Number(activePosition.value.margin_usdt ?? activePosition.value.margin ?? 0)
+    if (rawMargin > 0) activeMargin = rawMargin
+    const rawLever = Number(activePosition.value.lever ?? 3)
+    if (rawLever > 0) activeLeverage = rawLever
+  }
 
-  const rewardPct = entry > 0 ? (rewardDist / entry) * 100 : 8.0
-  const riskPct = entry > 0 ? (riskDist / entry) * 100 : 4.0
-
-  const estProfitUsd = (notionalUsd * rewardPct) / 100
-  const estRiskUsd = (notionalUsd * riskPct) / 100
+  const estProfitUsd = activeMargin * activeLeverage * (rewardPct / 100)
+  const estRiskUsd = activeMargin * activeLeverage * (riskPct / 100)
 
   return {
-    entry,
-    sl,
-    tp,
     riskDist,
     rewardDist,
-    rewardPct,
     riskPct,
+    rewardPct,
     rrRatio,
     atrMultiple,
     isRrCompliant,
@@ -297,397 +337,448 @@ const riskRewardMetrics = computed(() => {
   }
 })
 
-// 动态根据标的价格计算自适应价格刻度精度 (彻底解决 SUI/ASTER/DOGE 价格标签全是 0.80 的重叠Bug)
-function getSymbolPrecision(sym: string, price: number): { precision: number; minMove: number } {
+// 价格精度自适应
+function getSymbolPrecision(sym: string, price: number): number {
   const upper = sym.toUpperCase()
-  if (upper.includes('BTC')) return { precision: 1, minMove: 0.1 }
-  if (upper.includes('ETH') || upper.includes('SOL')) return { precision: 2, minMove: 0.01 }
-  if (price >= 100) return { precision: 2, minMove: 0.01 }
-  if (price >= 10) return { precision: 3, minMove: 0.005 }
-  if (price >= 1) return { precision: 3, minMove: 0.001 }
-  // SUI, ASTER, DOGE, ADA 等低价币种强制 4 位小数！
-  return { precision: 4, minMove: 0.0001 }
-}
-
-function applyPricePrecision(price: number) {
-  if (!candleSeries) return
-  const { precision, minMove } = getSymbolPrecision(currentSymbol.value, price)
-  const formatOptions = {
-    priceFormat: {
-      type: 'price' as const,
-      precision,
-      minMove,
-    },
-  }
-  candleSeries.applyOptions(formatOptions)
-  ma5Series?.applyOptions(formatOptions)
-  ma10Series?.applyOptions(formatOptions)
-  ma20Series?.applyOptions(formatOptions)
-  bollUbSeries?.applyOptions(formatOptions)
-  bollMbSeries?.applyOptions(formatOptions)
-  bollLbSeries?.applyOptions(formatOptions)
+  if (upper.includes('BTC')) return 1
+  if (upper.includes('ETH') || upper.includes('SOL')) return 2
+  if (price >= 100) return 2
+  if (price >= 10) return 3
+  if (price >= 1) return 3
+  return 4
 }
 
 // ==========================================
-// 3. TradingView Lightweight Charts 极简干净初始化 (对标 OKX 官方)
+// 4. KLineChart 引擎核心初始化与生命周期
 // ==========================================
-function initTradingViewChart() {
-  if (!chartContainerRef.value) return
-  if (chart) {
-    chart.remove()
-    chart = null
-  }
+let klineChart: KLineChartType | null = null
+const candles = ref<Array<any>>([])
+const candleCountdown = ref<string>('00:00')
 
-  const isDark = theme.value === 'dark'
-  // OKX 官方同款深邃纯粹黑灰色背景，极致干净专业
-  const bgColor = isDark ? '#0C0D12' : '#FFFFFF'
-  const textColor = isDark ? '#848E9C' : '#4B5563'
-  // 极淡水平分割线，完全隐藏垂直网格线 (与 OKX 一样干净)
-  const vertGridColor = 'transparent'
-  const horzGridColor = isDark ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.04)'
-  const borderColor = isDark ? '#1E2329' : '#E5E7EB'
+// 绘制的价格线 ID 记录
+let entryOverlayId: string | null = null
+let slOverlayId: string | null = null
+let tpOverlayId: string | null = null
 
-  const width = chartContainerRef.value.clientWidth || 800
-  const height = chartContainerRef.value.clientHeight || 460
-
-  chart = createChart(chartContainerRef.value, {
-    width,
-    height,
-    layout: {
-      background: { type: ColorType.Solid, color: bgColor },
-      textColor,
-      fontFamily: 'SF Pro Display, -apple-system, monospace, sans-serif',
-      fontSize: 11,
-    },
+function getChartStyles(): DeepPartial<Styles> {
+  const dark = isDark.value
+  return {
     grid: {
-      vertLines: { color: vertGridColor },
-      horzLines: { color: horzGridColor },
+      show: true,
+      horizontal: {
+        show: true,
+        size: 1,
+        color: dark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)',
+        style: 'solid',
+      },
+      vertical: {
+        show: false, // 隐藏垂直杂乱网格
+      },
+    },
+    candle: {
+      type: 'candle_solid',
+      bar: {
+        upColor: '#10B981',
+        downColor: '#F43F5E',
+        noChangeColor: '#888888',
+        upBorderColor: '#10B981',
+        downBorderColor: '#F43F5E',
+        noChangeBorderColor: '#888888',
+        upWickColor: '#10B981',
+        downWickColor: '#F43F5E',
+        noChangeWickColor: '#888888',
+      },
+      priceMark: {
+        show: true,
+        high: {
+          show: true,
+          color: dark ? '#CBD5E1' : '#475569',
+          textOffset: 4,
+          textSize: 10,
+        },
+        low: {
+          show: true,
+          color: dark ? '#CBD5E1' : '#475569',
+          textOffset: 4,
+          textSize: 10,
+        },
+        last: {
+          show: true,
+          upColor: '#10B981',
+          downColor: '#F43F5E',
+          noChangeColor: '#888888',
+          line: {
+            show: true,
+            style: 'dashed',
+            dashedValue: [4, 4],
+            size: 1,
+          },
+          text: {
+            show: true,
+            size: 11,
+            paddingLeft: 4,
+            paddingTop: 2,
+            paddingRight: 4,
+            paddingBottom: 2,
+            color: '#FFFFFF',
+          },
+        },
+      },
+      tooltip: {
+        showRule: 'always',
+        showType: 'standard',
+        text: {
+          size: 11,
+          family: 'JetBrains Mono, monospace',
+          color: dark ? '#94A3B8' : '#64748B',
+        },
+      },
+    },
+    indicator: {
+      ohlc: {
+        upColor: '#10B981',
+        downColor: '#F43F5E',
+        noChangeColor: '#888888',
+      },
+      lines: [
+        { style: 'solid', smooth: false, size: 1.5, color: '#F59E0B' }, // MA5 / 黄
+        { style: 'solid', smooth: false, size: 1.5, color: '#38BDF8' }, // MA10 / 蓝
+        { style: 'solid', smooth: false, size: 1.5, color: '#A855F7' }, // MA20 / 紫
+        { style: 'solid', smooth: false, size: 1.5, color: '#F43F5E' },
+        { style: 'solid', smooth: false, size: 1.5, color: '#10B981' },
+      ],
+      lastValueMark: {
+        show: true,
+        text: {
+          show: true,
+          size: 10,
+          paddingLeft: 3,
+          paddingTop: 1,
+          paddingRight: 3,
+          paddingBottom: 1,
+          color: '#FFFFFF',
+        },
+      },
+    },
+    xAxis: {
+      show: true,
+      size: 'auto',
+      axisLine: {
+        show: true,
+        color: dark ? '#1E293B' : '#E2E8F0',
+        size: 1,
+      },
+      tickText: {
+        show: true,
+        color: dark ? '#64748B' : '#94A3B8',
+        family: 'JetBrains Mono, monospace',
+        size: 10,
+      },
+      tickLine: {
+        show: true,
+        size: 1,
+        length: 3,
+        color: dark ? '#1E293B' : '#E2E8F0',
+      },
+    },
+    yAxis: {
+      show: true,
+      size: 'auto',
+      position: 'right',
+      type: 'normal',
+      inside: false,
+      axisLine: {
+        show: true,
+        color: dark ? '#1E293B' : '#E2E8F0',
+        size: 1,
+      },
+      tickText: {
+        show: true,
+        color: dark ? '#94A3B8' : '#64748B',
+        family: 'JetBrains Mono, monospace',
+        size: 11,
+      },
+      tickLine: {
+        show: false,
+      },
+    },
+    separator: {
+      size: 1,
+      color: dark ? '#1E293B' : '#E2E8F0',
+      fill: true,
+      activeBackgroundColor: dark ? '#334155' : '#CBD5E1',
     },
     crosshair: {
-      mode: CrosshairMode.Normal,
-      vertLine: {
-        color: isDark ? 'rgba(255, 255, 255, 0.35)' : 'rgba(0, 0, 0, 0.35)',
-        width: 1,
-        style: LineStyle.Dotted,
-        labelBackgroundColor: isDark ? '#2B313A' : '#E2E8F0',
+      show: true,
+      horizontal: {
+        show: true,
+        line: {
+          style: 'dashed',
+          dashedValue: [4, 4],
+          size: 1,
+          color: dark ? '#64748B' : '#94A3B8',
+        },
+        text: {
+          show: true,
+          color: '#FFFFFF',
+          size: 11,
+          family: 'JetBrains Mono, monospace',
+          backgroundColor: '#3B82F6',
+        },
       },
-      horzLine: {
-        color: isDark ? 'rgba(255, 255, 255, 0.35)' : 'rgba(0, 0, 0, 0.35)',
-        width: 1,
-        style: LineStyle.Dotted,
-        labelBackgroundColor: isDark ? '#2B313A' : '#E2E8F0',
+      vertical: {
+        show: true,
+        line: {
+          style: 'dashed',
+          dashedValue: [4, 4],
+          size: 1,
+          color: dark ? '#64748B' : '#94A3B8',
+        },
+        text: {
+          show: true,
+          color: '#FFFFFF',
+          size: 10,
+          family: 'JetBrains Mono, monospace',
+          backgroundColor: '#475569',
+        },
       },
     },
-    rightPriceScale: {
-      borderColor,
-      autoScale: true,
-      scaleMargins: {
-        top: 0.12,
-        bottom: 0.22,
-      },
-    },
-    timeScale: {
-      borderColor,
-      timeVisible: true,
-      secondsVisible: false,
-      barSpacing: 10,
-      minBarSpacing: 4,
-      rightOffset: 3,
-      fixLeftEdge: true,
-      timeFormatter: (time: any) => {
-        const date = new Date(Number(time) * 1000)
+  }
+}
+
+// 统一根据 activeIndicators 渲染与挂载指标
+function syncIndicators() {
+  if (!klineChart) return
+
+  // 1. 同步主图指标 (全部挂在 candle_pane 上，isStack = false 叠加在蜡烛图内部)
+  mainIndicators.forEach((ind) => {
+    const isActive = !!activeIndicators.value[ind.key]
+    const currentOnChart = klineChart?.getIndicators({ id: `main_${ind.key}` }) || []
+    if (isActive) {
+      if (currentOnChart.length === 0) {
+        klineChart?.createIndicator(
+          {
+            id: `main_${ind.key}`,
+            name: ind.name,
+            paneId: 'candle_pane',
+            calcParams: ind.defaultParams || [],
+          },
+          false // 叠加在 candle_pane 上
+        )
+      }
+    } else {
+      if (currentOnChart.length > 0) {
+        klineChart?.removeIndicator({ id: `main_${ind.key}`, paneId: 'candle_pane' })
+      }
+    }
+  })
+
+  // 2. 同步副图指标 (创建独立 Pane)
+  subIndicators.forEach((ind) => {
+    const isActive = !!activeIndicators.value[ind.key]
+    const currentOnChart = klineChart?.getIndicators({ id: `sub_${ind.key}` }) || []
+    if (isActive) {
+      if (currentOnChart.length === 0) {
+        klineChart?.createIndicator(
+          {
+            id: `sub_${ind.key}`,
+            name: ind.name,
+            calcParams: ind.defaultParams || [],
+          },
+          false // 独立副图 Pane
+        )
+      }
+    } else {
+      if (currentOnChart.length > 0) {
+        // 直接按唯一 id 移除，KLineChart 内部会自动销毁空置的 Pane！
+        klineChart?.removeIndicator({ id: `sub_${ind.key}` })
+      }
+    }
+  })
+}
+
+function toggleIndicatorKey(key: string) {
+  activeIndicators.value = {
+    ...activeIndicators.value,
+    [key]: !activeIndicators.value[key],
+  }
+  nextTick(() => {
+    syncIndicators()
+  })
+}
+
+const activeIndicatorCount = computed(() => {
+  return Object.values(activeIndicators.value).filter(Boolean).length
+})
+
+function initChart() {
+  if (!chartContainer.value) return
+  disposeKLineChart(chartContainer.value)
+
+  klineChart = initKLineChart(chartContainer.value, {
+    locale: isEn.value ? 'en-US' : 'zh-CN',
+    timezone: 'Asia/Shanghai',
+    styles: getChartStyles(),
+    formatter: {
+      // 纯纯正正的纯数字时间刻度！彻底去除“几日几日”中文，符合用户习惯！
+      formatDate: ({ timestamp }) => {
+        const date = new Date(timestamp)
         const m = String(date.getMonth() + 1).padStart(2, '0')
         const d = String(date.getDate()).padStart(2, '0')
         const hh = String(date.getHours()).padStart(2, '0')
         const mm = String(date.getMinutes()).padStart(2, '0')
-        if (currentPeriod.value === '15m' || currentPeriod.value === '1H') {
-          return `${hh}:${mm}`
+        if (currentPeriod.value === '1D') {
+          return `${m}-${d}`
         }
-        return `${m}-${d} ${hh}:${mm}`
+        if (currentPeriod.value === '4H') {
+          return `${m}-${d} ${hh}:${mm}`
+        }
+        return `${hh}:${mm}`
       },
     },
   })
 
-  // 1. 宽大饱满的蜡烛图 (实体大、对比鲜明，易于视觉 LLM 提取形态)
-  candleSeries = chart.addSeries(CandlestickSeries, {
-    upColor: '#10B981', // 翡翠绿
-    downColor: '#F43F5E', // 玫瑰红
-    borderVisible: false,
-    wickUpColor: '#10B981',
-    wickDownColor: '#F43F5E',
-  })
+  if (!klineChart) return
+  ;(window as any).__klineChart = klineChart
+  klineChart.setOffsetRightDistance(25)
 
-  // 2. 彻底修复的 VOL 成交量系列 (高对比度柱状图，视觉 LLM 极佳读取)
-  volumeSeries = chart.addSeries(HistogramSeries, {
-    priceFormat: {
-      type: 'volume',
-    },
-    priceScaleId: '',
+  // 必须显式设置默认 symbol 与 period，KLineChart 内部的 _dataLoader 才会触发加载！
+  klineChart.setSymbol({
+    ticker: `${currentSymbol.value}/USDT`,
+    pricePrecision: 2,
+    volumePrecision: 2,
   })
-  volumeSeries.priceScale().applyOptions({
-    scaleMargins: {
-      top: 0.80, // 占据最底部 20% 高度
-      bottom: 0,
-    },
-  })
+  klineChart.setPeriod({ type: 'hour', span: 1 })
 
-  // 成交量均线 VOL-MA5
-  volMaSeries = chart.addSeries(LineSeries, {
-    color: '#F59E0B',
-    lineWidth: 1,
-    priceScaleId: '',
-    crosshairMarkerVisible: false,
-    priceLineVisible: false,
-  })
-
-  // 3. MA 均线系列 (MA5, MA10, MA20)
-  ma5Series = chart.addSeries(LineSeries, {
-    color: '#F59E0B', // 金黄
-    lineWidth: 1.2,
-    crosshairMarkerVisible: false,
-    priceLineVisible: false,
-  })
-  ma10Series = chart.addSeries(LineSeries, {
-    color: '#38BDF8', // 天蓝
-    lineWidth: 1.2,
-    crosshairMarkerVisible: false,
-    priceLineVisible: false,
-  })
-  ma20Series = chart.addSeries(LineSeries, {
-    color: '#A855F7', // 紫罗兰
-    lineWidth: 1.2,
-    crosshairMarkerVisible: false,
-    priceLineVisible: false,
-  })
-
-  // 4. BOLL 布林带系列 (UB, MB, LB)
-  bollUbSeries = chart.addSeries(LineSeries, {
-    color: '#FB923C', // 橙红上轨
-    lineWidth: 1.2,
-    crosshairMarkerVisible: false,
-    priceLineVisible: false,
-  })
-  bollMbSeries = chart.addSeries(LineSeries, {
-    color: '#34D399', // 翠绿中轨
-    lineWidth: 1.2,
-    crosshairMarkerVisible: false,
-    priceLineVisible: false,
-  })
-  bollLbSeries = chart.addSeries(LineSeries, {
-    color: '#FB923C', // 橙红下轨
-    lineWidth: 1.2,
-    crosshairMarkerVisible: false,
-    priceLineVisible: false,
-  })
-
-  // 十字光标监听
-  chart.subscribeCrosshairMove((param) => {
-    if (!param || !param.time || !param.seriesData) {
-      hoverCandle.value = null
-      return
-    }
-    const data = param.seriesData.get(candleSeries!) as any
-    if (data) {
-      hoverCandle.value = {
-        ts: Number(data.time) * 1000,
-        open: data.open,
-        high: data.high,
-        low: data.low,
-        close: data.close,
-        vol: 0,
+  // 配置 DataLoader 驱动
+  klineChart.setDataLoader({
+    getBars: async ({ callback }) => {
+      try {
+        const res = await fetch(
+          `/api/v1/market/${currentInstId.value}/candles?bar=${currentPeriod.value}&limit=150`
+        )
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const data = await res.json()
+        if (Array.isArray(data.candles) && data.candles.length > 0) {
+          candles.value = data.candles
+          const klineList: KLineData[] = data.candles.map((c: any) => ({
+            timestamp: c.ts,
+            open: c.open,
+            high: c.high,
+            low: c.low,
+            close: c.close,
+            volume: c.vol,
+            turnover: c.vol * c.close,
+          }))
+          callback(klineList, false)
+          nextTick(() => {
+            klineChart?.scrollToRealTime()
+            updatePriceLines()
+          })
+          return
+        }
+      } catch (err) {
+        console.warn('DataLoader getBars error:', err)
       }
-    } else {
-      hoverCandle.value = null
-    }
+      callback([], false)
+    },
   })
 
-  renderChartData()
+  // 挂载默认指标 (VOL + VWAP)
+  syncIndicators()
 }
 
-// 格式化并灌入数据
-function renderChartData() {
-  if (!candleSeries || candles.value.length === 0) return
+// 清除并更新价格线
+function updatePriceLines() {
+  if (!klineChart) return
 
-  // 保证时间戳严格递增去重
-  const map = new Map<number, Candle>()
-  for (const c of candles.value) {
-    const sec = Math.floor(c.ts / 1000)
-    map.set(sec, c)
+  // 1. 先移除旧的价格线 Overlay
+  if (entryOverlayId) {
+    klineChart.removeOverlay({ id: entryOverlayId })
+    entryOverlayId = null
   }
-  const sorted = Array.from(map.entries())
-    .sort((a, b) => a[0] - b[0])
-    .map(([, c]) => c)
-
-  const count = sorted.length
-
-  // 1. 蜡烛数据
-  const candleData = sorted.map((c) => ({
-    time: Math.floor(c.ts / 1000) as UTCTimestamp,
-    open: c.open,
-    high: c.high,
-    low: c.low,
-    close: c.close,
-  }))
-
-  // 2. VOL 成交量数据 (高对比度红绿柱)
-  const volumeData = sorted.map((c) => ({
-    time: Math.floor(c.ts / 1000) as UTCTimestamp,
-    value: c.vol,
-    color: c.close >= c.open ? 'rgba(16, 185, 129, 0.65)' : 'rgba(244, 63, 94, 0.65)',
-  }))
-
-  // 3. MA5, MA10, MA20
-  const ma5Data: any[] = []
-  const ma10Data: any[] = []
-  const ma20Data: any[] = []
-  for (let i = 0; i < count; i++) {
-    const time = Math.floor(sorted[i].ts / 1000) as UTCTimestamp
-    if (i >= 4) {
-      let s = 0
-      for (let k = 0; k < 5; k++) s += sorted[i - k].close
-      ma5Data.push({ time, value: s / 5 })
-    }
-    if (i >= 9) {
-      let s = 0
-      for (let k = 0; k < 10; k++) s += sorted[i - k].close
-      ma10Data.push({ time, value: s / 10 })
-    }
-    if (i >= 19) {
-      let s = 0
-      for (let k = 0; k < 20; k++) s += sorted[i - k].close
-      ma20Data.push({ time, value: s / 20 })
-    }
+  if (slOverlayId) {
+    klineChart.removeOverlay({ id: slOverlayId })
+    slOverlayId = null
+  }
+  if (tpOverlayId) {
+    klineChart.removeOverlay({ id: tpOverlayId })
+    tpOverlayId = null
   }
 
-  // 4. VOL-MA5
-  const volMaData: any[] = []
-  for (let i = 4; i < count; i++) {
-    let sumV = 0
-    for (let k = 0; k < 5; k++) sumV += sorted[i - k].vol
-    volMaData.push({
-      time: Math.floor(sorted[i].ts / 1000) as UTCTimestamp,
-      value: sumV / 5,
-    })
-  }
-
-  // 5. BOLL (20, 2)
-  const bollUbData: any[] = []
-  const bollMbData: any[] = []
-  const bollLbData: any[] = []
-  for (let i = 19; i < count; i++) {
-    const time = Math.floor(sorted[i].ts / 1000) as UTCTimestamp
-    let sum = 0
-    for (let k = 0; k < 20; k++) sum += sorted[i - k].close
-    const mean = sum / 20
-    let variance = 0
-    for (let k = 0; k < 20; k++) variance += Math.pow(sorted[i - k].close - mean, 2)
-    const std = Math.sqrt(variance / 20)
-    bollMbData.push({ time, value: mean })
-    bollUbData.push({ time, value: mean + 2 * std })
-    bollLbData.push({ time, value: mean - 2 * std })
-  }
-
-  // 动态应用标的价格精度，防止低价币所有指标与刻度四舍五入重叠
-  applyPricePrecision(currentPrice.value)
-
-  // 批量应用与可见性控制 (支持多指标独立共存)
-  candleSeries.setData(candleData)
-
-  if (volumeSeries) {
-    volumeSeries.applyOptions({ visible: indVOL.value })
-    if (indVOL.value) volumeSeries.setData(volumeData)
-  }
-  if (volMaSeries) {
-    volMaSeries.applyOptions({ visible: indVOL.value })
-    if (indVOL.value) volMaSeries.setData(volMaData)
-  }
-
-  if (ma5Series) {
-    ma5Series.applyOptions({ visible: indMA.value })
-    if (indMA.value) ma5Series.setData(ma5Data)
-  }
-  if (ma10Series) {
-    ma10Series.applyOptions({ visible: indMA.value })
-    if (indMA.value) ma10Series.setData(ma10Data)
-  }
-  if (ma20Series) {
-    ma20Series.applyOptions({ visible: indMA.value })
-    if (indMA.value) ma20Series.setData(ma20Data)
-  }
-
-  if (bollUbSeries && bollMbSeries && bollLbSeries) {
-    bollUbSeries.applyOptions({ visible: indBOLL.value })
-    bollMbSeries.applyOptions({ visible: indBOLL.value })
-    bollLbSeries.applyOptions({ visible: indBOLL.value })
-    if (indBOLL.value) {
-      bollUbSeries.setData(bollUbData)
-      bollMbSeries.setData(bollMbData)
-      bollLbSeries.setData(bollLbData)
-    }
-  }
-
-  updateTradingPriceLines()
-  // 紧贴右侧
-  chart?.timeScale().scrollToRealtime()
-}
-
-function clearTradingPriceLines() {
-  if (!candleSeries) return
-  if (entryPriceLine) {
-    try { candleSeries.removePriceLine(entryPriceLine) } catch {}
-    entryPriceLine = null
-  }
-  if (slPriceLine) {
-    try { candleSeries.removePriceLine(slPriceLine) } catch {}
-    slPriceLine = null
-  }
-  if (tpPriceLine) {
-    try { candleSeries.removePriceLine(tpPriceLine) } catch {}
-    tpPriceLine = null
-  }
-}
-
-// 刷新原生价格线
-function updateTradingPriceLines() {
-  if (!candleSeries) return
-  clearTradingPriceLines()
-
-  if (activePosition.value || activeOrder.value) {
-    const entryPx = liveEntry.value
-    if (entryPx > 0) {
-      entryPriceLine = candleSeries.createPriceLine({
-        price: entryPx,
-        color: liveSide.value === 'long' ? '#10B981' : '#F43F5E',
-        lineWidth: 1,
-        lineStyle: LineStyle.Solid,
-        axisLabelVisible: true,
-        title: liveSide.value === 'long' ? (isEn ? 'Entry Long' : '多头入场') : (isEn ? 'Entry Short' : '空头入场'),
-      })
-    }
-  }
-
+  // 2. 只有在有实盘持仓、或者有挂单、或者在试算模式下，才绘制价格线！
+  const entryPx = effectiveEntry.value
   const slPx = effectiveSL.value
-  if (slPx > 0) {
-    slPriceLine = candleSeries.createPriceLine({
-      price: slPx,
-      color: '#F43F5E',
-      lineWidth: 1,
-      lineStyle: LineStyle.Dashed,
-      axisLabelVisible: true,
-      title: `🛑 ${isEn ? 'SL' : '止损SL'} -${riskRewardMetrics.value.riskPct.toFixed(1)}%`,
+  const tpPx = effectiveTP.value
+  const hasPosOrOrder = activePosition.value || activeOrder.value || simMode.value
+
+  if (hasPosOrOrder && entryPx > 0) {
+    const isLong = liveSide.value === 'long'
+    const entryRes = klineChart.createOverlay({
+      name: 'priceLine',
+      paneId: 'candle_pane',
+      points: [{ value: entryPx }],
+      styles: {
+        line: {
+          style: 'solid',
+          size: 1.5,
+          color: isLong ? '#10B981' : '#F43F5E',
+        },
+        text: {
+          size: 11,
+          color: '#FFFFFF',
+          backgroundColor: isLong ? '#10B981' : '#F43F5E',
+        },
+      },
+      extendData: isLong ? (isEn.value ? 'Entry Long' : '多头入场') : (isEn.value ? 'Entry Short' : '空头入场'),
     })
+    entryOverlayId = typeof entryRes === 'string' ? entryRes : null
   }
 
-  const tpPx = effectiveTP.value
-  if (tpPx > 0) {
-    tpPriceLine = candleSeries.createPriceLine({
-      price: tpPx,
-      color: '#10B981',
-      lineWidth: 1,
-      lineStyle: LineStyle.Dashed,
-      axisLabelVisible: true,
-      title: `🎯 ${isEn ? 'TP' : '止盈TP'} +${riskRewardMetrics.value.rewardPct.toFixed(1)}%`,
+  if (slPx > 0) {
+    const slRes = klineChart.createOverlay({
+      name: 'priceLine',
+      paneId: 'candle_pane',
+      points: [{ value: slPx }],
+      styles: {
+        line: {
+          style: 'dashed',
+          dashedValue: [6, 4],
+          size: 1.5,
+          color: '#F43F5E',
+        },
+        text: {
+          size: 11,
+          color: '#FFFFFF',
+          backgroundColor: '#F43F5E',
+        },
+      },
+      extendData: `🛑 ${isEn.value ? 'SL' : '止损SL'} -${riskRewardMetrics.value.riskPct.toFixed(1)}%`,
     })
+    slOverlayId = typeof slRes === 'string' ? slRes : null
+  }
+
+  if (tpPx > 0) {
+    const tpRes = klineChart.createOverlay({
+      name: 'priceLine',
+      paneId: 'candle_pane',
+      points: [{ value: tpPx }],
+      styles: {
+        line: {
+          style: 'dashed',
+          dashedValue: [6, 4],
+          size: 1.5,
+          color: '#10B981',
+        },
+        text: {
+          size: 11,
+          color: '#FFFFFF',
+          backgroundColor: '#10B981',
+        },
+      },
+      extendData: `🎯 ${isEn.value ? 'TP' : '止盈TP'} +${riskRewardMetrics.value.rewardPct.toFixed(1)}%`,
+    })
+    tpOverlayId = typeof tpRes === 'string' ? tpRes : null
   }
 }
 
@@ -708,43 +799,16 @@ function updateCountdown() {
     remainSec = 86400 - (hr * 3600 + min * 60 + sec)
   }
   remainSec = Math.max(0, remainSec)
-  const h = Math.floor(remainSec / 3600)
   const m = Math.floor((remainSec % 3600) / 60)
   const s = remainSec % 60
-  if (h > 0) {
-    candleCountdown.value = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-  } else {
-    candleCountdown.value = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-  }
+  candleCountdown.value = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
-// 毫秒级 Tick 更新最后一根 K 线
-function updateLiveTick() {
-  updateCountdown()
-  if (!candleSeries || candles.value.length === 0) return
-  const last = candles.value[candles.value.length - 1]
-  const px = currentPrice.value
-  if (px > 0 && last) {
-    // 异常价差保护过滤：若实时盘口价格偏离上一根结线超过 3.5%，可能是异币种或残存脏数据，跳过盲目拉伸
-    const maxDeviation = Math.abs(px - last.close) / (last.close || 1)
-    if (maxDeviation > 0.035) return
-
-    last.close = px
-    last.high = Math.max(last.high, px)
-    last.low = Math.min(last.low, px)
-    candleSeries.update({
-      time: Math.floor(last.ts / 1000) as UTCTimestamp,
-      open: last.open,
-      high: last.high,
-      low: last.low,
-      close: last.close,
-    })
-  }
-}
-
-// 拉取 150 根行情数据 (彻底填满 PC 端视口，支持 3s 静默增量对齐)
-async function loadCandles(silent = false, resetScale = false) {
+// 拉取行情蜡烛数据 (供定时静默刷新使用)
+async function loadCandles(silent = false, resetTime = false) {
+  if (!klineChart) return
   if (!silent) isLoading.value = true
+
   try {
     const res = await fetch(
       `/api/v1/market/${currentInstId.value}/candles?bar=${currentPeriod.value}&limit=150`
@@ -753,10 +817,39 @@ async function loadCandles(silent = false, resetScale = false) {
     const data = await res.json()
     if (Array.isArray(data.candles) && data.candles.length > 0) {
       candles.value = data.candles
-      renderChartData()
-      if (resetScale && chart) {
-        chart.timeScale().scrollToRealtime()
+
+      // 转换为 KLineChart 标准数据结构
+      const klineList: KLineData[] = data.candles.map((c: any) => ({
+        timestamp: c.ts,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+        volume: c.vol,
+        turnover: c.vol * c.close,
+      }))
+
+      // 配置标的价格精度
+      const prec = getSymbolPrecision(currentSymbol.value, currentPrice.value)
+      klineChart.setSymbol({
+        ticker: `${currentSymbol.value}/USDT`,
+        pricePrecision: prec,
+        volumePrecision: 2,
+      })
+
+      // 填入数据 (通过 setDataLoader)
+      klineChart.setDataLoader({
+        getBars: ({ callback }) => {
+          callback(klineList, false)
+        },
+      })
+
+      // 始终让最新蜡烛贴紧最右侧！
+      if (resetTime) {
+        klineChart.scrollToRealTime()
       }
+
+      updatePriceLines()
     }
   } catch (err) {
     console.warn('Candles fetch fallback:', err)
@@ -765,200 +858,127 @@ async function loadCandles(silent = false, resetScale = false) {
   }
 }
 
+// 切换币种
 function selectSymbol(s: string) {
   const sym = s.toUpperCase()
   if (sym === currentSymbol.value) return
   currentSymbol.value = sym
   emit('select-symbol', sym)
 
-  // 1. 立即清除旧币种残留的价格线，防止旧币种的万刀价格污染新标的坐标轴！
-  clearTradingPriceLines()
-  // 2. 清空当前 Series 数据，杜绝残存跨度
-  candleSeries?.setData([])
-  volumeSeries?.setData([])
-  volMaSeries?.setData([])
-  ma5Series?.setData([])
-  ma10Series?.setData([])
-  ma20Series?.setData([])
-  bollUbSeries?.setData([])
-  bollMbSeries?.setData([])
-  bollLbSeries?.setData([])
+  // 1. 立即清除旧币种的价格线
+  if (entryOverlayId) klineChart?.removeOverlay({ id: entryOverlayId })
+  if (slOverlayId) klineChart?.removeOverlay({ id: slOverlayId })
+  if (tpOverlayId) klineChart?.removeOverlay({ id: tpOverlayId })
+  entryOverlayId = null
+  slOverlayId = null
+  tpOverlayId = null
 
-  // 3. 重置时间轴
-  chart?.timeScale().resetTimeScale()
+  // 2. 清空旧数据防止坐标轴跨度被拉扯
+  klineChart?.resetData()
 
-  // 4. 加载新标的蜡烛并重塑缩放
+  // 3. 加载新标的蜡烛并滚动到最右侧
   loadCandles(false, true)
 }
 
-// 调价
-function adjustSL(deltaPercent: number) {
-  if (!simMode.value) simMode.value = true
-  const cur = simStopLoss.value || liveStopLoss.value
-  const step = cur * deltaPercent
-  simStopLoss.value = Number((cur + step).toFixed(4))
-  updateTradingPriceLines()
-}
-
-function adjustTP(deltaPercent: number) {
-  if (!simMode.value) simMode.value = true
-  const cur = simTakeProfit.value || liveTakeProfit.value
-  const step = cur * deltaPercent
-  simTakeProfit.value = Number((cur + step).toFixed(4))
-  updateTradingPriceLines()
-}
-
-function initSimulation() {
-  simStopLoss.value = Number(liveStopLoss.value.toFixed(4))
-  simTakeProfit.value = Number(liveTakeProfit.value.toFixed(4))
-  updateTradingPriceLines()
-}
-
-function resetSimulation() {
-  initSimulation()
+// 切换周期
+function selectPeriod(p: any) {
+  if (p.id === currentPeriod.value) return
+  currentPeriod.value = p.id
+  klineChart?.setPeriod({ type: p.type, span: p.span })
+  loadCandles(false, true)
 }
 
 function copySimulationSummary() {
-  const m = riskRewardMetrics.value
-  const text = `【R20 视觉风控测算】\n标的: ${currentSymbol.value}-USDT-SWAP\n方向: ${
-    liveSide.value === 'long' ? 'BUY_LONG 多头' : 'SELL_SHORT 空头'
-  }\n入场价: $${m.entry.toFixed(2)}\n止损线 (SL): $${m.sl.toFixed(2)} (${m.atrMultiple.toFixed(2)}x ATR)\n止盈线 (TP): $${m.tp.toFixed(2)}\n预期盈亏比: ${m.rrRatio.toFixed(2)}:1 ${
-    m.isRrCompliant ? '✅达标' : '⚠️不足2.0'
-  }\n预期收益: +$${m.estProfitUsd.toFixed(2)} (${m.rewardPct.toFixed(1)}%)\n最大风险: -$${m.estRiskUsd.toFixed(2)} (${m.riskPct.toFixed(1)}%)`
-  navigator.clipboard.writeText(text)
-  copied.value = true
-  setTimeout(() => {
-    copied.value = false
-  }, 2000)
-}
-
-function autoSelectFirstActiveSymbol() {
-  if (props.initialSymbol && availableSymbols.value.includes(props.initialSymbol.toUpperCase())) {
-    currentSymbol.value = props.initialSymbol.toUpperCase()
-    return
-  }
-  const pos = store.positions[0]
-  if (pos) {
-    const sym = pos.name || pos.instId?.split('-')[0]
-    if (sym && availableSymbols.value.includes(sym.toUpperCase())) {
-      currentSymbol.value = sym.toUpperCase()
-      return
-    }
-  }
-  if (availableSymbols.value.length > 0) {
-    currentSymbol.value = availableSymbols.value[0]
-  }
-}
-
-watch(() => props.initialSymbol, (val) => {
-  if (val && val.toUpperCase() !== currentSymbol.value && availableSymbols.value.includes(val.toUpperCase())) {
-    selectSymbol(val.toUpperCase())
-  }
-})
-
-watch(availableSymbols, (symbols) => {
-  if (symbols.length > 0 && !symbols.includes(currentSymbol.value)) {
-    currentSymbol.value = symbols[0]
-    loadCandles()
-  }
-})
-
-watch(() => theme.value, () => {
-  nextTick(() => {
-    initTradingViewChart()
+  const text = `【R20 风控测算】${currentSymbol.value} 入场:${effectiveEntry.value} SL:${effectiveSL.value} TP:${effectiveTP.value} R:R=${riskRewardMetrics.value.rrRatio.toFixed(2)}:1`
+  navigator.clipboard.writeText(text).then(() => {
+    copied.value = true
+    setTimeout(() => {
+      copied.value = false
+    }, 2000)
   })
+}
+
+// 监听主题与外部持仓变化
+watch(isDark, () => {
+  klineChart?.setStyles(getChartStyles())
 })
 
-// 多指标共存监听
-watch([indMA, indBOLL, indVOL], () => {
-  renderChartData()
+watch([() => activePosition.value, () => activeOrder.value], () => {
+  updatePriceLines()
 })
+
+let timer: any = null
+let countdownTimer: any = null
+
+function handleClickOutside(e: MouseEvent) {
+  const target = e.target as HTMLElement
+  if (!target.closest('.indicator-dropdown-container')) {
+    showIndicatorMenu.value = false
+  }
+}
 
 onMounted(() => {
-  autoSelectFirstActiveSymbol()
+  const initSym = props.initialSymbol || props.symbol
+  if (initSym) currentSymbol.value = initSym.toUpperCase()
+  document.addEventListener('click', handleClickOutside)
   nextTick(() => {
-    initTradingViewChart()
-    loadCandles()
-
-    if (chartContainerRef.value) {
-      resizeObserver = new ResizeObserver((entries) => {
-        if (!entries || entries.length === 0) return
-        const { width, height } = entries[0].contentRect
-        if (chart && width > 0 && height > 0) {
-          chart.applyOptions({ width, height })
-        }
-      })
-      resizeObserver.observe(chartContainerRef.value)
-    }
+    initChart()
+    // 3s 静默增量拉取，保证数据绝对准确对齐
+    timer = setInterval(() => {
+      loadCandles(true, false)
+    }, 3000)
+    countdownTimer = setInterval(updateCountdown, 1000)
   })
-
-  // 3秒静默轮询 + 1秒盘口跳动
-  pollTimer = setInterval(() => {
-    if (typeof document !== 'undefined' && !document.hidden) {
-      loadCandles(true)
-    }
-  }, 3000)
-  tickTimer = setInterval(updateLiveTick, 1000)
 })
 
 onUnmounted(() => {
-  if (resizeObserver) resizeObserver.disconnect()
-  if (pollTimer) clearInterval(pollTimer)
-  if (tickTimer) clearInterval(tickTimer)
-  if (chart) {
-    chart.remove()
-    chart = null
+  document.removeEventListener('click', handleClickOutside)
+  if (timer) clearInterval(timer)
+  if (countdownTimer) clearInterval(countdownTimer)
+  if (chartContainer.value) {
+    disposeKLineChart(chartContainer.value)
+    klineChart = null
   }
-})
-
-defineExpose({
-  selectSymbol,
-  loadCandles,
 })
 </script>
 
 <template>
   <div
-    class="rounded-xl border transition-all shadow-xs overflow-hidden"
+    class="flex flex-col border rounded-xl overflow-hidden shadow-xs transition-all select-none"
     style="background-color: var(--bg-card); border-color: var(--border-subtle);"
   >
-    <!-- Top Bar: 动态自动读取系统标的 + 周期切换 (OKX 极简干净风) -->
+    <!-- Top Bar: 标的切换、周期选择与指标下拉工作台 -->
     <div
-      class="px-3 py-2 sm:px-4 sm:py-2.5 border-b flex flex-wrap items-center justify-between gap-2 text-xs font-mono"
-      style="border-color: var(--border-subtle); background-color: var(--bg-card-subtle);"
+      class="p-2 sm:p-3 border-b flex flex-wrap items-center justify-between gap-2"
+      style="border-color: var(--border-subtle);"
     >
-      <!-- 动态标的横滑栏 (100% 自动读取系统真实设置标的) -->
-      <div class="flex items-center space-x-1 sm:space-x-1.5 overflow-x-auto py-0.5 max-w-full">
+      <!-- 标的按钮组 -->
+      <div class="flex items-center space-x-1.5 overflow-x-auto max-w-full pb-0.5 sm:pb-0 scrollbar-none">
         <button
           v-for="sym in availableSymbols"
           :key="sym"
           @click="selectSymbol(sym)"
-          class="px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer border flex items-center space-x-1 shrink-0"
+          class="h-7 px-2.5 rounded-lg text-xs font-mono font-bold transition-all shrink-0 cursor-pointer flex items-center space-x-1"
           :style="currentSymbol === sym
-            ? { backgroundColor: 'var(--color-brand-bg)', borderColor: 'var(--color-brand-border)', color: 'var(--color-brand)' }
-            : { backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }"
+            ? { backgroundColor: 'var(--color-brand-bg)', color: 'var(--color-brand)', border: '1px solid var(--color-brand-border)' }
+            : { backgroundColor: 'var(--bg-badge)', color: 'var(--text-muted)', border: '1px solid transparent' }"
         >
           <span
-            v-if="store.positions.some((p: any) => p.name?.toUpperCase() === sym || p.instId?.toUpperCase().startsWith(sym))"
-            class="w-1.5 h-1.5 rounded-full"
-            :class="store.positions.find((p: any) => p.name?.toUpperCase() === sym || p.instId?.toUpperCase().startsWith(sym))?.side === 'long' ? 'bg-emerald-500' : 'bg-rose-500'"
-            title="持有活动持仓"
+            v-if="store.positions.some(p => p.instId?.startsWith(sym) || p.name === sym)"
+            class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse mr-0.5"
           ></span>
           <span>{{ sym }}</span>
         </button>
       </div>
 
-      <!-- 周期与多指标独立开关 (支持同时开启，为未来视觉LLM形态推演打造) -->
-      <div class="flex items-center space-x-1.5 shrink-0">
+      <!-- 周期、指标下拉与试算工具 -->
+      <div class="flex items-center space-x-1.5 sm:space-x-2 shrink-0 font-mono">
         <!-- 周期切换 -->
-        <div
-          class="flex items-center p-0.5 rounded-lg border text-[11px]"
-          style="background-color: var(--bg-card); border-color: var(--border-subtle);"
-        >
+        <div class="flex items-center rounded-lg p-0.5 border text-xs" style="background-color: var(--bg-app); border-color: var(--border-subtle);">
           <button
             v-for="p in periods"
             :key="p.id"
-            @click="currentPeriod = p.id; loadCandles(false, true)"
+            @click="selectPeriod(p)"
             class="h-6 px-2 rounded-md font-bold transition-all cursor-pointer"
             :style="currentPeriod === p.id
               ? { backgroundColor: 'var(--bg-badge)', color: 'var(--text-main)' }
@@ -968,58 +988,106 @@ defineExpose({
           </button>
         </div>
 
-        <!-- 多指标独立开关胶囊 (可同时开启共存) -->
-        <div class="flex items-center space-x-1 p-0.5 rounded-lg border text-[11px] font-mono font-bold" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
+        <!-- 专业级指标分类下拉菜单 (Indicators Dropdown) -->
+        <div class="relative indicator-dropdown-container">
           <button
-            @click="indMA = !indMA"
-            class="h-6 px-2 rounded transition-colors cursor-pointer"
-            :style="indMA
-              ? { backgroundColor: 'var(--bg-badge)', color: '#F59E0B' }
-              : { color: 'var(--text-faint)' }"
-            title="主图移动平均线 MA5/MA10/MA20"
+            @click="showIndicatorMenu = !showIndicatorMenu"
+            class="h-6.5 px-2.5 rounded-lg text-xs font-mono border flex items-center space-x-1.5 transition-all cursor-pointer font-bold"
+            :style="showIndicatorMenu || activeIndicatorCount > 0
+              ? { backgroundColor: 'var(--color-brand-bg)', borderColor: 'var(--color-brand-border)', color: 'var(--color-brand)' }
+              : { backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }"
           >
-            MA
+            <SlidersHorizontal class="w-3 h-3" />
+            <span>{{ isEn ? 'Indicators' : '指标' }}</span>
+            <span
+              v-if="activeIndicatorCount > 0"
+              class="w-4 h-4 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] flex items-center justify-center font-bold"
+            >
+              {{ activeIndicatorCount }}
+            </span>
+            <ChevronDown class="w-3 h-3 transition-transform" :class="showIndicatorMenu ? 'rotate-180' : ''" />
           </button>
-          <button
-            @click="indBOLL = !indBOLL"
-            class="h-6 px-2 rounded transition-colors cursor-pointer"
-            :style="indBOLL
-              ? { backgroundColor: 'var(--bg-badge)', color: '#FB923C' }
-              : { color: 'var(--text-faint)' }"
-            title="主图布林带 BOLL(20,2)"
+
+          <!-- 下拉菜单浮层 -->
+          <div
+            v-if="showIndicatorMenu"
+            class="absolute right-0 top-8 z-50 w-72 p-3 rounded-xl border shadow-xl flex flex-col space-y-3 font-mono text-xs backdrop-blur-md"
+            style="background-color: var(--bg-card); border-color: var(--border-medium);"
           >
-            BOLL
-          </button>
-          <button
-            @click="indVOL = !indVOL"
-            class="h-6 px-2 rounded transition-colors cursor-pointer"
-            :style="indVOL
-              ? { backgroundColor: 'var(--bg-badge)', color: '#10B981' }
-              : { color: 'var(--text-faint)' }"
-            title="副图成交量 VOL (放量/缩量高对比度柱)"
-          >
-            VOL
-          </button>
+            <!-- 板块 1: 主图指标 (叠在蜡烛图上) -->
+            <div>
+              <div class="flex items-center justify-between pb-1.5 border-b mb-1.5" style="border-color: var(--border-subtle);">
+                <span class="text-[11px] font-bold uppercase tracking-wider text-amber-400 flex items-center space-x-1">
+                  <span>{{ isEn ? 'Main Chart Overlays' : '主图叠加指标' }}</span>
+                </span>
+                <span class="text-[9px]" style="color: var(--text-faint);">{{ isEn ? 'On Candlestick' : '主蜡烛同屏' }}</span>
+              </div>
+              <div class="grid grid-cols-2 gap-1.5">
+                <button
+                  v-for="ind in mainIndicators"
+                  :key="ind.key"
+                  @click="toggleIndicatorKey(ind.key)"
+                  class="p-1.5 rounded-lg border text-left flex items-center justify-between transition-all cursor-pointer"
+                  :style="activeIndicators[ind.key]
+                    ? { backgroundColor: 'var(--color-brand-bg)', borderColor: 'var(--color-brand-border)', color: 'var(--text-main)' }
+                    : { backgroundColor: 'var(--bg-card-subtle)', borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }"
+                >
+                  <div class="flex items-center space-x-1.5 truncate">
+                    <span class="w-2 h-2 rounded-full shrink-0" :style="{ backgroundColor: ind.color }"></span>
+                    <span class="font-bold truncate">{{ ind.label }}</span>
+                  </div>
+                  <Check v-if="activeIndicators[ind.key]" class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                </button>
+              </div>
+            </div>
+
+            <!-- 板块 2: 副图指标 (独立视口窗格) -->
+            <div>
+              <div class="flex items-center justify-between pb-1.5 border-b mb-1.5" style="border-color: var(--border-subtle);">
+                <span class="text-[11px] font-bold uppercase tracking-wider text-emerald-400 flex items-center space-x-1">
+                  <span>{{ isEn ? 'Sub-Window Panes' : '副图震荡指标' }}</span>
+                </span>
+                <span class="text-[9px]" style="color: var(--text-faint);">{{ isEn ? 'Independent Panes' : '独立高宽窗口' }}</span>
+              </div>
+              <div class="grid grid-cols-2 gap-1.5">
+                <button
+                  v-for="ind in subIndicators"
+                  :key="ind.key"
+                  @click="toggleIndicatorKey(ind.key)"
+                  class="p-1.5 rounded-lg border text-left flex items-center justify-between transition-all cursor-pointer"
+                  :style="activeIndicators[ind.key]
+                    ? { backgroundColor: 'var(--color-brand-bg)', borderColor: 'var(--color-brand-border)', color: 'var(--text-main)' }
+                    : { backgroundColor: 'var(--bg-card-subtle)', borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }"
+                >
+                  <div class="flex items-center space-x-1.5 truncate">
+                    <span class="w-2 h-2 rounded-full shrink-0" :style="{ backgroundColor: ind.color }"></span>
+                    <span class="font-bold truncate">{{ ind.label }}</span>
+                  </div>
+                  <Check v-if="activeIndicators[ind.key]" class="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- 调价平移试算 -->
         <button
-          @click="simMode = !simMode; if (simMode) initSimulation(); updateTradingPriceLines()"
+          @click="simMode = !simMode; if (simMode) initSimulation(); updatePriceLines()"
           class="h-6.5 px-2 rounded-lg text-xs font-mono border flex items-center space-x-1 transition-all cursor-pointer font-bold"
           :style="simMode
             ? { backgroundColor: 'var(--color-brand-bg)', borderColor: 'var(--color-brand-border)', color: 'var(--color-brand)' }
             : { backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }"
-          :title="simMode ? '退出试算' : '平移试算 R:R'"
+          :title="simMode ? (isEn ? 'Exit' : '退出试算') : (isEn ? 'Simulate' : '平移试算 R:R')"
         >
           <Sliders class="w-3 h-3" />
-          <span class="hidden sm:inline">{{ simMode ? '退出' : '试算' }}</span>
+          <span class="hidden sm:inline">{{ simMode ? (isEn ? 'Exit' : '退出') : t('chart.simulateBtn', '试算') }}</span>
         </button>
 
         <button
-          @click="loadCandles()"
+          @click="loadCandles(false, true)"
           class="h-6.5 w-6.5 rounded-lg border flex items-center justify-center transition-colors cursor-pointer"
           style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-muted);"
-          title="刷新行情"
+          :title="isEn ? 'Refresh' : '刷新行情'"
         >
           <RefreshCw class="w-3 h-3" :class="isLoading ? 'animate-spin' : ''" />
         </button>
@@ -1046,165 +1114,140 @@ defineExpose({
         <span class="text-[10px]" style="color: var(--text-faint);">1H ATR: ${{ currentAtr.toFixed(1) }}</span>
       </div>
 
-      <!-- Hover OHLC 读数 或 周期倒计时 -->
-      <div v-if="hoverCandle" class="flex items-center space-x-2 text-[10px] num-tabular" style="color: var(--text-muted);">
-        <span>O: <strong style="color: var(--text-main);">${{ hoverCandle.open.toFixed(1) }}</strong></span>
-        <span>H: <strong class="text-emerald-400">${{ hoverCandle.high.toFixed(1) }}</strong></span>
-        <span>L: <strong class="text-rose-400">${{ hoverCandle.low.toFixed(1) }}</strong></span>
-        <span>C: <strong style="color: var(--text-main);">${{ hoverCandle.close.toFixed(1) }}</strong></span>
-      </div>
-      <div v-else class="flex items-center space-x-2 text-[10px] font-mono" style="color: var(--text-muted);">
+      <div class="flex items-center space-x-2 text-[10px] font-mono" style="color: var(--text-muted);">
         <span>{{ t('chart.countdownLabel', 'K线结线倒计时') }}:</span>
         <span class="font-bold text-amber-400 num-tabular">{{ candleCountdown }}</span>
       </div>
     </div>
 
-    <!-- TradingView Lightweight Chart 容器 (OKX 极简干净风格，蜡烛实体大，PC填满) -->
+    <!-- 图表挂载核心容器 (纯 Canvas 渲染，自适应铺满) -->
     <div
-      ref="chartContainerRef"
-      class="relative w-full h-[420px] sm:h-[480px] 2xl:h-[540px] select-none"
-      style="background-color: var(--bg-card);"
-    >
-      <!-- Top Left Active Indicators Legend (彻底去除阴影遮罩与深色背景，亮暗双模纯净无遮挡) -->
-      <div class="absolute top-2 left-3 flex flex-wrap items-center gap-3 text-[10px] font-mono pointer-events-none z-10 select-none">
-        <span v-if="indMA" class="flex items-center space-x-1.5">
-          <span class="text-amber-500 font-bold">MA5</span>
-          <span class="text-sky-500 font-bold">MA10</span>
-          <span class="text-purple-500 font-bold">MA20</span>
-        </span>
-        <span v-if="indBOLL" class="flex items-center space-x-1.5">
-          <span class="text-emerald-500 font-bold">BOLL(20,2)</span>
-        </span>
-        <span v-if="indVOL" class="flex items-center space-x-1.5">
-          <span class="text-emerald-500 font-bold">VOL</span>
-          <span class="text-amber-500 font-bold">MA5</span>
-        </span>
-      </div>
-    </div>
+      ref="chartContainer"
+      class="w-full relative"
+      :style="{ height: fullscreen ? 'calc(100vh - 260px)' : '480px' }"
+    ></div>
 
-    <!-- Bottom Interactive Risk / Reward (R:R) Simulator Console (真实科学金额) -->
+    <!-- 底部风控测算控制台 (平移试算展开时展现) -->
     <div
-      class="p-3 sm:p-4 border-t transition-colors"
+      v-if="simMode"
+      class="border-t p-3 sm:p-4 space-y-3 transition-all font-mono"
       style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);"
     >
-      <div class="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3">
-        <!-- 四项真实核心风控数据 -->
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 w-full lg:w-auto">
-          <!-- 期望盈亏比 -->
-          <div
-            class="p-2.5 rounded-lg border font-mono flex flex-col justify-between"
-            :style="{
-              backgroundColor: riskRewardMetrics.isRrCompliant ? 'var(--color-up-bg)' : 'var(--color-warn-bg)',
-              borderColor: riskRewardMetrics.isRrCompliant ? 'var(--color-up-border)' : 'var(--color-warn-border)',
-            }"
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div class="flex items-center space-x-2">
+          <Zap class="w-4 h-4 text-amber-400 shrink-0" />
+          <span class="text-xs font-bold" style="color: var(--text-main);">
+            {{ t('chart.simulateTitle', '科学预期盈亏比测算控制台') }}
+          </span>
+          <span
+            class="text-[10px] px-2 py-0.5 rounded border font-bold"
+            :class="riskRewardMetrics.hasRealPosition ? 'text-indigo-400 bg-indigo-500/10 border-indigo-500/30' : 'text-slate-400 bg-slate-500/10 border-slate-500/30'"
           >
-            <span class="text-[10px] uppercase font-bold" :style="{ color: riskRewardMetrics.isRrCompliant ? 'var(--color-up)' : 'var(--color-warn)' }">
-              {{ riskRewardMetrics.isRrCompliant ? (isEn ? '✅ Expected R:R' : '✅ 期望盈亏比 (R:R)') : (isEn ? '⚠️ Low R:R (<2.0)' : '⚠️ 盈亏比不足 2.0') }}
-            </span>
-            <div class="flex items-baseline space-x-1 mt-0.5">
-              <span class="text-base sm:text-lg font-black num-tabular" :style="{ color: riskRewardMetrics.isRrCompliant ? 'var(--color-up)' : 'var(--color-warn)' }">
-                {{ riskRewardMetrics.rrRatio.toFixed(2) }} : 1
-              </span>
-              <span class="text-[9px] opacity-70" :style="{ color: riskRewardMetrics.isRrCompliant ? 'var(--color-up)' : 'var(--color-warn)' }">
-                {{ isEn ? 'Min 2.0' : '底线 2.0' }}
-              </span>
-            </div>
-          </div>
+            {{ riskRewardMetrics.hasRealPosition ? t('chart.holdingModeNotice', '实盘持仓联动模式') : t('chart.speculativeNotice', '标准观望测算模式') }}
+          </span>
+        </div>
+      </div>
 
-          <!-- ATR 呼吸空间 -->
-          <div
-            class="p-2.5 rounded-lg border font-mono flex flex-col justify-between"
-            style="background-color: var(--bg-card); border-color: var(--border-subtle);"
-          >
-            <span class="text-[10px] uppercase font-bold" style="color: var(--text-muted);">
-              {{ isEn ? 'SL Buffer (ATR)' : '止损呼吸空间 (ATR)' }}
+      <!-- 四维测算卡片 -->
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-2 text-xs">
+        <div
+          class="p-2.5 rounded-lg border font-mono flex flex-col justify-between"
+          :style="{
+            backgroundColor: riskRewardMetrics.isRrCompliant ? 'var(--color-up-bg)' : 'var(--color-warn-bg)',
+            borderColor: riskRewardMetrics.isRrCompliant ? 'var(--color-up-border)' : 'var(--color-warn-border)',
+          }"
+        >
+          <span class="text-[10px] uppercase font-bold" :style="{ color: riskRewardMetrics.isRrCompliant ? 'var(--color-up)' : 'var(--color-warn)' }">
+            {{ riskRewardMetrics.isRrCompliant ? (isEn ? '✅ Expected R:R' : '✅ 期望盈亏比 (R:R)') : (isEn ? '⚠️ Low R:R (<2.0)' : '⚠️ 盈亏比不足 2.0') }}
+          </span>
+          <div class="flex items-baseline space-x-1 mt-0.5">
+            <span class="text-base sm:text-lg font-black num-tabular" :style="{ color: riskRewardMetrics.isRrCompliant ? 'var(--color-up)' : 'var(--color-warn)' }">
+              {{ riskRewardMetrics.rrRatio.toFixed(2) }} : 1
             </span>
-            <div class="flex items-baseline space-x-1 mt-0.5">
-              <span
-                class="text-base sm:text-lg font-black num-tabular"
-                :style="{ color: riskRewardMetrics.isAtrOptimal ? 'var(--color-brand)' : 'var(--color-warn)' }"
-              >
-                {{ riskRewardMetrics.atrMultiple.toFixed(2) }}x
-              </span>
-              <span class="text-[9px] font-bold" :style="{ color: riskRewardMetrics.isAtrOptimal ? 'var(--color-brand)' : 'var(--color-warn)' }">
-                {{ riskRewardMetrics.isAtrOptimal ? (isEn ? 'Noise Buffer' : '防插针区间') : (isEn ? 'Deviates 1.8~2.2' : '偏离1.8~2.2') }}
-              </span>
-            </div>
-          </div>
-
-          <!-- 真实预期收益金额 -->
-          <div
-            class="p-2.5 rounded-lg border font-mono flex flex-col justify-between"
-            style="background-color: var(--bg-card); border-color: var(--border-subtle);"
-          >
-            <span class="text-[10px] uppercase font-bold text-emerald-500">
-              {{ isEn ? 'Target Profit (TP)' : '预期收益目标 (TP)' }}
+            <span class="text-[9px] opacity-70" :style="{ color: riskRewardMetrics.isRrCompliant ? 'var(--color-up)' : 'var(--color-warn)' }">
+              {{ isEn ? 'Min 2.0' : '底线 2.0' }}
             </span>
-            <div class="flex items-baseline space-x-1 mt-0.5">
-              <span class="text-base sm:text-lg font-black text-emerald-400 num-tabular">
-                +${{ riskRewardMetrics.estProfitUsd.toFixed(2) }}
-              </span>
-              <span class="text-[9px] text-emerald-400 font-bold">
-                ({{ riskRewardMetrics.rewardPct.toFixed(1) }}%)
-              </span>
-            </div>
-          </div>
-
-          <!-- 真实最大风险金额 -->
-          <div
-            class="p-2.5 rounded-lg border font-mono flex flex-col justify-between"
-            style="background-color: var(--bg-card); border-color: var(--border-subtle);"
-          >
-            <span class="text-[10px] uppercase font-bold text-rose-500">
-              {{ isEn ? 'Max Risk (SL)' : '最大硬风控风险 (SL)' }}
-            </span>
-            <div class="flex items-baseline space-x-1 mt-0.5">
-              <span class="text-base sm:text-lg font-black text-rose-400 num-tabular">
-                -${{ riskRewardMetrics.estRiskUsd.toFixed(2) }}
-              </span>
-              <span class="text-[9px] text-rose-400 font-bold">
-                ({{ riskRewardMetrics.riskPct.toFixed(1) }}%)
-              </span>
-            </div>
           </div>
         </div>
 
-        <!-- 调价与复制操作区 -->
-        <div class="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-end">
-          <div v-if="simMode" class="flex flex-wrap items-center gap-1.5 text-xs font-mono">
-            <div class="flex items-center space-x-1 bg-rose-950/20 border border-rose-900/40 px-2 py-1 rounded-lg text-[11px]">
-              <span class="text-rose-400 font-bold">SL:</span>
-              <button @click="adjustSL(-0.005)" class="px-1 py-0.5 bg-rose-900/40 rounded hover:bg-rose-800/60 cursor-pointer text-rose-300">-0.5%</button>
-              <button @click="adjustSL(0.005)" class="px-1 py-0.5 bg-rose-900/40 rounded hover:bg-rose-800/60 cursor-pointer text-rose-300">+0.5%</button>
-            </div>
-
-            <div class="flex items-center space-x-1 bg-emerald-950/20 border border-emerald-900/40 px-2 py-1 rounded-lg text-[11px]">
-              <span class="text-emerald-400 font-bold">TP:</span>
-              <button @click="adjustTP(-0.01)" class="px-1 py-0.5 bg-emerald-900/40 rounded hover:bg-emerald-800/60 cursor-pointer text-emerald-300">-1%</button>
-              <button @click="adjustTP(0.01)" class="px-1 py-0.5 bg-emerald-900/40 rounded hover:bg-emerald-800/60 cursor-pointer text-emerald-300">+1%</button>
-            </div>
-
-            <button
-              @click="resetSimulation"
-              class="px-2.5 py-1 rounded-lg border text-[11px] font-mono flex items-center space-x-1 cursor-pointer transition-colors"
-              style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-muted);"
-              :title="isEn ? 'Reset' : '重置点位'"
+        <div
+          class="p-2.5 rounded-lg border font-mono flex flex-col justify-between"
+          style="background-color: var(--bg-card); border-color: var(--border-subtle);"
+        >
+          <span class="text-[10px] uppercase font-bold" style="color: var(--text-muted);">
+            {{ isEn ? 'SL Buffer (ATR)' : '止损呼吸空间 (ATR)' }}
+          </span>
+          <div class="flex items-baseline space-x-1 mt-0.5">
+            <span
+              class="text-base sm:text-lg font-black num-tabular"
+              :style="{ color: riskRewardMetrics.isAtrOptimal ? 'var(--color-brand)' : 'var(--color-warn)' }"
             >
-              <RotateCcw class="w-3 h-3" />
-              <span>{{ isEn ? 'Reset' : '复位' }}</span>
-            </button>
+              {{ riskRewardMetrics.atrMultiple.toFixed(2) }}x
+            </span>
+            <span class="text-[9px] font-bold" :style="{ color: riskRewardMetrics.isAtrOptimal ? 'var(--color-brand)' : 'var(--color-warn)' }">
+              {{ riskRewardMetrics.isAtrOptimal ? (isEn ? 'Noise Buffer' : '防插针区间') : (isEn ? 'Deviates 1.8~2.2' : '偏离1.8~2.2') }}
+            </span>
           </div>
+        </div>
 
+        <div
+          class="p-2.5 rounded-lg border font-mono flex flex-col justify-between"
+          style="background-color: var(--bg-card); border-color: var(--border-subtle);"
+        >
+          <span class="text-[10px] uppercase font-bold text-emerald-500">
+            {{ isEn ? 'Target Profit (TP)' : '预期收益目标 (TP)' }}
+          </span>
+          <div class="flex items-baseline space-x-1 mt-0.5">
+            <span class="text-base sm:text-lg font-black text-emerald-400 num-tabular">
+              +${{ riskRewardMetrics.estProfitUsd.toFixed(2) }}
+            </span>
+            <span class="text-[9px] text-emerald-400 font-bold">
+              ({{ riskRewardMetrics.rewardPct.toFixed(1) }}%)
+            </span>
+          </div>
+        </div>
+
+        <div
+          class="p-2.5 rounded-lg border font-mono flex flex-col justify-between"
+          style="background-color: var(--bg-card); border-color: var(--border-subtle);"
+        >
+          <span class="text-[10px] uppercase font-bold text-rose-500">
+            {{ isEn ? 'Max Risk (SL)' : '最大硬风控风险 (SL)' }}
+          </span>
+          <div class="flex items-baseline space-x-1 mt-0.5">
+            <span class="text-base sm:text-lg font-black text-rose-400 num-tabular">
+              -${{ riskRewardMetrics.estRiskUsd.toFixed(2) }}
+            </span>
+            <span class="text-[9px] text-rose-400 font-bold">
+              ({{ riskRewardMetrics.riskPct.toFixed(1) }}%)
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 调整滑动条与按钮 -->
+      <div class="flex flex-wrap items-center justify-between gap-3 pt-1">
+        <div class="flex items-center space-x-2">
           <button
-            @click="copySimulationSummary"
-            class="btn-admin-secondary text-xs font-mono flex items-center space-x-1.5"
-            :title="isEn ? 'Copy risk metrics' : '复制风控测算契约'"
+            @click="resetSimulation"
+            class="px-2.5 py-1 rounded-lg border text-[11px] font-mono flex items-center space-x-1 cursor-pointer transition-colors"
+            style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-muted);"
+            :title="isEn ? 'Reset' : '重置点位'"
           >
-            <Check v-if="copied" class="w-3.5 h-3.5 text-emerald-400" />
-            <Copy v-else class="w-3.5 h-3.5" />
-            <span>{{ copied ? (isEn ? 'Copied' : '已复制') : (isEn ? 'Copy Params' : '复制风控参数') }}</span>
+            <RotateCcw class="w-3 h-3" />
+            <span>{{ isEn ? 'Reset' : '复位' }}</span>
           </button>
         </div>
+
+        <button
+          @click="copySimulationSummary"
+          class="px-3 py-1 rounded-lg border text-xs font-mono font-bold flex items-center space-x-1.5 cursor-pointer transition-all"
+          style="background-color: var(--color-brand-bg); border-color: var(--color-brand-border); color: var(--color-brand);"
+        >
+          <Check v-if="copied" class="w-3.5 h-3.5 text-emerald-400" />
+          <Copy v-else class="w-3.5 h-3.5" />
+          <span>{{ copied ? (isEn ? 'Copied' : '已复制') : (isEn ? 'Copy Params' : '复制风控参数') }}</span>
+        </button>
       </div>
     </div>
   </div>
