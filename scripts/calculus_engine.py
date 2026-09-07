@@ -70,6 +70,17 @@ def classify_regime(velocity: float, acceleration: float, impulse: float, jerk: 
     return "BEAR_STABLE"
 
 
+def classify_power_regime(power: float, curvature: float, velocity: float, acceleration: float) -> str:
+    """Classify physical kinetic flux and power state based on power and curvature."""
+    if curvature >= 1.5:
+        return "HIGH_CURVATURE_INFLECTION"
+    if power > 0.12 and abs(velocity) > 0.20:
+        return "KINETIC_ACCELERATING"
+    if power < -0.12:
+        return "KINETIC_EXHAUSTION"
+    return "STEADY_FLUX"
+
+
 def classify_integral_regime(energy: float, deviation_area: float) -> str:
     """Classify aggregate path-energy state from aggregate integral values."""
     if energy > 0.8 and deviation_area > 0.5:
@@ -342,6 +353,11 @@ def calculate_calculus(
     quality = min(1.0, max(0.0, 0.45 + min(0.35, len(prices) / 100.0) + (0.20 if volatility > 1e-5 else 0.0)))
     regime = classify_regime(velocity, acceleration, impulse, jerk)
 
+    # Curvature (kappa) and Kinetic Power Flux (Phi = v * a)
+    curvature = abs(acceleration) / math.pow(1.0 + velocity ** 2, 1.5)
+    power = velocity * acceleration
+    power_regime = classify_power_regime(power, curvature, velocity, acceleration)
+
     return {
         "valid": True,
         "sample_size": len(prices),
@@ -349,6 +365,9 @@ def calculate_calculus(
         "acceleration": round(acceleration, 4),
         "impulse": round(impulse, 4),
         "jerk": round(jerk, 4),
+        "curvature": round(curvature, 4),
+        "power": round(power, 4),
+        "power_regime": power_regime,
         "atr_pct": round(atr_pct * 100.0, 4),
         "volatility": round(volatility, 6),
         "regime": regime,
@@ -390,6 +409,9 @@ def calculate_multi_timeframe(candles_by_tf: Dict[str, Sequence[Sequence[float]]
     velocity = sum(f["velocity"] for f in valid) / len(valid)
     acceleration = sum(f["acceleration"] for f in valid) / len(valid)
     jerk = max(abs(f["jerk"]) for f in valid)
+    curvature = sum(f.get("curvature", 0.0) for f in valid) / len(valid)
+    power = sum(f.get("power", 0.0) for f in valid) / len(valid)
+    power_regime = classify_power_regime(power, curvature, velocity, acceleration)
     direction_votes = sum(f["direction"] for f in valid)
 
     if direction_votes >= 2 and acceleration > 0.05:
@@ -429,6 +451,9 @@ def calculate_multi_timeframe(candles_by_tf: Dict[str, Sequence[Sequence[float]]
         "acceleration": round(acceleration, 4),
         "impulse": round(impulse, 4),
         "max_abs_jerk": round(jerk, 4),
+        "curvature": round(curvature, 4),
+        "power": round(power, 4),
+        "power_regime": power_regime,
         "regime": regime,
         "quality": round(sum(f["quality"] for f in valid) / len(valid), 3),
         # Unified Definite Integrals

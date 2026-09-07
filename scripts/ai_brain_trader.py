@@ -408,10 +408,14 @@ SYSTEM_PROMPT = """你是 R20 Quantum Trader 的首席 AI 交易官，负责 1H~
 
 【核心军规：反割肉·反磨损·选优开单五大铁律（自进化实战深度纠偏）】
 1. 宽止损隔绝杂波：严禁把止损设在 15M/5M 噪音区间！止损距离必须放宽至结构外 **1.8x ~ 2.2x 1H ATR**（或现价外 1.8%~3.0% 安全垫）；宁可把单笔杠杆控制在 2x~3x、保证金控制在 100~200U，也必须给足呼吸空间，绝不给交易所微小插针割肉的机会！
-2. 三阶分层动态利润棘轮（杜绝假保本倒贴手续费）：
-   - 阶梯 1（浮盈 < 1.0R）：保持原 1.8x~2.2x ATR 宽止损呼吸空间，给波段展开充分时间，严禁在微小浮盈时过早移损保本，杜绝频繁被轻微回踩扫损（白亏 2 笔手续费）；
-   - 阶梯 2（浮盈 ≥ 1.0R 且 ROI ≥ +1.2%）：坚决输出 UPDATE_SL 将止损上移至开仓成本位（保本位 BE），锁死下限风险，最坏结果也是 0 亏损出场；
-   - 阶梯 3（浮盈 ≥ 1.6R）：坚决输出 UPDATE_SL 将止损上移锁定至成本上方 +0.6R，锁定利润胜果，杜绝丰厚浮盈大幅回吐！
+2. 反浮盈回吐·三阶动态棘轮与果断主动止盈（保住利润是高胜率核心，绝不让赚钱单倒亏割肉）：
+   - 阶梯 1（浮盈 < 0.8R）：保持宽止损呼吸空间（1.8x~2.2x 1H ATR），给波段展开充分时间，严禁微小浮盈过早移损被杂波扫损；
+   - 阶梯 2（浮盈 ≥ 0.8R 或 ROI ≥ +1.5%）：坚决输出 UPDATE_SL 将止损上移至开仓成本位 +0.20%（保本位 BE），彻底切断本金风险，立于不败之地；
+   - 阶梯 3（浮盈 ≥ 1.5R 或 ROI ≥ +3.0%）：坚决输出 UPDATE_SL 将止损上移锁定至成本上方至少 +0.6R（保底锁定 35%~50% 扎实波段利润）；
+   - ★主动止盈与回撤防线（坚决杜绝坐过山车倒亏割肉）：
+     ① 峰值回撤硬止盈：若持仓曾达到的最高浮盈（ROI ≥ +2.5% 或 ≥ 1.0R），但当前浮盈已较极值回撤超 35%~45% 且 1H 动能未二次放量突破时，严禁盲目死扛 HOLD！必须果断在 position_management 中输出 CLOSE_MARKET 止盈出场，或紧贴现价 UPDATE_SL 锁定剩余利润！
+     ② 动力学负功率耗散止盈：当持仓处于浮盈状态（ROI ≥ +1.5%），若当前标的 1H 微积分做功功率 Φ = v · a < -0.12（速度与加速度反向耗散）或曲率 κ ≥ 1.5（高位急刹车力竭、长上影假突破受挫）时，坚决输出 CLOSE_MARKET 提前落袋为安，拒绝死等极远挂单！
+     ③ 科学第一阻力止盈：开仓止盈价 take_profit_price 优先锚定在前方关键阻力支撑位（或 1.8~2.2x ATR），有确定性利润优先落袋。
 3. 空仓选优与开单执行纪律（破除盲目懈怠与无序乱开）：
    - 【空仓且存在至少一个合法顺势候选时（符合顺势高胜率形态），强制在候选标的池中选优输出，不得无故放弃合规机会】！市场处于顺势波段时，严禁机械化死板地全盘 WAIT；
    - 只要候选标的符合 4H/1H 顺势结构且 R:R ≥ 2.2，果断在 6 个标的中挑出微积分加速度与概率期望最强的最优项输出 BUY_LONG 或 SELL_SHORT 限价单；
@@ -516,7 +520,7 @@ P3 执行定位：15M K线、盘口与 Maker 限价挂单位置。P3 优化入�
 }
 
 【字段审计说明】：
-- position_management.action 只允许: "HOLD" | "CLOSE_MARKET" | "UPDATE_SL"；action 为 UPDATE_SL 时 suggested_sl_price 填目标价格，否则必须填 0.0；
+- position_management.action 只允许: "HOLD" | "CLOSE_MARKET" | "UPDATE_SL"；触发峰值回撤超 35% 或 1H 负功率衰竭时果断输出 CLOSE_MARKET 止盈；action 为 UPDATE_SL 时 suggested_sl_price 填目标价格，否则必须填 0.0；
 - pending_orders_management.action 只允许: "KEEP" | "CANCEL"；
 - decisions[标的].action 只允许: "BUY_LONG" | "SELL_SHORT" | "WAIT"；action 为 WAIT 时 entry_price/take_profit_price/stop_loss_price 填 0.0；
 - 每个决策的 calculus_dynamics 与 math_prob_rationale 必须明确引用具体 1H v, a 与概率数值，严禁只写空泛定性词句！"""
@@ -549,7 +553,8 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
         calc_line = (
             f"动力学态={calc.get('regime', 'DATA_UNRELIABLE')} | 速度={calc.get('velocity', '--')} "
             f"| 加速度={calc.get('acceleration', '--')} | 累计冲量={calc.get('impulse', '--')} "
-            f"| 冲击变化={calc.get('max_abs_jerk', '--')} | 质量={calc.get('quality', 0)}"
+            f"| 冲击变化={calc.get('max_abs_jerk', '--')} | 曲率κ={calc.get('curvature', '--')} "
+            f"| 功率Φ={calc.get('power', '--')} | 功率态={calc.get('power_regime', '--')} | 质量={calc.get('quality', 0)}"
         )
         integral_line = (
             f"多周期净做功积分={d_int.get('energy_integral', 'UNKNOWN')} | 路径偏离面积积分={d_int.get('deviation_area_integral', 'UNKNOWN')} "
@@ -563,13 +568,16 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
         )
         core_math_line = (
             f"1H:v={calc_1h.get('velocity', 'UNKNOWN')},a={calc_1h.get('acceleration', 'UNKNOWN')},"
-            f"j={calc_1h.get('jerk', 'UNKNOWN')},I={calc_1h.get('impulse', 'UNKNOWN')},态={calc_1h.get('regime', 'UNKNOWN')} "
+            f"j={calc_1h.get('jerk', 'UNKNOWN')},I={calc_1h.get('impulse', 'UNKNOWN')},"
+            f"κ={calc_1h.get('curvature', 'UNKNOWN')},Φ={calc_1h.get('power', 'UNKNOWN')},"
+            f"功率态={calc_1h.get('power_regime', 'UNKNOWN')},态={calc_1h.get('regime', 'UNKNOWN')} "
             f"| E={int_1h.get('energy_integral', 'UNKNOWN')},A={int_1h.get('deviation_area_integral', 'UNKNOWN')} "
             f"| P续={prob_1h.get('continuation_prob_pct', 'UNKNOWN')}%,P破={prob_1h.get('breakdown_prob_pct', 'UNKNOWN')}%,"
             f"VaR={prob_1h.get('var_95_pct', 'UNKNOWN')}%,CVaR={prob_1h.get('cvar_95_pct', 'UNKNOWN')}%"
         )
         calc_tf_line = "；".join(
-            f"{tf}:v={v.get('velocity', '--')},a={v.get('acceleration', '--')},I={v.get('impulse', '--')},态={v.get('regime', '--')}"
+            f"{tf}:v={v.get('velocity', '--')},a={v.get('acceleration', '--')},I={v.get('impulse', '--')},"
+            f"κ={v.get('curvature', '--')},Φ={v.get('power', '--')},功率态={v.get('power_regime', '--')},态={v.get('regime', '--')}"
             for tf, v in calc_tfs.items() if isinstance(v, dict)
         )
         info = f"""---------------------------------------------------------
@@ -594,8 +602,39 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
     pos_lines = []
     if active_positions_detail and len(active_positions_detail) > 0:
         for p in active_positions_detail:
+            inst_name = p.get('name') or p.get('instId')
+            side = p.get('side') or p.get('posSide', 'long')
+            raw_side = str(side).strip().lower()
+            pos_qty = safe_float(p.get('pos'))
+            if "long" in raw_side and "short" not in raw_side:
+                direction = "long"
+            elif "short" in raw_side:
+                direction = "short"
+            elif pos_qty > 0:
+                direction = "long"
+            elif pos_qty < 0:
+                direction = "short"
+            else:
+                direction = ""
+            entry_px = safe_float(p.get('avgPx', 0))
+            cur_px = safe_float(p.get('markPx') or p.get('lastPx') or entry_px)
+            hwm = safe_float(p.get('highWaterMark', 0))
+            lwm = safe_float(p.get('lowWaterMark', 0))
+            tp_px = p.get('takeProfitPx', '--')
+            stage_desc = p.get('stage_desc', '持有监控中')
+
+            profit_desc = ""
+            if direction == "long" and hwm > entry_px and entry_px > 0:
+                peak_gain_pct = round((hwm - entry_px) / entry_px * 100, 2)
+                dd_from_peak = round((hwm - cur_px) / (hwm - entry_px) * 100, 1) if hwm > entry_px else 0.0
+                profit_desc = f" | 曾最高到: {hwm} (极值浮盈 +{peak_gain_pct}%, 现已从极值回撤 {dd_from_peak}%)"
+            elif direction == "short" and lwm > 0 and lwm < entry_px and entry_px > 0:
+                peak_gain_pct = round((entry_px - lwm) / entry_px * 100, 2)
+                dd_from_peak = round((cur_px - lwm) / (entry_px - lwm) * 100, 1) if lwm < entry_px else 0.0
+                profit_desc = f" | 曾最低到: {lwm} (极值浮盈 +{peak_gain_pct}%, 现已从极值回撤 {dd_from_peak}%)"
+
             pos_lines.append(
-                f"- 标的: {p.get('name') or p.get('instId')} | 方向: {p.get('side')} {p.get('lever', '3')}x | 开仓均价: {p.get('avgPx')} | 当前标记价: {p.get('markPx', p.get('lastPx'))} | 持仓量: {p.get('pos')} (BASE) | 未结浮盈: {p.get('upl')} U (ROI: {round(safe_float(p.get('uplRatio')) * 100, 2)}%) | 动态止损线: {p.get('trailingStopPx', p.get('trailingSl', '--'))}"
+                f"- 标的: {inst_name} | 方向: {side} {p.get('lever', '3')}x | 开仓均价: {p.get('avgPx')} | 当前价: {cur_px} | 持仓量: {p.get('pos')} (BASE) | 浮盈: {p.get('upl')} U (ROI: {round(safe_float(p.get('uplRatio')) * 100, 2)}%){profit_desc} | 动态止损线: {p.get('trailingStopPx', p.get('trailingSl', '--'))} | 目标止盈: {tp_px} | 状态: {stage_desc}"
             )
     else:
         pos_lines.append("[MISSING_CONTEXT:account_positions]" if active_positions_detail is None else "当前无任何在途持仓敞口 (100% 现金空仓状态)")
@@ -990,8 +1029,21 @@ def execute_batch_ai_brain_cycle(
     active_inst_ids = {
         str(p.get("instId", "")) for p in active_positions_detail if p.get("instId")
     }
+    def _resolved_side(pos: Dict[str, Any]) -> str:
+        raw = str(pos.get("side") or pos.get("posSide") or "").strip().lower()
+        if "long" in raw and "short" not in raw:
+            return "long"
+        if "short" in raw:
+            return "short"
+        qty = safe_float(pos.get("pos"))
+        if qty > 0:
+            return "long"
+        if qty < 0:
+            return "short"
+        return raw
+
     active_position_sides = {
-        str(p.get("instId", "")): str(p.get("side", p.get("posSide", ""))).lower()
+        str(p.get("instId", "")): _resolved_side(p)
         for p in active_positions_detail if p.get("instId")
     }
     package_by_id = {p["instId"]: p for p in packages}

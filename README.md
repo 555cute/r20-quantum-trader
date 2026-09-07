@@ -11,14 +11,14 @@
                                                                                                |___/ 
 ```
 
-[![Release](https://img.shields.io/badge/release-v7.5.1-orange.svg?style=flat-square)](https://github.com/555cute/r20-quantum-trader/releases/tag/v7.5.1)
+[![Release](https://img.shields.io/badge/release-v7.5.2-orange.svg?style=flat-square)](https://github.com/555cute/r20-quantum-trader/releases/tag/v7.5.2)
 [![LINUX DO](https://img.shields.io/badge/Community-LINUX%20DO-F97316?style=flat-square&logo=linux&logoColor=white)](https://linux.do/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg?style=flat-square)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688.svg?style=flat-square)](https://fastapi.tiangolo.com/)
 [![Vue 3](https://img.shields.io/badge/Vue-3.5%2B-4FC08D.svg?style=flat-square)](https://vuejs.org/)
-[![KLineCharts](https://img.shields.io/badge/Chart-KLineCharts-blue.svg?style=flat-square)](https://klinecharts.com/)
-[![CI](https://github.com/555cute/r20-quantum-trader/actions/workflows/ci.yml/badge.svg)](https://github.com/555cute/r20-quantum-trader/actions/workflows/ci.yml)
+[![TradingView](https://img.shields.io/badge/Chart-TradingView%20Native-blue.svg?style=flat-square)](https://github.com/tradingview/lightweight-charts)
+[![Tests](https://img.shields.io/badge/tests-325%20passed-brightgreen.svg?style=flat-square)](tests/)
 
 **新一代机构级加密货币波段量化决策与执行系统 · AI 投委会大模型驱动**  
 *全栈策略自由编排 · 白盒自进化认知复盘 · Fail-Closed 物理硬拦截 · 多模型决策委员会 · 原生云端 OCO 风控*

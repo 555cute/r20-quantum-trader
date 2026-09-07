@@ -13,16 +13,78 @@ from r20_exchange.runtime import state_path
 ROOT = Path(__file__).resolve().parents[1]
 POOL_FILE = ROOT / "data" / "instrument_pool.json"
 
-# Shared coin selection. Quantities are BASE asset units (ctVal normalized to 1).
-# Legacy OKX contract counts were migrated as base_qty = base_sz * nativeCtVal.
+TIER_PROFILES = {
+    "tier_1_bluechip": {
+        "label": "蓝筹主流",
+        "max_leverage": 5,
+        "base_risk_ratio": 1.0,
+        "sl_atr_mult": 1.8,
+        "min_vol_24h_usd": 100_000_000,
+    },
+    "tier_2_momentum": {
+        "label": "高弹性动量",
+        "max_leverage": 3,
+        "base_risk_ratio": 0.75,
+        "sl_atr_mult": 2.2,
+        "min_vol_24h_usd": 20_000_000,
+    }
+}
+
 DEFAULT_INSTRUMENTS = [
-    {"instId": "BTC-USDT-SWAP", "name": "BTC", "type": "crypto", "ccy": "BTC", "base_sz": 0.01, "base_qty": 0.01, "precision": 1, "ctVal": 1, "nativeCtVal": 0.01, "tickSz": "0.1", "minSz": "0.01", "risk_per_trade_usd": 15.0, "state": "live"},
-    {"instId": "ETH-USDT-SWAP", "name": "ETH", "type": "crypto", "ccy": "ETH", "base_sz": 0.3, "base_qty": 0.3, "precision": 2, "ctVal": 1, "nativeCtVal": 0.1, "tickSz": "0.01", "minSz": "0.01", "risk_per_trade_usd": 15.0, "state": "live"},
-    {"instId": "SOL-USDT-SWAP", "name": "SOL", "type": "crypto", "ccy": "SOL", "base_sz": 7.0, "base_qty": 7.0, "precision": 2, "ctVal": 1, "nativeCtVal": 1.0, "tickSz": "0.01", "minSz": "0.01", "risk_per_trade_usd": 15.0, "state": "live"},
-    {"instId": "DOGE-USDT-SWAP", "name": "DOGE", "type": "crypto", "ccy": "DOGE", "base_sz": 10000.0, "base_qty": 10000.0, "precision": 4, "ctVal": 1, "nativeCtVal": 1000.0, "tickSz": "0.0001", "minSz": "0.01", "risk_per_trade_usd": 15.0, "state": "live"},
-    {"instId": "SUI-USDT-SWAP", "name": "SUI", "type": "crypto", "ccy": "SUI", "base_sz": 50.0, "base_qty": 50.0, "precision": 4, "ctVal": 1, "nativeCtVal": 1.0, "tickSz": "0.0001", "minSz": "0.01", "risk_per_trade_usd": 15.0, "state": "live"},
-    {"instId": "LINK-USDT-SWAP", "name": "LINK", "type": "crypto", "ccy": "LINK", "base_sz": 64.0, "base_qty": 64.0, "precision": 3, "ctVal": 1, "nativeCtVal": 1.0, "tickSz": "0.001", "minSz": "0.01", "risk_per_trade_usd": 15.0, "state": "live"},
+    {"instId": "BTC-USDT-SWAP", "name": "BTC", "type": "crypto", "ccy": "BTC", "tier": "tier_1_bluechip", "max_leverage": 5, "sl_atr_mult": 1.8, "base_sz": 1, "precision": 1, "ctVal": 0.01, "tickSz": "0.1", "minSz": "0.01", "risk_per_trade_usd": 15.0},
+    {"instId": "ETH-USDT-SWAP", "name": "ETH", "type": "crypto", "ccy": "ETH", "tier": "tier_1_bluechip", "max_leverage": 5, "sl_atr_mult": 1.8, "base_sz": 3, "precision": 2, "ctVal": 0.1, "tickSz": "0.01", "minSz": "0.01", "risk_per_trade_usd": 15.0},
+    {"instId": "SOL-USDT-SWAP", "name": "SOL", "type": "crypto", "ccy": "SOL", "tier": "tier_2_momentum", "max_leverage": 3, "sl_atr_mult": 2.2, "base_sz": 7, "precision": 2, "ctVal": 1.0, "tickSz": "0.01", "minSz": "0.01", "risk_per_trade_usd": 15.0},
+    {"instId": "DOGE-USDT-SWAP", "name": "DOGE", "type": "crypto", "ccy": "DOGE", "tier": "tier_2_momentum", "max_leverage": 3, "sl_atr_mult": 2.2, "base_sz": 10, "precision": 4, "ctVal": 1000.0, "tickSz": "0.0001", "minSz": "0.01", "risk_per_trade_usd": 15.0},
+    {"instId": "SUI-USDT-SWAP", "name": "SUI", "type": "crypto", "ccy": "SUI", "tier": "tier_2_momentum", "max_leverage": 3, "sl_atr_mult": 2.2, "base_sz": 50, "precision": 4, "ctVal": 1.0, "tickSz": "0.0001", "minSz": "0.01", "risk_per_trade_usd": 15.0},
+    {"instId": "LINK-USDT-SWAP", "name": "LINK", "type": "crypto", "ccy": "LINK", "tier": "tier_2_momentum", "max_leverage": 3, "sl_atr_mult": 2.2, "base_sz": 64, "precision": 3, "ctVal": 1.0, "tickSz": "0.001", "minSz": "0.01", "risk_per_trade_usd": 15.0},
 ]
+
+
+def evaluate_instrument_tier(inst_id: str, name: str = "") -> str:
+    """Classify instrument into Tier-1 Bluechip or Tier-2 Momentum."""
+    name_upper = (name or inst_id.split("-")[0]).upper()
+    if name_upper in ("BTC", "ETH"):
+        return "tier_1_bluechip"
+    return "tier_2_momentum"
+
+
+def score_universe_candidate(
+    candidate: dict[str, Any],
+    vol_24h_usd: float = 0.0,
+    atr_pct: float = 0.0,
+    funding_rate: float = 0.0
+) -> dict[str, Any]:
+    """Evaluate candidate instrument suitability and rank quality score (0 ~ 100)."""
+    name = candidate.get("name", "")
+    tier = evaluate_instrument_tier(candidate.get("instId", ""), name)
+    profile = TIER_PROFILES[tier]
+
+    score = 50.0
+    # Liquidity check
+    if vol_24h_usd > 0:
+        if vol_24h_usd >= profile["min_vol_24h_usd"]:
+            score += 20.0
+        else:
+            score -= 30.0
+
+    # Volatility band check (healthy swing trading band: 1.5% ~ 6.0%)
+    if atr_pct > 0:
+        if 1.5 <= atr_pct <= 6.0:
+            score += 20.0
+        elif atr_pct < 1.0:
+            score -= 15.0  # too sleepy
+        elif atr_pct > 9.0:
+            score -= 25.0  # extreme rug risk
+
+    # Extreme funding rate penalty (abs(funding) > 0.05% implies crowding)
+    if abs(funding_rate) > 0.0005:
+        score -= 15.0
+
+    candidate["tier"] = tier
+    candidate["max_leverage"] = profile["max_leverage"]
+    candidate["sl_atr_mult"] = profile["sl_atr_mult"]
+    candidate["universe_score"] = round(max(0.0, min(100.0, score)), 1)
+    return candidate
 
 
 def _precision(tick_size: str) -> int:
@@ -40,6 +102,18 @@ def _decimal(value: Any, default: str = "0") -> Decimal:
 
 def _as_float(value: Decimal) -> float:
     return float(value)
+
+
+def _ensure_tier(item: dict[str, Any]) -> dict[str, Any]:
+    """Fill missing universe tier fields without overriding an explicit profile."""
+    if item.get("tier") not in TIER_PROFILES:
+        item["tier"] = evaluate_instrument_tier(str(item.get("instId") or ""), str(item.get("name") or ""))
+    profile = TIER_PROFILES[item["tier"]]
+    if item.get("max_leverage") in (None, ""):
+        item["max_leverage"] = profile["max_leverage"]
+    if item.get("sl_atr_mult") in (None, ""):
+        item["sl_atr_mult"] = profile["sl_atr_mult"]
+    return item
 
 
 def normalize_pool_item(item: dict[str, Any]) -> dict[str, Any]:
@@ -66,6 +140,11 @@ def normalize_pool_item(item: dict[str, Any]) -> dict[str, Any]:
             base_qty = base_sz * ct_val
             native_ct = ct_val if ct_val > 0 else native_ct
 
+    if ct_val > 0 and ct_val != 1:
+        for quantity_rule in ("minSz", "lotSz"):
+            if out.get(quantity_rule) not in (None, ""):
+                out[quantity_rule] = str(_decimal(out[quantity_rule]) * ct_val)
+
     tick_size = str(out.get("tickSz") or "0.0001")
     inst_id = str(out.get("instId", "")).upper()
     name = str(out.get("name") or out.get("ccy") or inst_id.split("-", 1)[0]).upper()
@@ -85,6 +164,7 @@ def normalize_pool_item(item: dict[str, Any]) -> dict[str, Any]:
         "state": str(out.get("state") or "live"),
         "quantity_unit": "base",
     })
+    _ensure_tier(out)
     return out
 
 
@@ -98,6 +178,8 @@ def from_okx_instrument(raw: dict[str, Any]) -> dict[str, Any]:
     min_sz = _decimal(raw.get("minSz"), "1")
     lot_sz = raw.get("lotSz")
     min_notional = raw.get("minNotional")
+    if reported_ct > 0 and reported_ct != 1 and lot_sz not in (None, ""):
+        lot_sz = str(_decimal(lot_sz) * reported_ct)
     # Adapter-normalized metadata already converted minSz/lotSz to BASE and ctVal='1'.
     if reported_ct == 1 and raw.get("nativeCtVal") not in (None, ""):
         base_qty = min_sz
@@ -106,11 +188,16 @@ def from_okx_instrument(raw: dict[str, Any]) -> dict[str, Any]:
         base_qty = min_sz * (native_ct if native_ct > 0 else Decimal("1"))
         native_ct = native_ct if native_ct > 0 else reported_ct
         min_sz_out = str(base_qty)
+    tier = evaluate_instrument_tier(inst_id, base)
+    profile = TIER_PROFILES[tier]
     item = {
         "instId": inst_id,
         "name": base,
         "type": "crypto",
         "ccy": base,
+        "tier": tier,
+        "max_leverage": profile["max_leverage"],
+        "sl_atr_mult": profile["sl_atr_mult"],
         "base_sz": _as_float(base_qty),
         "base_qty": _as_float(base_qty),
         "precision": _precision(tick_size),

@@ -13,6 +13,9 @@ def test_calculus_is_causal_and_bounded():
     assert -3 <= a["acceleration"] <= 3
     assert -3 <= a["impulse"] <= 3
     assert a["velocity"] != b["velocity"]
+    assert "curvature" in a and a["curvature"] >= 0
+    assert "power" in a
+    assert "power_regime" in a
 
 
 def test_multi_timeframe_reverses_okx_newest_first():
@@ -20,3 +23,5 @@ def test_multi_timeframe_reverses_okx_newest_first():
     result = calculate_multi_timeframe({"15M": list(reversed(rows))})
     assert result["valid"]
     assert result["timeframes"]["15M"]["velocity"] > 0
+    assert "power" in result
+    assert "curvature" in result

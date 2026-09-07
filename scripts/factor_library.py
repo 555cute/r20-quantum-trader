@@ -120,6 +120,9 @@ def compute_instrument_factors(item: Dict[str, Any], smart_money_pool: Dict[str,
             "acceleration": 0.0,
             "impulse": 0.0,
             "jerk": 0.0,
+            "curvature": 0.0,
+            "power": 0.0,
+            "power_regime": "STEADY_FLUX",
             "regime": "RANGE_LOW_VELOCITY",
             "quality": 0.0,
             "direction": 0
@@ -221,22 +224,31 @@ def compute_instrument_factors(item: Dict[str, Any], smart_money_pool: Dict[str,
                 elif closes[i] < closes[i-1]: obv -= vols[i]
             factors["volume_money_flow"]["obv_flow"] = "BULL_FLOW" if obv > 0 else ("BEAR_FLOW" if obv < 0 else "NEUTRAL")
 
+            # Pillar 6: Calculus, Definite Integrals & Probability Theory (15M High-Resolution)
             try:
                 from calculus_engine import calculate_calculus
                 c_res = calculate_calculus(closes, highs, lows, vols)
                 if c_res.get("valid"):
+                    # Calculus Dynamics
                     factors["calculus_dynamics"]["velocity"] = c_res.get("velocity", 0.0)
                     factors["calculus_dynamics"]["acceleration"] = c_res.get("acceleration", 0.0)
                     factors["calculus_dynamics"]["impulse"] = c_res.get("impulse", 0.0)
                     factors["calculus_dynamics"]["jerk"] = c_res.get("jerk", 0.0)
+                    factors["calculus_dynamics"]["curvature"] = c_res.get("curvature", 0.0)
+                    factors["calculus_dynamics"]["power"] = c_res.get("power", 0.0)
+                    factors["calculus_dynamics"]["power_regime"] = c_res.get("power_regime", "STEADY_FLUX")
                     factors["calculus_dynamics"]["regime"] = c_res.get("regime", "RANGE_LOW_VELOCITY")
                     factors["calculus_dynamics"]["quality"] = c_res.get("quality", 0.0)
                     factors["calculus_dynamics"]["direction"] = c_res.get("direction", 0)
+
+                    # Definite Integrals
                     d_int = c_res.get("definite_integrals", {})
                     factors["definite_integrals"]["energy_integral"] = d_int.get("energy_integral", 0.0)
                     factors["definite_integrals"]["deviation_area_integral"] = d_int.get("deviation_area_integral", 0.0)
                     factors["definite_integrals"]["volume_action_integral"] = d_int.get("volume_action_integral", 0.0)
                     factors["definite_integrals"]["integral_regime"] = d_int.get("integral_regime", "BALANCED_ENERGY")
+
+                    # Probability Theory & Stochastic Modeling
                     p_th = c_res.get("probability_theory", {})
                     factors["probability_theory"]["skewness"] = p_th.get("skewness", 0.0)
                     factors["probability_theory"]["kurtosis"] = p_th.get("kurtosis", 0.0)

@@ -73,6 +73,21 @@ class CalculusEngineMathTest(unittest.TestCase):
         self.assertTrue(res_t2["valid"])
         self.assertNotEqual(res_t1["velocity"], res_t2["velocity"])
 
+    def test_calculus_curvature_and_power_dynamics(self):
+        # Monotonic accelerating prices: velocity > 0, acceleration > 0 => power > 0
+        accel_prices = [100.0, 101.0, 103.0, 106.0, 110.0, 115.0, 122.0, 131.0, 142.0]
+        res_acc = calculate_calculus(accel_prices)
+        self.assertTrue(res_acc["valid"])
+        self.assertGreater(res_acc["power"], 0.0, "Accelerating uptrend must have positive kinetic power flux")
+        self.assertGreaterEqual(res_acc["curvature"], 0.0)
+
+        # Decelerating top: velocity > 0, acceleration < 0 => power < 0 (kinetic exhaustion)
+        decel_prices = [100.0, 110.0, 118.0, 123.0, 125.0, 125.5, 125.6, 125.65]
+        res_dec = calculate_calculus(decel_prices)
+        self.assertTrue(res_dec["valid"])
+        self.assertLess(res_dec["power"], 0.0, "Decelerating rally must yield negative kinetic power (exhaustion)")
+        self.assertIn(res_dec["power_regime"], ["KINETIC_EXHAUSTION", "HIGH_CURVATURE_INFLECTION", "STEADY_FLUX"])
+
 
 class DefiniteIntegralsTest(unittest.TestCase):
     """Test trapezoidal definite integration of displacement energy and deviation area."""
@@ -167,19 +182,36 @@ class FactorLibraryIntegrationTest(unittest.TestCase):
     """Test Pillar 6 integration in factor_library.py."""
 
     def test_factor_library_structure_contains_math_prob_foundations(self):
+        from contextlib import ExitStack
+
         item = {"instId": "BTC-USDT-SWAP", "name": "BTC", "type": "crypto", "precision": 1}
-        factors = factor_library.compute_instrument_factors(item, {})
-        self.assertIn("calculus_dynamics", factors)
-        self.assertIn("definite_integrals", factors)
-        self.assertIn("probability_theory", factors)
-        
-        d_int = factors["definite_integrals"]
-        self.assertIn("energy_integral", d_int)
-        self.assertIn("deviation_area_integral", d_int)
-        
-        p_th = factors["probability_theory"]
-        self.assertIn("continuation_prob_pct", p_th)
-        self.assertIn("var_95_pct", p_th)
+        prices = [100.0 * (1.0005 ** (i * i)) for i in range(60)]
+        candles = [
+            [str(i * 900000), str(price - 0.1), str(price + 0.5), str(price - 0.5),
+             str(price), "1000", str(price * 1000), str(price * 1000), "1"]
+            for i, price in enumerate(prices)
+        ][::-1]
+        market = {
+            "fetch_ticker": {"last": str(prices[-1]), "bidPx": str(prices[-1] - 0.1), "askPx": str(prices[-1] + 0.1)},
+            "fetch_orderbook_depth": {"bids": [[str(prices[-1] - 0.1), "100"]], "asks": [[str(prices[-1] + 0.1), "100"]]},
+            "fetch_candles": candles,
+            "fetch_indicators_batch": {},
+            "fetch_funding_rate": 0.0,
+            "fetch_open_interest": {"oi": "100", "oiUsd": "1000000"},
+            "fetch_long_short_ratio": 1.0,
+            "fetch_taker_volume": {"buyVol": "100", "sellVol": "50"},
+        }
+        with ExitStack() as stack:
+            for name, result in market.items():
+                stack.enter_context(patch.object(factor_library, name, return_value=result))
+            factors = factor_library.compute_instrument_factors(item, {})
+        dynamics = factors["calculus_dynamics"]
+        self.assertGreater(dynamics["velocity"], 0)
+        self.assertGreater(dynamics["power"], 0)
+        self.assertGreaterEqual(dynamics["curvature"], 0)
+        self.assertIn(dynamics["power_regime"], {"KINETIC_ACCELERATING", "HIGH_CURVATURE_INFLECTION", "STEADY_FLUX"})
+        self.assertIn("energy_integral", factors["definite_integrals"])
+        self.assertIn("continuation_prob_pct", factors["probability_theory"])
 
 
 class AiFactorTraderMathProbTest(unittest.TestCase):
