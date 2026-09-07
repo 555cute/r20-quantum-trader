@@ -204,30 +204,26 @@ PowerShell 使用 `$env:R20_GATEWAY_WORKER_ENABLED="0"` 和 `$env:R20_DASHBOARD_
 
 ### 方式 B：Docker / Docker-Compose 容器化一键启动 (推荐)
 
-`main` 推送和 `v*` 标签会把镜像发布到 GitHub Container Registry：[`ghcr.io/cnlimiter/r20-quantum-trader`](https://github.com/cnlimiter/r20-quantum-trader/pkgs/container/r20-quantum-trader)。首次发布默认为 private；公开仓库可在 Packages 页改为 public 后匿名拉取。私有包需 classic PAT（`read:packages`）：
+默认 `docker-compose.yml` **只拉取** GitHub Container Registry 镜像，不含本地 `build`，避免 `docker compose up` 误跑源码构建或混用远端旧 `latest`。镜像：[`ghcr.io/cnlimiter/r20-quantum-trader`](https://github.com/cnlimiter/r20-quantum-trader/pkgs/container/r20-quantum-trader)。`main` 推送和 `v*` 标签发布；`latest` 仅默认分支。首次发布默认为 private，公开仓库可在 Packages 页改为 public 后匿名拉取。私有包需 classic PAT（`read:packages`）：
 
 ```bash
 echo "$CR_PAT" | docker login ghcr.io -u USERNAME --password-stdin
 ```
 
-拉取预构建镜像并启动（宿主机 `.env` 仅作启动注入）：
+默认启动（宿主机 `.env` 仅作启动注入，`pull_policy: always`）：
 
 ```bash
 cp env.example .env
-docker compose pull
 docker compose up -d
 ```
 
-指定版本：`R20_IMAGE=ghcr.io/cnlimiter/r20-quantum-trader:7.5.2 docker compose up -d`。分支构建可用 `workflow_dispatch` 发布，标签为分支名。
+指定版本：`R20_IMAGE=ghcr.io/cnlimiter/r20-quantum-trader:7.5.2 docker compose up -d`。离线复用已拉取镜像：`R20_PULL_POLICY=missing docker compose up -d`。
 
-无需在宿主机配置复杂的 Python 和 Node.js 环境时，也可本地构建：
+从当前源码构建（独立 overlay，镜像名为 `r20-quantum-trader:local`，不拉 GHCR）：
 
 ```bash
-# 1. 配置环境变量（宿主机 .env 仅作启动注入）
 cp env.example .env
-
-# 2. 一键构建并启动多阶段容器
-docker compose up -d --build
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 ```
 
 宿主机 `.env` 通过 compose `env_file` 注入初始值（含 worker 开关）。后台写入的配置落在已挂载的 `./data/config/.env`（容器内 `/app/data/config/.env`，由 `R20_ENV_FILE` 指定），并覆盖这些初始值。不要把单个 `.env` 文件 bind-mount 进容器。源码部署默认仍是项目根目录 `.env`，不要为原生安装设置 `R20_ENV_FILE`。

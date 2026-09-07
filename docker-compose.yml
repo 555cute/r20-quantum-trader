@@ -1,9 +1,9 @@
+# Default: pull the published GitHub Container Registry image.
+# Local source build: docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 services:
   r20-quantum-trader:
     image: ${R20_IMAGE:-ghcr.io/cnlimiter/r20-quantum-trader:latest}
-    build:
-      context: .
-      dockerfile: Dockerfile
+    pull_policy: ${R20_PULL_POLICY:-always}
     container_name: r20-quantum-trader
     restart: unless-stopped
     ports:

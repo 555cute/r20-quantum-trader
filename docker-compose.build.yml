@@ -1,0 +1,9 @@
+# Overlay for building from the local Dockerfile. Does not pull GHCR.
+# docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+services:
+  r20-quantum-trader:
+    image: ${R20_IMAGE:-r20-quantum-trader:local}
+    pull_policy: build
+    build:
+      context: .
+      dockerfile: Dockerfile
