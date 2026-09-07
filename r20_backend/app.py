@@ -3054,35 +3054,6 @@ def market_candles(inst_id: str, bar: str = "1H", limit: int = 150, response: Re
     except Exception as exc:
         if cached:
             return {"instId": inst_id, "bar": bar, "candles": cached[1], "source": "stale_cache", "warn": str(exc)}
-        factor_file = ROOT / "data" / "factor_library_snapshot.json"
-        if factor_file.exists():
-            try:
-                snap = json.loads(factor_file.read_text(encoding="utf-8"))
-                instruments = snap.get("instruments") or {}
-                sym = inst_id.split("-")[0]
-                inst_data = instruments.get(sym) or instruments.get(inst_id) or {}
-                px = float(inst_data.get("price") or 100.0)
-                if px > 0:
-                    candles = []
-                    step_sec = 3600 if "H" in bar else 900
-                    for i in range(limit):
-                        ts = int((now_ts - (limit - i) * step_sec) * 1000)
-                        # Slight organic variation around px
-                        c_open = round(px * (1.0 + (i - limit/2) * 0.0003), 4)
-                        c_close = round(px * (1.0 + (i - limit/2 + 0.3) * 0.0003), 4)
-                        c_high = round(max(c_open, c_close) * 1.0015, 4)
-                        c_low = round(min(c_open, c_close) * 0.9985, 4)
-                        candles.append({
-                            "ts": ts,
-                            "open": c_open,
-                            "high": c_high,
-                            "low": c_low,
-                            "close": c_close,
-                            "vol": 120.0 + (i % 5) * 20.0
-                        })
-                    return {"instId": inst_id, "bar": bar, "candles": candles, "source": "fallback_snapshot"}
-            except Exception:
-                pass
         raise HTTPException(status_code=502, detail=f"Failed to fetch market candles: {exc}") from exc
     raise HTTPException(status_code=502, detail="No candles data returned from upstream")
 
