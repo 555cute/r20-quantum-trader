@@ -17,6 +17,10 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data"
+# 标的池容量上限：此前被硬编码为 6，导致后台「添加币种」在加第 7 个时被直接拒绝。
+# 现改为可配置；并发持仓上限由执行层按 len(池) 自动跟随，同向持仓上限仍独立固定(防 Beta 踩踏)。
+MAX_POOL_SIZE = int(os.getenv("R20_MAX_POOL_SIZE", "20"))
+MIN_POOL_SIZE = int(os.getenv("R20_MIN_POOL_SIZE", "1"))
 SCRIPTS_DIR = ROOT / "scripts"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(SCRIPTS_DIR))
@@ -1710,7 +1714,7 @@ def admin_instruments(x_r20_admin_token: str | None = Header(default=None)) -> d
     active = set(trackers.keys()) if isinstance(trackers, dict) else set()
     return {
         "instruments": [{**item, "protected": item["instId"] == "BTC-USDT-SWAP", "has_tracker": item["instId"] in active or item["name"] in active} for item in load_instruments()],
-        "limits": {"minimum": 1, "maximum": 6, "btc_required": True},
+        "limits": {"minimum": MIN_POOL_SIZE, "maximum": MAX_POOL_SIZE, "btc_required": True},
     }
 
 
@@ -1722,8 +1726,8 @@ def add_admin_instrument(payload: InstrumentAddRequest, x_r20_admin_token: str |
     current = load_instruments()
     if any(item["instId"] == inst_id for item in current):
         raise HTTPException(status_code=409, detail="该币种已在交易池中")
-    if len(current) >= 6:
-        raise HTTPException(status_code=409, detail="交易池最多允许 6 个币种；请先删除一个无持仓币种")
+    if len(current) >= MAX_POOL_SIZE:
+        raise HTTPException(status_code=409, detail=f"交易池最多允许 {MAX_POOL_SIZE} 个币种；请先删除一个无持仓币种，或调整环境变量 R20_MAX_POOL_SIZE")
     try:
         matches = okx.instruments("SWAP", inst_id)
     except Exception as exc:
@@ -1747,8 +1751,8 @@ def delete_admin_instrument(inst_id: str, payload: InstrumentDeleteRequest, x_r2
     if inst_id == "BTC-USDT-SWAP":
         raise HTTPException(status_code=403, detail="BTC 是全局黑天鹅哨兵基准，不允许从交易池删除")
     current = load_instruments()
-    if len(current) <= 1:
-        raise HTTPException(status_code=409, detail="交易池至少保留 1 个币种")
+    if len(current) <= MIN_POOL_SIZE:
+        raise HTTPException(status_code=409, detail=f"交易池至少保留 {MIN_POOL_SIZE} 个币种")
     if not any(item["instId"] == inst_id for item in current):
         raise HTTPException(status_code=404, detail="该币种不在交易池中")
     trackers = read_json("position_trackers.json", {})

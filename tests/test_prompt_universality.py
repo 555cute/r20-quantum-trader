@@ -73,6 +73,39 @@ class PromptUniversalityTests(unittest.TestCase):
                                      usdt_available=None, runtime_context_out=ctx)
         self.assertIn("MISSING_CONTEXT:risk_budget", ctx["risk_budget"])
 
+    def test_multiline_block_var_not_embedded_in_system_prose(self):
+        """risk_budget 是多行块，内插进 system 正文会把句子撑断（曾在实盘 prompt 中出现）。
+        约定：它只能作为独立小节出现在 trading_user，不得出现在 trading_system 文本里。"""
+        live = json.loads((ROOT / "data" / "prompt_library.json").read_text(encoding="utf-8"))
+        prof = live["profiles"]["stable"]
+        sys_blob = json.dumps(
+            {"modules": (prof.get("pipelines") or {}).get("trading_system", []),
+             "legacy": prof.get("trading_system")}, ensure_ascii=False)
+        self.assertNotIn("{{risk_budget}}", sys_blob,
+                         "多行块变量被内插进 system 提示词，会撑断句子")
+
+    def test_rendered_system_prompt_has_no_injected_block(self):
+        from scripts.ai_brain_trader import (get_effective_system_prompt, apply_module_layout,
+                                             active_profile, construct_full_market_prompt)
+        ctx = {}
+        construct_full_market_prompt([], "无", [], [], "2026-09-07 21:00:00",
+                                     usdt_available=20.0, runtime_context_out=ctx)
+        rendered = apply_module_layout(get_effective_system_prompt(), active_profile(),
+                                       "trading_system", "t", context=ctx)
+        self.assertNotIn("{{risk_budget}}", rendered)
+        self.assertNotIn("】:\n- 常规单笔保证金", rendered, "system 正文中出现被撑断的预算块")
+        self.assertNotIn("取值严禁", rendered, "历史替换造成的语句粘连残留")
+
+    def test_pool_size_wording_is_not_hardcoded(self):
+        """标的池可增删，提示词与日志不得写死具体数量（如「六币种」「6 个标的」）。"""
+        from scripts.ai_brain_trader import get_effective_system_prompt
+        corpus = get_effective_system_prompt()
+        corpus += (ROOT / "scripts" / "prompt_library.py").read_text(encoding="utf-8")
+        corpus += json.dumps(json.loads((ROOT / "data" / "prompt_library.json").read_text(encoding="utf-8"))
+                             ["profiles"]["stable"], ensure_ascii=False)
+        for bad in ("六币种", "6币种", "在 6 个标的", "6 个标的中"):
+            self.assertNotIn(bad, corpus, f"提示词写死了标的数量: {bad}")
+
 
 class AdaptiveRiskLimitTests(unittest.TestCase):
     def test_small_account_daily_loss_limit_is_tighter_than_absolute_cap(self):
