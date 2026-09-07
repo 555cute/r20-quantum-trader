@@ -614,6 +614,8 @@ def git(command: list[str]) -> str:
         result = subprocess.run(["git", *command], cwd=ROOT, text=True, capture_output=True, timeout=30)
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError(f"git command timed out after {exc.timeout}s") from exc
+    except OSError as exc:
+        raise RuntimeError("Git is unavailable in this deployment") from exc
     if result.returncode:
         raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "git command failed")
     return result.stdout.strip()
@@ -1772,6 +1774,11 @@ def admin_about(
     require_admin_header(x_r20_admin_token, x_r20_session)
     import platform
     store = GatewayStore(GATEWAY_DB_PATH)
+    repository: dict[str, Any] = {"url": "https://github.com/555cute/r20-quantum-trader", "branch": "", "commit": "", "available": False}
+    try:
+        repository.update(branch=git(["branch", "--show-current"]), commit=git(["rev-parse", "--short", "HEAD"]), available=True)
+    except RuntimeError as exc:
+        repository["error"] = str(exc)
     return {
         "product": {"name": APP_NAME, "version": __version__, "control_plane": "R20 Gateway Runtime", "gateway_version": GATEWAY_VERSION},
         "runtime": {"python": platform.python_version(), "platform": platform.platform(), "backend_pid": os.getpid(), "gateway": gateway_status(x_r20_admin_token)},
@@ -1780,7 +1787,7 @@ def admin_about(
             {"name": "Gateway Event Runtime", "version": GATEWAY_VERSION},
             {"name": "SQLite", "version": __import__("sqlite3").sqlite_version},
         ],
-        "repository": {"url": "https://github.com/555cute/r20-quantum-trader", "branch": git(["branch", "--show-current"]), "commit": git(["rev-parse", "--short", "HEAD"])},
+        "repository": repository,
         "update": update_status(),
         "security": {"authentication": "PBKDF2-SHA256 + server-side sessions", "session_hours": 12, "plugin_policy": "builtin-only", "prompt_transport": "python-direct"},
     }
