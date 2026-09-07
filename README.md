@@ -154,34 +154,63 @@ R20 量子交易系统由**前台双翼量化操盘终端**与**后台机构级�
 
 ## 🚀 极速部署指南
 
-### 1. 克隆代码与配置环境变量
+### 方式 A：源码直接部署 (Python 3.10+ / Node.js 18+)
+
+#### 1. 克隆代码与配置环境变量
 ```bash
 git clone https://github.com/555cute/r20-quantum-trader.git
 cd r20-quantum-trader
 
-cp .env.example .env
-vim .env  # 填写您的 OKX API 与大模型凭据
+cp env.example .env
+vim .env  # 填写您的 OKX API 与大模型凭据 (例如 OpenAI / Gemini / DeepSeek)
 ```
 
-### 2. 安装依赖并启动
+#### 2. 安装依赖并启动
 ```bash
-# 安装 Python 后端依赖并启动
+# 1. 安装后端 Python 依赖
 pip install -r requirements.txt
+
+# 2. 编译打包现代化 Vue 3 前端操盘终端 (基于原生高性能 KLineChart)
+cd frontend
+npm install
+npm run build
+cd ..
+
+# 3. 一键启动后端控制面与交易主脑
 python -m uvicorn r20_backend.app:app --host 0.0.0.0 --port 8080
+# 或者直接运行一键启动脚本: ./start.sh
 ```
 
-服务启动后访问：  
-- 🖥️ **前台量化操盘大屏**：`http://localhost:8080/`  
-- ⚙️ **后台策略管理控制面**：`http://localhost:8080/admin/login`（默认账号 `admin`，首次启动可自由设定高强密码）
+---
+
+### 方式 B：Docker / Docker-Compose 容器化一键启动 (推荐)
+
+无需在宿主机配置复杂的 Python 和 Node.js 环境，秒级交付：
+
+```bash
+# 1. 配置环境变量
+cp env.example .env
+
+# 2. 一键构建并启动多阶段容器
+docker compose up -d --build
+```
+
+---
+
+### 🖥️ 访问与管理
+
+服务启动成功后，浏览器直接访问：  
+- 🖥️ **前台量化操盘工作台**：`http://localhost:8080/`  
+- ⚙️ **后台策略管理控制面**：`http://localhost:8080/admin/login`（默认系统账号 `admin`，首次启动进入系统后可自由设定高强密码）
 
 ---
 
 ## 🧪 全栈自动化测试保障
 
-系统配备了涵盖风控几何拦截、策略版本快照、多模型仲裁、OKX 鉴权与前后端 API 契约的完整自动化测试套件：
+系统配备了涵盖物理风控几何拦截、策略版本快照、多模型仲裁、OKX 鉴权与前后端 API 契约的完整自动化测试套件：
 
 ```bash
-python3 -m unittest discover tests
+python3 -m unittest discover -s tests -p "test_*.py"
 ```
 
 *当前自动化单测覆盖：316 项用例 100% 全部通过。*
