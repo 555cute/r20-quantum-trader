@@ -2539,6 +2539,8 @@ def test_simple_backup(payload: SimpleBackupUpdateRequest, x_r20_session: str | 
     if missing:
         raise HTTPException(status_code=400, detail=f"连接信息不完整：{', '.join(missing)}")
 
+    if wanted_type in {"s3", "oss"} and not target["bucket"]:
+        raise HTTPException(status_code=400, detail=f"{wanted_type.upper()} Bucket 不能为空")
     if wanted_type in {"s3", "oss", "webdav"}:
         if not target["endpoint"]:
             raise HTTPException(status_code=400, detail=f"{wanted_type.upper()} Endpoint 不能为空")
@@ -2548,8 +2550,6 @@ def test_simple_backup(payload: SimpleBackupUpdateRequest, x_r20_session: str | 
         except (ValueError, Exception) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    if wanted_type in {"s3", "oss"} and not target["bucket"]:
-        raise HTTPException(status_code=400, detail=f"{wanted_type.upper()} Bucket 不能为空")
 
     return {"status": "ready", "sent": False, "detail": "配置格式与目标地址校验通过；未上传任何文件", "destination": payload.destination}
 

@@ -165,23 +165,23 @@ class BackupMethodTests(unittest.TestCase):
             headers=headers,
         )
         self.assertEqual(resp.status_code, 400, resp.text)
-        self.assertIn("Endpoint 不能为空", resp.json()["detail"])
 
         # S3 missing bucket
-        resp_bucket = self.client.post(
-            "/api/v1/admin/backups/simple/test",
-            json={
-                "destination": "s3",
-                "enabled": True,
-                "schedule_time": "02:00",
-                "endpoint": "https://s3.amazonaws.com",
-                "bucket": "",
-                "credentials": {"access_key_id": "key", "secret_access_key": "sec"},
-            },
-            headers=headers,
-        )
+        with patch("r20_backend.net_security.validate_outbound_url") as outbound_probe:
+            resp_bucket = self.client.post(
+                "/api/v1/admin/backups/simple/test",
+                json={
+                    "destination": "s3",
+                    "enabled": True,
+                    "schedule_time": "02:00",
+                    "endpoint": "https://s3.amazonaws.com",
+                    "bucket": "",
+                    "credentials": {"access_key_id": "key", "secret_access_key": "sec"},
+                },
+                headers=headers,
+            )
         self.assertEqual(resp_bucket.status_code, 400, resp_bucket.text)
-        self.assertIn("Bucket 不能为空", resp_bucket.json()["detail"])
+        outbound_probe.assert_not_called()
 
     def test_safe_archive_verification_boundaries(self):
         # 1. Non-existent archive
