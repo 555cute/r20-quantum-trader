@@ -36,7 +36,7 @@ except ImportError:
 try:
     from r20_backend.version import __version__
 except Exception:
-    __version__ = "7.5.8"
+    __version__ = "7.5.9"
 
 
 def _get_system_version_tag() -> str:

@@ -41,6 +41,8 @@ from r20_backend.prompt_views import EVOLUTION_USER_TEMPLATE, TRADING_USER_TEMPL
 from r20_backend.settings_store import mask, remove_env, update_env
 from r20_backend.notifications import _env as notification_env, diagnose_channel, test_channel
 from r20_backend.audit import recent as recent_audit, record as audit_record
+from r20_backend.client_ip import client_ip as resolve_client_ip, user_agent as resolve_user_agent
+from r20_backend import login_guard
 from r20_backend.admin_auth import AdminAuthStore
 from r20_backend.backup_store import (
     create_job as create_backup_job, delete_job as delete_backup_job, export_job as export_backup_job,
@@ -698,23 +700,43 @@ def admin_auth_status() -> dict[str, Any]:
 
 @app.post("/api/v1/admin/login", include_in_schema=False)
 @app.post("/api/v1/admin/auth/login")
-def admin_login(payload: AdminLoginRequest) -> dict[str, Any]:
+def admin_login(request: Request, payload: AdminLoginRequest) -> dict[str, Any]:
+    ip = resolve_client_ip(request)
+    ua = resolve_user_agent(request)
+
+    # 按来源 IP 的登录限速：与「按账号 5 次失败锁定」互补，
+    # 攻击者轮换用户名或放慢速度时，仅账号维度的锁会被绕过。
+    allowed, retry_after = login_guard.check(ip)
+    if not allowed:
+        audit_record("admin.login", "rate_limited", {"username": payload.username, "ip": ip},
+                     ip=ip, user_agent=ua)
+        raise HTTPException(
+            status_code=429,
+            detail=f"该来源 IP 登录过于频繁，请 {retry_after} 秒后重试",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    login_guard.note_attempt(ip)
     try:
         result = admin_auth.login(payload.username, payload.password)
     except PermissionError as exc:
-        audit_record("admin.login", "failed", {"username": payload.username})
+        login_guard.note_failure(ip)
+        audit_record("admin.login", "failed", {"username": payload.username, "ip": ip},
+                     ip=ip, user_agent=ua)
         raise HTTPException(status_code=401, detail=str(exc)) from exc
-    audit_record("admin.login", "success", {"username": result["user"]["username"]})
+    audit_record("admin.login", "success", {"username": result["user"]["username"]},
+                 ip=ip, user_agent=ua)
     return result
 
 
 @app.post("/api/v1/admin/logout", include_in_schema=False)
 @app.post("/api/v1/admin/auth/logout")
-def admin_logout(x_r20_session: str | None = Header(default=None)) -> dict[str, Any]:
+def admin_logout(request: Request, x_r20_session: str | None = Header(default=None)) -> dict[str, Any]:
     user = admin_auth.validate_session(x_r20_session or "")
     admin_auth.logout(x_r20_session or "")
     if user:
-        audit_record("admin.logout", "success", {"username": user["username"]})
+        audit_record("admin.logout", "success", {"username": user["username"]},
+                     ip=resolve_client_ip(request), user_agent=resolve_user_agent(request))
     return {"logged_out": True}
 
 
@@ -1007,6 +1029,12 @@ def admin_config(x_r20_admin_token: str | None = Header(default=None)) -> dict[s
             "manual_close_enabled": settings.manual_close_enabled,
             "initial_capital": load_account_baseline()["initial_capital"],
             "initial_capital_reset_time": load_account_baseline()["reset_time"],
+        },
+        # 登录防护可观测性：此前审计不记来源，异常登录量完全无法归因
+        "login_protection": {
+            **login_guard.stats(),
+            "trusted_proxies": os.getenv("R20_TRUSTED_PROXIES", "").strip() or "(默认私网/回环/Docker桥网)",
+            "audit_records_ip": True,
         },
     }
 
