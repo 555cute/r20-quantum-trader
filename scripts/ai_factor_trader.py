@@ -33,10 +33,11 @@ if str(_THIS_DIR) not in sys.path:
 try:
     from r20_backend.version import __version__
 except Exception:
-    __version__ = "7.5.5"
+    __version__ = "7.5.6"
 
 from okx_runtime import freeze_environment as freeze_okx_environment, replace_cli_prefix as okx_private_command, unfreeze_environment as unfreeze_okx_environment, selected_environment
 import json
+import math
 import time
 import datetime
 import subprocess
@@ -144,6 +145,46 @@ def effective_single_asset_margin(usdt_available: float = None) -> float:
     if usdt_available and usdt_available > 0:
         cap = min(cap, max(round(float(usdt_available) * SINGLE_ASSET_EQUITY_RATIO, 2), 1.0))
     return cap
+
+
+# 单笔 1R 风险额按可用余额自适应：池内绝对值仅作大账户封顶，小资金账户按 2% 权益收紧。
+RISK_PER_TRADE_EQUITY_RATIO = float(os.getenv("R20_RISK_PER_TRADE_RATIO", "0.02"))
+# 单笔下单保证金占可用余额的硬顶，与提示词 {{risk_budget}} 的「强信号 20%」保持同口径。
+MAX_MARGIN_EQUITY_RATIO = float(os.getenv("R20_MAX_MARGIN_EQUITY_RATIO", "0.20"))
+
+
+def effective_risk_per_trade(pool_risk_usd: float, usdt_available: float = None) -> float:
+    """单笔基准风险额 = min(池内配置绝对值, 可用余额 × 2%)，避免 20U 账户被要求押 15U。"""
+    cap = float(pool_risk_usd or 0.0)
+    if usdt_available and usdt_available > 0:
+        cap = min(cap, max(round(float(usdt_available) * RISK_PER_TRADE_EQUITY_RATIO, 4), 0.05))
+    return cap
+
+
+def quantize_size(raw_sz: float, min_sz: float) -> float:
+    """按交易所最小下单步长(minSz)向下量化张数。
+
+    关键修正：历史实现把数量强制取整并抬到「至少 1 张」，而 OKX 多数永续的 minSz 实为 0.01 张，
+    导致小资金账户仓位被向上放大最多 100 倍(如 BTC 0.01 张=7.92U 名义被抬成 1 张=792U)。
+    现在低于最小步长时返回 0.0 由上层跳过该标的，而不是放大成 1 张。
+    """
+    step = float(min_sz or 0) or 1.0
+    try:
+        raw = float(raw_sz or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    if raw <= 0:
+        return 0.0
+    return round(math.floor(raw / step + 1e-9) * step, 10)
+
+
+def max_size_within_margin(usdt_available: float, leverage: float, price: float, ct_val: float, min_sz: float) -> float:
+    """可用余额硬顶：单笔保证金不得超过可用余额的 MAX_MARGIN_EQUITY_RATIO，超出部分直接砍掉。"""
+    if not usdt_available or usdt_available <= 0 or price <= 0 or ct_val <= 0:
+        return float("inf")
+    max_margin = float(usdt_available) * MAX_MARGIN_EQUITY_RATIO
+    raw = (max_margin * max(1.0, float(leverage or 1.0))) / (float(price) * float(ct_val))
+    return quantize_size(raw, min_sz)
 MIN_SCALE_IN_CONFIDENCE = 75.0    # 顺势加仓必须达到的最低 AI 置信度门槛
 
 def is_tradfi_market_liquid(asset_type: str) -> bool:
@@ -422,7 +463,7 @@ def prune_trackers(trackers: Dict[str, Any], real_pos_dict: Dict[str, Any]) -> i
     return removed
 
 
-def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: int, price: float, tp_px: float, sl_px: float) -> Tuple[bool, str]:
+def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: float, price: float, tp_px: float, sl_px: float) -> Tuple[bool, str]:
     """Submit a protected limit order; acceptance is not treated as a fill."""
     # Check if we are running in simulated/demo mode and price diverged significantly from demo orderbook
     env = selected_environment()
@@ -468,7 +509,7 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: i
 
     command = okx_private_command(
         f"okx swap place --instId {inst_id} --tdMode cross --side {side} "
-        f"--posSide {pos_side} --ordType limit --px {effective_px} --sz {size} "
+        f"--posSide {pos_side} --ordType limit --px {effective_px} --sz {size:g} "
         f"--tpTriggerPx {effective_tp} --tpOrdPx=-1 --slTriggerPx {effective_sl} --slOrdPx=-1 --json"
     )
     result = run_cmd_result(command, timeout=20)
@@ -769,6 +810,8 @@ def fetch_single_instrument_data(item, all_positions, usdt_available):
     name = item["name"]
     asset_type = item["type"]
     base_sz = item["base_sz"]
+    # 交易所最小下单量与步长（OKX 多数永续为 0.01 张），此前被代码的 int()+max(1,..) 完全忽略
+    min_sz = float(item.get("minSz", 1) or 1)
 
     f = {
         "instId": inst_id,
@@ -778,7 +821,8 @@ def fetch_single_instrument_data(item, all_positions, usdt_available):
         "sz": base_sz,
         "precision": item["precision"],
         "ctVal": item["ctVal"],
-        "risk_per_trade_usd": item.get("risk_per_trade_usd", 15.0),
+        "risk_per_trade_usd": effective_risk_per_trade(item.get("risk_per_trade_usd", 15.0), usdt_available),
+        "minSz": min_sz,
         # 标的分级信息随因子包下发，供拦截插件与提示词按「层级」而非写死币种名做通用判断
         "tier": item.get("tier", "tier_2_momentum"),
         "max_leverage": item.get("max_leverage", 3),
@@ -999,9 +1043,11 @@ def fetch_single_instrument_data(item, all_positions, usdt_available):
     atr_val = max(f["atr"], f["price"] * 0.005)
     if f["ctVal"] > 0 and atr_val > 0:
         raw_dyn_sz = (f["risk_per_trade_usd"] * pos_mult) / (f["ctVal"] * atr_val * sl_mult)
-        f["sz"] = max(1, int(round(raw_dyn_sz))) if pos_mult > 0 else 0
+        f["sz"] = quantize_size(raw_dyn_sz, min_sz) if pos_mult > 0 else 0.0
     else:
-        f["sz"] = int(round(base_sz * pos_mult)) if pos_mult > 0 else 0
+        f["sz"] = quantize_size(base_sz * pos_mult, min_sz) if pos_mult > 0 else 0.0
+    # 基准风险额推导出的数量不足交易所最小下单步长 -> 标记为资金规模不匹配，由上层跳过而非放大成 1 张
+    f["size_below_exchange_min"] = bool(f["sz"] <= 0 and pos_mult > 0)
 
     market_data_valid = (
         len(raw_15m) >= 30
@@ -1910,18 +1956,27 @@ def execute_portfolio():
             actual_sz = f["sz"]
             ai_margin = float(ai_decision.get("margin_usdt", 0.0) or 0.0)
             ai_lever = float(ai_decision.get("leverage", 3) or 3)
-            
+            step_sz = float(f.get("minSz", 1) or 1)
+
             # If AI planned margin & leverage, calculate custom contract size
             if ai_margin > 0 and ai_lever >= 1.0 and f["price"] > 0 and ct_val > 0:
                 planned_notional = ai_margin * ai_lever
-                calculated_sz = int(round(planned_notional / (f["price"] * ct_val)))
+                calculated_sz = quantize_size(planned_notional / (f["price"] * ct_val), step_sz)
                 if calculated_sz > 0:
-                    # Bounded risk clamp: Between 0.5x and 2.0x base size to prevent extreme outliers
-                    min_allowed_sz = max(1, int(f["sz"] * 0.5))
-                    max_allowed_sz = max(1, int(f["sz"] * 2.0))
+                    # 风险钳制：围绕自适应基准仓位的 0.5x~2.0x（按交易所最小步长量化，不再强制整数）
+                    min_allowed_sz = max(step_sz, quantize_size(f["sz"] * 0.5, step_sz))
+                    max_allowed_sz = max(min_allowed_sz, quantize_size(f["sz"] * 2.0, step_sz))
                     actual_sz = max(min_allowed_sz, min(max_allowed_sz, calculated_sz))
+                    # 可用余额硬顶：单笔保证金不得超过可用余额 20%，付不起则直接归零跳过而非放大
+                    afford_sz = max_size_within_margin(usdt_available, ai_lever, f["price"], ct_val, step_sz)
+                    if afford_sz is not None and afford_sz < float("inf"):
+                        actual_sz = min(actual_sz, afford_sz)
+                    actual_sz = quantize_size(actual_sz, step_sz)
 
             if actual_sz <= 0:
+                if f.get("size_below_exchange_min") or ai_margin > 0:
+                    print(f"[仓位跳过] {f['name']} 按风险预算推导的数量低于交易所最小下单量 {step_sz} 张"
+                          f"(可用余额 {usdt_available}, 单笔风险额 {f['risk_per_trade_usd']}U)，本周期不交易该标的")
                 continue
 
             # Long Execution (Initial Entry or Strict Pyramiding Scale-In)

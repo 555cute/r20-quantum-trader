@@ -11,7 +11,7 @@
                                                                                                |___/ 
 ```
 
-[![Release](https://img.shields.io/badge/release-v7.5.5-orange.svg?style=flat-square)](https://github.com/555cute/r20-quantum-trader/releases/tag/v7.5.5)
+[![Release](https://img.shields.io/badge/release-v7.5.6-orange.svg?style=flat-square)](https://github.com/555cute/r20-quantum-trader/releases/tag/v7.5.6)
 [![LINUX DO](https://img.shields.io/badge/Community-LINUX%20DO-F97316?style=flat-square&logo=linux&logoColor=white)](https://linux.do/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg?style=flat-square)](https://www.python.org/)
@@ -192,6 +192,29 @@ R20 量子交易系统由**前台双翼量化操盘终端**与**后台机构级�
 - **策略方案具名归档**：支持将当前调试满意的全套自定义策略一键归档为独立文件（如“激进突破版”、“牛市趋势追随版”），随时切换；
 - **0.5s 秒级一键原子回滚**：当新策略表现不佳时，可在控制面一键秒级回滚到任意历史归档版本。回滚采用原子操作，前置自动快照备份并校验哈希，杜绝局部状态残留；
 - **全链路台账 100% 溯源绑定**：每一笔开仓与平仓订单，后台均强制锁定记录开仓当时的 `policy_version` 与 `policy_hash`，真正实现“哪笔交易用了哪套策略，毫秒级精准溯源”。
+
+---
+
+## 💰 资金规模适配（小资金账户可直接运行）
+
+风控与仓位**全部按实际可用余额比例推导**，不存在任何写死的绝对金额，20U 也能正常开单：
+
+| 维度 | 规则 | 20U 账户 | 4000U 账户 |
+| :--- | :--- | ---: | ---: |
+| 单笔 1R 风险额 | `min(池内配置, 余额 × 2%)` | 0.40 U | 15.0 U |
+| 单笔保证金硬顶 | `余额 × 20%` | 4.0 U | 800 U |
+| 单标的累计保证金 | `min(600, 余额 × 30%)` | 6.0 U | 600 U |
+| 单日亏损熔断 | `min(150, 余额 × 5%)` | 1.0 U | 150 U |
+
+- **张数按交易所 `minSz` 步长量化**（OKX 多数永续为 0.01 张），不再强制"至少 1 张"。
+  旧实现会把 BTC 的 0.01 张（7.92 U 名义）放大成 1 张（792 U 名义 / 5x 需 158 U 保证金），
+  导致小资金账户被拒单、中等账户静默开出远超风险预算的仓位。
+- 资金规模不足以开出合规最小仓位（无法同时满足最小下单量、止损呼吸空间与 R:R ≥ 2.0）的标的，
+  **直接跳过并在日志标注"资金不匹配"**，而不是放大仓位硬开。
+- 全部阈值可用环境变量覆盖，见 [`env.example`](env.example) 的「资金规模自适应风控」段。
+
+> ⚠️ 实话：20U 虽然技术上可跑，但 Taker 0.05% 双边手续费 + 资金费率相对 1.8~2.2x ATR 的止损空间占比过高，
+> 统计意义有限。建议用模拟盘或 ≥300U 实盘验证策略。
 
 ---
 
