@@ -869,16 +869,31 @@ async function loadCandles(silent = false, resetTime = false) {
         volumePrecision: 2,
       })
 
-      // 填入数据 (通过 setDataLoader)
-      klineChart.setDataLoader({
-        getBars: ({ callback }) => {
-          callback(klineList, false)
-        },
-      })
-
-      // 始终让最新蜡烛贴紧最右侧！
-      if (resetTime) {
+      // 增量精准更新 vs 全量初始化
+      if (resetTime || klineChart.getDataList().length === 0) {
+        // 全量加载
+        klineChart.setDataLoader({
+          getBars: ({ callback }) => {
+            callback(klineList, false)
+          },
+        })
         klineChart.scrollToRealTime()
+      } else {
+        // 定时轮询更新：直接精准喂入最新最后一根/多根未结蜡烛，驱动 K 线毫秒级实时跳动！
+        const lastCandle = klineList[klineList.length - 1]
+        if (lastCandle) {
+          const storeImp = (klineChart as any)._chartStore
+          if (storeImp && typeof storeImp._addData === 'function') {
+            storeImp._addData(lastCandle, 'update')
+          } else {
+            // fallback
+            klineChart.setDataLoader({
+              getBars: ({ callback }) => {
+                callback(klineList, false)
+              },
+            })
+          }
+        }
       }
 
       updatePriceLines()
@@ -965,11 +980,10 @@ onMounted(() => {
   document.addEventListener('click', handleClickOutside)
   nextTick(() => {
     initChart()
-    // 静默增量拉取，页面隐藏时停止，页面可见时 4s 轮询，大幅释放 10M 带宽
+    // 2.5s 静默增量拉取最新Tick/未结蜡烛，保证移动端与PC端实时跳动！
     timer = setInterval(() => {
-      if (typeof document !== 'undefined' && document.hidden) return
       loadCandles(true, false)
-    }, 4000)
+    }, 2500)
     countdownTimer = setInterval(updateCountdown, 1000)
   })
 })
