@@ -72,6 +72,7 @@ data/*.txt
 data/*.md
 data/.*secret_key
 data/credentials/
+data/policy_archives/
 trading.html
 OPEN_SOURCE_CONTROL_TODO.md
 CONTROL_PLANE_V2_TODO.md

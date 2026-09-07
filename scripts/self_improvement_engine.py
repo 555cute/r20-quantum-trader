@@ -142,6 +142,38 @@ def get_cpa_client_config() -> Tuple[str, str]:
         os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY") or "",
     )
 
+def load_signal_journal():
+    """读取开仓时刻的数理快照日志，按标的分组，供平仓台账 join 真实因果证据。"""
+    journal_file = os.path.join(DATA_DIR, "signal_journal.json")
+    by_inst = {}
+    if not os.path.exists(journal_file):
+        return by_inst
+    try:
+        with open(journal_file, "r", encoding="utf-8") as f:
+            for rec in json.load(f):
+                inst = str(rec.get("name") or rec.get("inst") or "")
+                if inst:
+                    by_inst.setdefault(inst, []).append(rec)
+    except Exception as e:
+        log_msg(f"读取 signal_journal 异常: {e}")
+    return by_inst
+
+
+def _match_snapshot(journal_by_inst, inst, open_time):
+    """按开仓时间就近匹配（不晚于开仓时间的最后一条）开仓快照。"""
+    candidates = journal_by_inst.get(inst) or []
+    if not candidates or not open_time:
+        return None
+    best = None
+    for rec in candidates:
+        if str(rec.get("entryTime") or "") <= str(open_time):
+            if best is None or str(rec.get("entryTime") or "") > str(best.get("entryTime") or ""):
+                best = rec
+    if best is None and candidates:
+        best = candidates[0]
+    return (best or {}).get("snapshot")
+
+
 def load_closed_trades():
     if _ledger_incomplete():
         log_msg("台账不完整，跳过自进化归因")
@@ -164,6 +196,7 @@ def load_closed_trades():
         except Exception:
             pass
 
+    journal_by_inst = load_signal_journal()
     closed_trades = []
     path = _ledger_file()
     if os.path.exists(path):
@@ -196,7 +229,8 @@ def load_closed_trades():
                         "gross_pnl": round(gross, 2),
                         "fee": round(fee, 2),
                         "net_pnl": round(pnl, 2),
-                        "exit_reason": reason
+                        "exit_reason": reason,
+                        "entry_snapshot": t.get("signal_snapshot") or _match_snapshot(journal_by_inst, inst, t.get("open_time")),
                     })
         except Exception as e:
             log_msg(f"读取交易台账异常: {e}")
@@ -309,7 +343,7 @@ def call_llm_evolution_review(closed_trades: List[Dict[str, Any]], existing_memo
     except OSError:
         pass
 
-    model_name = os.environ.get("LLM_MODEL") or "gemini-3.8-flash-high"
+    model_name = os.environ.get("LLM_MODEL") or ""
     effort = os.environ.get("LLM_REASONING_EFFORT") or "high"
     api_format = "openai_chat"
     try:
@@ -397,7 +431,7 @@ def run_self_evolution(force: bool = False):
     tz_bj = datetime.timezone(datetime.timedelta(hours=8))
     now_bj = datetime.datetime.now(tz_bj)
     timestamp_str = now_bj.strftime("%Y-%m-%d %H:%M:%S")
-    log_msg("🧬 启动 R20 AI 大脑自进化认知复盘与实战心法提炼 (v7.2.1 Crypto Focus)...")
+    log_msg(f"🧬 启动 R20 AI 大脑自进化认知复盘与实战心法提炼 (v{__version__} Crypto Focus)...")
 
     if _ledger_incomplete():
         log_msg("台账不完整，拒绝用残缺历史覆盖心法归因")

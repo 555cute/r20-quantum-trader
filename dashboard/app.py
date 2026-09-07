@@ -1310,14 +1310,14 @@ def update_cache_cycle():
         from r20_backend.llm_manager import get_active_llm_runtime
         active_llm_info = get_active_llm_runtime()
         CACHE_DATA["llm_runtime"] = {
-            "model": active_llm_info.get("model", "gemini-3.8-flash-high"),
+            "model": active_llm_info.get("model", ""),
             "provider_name": active_llm_info.get("provider_name", "默认"),
             "reasoning_effort": active_llm_info.get("reasoning_effort", "high"),
             "api_format": active_llm_info.get("api_format", "openai_chat"),
         }
     except Exception:
         CACHE_DATA["llm_runtime"] = {
-            "model": os.getenv("LLM_MODEL", "gemini-3.8-flash-high"),
+            "model": os.getenv("LLM_MODEL", ""),
             "provider_name": "默认",
             "reasoning_effort": os.getenv("LLM_REASONING_EFFORT", "high"),
             "api_format": "openai_chat",

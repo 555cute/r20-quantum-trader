@@ -201,13 +201,14 @@ const quickNav = [
               <Cpu class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
             </div>
           </div>
-          <div class="text-sm sm:text-base 2xl:text-lg font-black font-mono truncate" style="color: var(--text-main);">
-            {{ runtime.llm_runtime?.active_model || 'gemini-3.8-flash-high' }}
+          <div class="text-sm sm:text-base 2xl:text-lg font-black font-mono truncate" style="color: var(--text-main);" :title="runtime.llm_runtime?.model || runtime.llm_runtime?.name || '未配置模型'">
+            {{ runtime.llm_runtime?.model || runtime.llm_runtime?.name || '未配置模型' }}
           </div>
           <div class="text-[10px] 2xl:text-[11px] font-mono mt-1 flex items-center space-x-1.5" style="color: var(--text-faint);">
-            <span>推理思考: {{ runtime.llm_runtime?.active_reasoning_effort || 'HIGH' }}</span>
+            <span>{{ runtime.llm_runtime?.provider_name || '未配置供应商' }}</span>
             <span>·</span>
-            <span class="text-indigo-400 group-hover:underline">配置通道 →</span>
+            <span>推理思考: {{ (runtime.llm_runtime?.reasoning_effort || '未设置').toString().toUpperCase() }}</span>
+            <span class="text-indigo-400 group-hover:underline ml-1">配置通道 →</span>
           </div>
         </div>
 

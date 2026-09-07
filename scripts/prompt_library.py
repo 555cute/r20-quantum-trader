@@ -241,12 +241,34 @@ EMPTY_CUSTOM = {
     "trading_system": "", "trading_user": "", "evolution_system": "", "evolution_user": "",
 }
 
+# 白盒安全护栏：只拦截「解除硬约束」的意图，不拦截正常的杠杆/保证金/止损参数调优表述。
+# 设计要点：动词与硬约束名词必须紧邻（≤2 字插入语），避免 "覆盖 100~200U 保证金上限" 这类
+# 正常额度表述被误判；另用「规则否定」宽窗口兜底捕捉 "忽略上面关于止损的规定" 这类绕法。
 _FORBIDDEN = (
-    (re.compile(r"(?is)(忽略|绕过|取消|覆盖).{0,24}(P0|硬风控|风险门禁|OCO|JSON|止损|保证金上限)"), "不得要求忽略或覆盖 P0 与执行层硬约束"),
-    (re.compile(r"(?is)(允许|可以).{0,20}(逆势补仓|无止损|跳过OCO|突破持仓上限)"), "不得放宽逆势补仓、OCO、止损或持仓上限"),
-    (re.compile(r"(?is)ignore.{0,30}(system|risk|safety|json|oco)"), "不得要求忽略系统、风险、安全或 JSON 契约"),
+    (re.compile(r"(?is)(忽略|绕过|无视|跳过|取消|禁用|关闭|豁免|覆盖)[^。；;，,\n]{0,2}(P0|硬风控|风险门禁|风控门禁|风控底线|安全底线|OCO|JSON|止损|保证金上限|持仓上限|盈亏比|置信度)"), "不得要求忽略或覆盖 P0 与执行层硬约束"),
+    (re.compile(r"(?is)(忽略|绕过|无视|取消|覆盖|不必|不要|无需|不受)[^。；;\n]{0,12}(规定|规则|约束|要求|限制|契约|铁律|军规|底线)"), "不得要求忽略系统硬约束与规则契约"),
+    (re.compile(r"(?is)(不设|没有|去掉|拿掉|无需|不必)[^。；;\n]{0,2}(止损|风控)"), "不得取消止损或风控"),
+    (re.compile(r"(?is)(允许|可以|支持|应当)[^。；;\n]{0,12}(逆势补仓|无止损|跳过OCO|突破持仓上限|超过持仓上限|无限杠杆)"), "不得放宽逆势补仓、OCO、止损或持仓上限"),
+    (re.compile(r"(?is)ignore[^.;\n]{0,30}(system|risk|safety|json|oco)"), "不得要求忽略系统、风险、安全或 JSON 契约"),
     (re.compile(r"(?i)(sk-[A-Za-z0-9_-]{16,}|AIza[A-Za-z0-9_-]{16,}|api[_ -]?key\s*[:=]\s*\S+)"), "提示词中禁止写入 API Key 或密钥"),
 )
+# 命中前若出现这些否定前缀，说明文本本身是在「禁止」该行为，属于合规表述。
+_BENIGN_PREFIX = re.compile(r"(不得|严禁|禁止|不可|不能|无法|杜绝|防止|避免)[^。；;\n]{0,10}$")
+
+
+def scan_forbidden(value: str) -> list[str]:
+    """返回命中的护栏告警（附带命中片段），供保存/导入/回滚三处校验复用。"""
+    hits: list[str] = []
+    text = str(value or "")
+    for pattern, message in _FORBIDDEN:
+        for match in pattern.finditer(text):
+            prefix = text[max(0, match.start() - 12):match.start()]
+            if _BENIGN_PREFIX.search(prefix):
+                continue
+            fragment = match.group(0).strip().replace("\n", " ")
+            hits.append(f"{message}（命中片段：「{fragment[:40]}」）")
+            break
+    return hits
 _VAR_RE = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
 
 
@@ -451,13 +473,8 @@ def validate_profile(profile: dict[str, Any]) -> dict[str, Any]:
                 errors.append(f"{pipeline}/{module.get('title', '模块')} 包含未知变量：{', '.join(unknown)}")
             if module.get("source") == "base" and module.get("locked"):
                 continue
-            for pattern, message in _FORBIDDEN:
-                for match in pattern.finditer(value):
-                    prefix = value[max(0, match.start() - 12):match.start()]
-                    if re.search(r"(不得|严禁|禁止|不可).{0,10}$", prefix):
-                        continue
-                    errors.append(f"{pipeline}/{module.get('title', '模块')}：{message}")
-                    break
+            for hit in scan_forbidden(value):
+                errors.append(f"{pipeline}/{module.get('title', '模块')}：{hit}")
     policy = profile.get("simple_policy") if isinstance(profile.get("simple_policy"), dict) else {}
     if profile.get("editor_mode") == "simple":
         strategy = str(policy.get("strategy") or "")
@@ -468,9 +485,8 @@ def validate_profile(profile: dict[str, Any]) -> dict[str, Any]:
             unknown = sorted(set(_VAR_RE.findall(value)) - ALLOWED_VARIABLES)
             if unknown:
                 errors.append(f"{label} 包含未知变量：{', '.join(unknown)}")
-            for pattern, message in _FORBIDDEN:
-                if pattern.search(value):
-                    errors.append(f"{label}：{message}")
+            for hit in scan_forbidden(value):
+                errors.append(f"{label}：{hit}")
         if policy.get("participation", "balanced") not in {"conservative", "balanced", "active"}:
             errors.append("参与风格无效")
         if policy.get("evidence", "strict") not in {"strict", "balanced", "trend"}:
@@ -486,13 +502,8 @@ def validate_profile(profile: dict[str, Any]) -> dict[str, Any]:
         unknown = sorted(set(_VAR_RE.findall(value)) - ALLOWED_VARIABLES)
         if unknown:
             errors.append(f"{key} 包含未知变量：{', '.join(unknown)}")
-        for pattern, message in _FORBIDDEN:
-            for match in pattern.finditer(value):
-                prefix = value[max(0, match.start() - 12):match.start()]
-                if re.search(r"(不得|严禁|禁止|不可).{0,10}$", prefix):
-                    continue
-                errors.append(f"{key}：{message}")
-                break
+        for hit in scan_forbidden(value):
+            errors.append(f"{key}：{hit}")
     total_chars = module_total if pipelines else total
     if total_chars > MAX_PROFILE_CHARS:
         errors.append(f"四类模板合计不得超过 {MAX_PROFILE_CHARS} 字符")
