@@ -203,7 +203,13 @@ const liveSide = computed<'long' | 'short'>(() => {
 
 const liveStopLoss = computed(() => {
   if (activePosition.value) {
-    const s = Number(activePosition.value.displayStop ?? activePosition.value.slTriggerPx ?? 0)
+    const s = Number(
+      activePosition.value.displayStop ??
+      activePosition.value.exchangeSl ??
+      activePosition.value.slTriggerPx ??
+      activePosition.value.trailingSl ??
+      0
+    )
     if (s > 0) return s
   }
   if (activeOrder.value) {
@@ -220,7 +226,12 @@ const liveStopLoss = computed(() => {
 
 const liveTakeProfit = computed(() => {
   if (activePosition.value) {
-    const tp = Number(activePosition.value.displayTakeProfit ?? activePosition.value.tpTriggerPx ?? 0)
+    const tp = Number(
+      activePosition.value.displayTakeProfit ??
+      activePosition.value.exchangeTp ??
+      activePosition.value.tpTriggerPx ??
+      0
+    )
     if (tp > 0) return tp
   }
   if (activeOrder.value) {
@@ -383,6 +394,17 @@ function initTradingViewChart() {
       minBarSpacing: 4,
       rightOffset: 3,
       fixLeftEdge: true,
+      timeFormatter: (time: any) => {
+        const date = new Date(Number(time) * 1000)
+        const m = String(date.getMonth() + 1).padStart(2, '0')
+        const d = String(date.getDate()).padStart(2, '0')
+        const hh = String(date.getHours()).padStart(2, '0')
+        const mm = String(date.getMinutes()).padStart(2, '0')
+        if (currentPeriod.value === '15m' || currentPeriod.value === '1H') {
+          return `${hh}:${mm}`
+        }
+        return `${m}-${d} ${hh}:${mm}`
+      },
     },
   })
 
@@ -703,6 +725,10 @@ function updateLiveTick() {
   const last = candles.value[candles.value.length - 1]
   const px = currentPrice.value
   if (px > 0 && last) {
+    // 异常价差保护过滤：若实时盘口价格偏离上一根结线超过 3.5%，可能是异币种或残存脏数据，跳过盲目拉伸
+    const maxDeviation = Math.abs(px - last.close) / (last.close || 1)
+    if (maxDeviation > 0.035) return
+
     last.close = px
     last.high = Math.max(last.high, px)
     last.low = Math.min(last.low, px)
