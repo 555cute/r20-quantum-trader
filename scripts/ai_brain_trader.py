@@ -36,7 +36,7 @@ except ImportError:
 try:
     from r20_backend.version import __version__
 except Exception:
-    __version__ = "7.5.4"
+    __version__ = "7.5.5"
 
 
 def _get_system_version_tag() -> str:
@@ -404,7 +404,7 @@ def fetch_single_instrument_package(item: Dict[str, Any]) -> Dict[str, Any]:
 SYSTEM_PROMPT = """你是 R20 Quantum Trader 的首席 AI 交易官，负责 1H~4H 加密波段高胜率盈利交易裁决。你的首要使命是【捕捉确定性大波段积累正收益并捍卫本金】，杜绝随意割肉与无序磨损；【空仓且存在至少一个合法顺势候选时（符合顺势高胜率形态），强制在候选标的池中选优输出，不得无故放弃合规机会】，为系统积累宝贵实盘胜果！
 
 【核心军规：反割肉·反磨损·选优开单五大铁律（自进化实战深度纠偏）】
-1. 宽止损隔绝杂波：严禁把止损设在 15M/5M 噪音区间！止损距离必须放宽至结构外 **1.8x ~ 2.2x 1H ATR**（或现价外 1.8%~3.0% 安全垫）；宁可把单笔杠杆控制在 2x~3x、保证金控制在 100~200U，也必须给足呼吸空间，绝不给交易所微小插针割肉的机会！
+1. 宽止损隔绝杂波：严禁把止损设在 15M/5M 噪音区间！止损距离必须放宽至结构外 **1.8x ~ 2.2x 1H ATR**（或现价外 1.8%~3.0% 安全垫）；宁可把单笔杠杆控制在 2x~3x、保证金按上方【本周期风险预算】给出的**自适应区间**取值，也必须给足呼吸空间，绝不给交易所微小插针割肉的机会！**严禁套用任何固定绝对金额，保证金一律以 {{risk_budget}} 实时推导值为准。**
 2. 反浮盈回吐·三阶动态棘轮与果断主动止盈（保住利润是高胜率核心，绝不让赚钱单倒亏割肉）：
    - 阶梯 1（浮盈 < 0.8R）：保持宽止损呼吸空间（1.8x~2.2x 1H ATR），给波段展开充分时间，严禁微小浮盈过早移损被杂波扫损；
    - 阶梯 2（浮盈 ≥ 0.8R 或 ROI ≥ +1.5%）：坚决输出 UPDATE_SL 将止损上移至开仓成本位 +0.20%（保本位 BE），彻底切断本金风险，立于不败之地；
@@ -467,11 +467,11 @@ P3 执行定位：15M K线、盘口与 Maker 限价挂单位置。P3 优化入�
   - 目标 R:R ≥ 2.2；执行层绝对拒绝 R:R < 2.0 的报价。
   - 进场必须使用 Maker 限价单挂在支撑/阻力位附近（如现价下方 0.1%~0.4%），严禁市价追单。
   - 止损必须基于结构性保护点（如前低支撑位或箱体边缘下方 0.3%~0.5%），参考 1.8~2.2x 1H ATR，绝不把止损设得过近以防被杂波插针。
-  - 单笔保证金建议 5%~15%，强信号可使用 15%~20%；杠杆 2x~5x。
+  - 单笔保证金取【本周期风险预算】的常规区间（可用余额 3%~12%），强信号可上浮至 15%~20%；杠杆 2x~5x。资金规模过小时宁可少开标的，也不得压缩止损距离或放弃盈亏比底线。
 
 【顺势浮盈金字塔加仓：模型只能申请，执行层拥有最终否决权】
 - 已有多仓只能申请同向 BUY_LONG，已有空仓只能申请同向 SELL_SHORT；反向指令不得借加仓通道执行。
-- 底仓必须 ROI ≥ +0.8% 且止损已经移至保本/盈利区；最多追加 1 次；单标的累计保证金 ≤ 600 USDT；AI 置信度 ≥ 75%。
+- 底仓必须 ROI ≥ +0.8% 且止损已经移至保本/盈利区；最多追加 1 次；单标的累计保证金（含加仓）不得超过【本周期风险预算】的单标的上限（默认可用余额 30%，由 {{risk_budget}} 实时给出，严禁套用固定绝对金额）；AI 置信度 ≥ 75%。
 - 加多门禁：多周期聚合加速度 a ≥ -0.25 且 continuation_prob_pct ≥ 40%。
 - 加空门禁：多周期聚合加速度 a ≤ +0.25 且 breakdown_prob_pct ≥ 40%。
 - 浮亏、未脱离成本区、顶部/底部失速、概率不足或肥尾冲击时不得申请加仓。即使模型申请，执行器仍会再次硬校验。
@@ -677,9 +677,37 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
 
     avail_balance_str = f"{usdt_available:.2f} USDT" if usdt_available is not None and usdt_available >= 0 else "[MISSING_CONTEXT:account_balance]"
 
+    # 风险预算按「实际可用余额」自适应推导：预设绝不写死绝对金额，避免与小资金账户(如 80U)冲突。
+    if usdt_available is None or usdt_available < 0:
+        risk_budget_text = "[MISSING_CONTEXT:risk_budget]"
+    else:
+        _eq = float(usdt_available)
+        _m_lo = round(_eq * 0.03, 2)
+        _m_hi = round(_eq * 0.12, 2)
+        _m_strong = round(_eq * 0.20, 2)
+        _asset_cap = round(_eq * 0.30, 2)
+        _daily_stop = round(max(_eq * 0.05, 1.0), 2)
+        risk_budget_text = (
+            f"【本周期风险预算｜按实际可用余额 {_eq:.2f} USDT 自适应推导，严禁套用任何固定绝对金额】:\n"
+            f"- 常规单笔保证金: {_m_lo} ~ {_m_hi} USDT (可用余额 3%~12%)\n"
+            f"- 强信号单笔保证金上限: {_m_strong} USDT (20%)\n"
+            f"- 单标的累计保证金上限(含金字塔加仓): {_asset_cap} USDT (30%)\n"
+            f"- 单笔最大可承受亏损: 以 1.0R 为基准，且不超过可用余额 2%\n"
+            f"- 当日累计亏损熔断线: -{_daily_stop} USDT (可用余额 5%)"
+        )
+        if _eq < 200.0:
+            risk_budget_text += (
+                "\n- ⚠️ 小资金账户提示: 可用余额偏小，按百分比推导的保证金可能低于部分永续合约的交易所最小下单名义价值"
+                "（如高单价币种 BTC 一张合约的名义价值就可能超过账户余额）。此时应当【减少同时持有的标的数量】、"
+                "优先选择最小名义价值与账户规模匹配的标的，或适度提高单笔保证金占比；"
+                "绝不允许通过压缩止损距离或降低盈亏比来迁就资金规模。"
+                "若某标的在当前余额下无法同时满足最小下单量、止损呼吸空间与 R:R≥2.0，该标的必须输出 WAIT 并说明资金不匹配。"
+            )
+
     prompt = f"""======================= 【当前决策时间戳与市场时效】 =======================
 【推演基准时间】: {now_bj_str}
 【当前账户可用资金】: {avail_balance_str}
+{risk_budget_text}
 
 ======================= 【全网实时重大快讯与宏观情报】 =======================
 【宏观环境基调】: {macro_env}
@@ -712,7 +740,7 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
    - 仔细审查上述在途未成交挂单：若挂单价格已大幅偏离最新盘口、或者行情动能/突发要闻已转变导致原挂单计划失效，必须在 pending_orders_management 中为该挂单输出 CANCEL 立即撤单指令，防止挂单成交在不利价格；若原计划仍然有效且价格合适，输出 KEEP 维持挂单。
 3. 【多空开仓与顺势浮盈加仓全权裁决 (Opening & Pyramiding)】：
    - 【首发开仓】：自主判断未持仓品种是否具备确定性爆发机会，结合最新资讯、多周期形态与筹码，决定多空方向 (action: BUY_LONG / SELL_SHORT / WAIT)；
-   - 【顺势浮盈金字塔加仓申请】：已有多仓仅可输出同向 BUY_LONG，已有空仓仅可输出同向 SELL_SHORT；这只是加仓申请，执行层仍将复核底仓 ROI/保本、最多1次、累计保证金≤600U、置信度≥75%、加速度与延续/击穿概率门禁。任何不确定均输出 WAIT；
+   - 【顺势浮盈金字塔加仓申请】：已有多仓仅可输出同向 BUY_LONG，已有空仓仅可输出同向 SELL_SHORT；这只是加仓申请，执行层仍将复核底仓 ROI/保本、最多1次、累计保证金≤【本周期风险预算】单标的上限、置信度≥75%、加速度与延续/击穿概率门禁。任何不确定均输出 WAIT；
    - 自主规划拟开仓/加仓保证金 (margin_usdt: 可用余额的 5%~20%，且不得超过系统上限) 与杠杆 (2~5x)；
    - 自主规划 entry_price、take_profit_price 与 stop_loss_price；目标 R:R ≥ 2.5，且任何 R:R < 2.0 的报价会被执行层拒绝。
 4. 必须输出严格 JSON，格式如下：
@@ -740,7 +768,7 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
       "action": "BUY_LONG" | "SELL_SHORT" | "WAIT",
       "confidence": 0~100,
       "leverage": 3 (推荐杠杆2~5),
-      "margin_usdt": 50.0 (推荐保证金),
+      "margin_usdt": float (必须取自上方【本周期风险预算】的常规单笔区间；示例: 可用余额 80U → 2.4~9.6，可用余额 4000U → 120~480。严禁套用任何固定绝对金额),
       "entry_price": float,
       "take_profit_price": float,
       "stop_loss_price": float,
@@ -757,6 +785,7 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
     runtime_vars = {
         "decision_timestamp": f"【推演基准时间】: {now_bj_str}",
         "account_balance": f"【当前账户可用资金】: {avail_balance_str}",
+        "risk_budget": risk_budget_text,
         "account_positions": f"【账户持仓概况】: {pos_summary}\n【当前活动在途持仓明细】:\n{active_pos_text}",
         "pending_orders": f"【当前在途挂单列表】:\n{pending_orders_text}",
         "news_intelligence": f"【宏观环境基调】: {macro_env}\n【最新核心资讯要闻】:\n{news_text}",

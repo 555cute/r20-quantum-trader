@@ -33,7 +33,7 @@ if str(_THIS_DIR) not in sys.path:
 try:
     from r20_backend.version import __version__
 except Exception:
-    __version__ = "7.5.4"
+    __version__ = "7.5.5"
 
 from okx_runtime import freeze_environment as freeze_okx_environment, replace_cli_prefix as okx_private_command, unfreeze_environment as unfreeze_okx_environment, selected_environment
 import json
@@ -118,12 +118,32 @@ MAX_CONCURRENT_POSITIONS = len(TARGET_INSTRUMENTS)
 MAX_SAME_DIRECTION_POSITIONS = 3
 TAKER_FEE_RATE = 0.0005
 MAKER_FEE_RATE = 0.0002 # Limit Order Maker Fee (60% Lower Than Market Taker)
-MAX_DAILY_LOSS_USDT = 150.0
+# 风控上限按「实际可用余额」自适应：绝对值只作为大账户的封顶，小资金账户按权益比例收紧，
+# 避免 80U 账户下 150U 熔断线永不触发（等于没有熔断）。可用环境变量显式覆盖。
+MAX_DAILY_LOSS_USDT = float(os.getenv("R20_MAX_DAILY_LOSS_USDT", "150.0"))
+DAILY_LOSS_EQUITY_RATIO = float(os.getenv("R20_DAILY_LOSS_EQUITY_RATIO", "0.05"))
 
 # 🚀 Pyramiding Scale-In Hard Risk Gateways (顺势浮盈金字塔加仓风控硬门禁)
-MAX_SINGLE_ASSET_MARGIN = 600.0   # 单标的最大累计占用保证金上限 (USDT)
+MAX_SINGLE_ASSET_MARGIN = float(os.getenv("R20_MAX_SINGLE_ASSET_MARGIN_USDT", "600.0"))   # 单标的最大累计占用保证金封顶 (USDT)
+SINGLE_ASSET_EQUITY_RATIO = float(os.getenv("R20_SINGLE_ASSET_EQUITY_RATIO", "0.30"))      # 单标的累计保证金占可用余额比例
 MAX_SCALE_IN_COUNT = 1            # 单标的最大顺势加仓次数 (底仓+最多1次顺势追加)
 MIN_SCALE_IN_PROFIT_RATIO = 0.008 # 允许顺势加仓的最小底仓浮盈率 (+0.8%)
+
+
+def effective_daily_loss_limit(usdt_available: float = None) -> float:
+    """单日亏损熔断线 = min(绝对封顶, 可用余额 5%)，小资金账户自动收紧。"""
+    cap = MAX_DAILY_LOSS_USDT
+    if usdt_available and usdt_available > 0:
+        cap = min(cap, max(round(float(usdt_available) * DAILY_LOSS_EQUITY_RATIO, 2), 1.0))
+    return cap
+
+
+def effective_single_asset_margin(usdt_available: float = None) -> float:
+    """单标的累计保证金上限 = min(绝对封顶, 可用余额 30%)，与提示词风险预算同口径。"""
+    cap = MAX_SINGLE_ASSET_MARGIN
+    if usdt_available and usdt_available > 0:
+        cap = min(cap, max(round(float(usdt_available) * SINGLE_ASSET_EQUITY_RATIO, 2), 1.0))
+    return cap
 MIN_SCALE_IN_CONFIDENCE = 75.0    # 顺势加仓必须达到的最低 AI 置信度门槛
 
 def is_tradfi_market_liquid(asset_type: str) -> bool:
@@ -300,7 +320,7 @@ def check_black_swan_sentinel() -> Tuple[bool, str]:
 
     return False, ""
 
-def is_circuit_breaker_active():
+def is_circuit_breaker_active(usdt_available: float = None):
     # 1. Black Swan Sentinel Check
     bs_active, bs_reason = check_black_swan_sentinel()
     if bs_active:
@@ -330,8 +350,9 @@ def is_circuit_breaker_active():
                 for t in ledger
                 if t.get("status") == "closed" and str(t.get("close_time", "")).startswith(today_str)
             )
-            if today_pnl < -MAX_DAILY_LOSS_USDT:
-                return True, f"今日累计回撤 ({today_pnl:.2f}U) 触及单日最大风控熔断限额 ({MAX_DAILY_LOSS_USDT}U)"
+            _loss_cap = effective_daily_loss_limit(usdt_available)
+            if today_pnl < -_loss_cap:
+                return True, f"今日累计回撤 ({today_pnl:.2f}U) 触及单日最大风控熔断限额 ({_loss_cap}U｜按可用余额自适应)"
         except Exception as e:
             return True, f"日亏损风控数据读取失败，安全暂停开仓: {e}"
 
@@ -758,6 +779,10 @@ def fetch_single_instrument_data(item, all_positions, usdt_available):
         "precision": item["precision"],
         "ctVal": item["ctVal"],
         "risk_per_trade_usd": item.get("risk_per_trade_usd", 15.0),
+        # 标的分级信息随因子包下发，供拦截插件与提示词按「层级」而非写死币种名做通用判断
+        "tier": item.get("tier", "tier_2_momentum"),
+        "max_leverage": item.get("max_leverage", 3),
+        "sl_atr_mult": item.get("sl_atr_mult", 2.2),
         "price": 0.0,
         "change24h": 0.0,
         "vol24h": 0.0,
@@ -1789,7 +1814,9 @@ def execute_portfolio():
     save_trackers(trackers)
 
     # 4. Check Circuit Breaker & Batch AI Brain Scan (Including Active Positions Detail)
-    cb_active, cb_reason = is_circuit_breaker_active()
+    cb_active, cb_reason = is_circuit_breaker_active(usdt_available)
+    # 单标的累计保证金上限按可用余额自适应，与提示词 {{risk_budget}} 同口径
+    ASSET_MARGIN_CAP = effective_single_asset_margin(usdt_available)
 
     brain_cache = {}
     # One LLM call covers the full six-instrument universe and all active positions.
@@ -1933,7 +1960,7 @@ def execute_portfolio():
 
                     is_profit_or_breakeven = (pos_upl > 0 and pos_upl_ratio >= MIN_SCALE_IN_PROFIT_RATIO) or (trailing_sl > 0 and trailing_sl >= pos_avg_px)
                     planned_margin = ai_margin if ai_margin > 0 else (actual_sz * ct_val * f["price"] / max(1.0, ai_lever))
-                    within_margin_cap = (curr_margin + planned_margin) <= MAX_SINGLE_ASSET_MARGIN
+                    within_margin_cap = (curr_margin + planned_margin) <= ASSET_MARGIN_CAP
 
                     if is_profit_or_breakeven and scale_count < MAX_SCALE_IN_COUNT and within_margin_cap and ai_conf >= MIN_SCALE_IN_CONFIDENCE and calculus_accel_ok:
                         allow_entry = True
@@ -1945,7 +1972,7 @@ def execute_portfolio():
                         elif scale_count >= MAX_SCALE_IN_COUNT:
                             print(f"[Pyramiding 拦截] {f['name']} 已达最大加仓次数 ({scale_count}/{MAX_SCALE_IN_COUNT})")
                         elif not within_margin_cap:
-                            print(f"[Pyramiding 拦截] {f['name']} 加仓后总保证金将超限 ({curr_margin + planned_margin:.1f} > {MAX_SINGLE_ASSET_MARGIN}U)")
+                            print(f"[Pyramiding 拦截] {f['name']} 加仓后总保证金将超限 ({curr_margin + planned_margin:.1f} > {ASSET_MARGIN_CAP}U)")
                         elif ai_conf < MIN_SCALE_IN_CONFIDENCE:
                             print(f"[Pyramiding 拦截] {f['name']} AI加仓置信度不足 ({ai_conf:.0f}% < {MIN_SCALE_IN_CONFIDENCE}%)")
                         elif not calculus_accel_ok:
@@ -2025,7 +2052,7 @@ def execute_portfolio():
 
                     is_profit_or_breakeven = (pos_upl > 0 and pos_upl_ratio >= MIN_SCALE_IN_PROFIT_RATIO) or (trailing_sl > 0 and trailing_sl <= pos_avg_px)
                     planned_margin = ai_margin if ai_margin > 0 else (actual_sz * ct_val * f["price"] / max(1.0, ai_lever))
-                    within_margin_cap = (curr_margin + planned_margin) <= MAX_SINGLE_ASSET_MARGIN
+                    within_margin_cap = (curr_margin + planned_margin) <= ASSET_MARGIN_CAP
 
                     c_dyn = f.get("calculus", {})
                     c_accel = float(c_dyn.get("acceleration", 0.0) or 0.0)
@@ -2043,7 +2070,7 @@ def execute_portfolio():
                         elif scale_count >= MAX_SCALE_IN_COUNT:
                             print(f"[Pyramiding 拦截] {f['name']} 已达最大加仓次数 ({scale_count}/{MAX_SCALE_IN_COUNT})")
                         elif not within_margin_cap:
-                            print(f"[Pyramiding 拦截] {f['name']} 加仓后总保证金将超限 ({curr_margin + planned_margin:.1f} > {MAX_SINGLE_ASSET_MARGIN}U)")
+                            print(f"[Pyramiding 拦截] {f['name']} 加仓后总保证金将超限 ({curr_margin + planned_margin:.1f} > {ASSET_MARGIN_CAP}U)")
                         elif ai_conf < MIN_SCALE_IN_CONFIDENCE:
                             print(f"[Pyramiding 拦截] {f['name']} AI加仓置信度不足 ({ai_conf:.0f}% < {MIN_SCALE_IN_CONFIDENCE}%)")
                         elif not calculus_accel_ok:
