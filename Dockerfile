@@ -16,6 +16,10 @@ RUN npm run build
 FROM python:3.11-slim AS runner
 
 WORKDIR /app
+LABEL org.opencontainers.image.title="R20 Quantum Trader" \
+      org.opencontainers.image.description="R20 Quantum Trading System" \
+      org.opencontainers.image.licenses="MIT"
+
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

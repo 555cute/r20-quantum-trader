@@ -1,5 +1,6 @@
 services:
   r20-quantum-trader:
+    image: ${R20_IMAGE:-ghcr.io/cnlimiter/r20-quantum-trader:latest}
     build:
       context: .
       dockerfile: Dockerfile

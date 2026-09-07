@@ -19,6 +19,7 @@
 [![Vue 3](https://img.shields.io/badge/Vue-3.5%2B-4FC08D.svg?style=flat-square)](https://vuejs.org/)
 [![TradingView](https://img.shields.io/badge/Chart-TradingView%20Native-blue.svg?style=flat-square)](https://github.com/tradingview/lightweight-charts)
 [![Tests](https://img.shields.io/badge/tests-325%20passed-brightgreen.svg?style=flat-square)](tests/)
+[![GHCR](https://img.shields.io/badge/GHCR-ghcr.io%2Fcnlimiter%2Fr20--quantum--trader-blue.svg?style=flat-square&logo=github)](https://github.com/cnlimiter/r20-quantum-trader/pkgs/container/r20-quantum-trader)
 
 **新一代机构级加密货币波段量化决策与执行系统 · AI 投委会大模型驱动**  
 *全栈策略自由编排 · 白盒自进化认知复盘 · Fail-Closed 物理硬拦截 · 多模型决策委员会 · 原生云端 OCO 风控*
@@ -203,7 +204,23 @@ PowerShell 使用 `$env:R20_GATEWAY_WORKER_ENABLED="0"` 和 `$env:R20_DASHBOARD_
 
 ### 方式 B：Docker / Docker-Compose 容器化一键启动 (推荐)
 
-无需在宿主机配置复杂的 Python 和 Node.js 环境，秒级交付：
+`main` 推送和 `v*` 标签会把镜像发布到 GitHub Container Registry：[`ghcr.io/cnlimiter/r20-quantum-trader`](https://github.com/cnlimiter/r20-quantum-trader/pkgs/container/r20-quantum-trader)。首次发布默认为 private；公开仓库可在 Packages 页改为 public 后匿名拉取。私有包需 classic PAT（`read:packages`）：
+
+```bash
+echo "$CR_PAT" | docker login ghcr.io -u USERNAME --password-stdin
+```
+
+拉取预构建镜像并启动（宿主机 `.env` 仅作启动注入）：
+
+```bash
+cp env.example .env
+docker compose pull
+docker compose up -d
+```
+
+指定版本：`R20_IMAGE=ghcr.io/cnlimiter/r20-quantum-trader:7.5.2 docker compose up -d`。分支构建可用 `workflow_dispatch` 发布，标签为分支名。
+
+无需在宿主机配置复杂的 Python 和 Node.js 环境时，也可本地构建：
 
 ```bash
 # 1. 配置环境变量（宿主机 .env 仅作启动注入）

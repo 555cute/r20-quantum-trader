@@ -118,4 +118,4 @@ R20_GATEWAY_WORKER_ENABLED=0 R20_DASHBOARD_WORKER_ENABLED=0 R20_TESTING=1 \
   python -m unittest discover -s tests
 ```
 
-The GitHub Actions workflow is `.github/workflows/ci.yml`. Test counts are determined by the current run, not by a static README badge.
+The GitHub Actions workflows are `.github/workflows/ci.yml` and `.github/workflows/docker.yml` (GHCR). Test counts are determined by the current run, not by a static README badge.
