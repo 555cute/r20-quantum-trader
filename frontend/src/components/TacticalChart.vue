@@ -988,10 +988,10 @@ onMounted(() => {
   document.addEventListener('click', handleClickOutside)
   nextTick(() => {
     initChart()
-    // 2.5s 静默增量拉取最新Tick/未结蜡烛，保证移动端与PC端实时跳动！
+    // 3s 静默拉取最新数据，保证准确对齐与跳动
     timer = setInterval(() => {
       loadCandles(true, false)
-    }, 2500)
+    }, 3000)
     countdownTimer = setInterval(updateCountdown, 1000)
   })
 })

@@ -1405,10 +1405,10 @@ async def get_all_data():
         data = await refresh_cache_if_needed(1.5)
     else:
         data = CACHE_DATA
-    # Realtime data: strictly never cache in browser (max-age=0), micro-cache at Cloudflare edge for 3s with fast revalidation
+    # Realtime data: strictly never cache in browser (max-age=0), micro-cache at edge for 2s with fast revalidation
     return JSONResponse(
         data,
-        headers={"Cache-Control": "public, max-age=0, s-maxage=3, stale-while-revalidate=4"},
+        headers={"Cache-Control": "public, max-age=0, s-maxage=2, stale-while-revalidate=5"},
     )
 
 
