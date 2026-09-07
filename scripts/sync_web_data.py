@@ -229,7 +229,8 @@ def generate_trading_data(exchange=None):
             pass
 
     data = {
-        "timestamp": now_bj.strftime("%Y-%m-%d %H:%M:%S (北京时间)"),
+        "timestamp": now_bj.strftime("%Y-%m-%d %H:%M:%S") + " (北京时间)",
+
         "date": today_str,
         "exchange": env.exchange,
         "environment": env.mode,

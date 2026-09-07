@@ -14,6 +14,8 @@ from types import ModuleType
 from unittest.mock import Mock, patch
 
 from scripts import evolution_shield as shield
+from path_guard import contained
+
 
 
 class SelfEvolutionSafetyTests(unittest.TestCase):
@@ -62,9 +64,10 @@ class SelfEvolutionSafetyTests(unittest.TestCase):
         def guarded_open(original):
             def checked(file, *args, **kwargs):
                 if not isinstance(file, int):
-                    self.assertTrue(Path(file).resolve().is_relative_to(self.root), str(file))
+                    self.assertTrue(contained(file, self.root), str(file))
                 return original(file, *args, **kwargs)
             return checked
+
         self.start_patch(patch("builtins.open", guarded_open(builtins.open)))
         self.start_patch(patch("io.open", guarded_open(io.open)))
         self.json_path = Path(self.engine.AI_MEMORY_FILE)

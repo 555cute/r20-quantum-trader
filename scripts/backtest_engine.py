@@ -444,7 +444,8 @@ class BacktestEngine:
 
 
 def _now_beijing() -> str:
-    return datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S (北京时间)")
+    return datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S") + " (北京时间)"
+
 
 
 def _incomplete_report(

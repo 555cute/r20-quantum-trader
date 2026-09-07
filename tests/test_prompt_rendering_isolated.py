@@ -40,13 +40,15 @@ class Sandbox(unittest.TestCase):
         self.stack.enter_context(patch.object(prompts, "ROOT", self.root))
         self.stack.enter_context(patch.object(prompts, "LIBRARY_FILE", self.root / "library.json"))
         original_open, original_io_open, original_os_open = builtins.open, io.open, os.open
+        from path_guard import contained
+
 
         def check(path):
             if isinstance(path, int):
                 return
-            resolved = Path(path).resolve()
-            if not resolved.is_relative_to(self.root):
-                raise AssertionError(f"Non-sandbox file access blocked: {resolved}")
+            if not contained(path, self.root):
+                raise AssertionError(f"Non-sandbox file access blocked: {Path(path).resolve()}")
+
 
         def guarded(fn):
             def call(path, *args, **kwargs):

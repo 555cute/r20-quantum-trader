@@ -560,7 +560,8 @@ def update_cache_cycle():
     tz_beijing = datetime.timezone(datetime.timedelta(hours=8))
     now_bj = datetime.datetime.now(tz_beijing)
     today_bj_str = now_bj.strftime("%Y-%m-%d")
-    timestamp_full = now_bj.strftime("%Y-%m-%d %H:%M:%S (北京时间)")
+    timestamp_full = now_bj.strftime("%Y-%m-%d %H:%M:%S") + " (北京时间)"
+
 
     source_errors = []
     env = selected_environment()
@@ -1331,7 +1332,8 @@ def serve_cached_dashboard():
     if payload:
         return _stamp_runtime(dict(payload), env)
     return _stamp_runtime({
-        "timestamp": datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S (北京时间)"),
+        "timestamp": datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S") + " (北京时间)",
+
         "data_health": {"status": "IDLE", "partial": True, "errors": ["account refresh required"]},
         "account": {},
         "today_stats": {},

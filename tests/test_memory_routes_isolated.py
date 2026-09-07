@@ -25,6 +25,8 @@ from pydantic import BaseModel, Field
 from r20_backend.admin_auth import AdminAuthStore
 from scripts import evolution_shield as shield
 
+from path_guard import contained
+
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / 'r20_backend' / 'app.py'
 SAFE = '【合理经验】4H多头回踩均线支撑时开多'
@@ -55,12 +57,11 @@ class MemoryRouteTests(unittest.IsolatedAsyncioTestCase):
             def checked(file, *args, **kwargs):
                 if not isinstance(file, int):
                     path = Path(file).resolve()
-                    # Runtime file IO is restricted to synthetic fixtures. Python
-                    # import machinery is not replaced and may read library code.
-                    if not path.is_relative_to(self.root):
+                    if not contained(path, self.root):
                         raise AssertionError(f'non-fixture file IO: {path}')
                 return original(file, *args, **kwargs)
             return checked
+
         self.start_patch(patch('builtins.open', guard(builtins.open)))
         self.start_patch(patch('io.open', guard(io.open)))
         self.start_patch(patch('sqlite3.connect', guard(sqlite3.connect)))

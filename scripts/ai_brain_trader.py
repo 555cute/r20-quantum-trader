@@ -527,7 +527,8 @@ P3 执行定位：15M K线、盘口与 Maker 限价挂单位置。P3 优化入�
 
 def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: str = "[MISSING_CONTEXT:account_positions]", active_positions_detail: List[Dict[str, Any]] = None, pending_orders_detail: List[Dict[str, Any]] = None, current_time_str: str = "", usdt_available: float = None, runtime_context_out: Dict[str, Any] = None, policy_snapshot: Dict[str, Any] = None) -> str:
     tz_bj = datetime.timezone(datetime.timedelta(hours=8))
-    now_bj_str = current_time_str or datetime.datetime.now(tz_bj).strftime("%Y-%m-%d %H:%M:%S (北京时间)")
+    now_bj_str = current_time_str or datetime.datetime.now(tz_bj).strftime("%Y-%m-%d %H:%M:%S") + " (北京时间)"
+
     market_lines = []
     for p in packages:
         k15 = p.get("recent_15m", [])

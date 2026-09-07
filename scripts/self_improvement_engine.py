@@ -239,7 +239,8 @@ def call_llm_evolution_review(closed_trades: List[Dict[str, Any]], existing_memo
         return {}
 
     tz_bj = datetime.timezone(datetime.timedelta(hours=8))
-    now_bj_str = timestamp_str or datetime.datetime.now(tz_bj).strftime("%Y-%m-%d %H:%M:%S (北京时间)")
+    now_bj_str = timestamp_str or datetime.datetime.now(tz_bj).strftime("%Y-%m-%d %H:%M:%S") + " (北京时间)"
+
 
     total = len(closed_trades)
     wins = [t for t in closed_trades if t["net_pnl"] > 0]
