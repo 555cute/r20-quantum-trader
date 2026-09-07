@@ -41,7 +41,7 @@ import time
 import datetime
 import subprocess
 import urllib.request
-import fcntl
+from r20_backend.file_lock import acquire, release
 from typing import Tuple, Dict, Any, List, Optional
 from concurrent.futures import ThreadPoolExecutor
 from market_data_service import fetch_candles, fetch_ticker
@@ -1548,7 +1548,7 @@ def single_trader_cycle(func):
         os.makedirs(DATA_DIR, exist_ok=True)
         lock_handle = open(TRADER_LOCK_FILE, "a+", encoding="utf-8")
         try:
-            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            acquire(lock_handle, blocking=False)
         except BlockingIOError:
             lock_handle.close()
             print("[Trader] Skip: another portfolio cycle is still running")
@@ -1577,7 +1577,10 @@ def single_trader_cycle(func):
             return func(*args, **kwargs)
         finally:
             unfreeze_okx_environment()
-            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+            try:
+                release(lock_handle)
+            except OSError:
+                pass
             lock_handle.close()
     return wrapped
 

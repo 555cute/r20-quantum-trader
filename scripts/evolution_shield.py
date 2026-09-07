@@ -23,7 +23,7 @@ import json
 import math
 import re
 import copy
-import fcntl
+import sys
 import hashlib
 import os
 import tempfile
@@ -37,6 +37,9 @@ WORKSPACE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = WORKSPACE_DIR / "data"
 STRUCTURED_MEMORY_FILE = DATA_DIR / "structured_trading_memory.json"
 AI_MEMORY_MD_FILE = DATA_DIR / "AI_TRADING_MEMORY.md"
+if str(WORKSPACE_DIR) not in sys.path:
+    sys.path.insert(0, str(WORKSPACE_DIR))
+from r20_backend.file_lock import acquire, release
 
 # 官方不可逾越的基准心法库 (Baseline Golden Lessons)
 BASELINE_LESSONS = [
@@ -287,11 +290,14 @@ def sync_markdown_mirror() -> bool:
 def _memory_lock():
     STRUCTURED_MEMORY_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(str(STRUCTURED_MEMORY_FILE) + ".lock", "a") as handle:
-        fcntl.flock(handle, fcntl.LOCK_EX)
+        acquire(handle, blocking=True)
         try:
             yield
         finally:
-            fcntl.flock(handle, fcntl.LOCK_UN)
+            try:
+                release(handle)
+            except OSError:
+                pass
 
 
 def _commit(lessons):

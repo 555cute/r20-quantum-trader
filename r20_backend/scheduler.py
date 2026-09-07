@@ -4,7 +4,10 @@ It owns scheduling but deliberately invokes existing scripts as isolated process
 which preserves each script's file lock and fail-closed behavior.
 """
 from __future__ import annotations
-import fcntl
+try:
+    from r20_backend.file_lock import acquire, release
+except ModuleNotFoundError:
+    from file_lock import acquire, release
 import logging
 import subprocess
 import sys
@@ -63,37 +66,42 @@ def main() -> None:
     lock_path = DATA / ".r20_scheduler.lock"
     with lock_path.open("a+") as lock:
         try:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            acquire(lock, blocking=False)
         except BlockingIOError:
             raise SystemExit("R20 standalone scheduler already running")
-
-        tz = timezone(timedelta(hours=8))
-        last: dict[str, datetime | None] = {key: None for key in JOBS}
-        logging.info("R20 standalone scheduler v6.6.2 started")
-        while True:
-            now = datetime.now(tz).replace(second=0, microsecond=0)
-            current = datetime.now(tz)
-            if not last["trader"] or (current - last["trader"]).total_seconds() >= 15 * 60:
-                run_script("trader")
-                last["trader"] = datetime.now(tz)
-            if not last["factor_library"] or (current - last["factor_library"]).total_seconds() >= 60:
-                run_script("factor_library")
-                last["factor_library"] = datetime.now(tz)
-            if not last["news"] or (current - last["news"]).total_seconds() >= 10 * 60:
-                run_script("news")
-                last["news"] = datetime.now(tz)
-            schedule = load_schedule()
-            briefing_times = schedule.get("briefing_times", ["08:00", "20:00"])
-            if any(due_daily(now, schedule_time, last["daily_briefing"]) for schedule_time in briefing_times):
-                run_script("daily_briefing")
-                last["daily_briefing"] = now
-            if due_daily(now, schedule.get("self_improvement_time", "20:00"), last["self_improvement"]):
-                run_script("self_improvement")
-                last["self_improvement"] = now
-            if due_daily(now, schedule.get("backup_time", "02:00"), last["nightly_backup"]):
-                run_script("nightly_backup")
-                last["nightly_backup"] = now
-            time.sleep(5)
+        try:
+            tz = timezone(timedelta(hours=8))
+            last: dict[str, datetime | None] = {key: None for key in JOBS}
+            logging.info("R20 standalone scheduler v6.6.2 started")
+            while True:
+                now = datetime.now(tz).replace(second=0, microsecond=0)
+                current = datetime.now(tz)
+                if not last["trader"] or (current - last["trader"]).total_seconds() >= 15 * 60:
+                    run_script("trader")
+                    last["trader"] = datetime.now(tz)
+                if not last["factor_library"] or (current - last["factor_library"]).total_seconds() >= 60:
+                    run_script("factor_library")
+                    last["factor_library"] = datetime.now(tz)
+                if not last["news"] or (current - last["news"]).total_seconds() >= 10 * 60:
+                    run_script("news")
+                    last["news"] = datetime.now(tz)
+                schedule = load_schedule()
+                briefing_times = schedule.get("briefing_times", ["08:00", "20:00"])
+                if any(due_daily(now, schedule_time, last["daily_briefing"]) for schedule_time in briefing_times):
+                    run_script("daily_briefing")
+                    last["daily_briefing"] = now
+                if due_daily(now, schedule.get("self_improvement_time", "20:00"), last["self_improvement"]):
+                    run_script("self_improvement")
+                    last["self_improvement"] = now
+                if due_daily(now, schedule.get("backup_time", "02:00"), last["nightly_backup"]):
+                    run_script("nightly_backup")
+                    last["nightly_backup"] = now
+                time.sleep(5)
+        finally:
+            try:
+                release(lock)
+            except OSError:
+                pass
 
 
 if __name__ == "__main__":

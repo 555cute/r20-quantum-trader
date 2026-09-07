@@ -22,10 +22,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-try:
-    import fcntl
-except ImportError:
-    fcntl = None  # type: ignore
+from r20_backend.file_lock import acquire, release
 
 from r20_backend.version import __version__
 
@@ -381,9 +378,6 @@ _lock_tls = threading.local()
 def _index_lock(archive_dir: Path, shared: bool = False):
     """Reentrant thread and process file locking context for policy archive index operations."""
     with _process_thread_lock:
-        if fcntl is None:
-            yield
-            return
 
         archive_dir.mkdir(parents=True, exist_ok=True)
         lock_file = archive_dir / ".index.lock"
@@ -398,8 +392,14 @@ def _index_lock(archive_dir: Path, shared: bool = False):
             return
 
         fd = os.open(str(lock_file), os.O_RDWR | os.O_CREAT, 0o600)
-        flag = fcntl.LOCK_SH if shared else fcntl.LOCK_EX
-        fcntl.flock(fd, flag)
+        try:
+            acquire(fd, blocking=True, shared=shared)
+        except BaseException:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            raise
         _lock_tls.depth = 1
         _lock_tls.fd = fd
         try:
@@ -407,7 +407,7 @@ def _index_lock(archive_dir: Path, shared: bool = False):
         finally:
             _lock_tls.depth = 0
             try:
-                fcntl.flock(fd, fcntl.LOCK_UN)
+                release(fd)
             except OSError:
                 pass
             try:

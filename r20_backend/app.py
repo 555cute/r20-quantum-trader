@@ -1114,13 +1114,13 @@ def update_admin_config(payload: AdminConfigUpdate, x_r20_admin_token: str | Non
         raise HTTPException(status_code=400, detail="Webhook 必须以 http:// 或 https:// 开头")
     selected_mode = data.get("okx_environment") or ("demo" if data.get("okx_simulated") else "live" if "okx_simulated" in data else None)
     if selected_mode and selected_mode != settings.okx_environment:
-        import fcntl
+        from r20_backend.file_lock import acquire, release
         lock_path = DATA_DIR / ".ai_factor_trader.lock"; lock_path.parent.mkdir(parents=True, exist_ok=True)
         with lock_path.open("a+", encoding="utf-8") as lock_handle:
-            try: fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            try: acquire(lock_handle, blocking=False)
             except BlockingIOError: raise HTTPException(status_code=409, detail="交易周期正在执行，OKX 环境已冻结；请等待本周期结束后再切换")
             finally:
-                try: fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+                try: release(lock_handle)
                 except OSError: pass
     secret_values = {
         "OKX_LIVE_API_KEY": data.get("okx_live_api_key"), "OKX_LIVE_SECRET_KEY": data.get("okx_live_secret_key"), "OKX_LIVE_PASSPHRASE": data.get("okx_live_passphrase"),
@@ -1685,12 +1685,12 @@ def manual_close_position(payload: ManualCloseRequest) -> dict[str, Any]:
     refresh_settings()
     if not settings.manual_close_enabled:
         raise HTTPException(status_code=403, detail="后台手动平仓功能未启用")
-    import fcntl
+    from r20_backend.file_lock import acquire, release
     lock_path = DATA_DIR / ".ai_factor_trader.lock"; lock_path.parent.mkdir(parents=True, exist_ok=True)
     if actor.get("role") == "legacy" or not admin_auth.verify_password(int(actor["id"]), payload.admin_password):
         raise HTTPException(status_code=403, detail="管理员密码验证失败")
     with lock_path.open("a+", encoding="utf-8") as lock_handle:
-        try: fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try: acquire(lock_handle, blocking=False)
         except BlockingIOError: raise HTTPException(status_code=409, detail="交易主循环正在执行，暂不允许后台快速平仓；请等待本周期结束")
         try:
             result = fast_close_confirmed(payload.close_token, payload.confirmation)
@@ -1702,7 +1702,7 @@ def manual_close_position(payload: ManualCloseRequest) -> dict[str, Any]:
         except Exception as exc:
             audit_record("position.close", "verification_failed", {"error": str(exc)[:300]})
             raise HTTPException(status_code=502, detail=f"OKX 快速平仓未完成确认：{exc}") from exc
-        finally: fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        finally: release(lock_handle)
 
 
 @app.get("/api/v1/admin/instruments")

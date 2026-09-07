@@ -24,7 +24,7 @@ import datetime
 import urllib.request
 import subprocess
 import tempfile
-import fcntl
+from r20_backend.file_lock import acquire, release
 from typing import Dict, Any, List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor
 
@@ -90,7 +90,7 @@ def single_brain_cycle(func):
         os.makedirs(DATA_DIR, exist_ok=True)
         lock_handle = open(AI_BRAIN_LOCK_FILE, "a+", encoding="utf-8")
         try:
-            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            acquire(lock_handle, blocking=False)
         except BlockingIOError:
             lock_handle.close()
             print("[AI Brain Batch] Skip: another inference cycle is still running")
@@ -102,7 +102,10 @@ def single_brain_cycle(func):
             lock_handle.flush()
             return func(*args, **kwargs)
         finally:
-            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+            try:
+                release(lock_handle)
+            except OSError:
+                pass
             lock_handle.close()
     return wrapped
 

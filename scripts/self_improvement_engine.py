@@ -13,7 +13,6 @@ import time
 import datetime
 import urllib.request
 import tempfile
-import fcntl
 import hashlib
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -43,6 +42,7 @@ LOG_FILE = os.path.join(LOGS_DIR, "self_improvement.log")
 EVOLUTION_LOCK_FILE = os.path.join(DATA_DIR, ".self_improvement.lock")
 
 from r20_backend.version import __version__
+from r20_backend.file_lock import acquire, release
 from instrument_pool import load_instruments
 from prompt_library import active_profile, apply_module_layout
 from r20_gateway.telemetry import ModelCallTelemetry
@@ -73,7 +73,7 @@ def single_evolution_cycle(func):
     def wrapped(*args, **kwargs):
         lock_handle = open(EVOLUTION_LOCK_FILE, "a+", encoding="utf-8")
         try:
-            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            acquire(lock_handle, blocking=False)
         except BlockingIOError:
             lock_handle.close()
             log_msg("Self-evolution skipped: another cycle is still running")
@@ -81,7 +81,10 @@ def single_evolution_cycle(func):
         try:
             return func(*args, **kwargs)
         finally:
-            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+            try:
+                release(lock_handle)
+            except OSError:
+                pass
             lock_handle.close()
     return wrapped
 
