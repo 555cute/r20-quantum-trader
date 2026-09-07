@@ -73,6 +73,21 @@ class CalculusEngineMathTest(unittest.TestCase):
         self.assertTrue(res_t2["valid"])
         self.assertNotEqual(res_t1["velocity"], res_t2["velocity"])
 
+    def test_calculus_curvature_and_power_dynamics(self):
+        # Monotonic accelerating prices: velocity > 0, acceleration > 0 => power > 0
+        accel_prices = [100.0, 101.0, 103.0, 106.0, 110.0, 115.0, 122.0, 131.0, 142.0]
+        res_acc = calculate_calculus(accel_prices)
+        self.assertTrue(res_acc["valid"])
+        self.assertGreater(res_acc["power"], 0.0, "Accelerating uptrend must have positive kinetic power flux")
+        self.assertGreaterEqual(res_acc["curvature"], 0.0)
+
+        # Decelerating top: velocity > 0, acceleration < 0 => power < 0 (kinetic exhaustion)
+        decel_prices = [100.0, 110.0, 118.0, 123.0, 125.0, 125.5, 125.6, 125.65]
+        res_dec = calculate_calculus(decel_prices)
+        self.assertTrue(res_dec["valid"])
+        self.assertLess(res_dec["power"], 0.0, "Decelerating rally must yield negative kinetic power (exhaustion)")
+        self.assertIn(res_dec["power_regime"], ["KINETIC_EXHAUSTION", "HIGH_CURVATURE_INFLECTION", "STEADY_FLUX"])
+
 
 class DefiniteIntegralsTest(unittest.TestCase):
     """Test trapezoidal definite integration of displacement energy and deviation area."""
@@ -170,6 +185,9 @@ class FactorLibraryIntegrationTest(unittest.TestCase):
         item = {"instId": "BTC-USDT-SWAP", "name": "BTC", "type": "crypto", "precision": 1}
         factors = factor_library.compute_instrument_factors(item, {})
         self.assertIn("calculus_dynamics", factors)
+        self.assertIn("curvature", factors["calculus_dynamics"])
+        self.assertIn("power", factors["calculus_dynamics"])
+        self.assertIn("power_regime", factors["calculus_dynamics"])
         self.assertIn("definite_integrals", factors)
         self.assertIn("probability_theory", factors)
         

@@ -112,6 +112,9 @@ def compute_instrument_factors(item: Dict[str, Any], smart_money_pool: Dict[str,
             "acceleration": 0.0,
             "impulse": 0.0,
             "jerk": 0.0,
+            "curvature": 0.0,
+            "power": 0.0,
+            "power_regime": "STEADY_FLUX",
             "regime": "RANGE_LOW_VELOCITY",
             "quality": 0.0,
             "direction": 0
@@ -240,6 +243,9 @@ def compute_instrument_factors(item: Dict[str, Any], smart_money_pool: Dict[str,
                         factors["calculus_dynamics"]["acceleration"] = c_res.get("acceleration", 0.0)
                         factors["calculus_dynamics"]["impulse"] = c_res.get("impulse", 0.0)
                         factors["calculus_dynamics"]["jerk"] = c_res.get("jerk", 0.0)
+                        factors["calculus_dynamics"]["curvature"] = c_res.get("curvature", 0.0)
+                        factors["calculus_dynamics"]["power"] = c_res.get("power", 0.0)
+                        factors["calculus_dynamics"]["power_regime"] = c_res.get("power_regime", "STEADY_FLUX")
                         factors["calculus_dynamics"]["regime"] = c_res.get("regime", "RANGE_LOW_VELOCITY")
                         factors["calculus_dynamics"]["quality"] = c_res.get("quality", 0.0)
                         factors["calculus_dynamics"]["direction"] = c_res.get("direction", 0)

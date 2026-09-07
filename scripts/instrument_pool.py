@@ -8,14 +8,79 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 POOL_FILE = ROOT / "data" / "instrument_pool.json"
+
+TIER_PROFILES = {
+    "tier_1_bluechip": {
+        "label": "蓝筹主流",
+        "max_leverage": 5,
+        "base_risk_ratio": 1.0,
+        "sl_atr_mult": 1.8,
+        "min_vol_24h_usd": 100_000_000,
+    },
+    "tier_2_momentum": {
+        "label": "高弹性动量",
+        "max_leverage": 3,
+        "base_risk_ratio": 0.75,
+        "sl_atr_mult": 2.2,
+        "min_vol_24h_usd": 20_000_000,
+    }
+}
+
 DEFAULT_INSTRUMENTS = [
-    {"instId": "BTC-USDT-SWAP", "name": "BTC", "type": "crypto", "ccy": "BTC", "base_sz": 1, "precision": 1, "ctVal": 0.01, "tickSz": "0.1", "minSz": "0.01", "risk_per_trade_usd": 15.0},
-    {"instId": "ETH-USDT-SWAP", "name": "ETH", "type": "crypto", "ccy": "ETH", "base_sz": 3, "precision": 2, "ctVal": 0.1, "tickSz": "0.01", "minSz": "0.01", "risk_per_trade_usd": 15.0},
-    {"instId": "SOL-USDT-SWAP", "name": "SOL", "type": "crypto", "ccy": "SOL", "base_sz": 7, "precision": 2, "ctVal": 1.0, "tickSz": "0.01", "minSz": "0.01", "risk_per_trade_usd": 15.0},
-    {"instId": "DOGE-USDT-SWAP", "name": "DOGE", "type": "crypto", "ccy": "DOGE", "base_sz": 10, "precision": 4, "ctVal": 1000.0, "tickSz": "0.0001", "minSz": "0.01", "risk_per_trade_usd": 15.0},
-    {"instId": "SUI-USDT-SWAP", "name": "SUI", "type": "crypto", "ccy": "SUI", "base_sz": 50, "precision": 4, "ctVal": 1.0, "tickSz": "0.0001", "minSz": "0.01", "risk_per_trade_usd": 15.0},
-    {"instId": "LINK-USDT-SWAP", "name": "LINK", "type": "crypto", "ccy": "LINK", "base_sz": 64, "precision": 3, "ctVal": 1.0, "tickSz": "0.001", "minSz": "0.01", "risk_per_trade_usd": 15.0},
+    {"instId": "BTC-USDT-SWAP", "name": "BTC", "type": "crypto", "ccy": "BTC", "tier": "tier_1_bluechip", "max_leverage": 5, "sl_atr_mult": 1.8, "base_sz": 1, "precision": 1, "ctVal": 0.01, "tickSz": "0.1", "minSz": "0.01", "risk_per_trade_usd": 15.0},
+    {"instId": "ETH-USDT-SWAP", "name": "ETH", "type": "crypto", "ccy": "ETH", "tier": "tier_1_bluechip", "max_leverage": 5, "sl_atr_mult": 1.8, "base_sz": 3, "precision": 2, "ctVal": 0.1, "tickSz": "0.01", "minSz": "0.01", "risk_per_trade_usd": 15.0},
+    {"instId": "SOL-USDT-SWAP", "name": "SOL", "type": "crypto", "ccy": "SOL", "tier": "tier_2_momentum", "max_leverage": 3, "sl_atr_mult": 2.2, "base_sz": 7, "precision": 2, "ctVal": 1.0, "tickSz": "0.01", "minSz": "0.01", "risk_per_trade_usd": 15.0},
+    {"instId": "DOGE-USDT-SWAP", "name": "DOGE", "type": "crypto", "ccy": "DOGE", "tier": "tier_2_momentum", "max_leverage": 3, "sl_atr_mult": 2.2, "base_sz": 10, "precision": 4, "ctVal": 1000.0, "tickSz": "0.0001", "minSz": "0.01", "risk_per_trade_usd": 15.0},
+    {"instId": "SUI-USDT-SWAP", "name": "SUI", "type": "crypto", "ccy": "SUI", "tier": "tier_2_momentum", "max_leverage": 3, "sl_atr_mult": 2.2, "base_sz": 50, "precision": 4, "ctVal": 1.0, "tickSz": "0.0001", "minSz": "0.01", "risk_per_trade_usd": 15.0},
+    {"instId": "LINK-USDT-SWAP", "name": "LINK", "type": "crypto", "ccy": "LINK", "tier": "tier_2_momentum", "max_leverage": 3, "sl_atr_mult": 2.2, "base_sz": 64, "precision": 3, "ctVal": 1.0, "tickSz": "0.001", "minSz": "0.01", "risk_per_trade_usd": 15.0},
 ]
+
+
+def evaluate_instrument_tier(inst_id: str, name: str = "") -> str:
+    """Classify instrument into Tier-1 Bluechip or Tier-2 Momentum."""
+    name_upper = (name or inst_id.split("-")[0]).upper()
+    if name_upper in ("BTC", "ETH"):
+        return "tier_1_bluechip"
+    return "tier_2_momentum"
+
+
+def score_universe_candidate(
+    candidate: dict[str, Any],
+    vol_24h_usd: float = 0.0,
+    atr_pct: float = 0.0,
+    funding_rate: float = 0.0
+) -> dict[str, Any]:
+    """Evaluate candidate instrument suitability and rank quality score (0 ~ 100)."""
+    name = candidate.get("name", "")
+    tier = evaluate_instrument_tier(candidate.get("instId", ""), name)
+    profile = TIER_PROFILES[tier]
+
+    score = 50.0
+    # Liquidity check
+    if vol_24h_usd > 0:
+        if vol_24h_usd >= profile["min_vol_24h_usd"]:
+            score += 20.0
+        else:
+            score -= 30.0
+
+    # Volatility band check (healthy swing trading band: 1.5% ~ 6.0%)
+    if atr_pct > 0:
+        if 1.5 <= atr_pct <= 6.0:
+            score += 20.0
+        elif atr_pct < 1.0:
+            score -= 15.0  # too sleepy
+        elif atr_pct > 9.0:
+            score -= 25.0  # extreme rug risk
+
+    # Extreme funding rate penalty (abs(funding) > 0.05% implies crowding)
+    if abs(funding_rate) > 0.0005:
+        score -= 15.0
+
+    candidate["tier"] = tier
+    candidate["max_leverage"] = profile["max_leverage"]
+    candidate["sl_atr_mult"] = profile["sl_atr_mult"]
+    candidate["universe_score"] = round(max(0.0, min(100.0, score)), 1)
+    return candidate
 
 
 def _precision(tick_size: str) -> int:
@@ -27,11 +92,16 @@ def from_okx_instrument(raw: dict[str, Any]) -> dict[str, Any]:
     inst_id = str(raw.get("instId", "")).upper()
     base = str(raw.get("baseCcy") or inst_id.split("-", 1)[0]).upper()
     tick_size = str(raw.get("tickSz") or "0.0001")
+    tier = evaluate_instrument_tier(inst_id, base)
+    profile = TIER_PROFILES[tier]
     return {
         "instId": inst_id,
         "name": base,
         "type": "crypto",
         "ccy": base,
+        "tier": tier,
+        "max_leverage": profile["max_leverage"],
+        "sl_atr_mult": profile["sl_atr_mult"],
         "base_sz": 1,
         "precision": _precision(tick_size),
         "ctVal": float(raw.get("ctVal") or 1.0),
@@ -48,6 +118,11 @@ def load_instruments() -> list[dict[str, Any]]:
         payload = json.loads(POOL_FILE.read_text(encoding="utf-8"))
         instruments = payload.get("instruments", payload) if isinstance(payload, dict) else payload
         if isinstance(instruments, list) and instruments:
+            for item in instruments:
+                if "tier" not in item:
+                    item["tier"] = evaluate_instrument_tier(item.get("instId", ""), item.get("name", ""))
+                    item["max_leverage"] = TIER_PROFILES[item["tier"]]["max_leverage"]
+                    item["sl_atr_mult"] = TIER_PROFILES[item["tier"]]["sl_atr_mult"]
             return instruments
     except (OSError, json.JSONDecodeError):
         pass

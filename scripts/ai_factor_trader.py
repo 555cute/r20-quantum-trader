@@ -944,6 +944,30 @@ def fetch_single_instrument_data(item, all_positions, usdt_available):
 # =============================================================================
 # Trailing Stop & Risk Management
 # =============================================================================
+def sync_cloud_algo_stop(inst_id: str, pos_side: str, new_sl: float, reason: str = "") -> bool:
+    """Sync ratchet dynamic stop to OKX cloud conditional OCO order.
+    
+    Ensures that once a position reaches Breakeven (Tier 1) or Profit-Lock (Tier 2),
+    the cloud trigger order is immediately amended without waiting for the 15-minute LLM cycle.
+    """
+    if SIMULATED_TRADING:
+        return True
+    try:
+        algo_orders = run_json_cmd(okx_private_command(f"okx swap algo orders --instId {inst_id} --json")) or []
+        live_algo = next((o for o in algo_orders if o.get("state") == "live" and o.get("posSide") == pos_side and o.get("slTriggerPx")), None)
+        if not live_algo:
+            return False
+        current_cloud_sl = float(live_algo.get("slTriggerPx") or 0.0)
+        # Avoid redundant amend if price already matches
+        if abs(current_cloud_sl - new_sl) < 1e-6:
+            return True
+        result = run_json_cmd(okx_private_command(f"okx swap algo amend --instId {inst_id} --algoId {live_algo['algoId']} --newSlTriggerPx {new_sl} --newSlOrdPx=-1 --json"))
+        return result is not None
+    except Exception as e:
+        print(f"[Cloud OCO Sync Error] {inst_id} {pos_side}: {e}")
+        return False
+
+
 def manage_position_tp_and_trailing(f, curr_pos, trackers, timestamp_full, executed_actions):
     if not f.get("market_data_valid"):
         executed_actions.append(f"[{f['name']}] 行情数据不完整，保留云端保护并跳过本地移动止盈")
@@ -1097,23 +1121,32 @@ def manage_position_tp_and_trailing(f, curr_pos, trackers, timestamp_full, execu
         return True, "时间止损"
 
     # 3. Three-Tier Ratchet Profit-Locking & Momentum Take-Profit Engine
-    # Tier 1: Breakeven Lock at +1.0x ATR profit (Guarantee 100% risk-free trade)
-    # Tier 2: 50% Profit Lock-In at +1.8x ATR profit (Lock in at least +0.9x ATR solid profit)
-    # Tier 3: Kinetic Reversal Exit from Peak (Protect accumulated big wins)
+    # Tier 1: Breakeven Lock at +1.5x ATR (~1.0R profit, covers taker fee + 0.20% cushion)
+    # Tier 2: Solid Wave Profit Lock at +2.2x ATR (~1.6R profit, lock in at least +1.0x ATR profit)
+    # Tier 3: Kinetic Momentum Pullback Exit (Symmetric >= 2.0x ATR peak profit with 0.75x ATR pullback)
     
     tier1_breakeven_trigger = 1.5 * atr
     tier2_lock_trigger = 2.2 * atr
+    momentum_tp_trigger = 2.0 * atr
+    momentum_pullback_buffer = 0.75 * atr
     
     if is_long:
-        # Dynamic Ratchet Stop Calculation
-        dynamic_floor_sl = t["trailingStopPx"]
+        # Dynamic Ratchet Stop Calculation for Long
+        old_sl = float(t.get("trailingStopPx", 0.0) or 0.0)
+        dynamic_floor_sl = old_sl
         if peak_profit_px >= tier2_lock_trigger:
-            dynamic_floor_sl = max(dynamic_floor_sl, entry_px + 1.0 * atr)
+            dynamic_floor_sl = max(dynamic_floor_sl, round(entry_px + 1.0 * atr, prec))
             t["stage_desc"] = f"锁定大波段利润 (保底止损 {dynamic_floor_sl})"
         elif peak_profit_px >= tier1_breakeven_trigger:
-            dynamic_floor_sl = max(dynamic_floor_sl, entry_px + 0.0020 * entry_px)
+            dynamic_floor_sl = max(dynamic_floor_sl, round(entry_px + 0.0020 * entry_px, prec))
             t["stage_desc"] = f"已推保本无风险 (保底止损 {dynamic_floor_sl})"
-        t["trailingStopPx"] = dynamic_floor_sl
+        
+        # If dynamic floor stop ratcheted up, commit and sync to cloud OCO
+        if dynamic_floor_sl > old_sl and old_sl > 0:
+            t["trailingStopPx"] = dynamic_floor_sl
+            sync_cloud_algo_stop(inst_id, "long", dynamic_floor_sl, reason=t["stage_desc"])
+        else:
+            t["trailingStopPx"] = dynamic_floor_sl
 
         # A. Hit Ratchet Floor Stop (Locked Profit Trigger)
         if cur_px <= dynamic_floor_sl and peak_profit_px >= tier1_breakeven_trigger:
@@ -1145,8 +1178,8 @@ def manage_position_tp_and_trailing(f, curr_pos, trackers, timestamp_full, execu
             if pos_key in trackers: del trackers[pos_key]
             return True, "已阶梯锁利"
 
-        # B. Kinetic Momentum Pullback Exit from Peak (Pullback >= 0.75x ATR when profit >= 2.0x ATR)
-        if peak_profit_px >= 2.0 * atr and cur_px <= (t["highWaterMark"] - 0.75 * atr):
+        # B. Kinetic Momentum Pullback Exit from Peak (Symmetric 2.0x ATR profit with 0.75x ATR pullback)
+        if peak_profit_px >= momentum_tp_trigger and cur_px <= (t["highWaterMark"] - momentum_pullback_buffer):
             closed, close_detail = close_position_confirmed(inst_id, "long", pos_sz)
             if not closed:
                 executed_actions.append(f"[{name}] 动能见顶移动止盈失败，仓位仍保留: {close_detail}")
@@ -1177,14 +1210,21 @@ def manage_position_tp_and_trailing(f, curr_pos, trackers, timestamp_full, execu
 
     else:
         # Dynamic Ratchet Stop Calculation for Short
-        dynamic_floor_sl = t["trailingStopPx"]
+        old_sl = float(t.get("trailingStopPx", 0.0) or 0.0)
+        dynamic_floor_sl = old_sl
         if peak_profit_px >= tier2_lock_trigger:
-            dynamic_floor_sl = min(dynamic_floor_sl, entry_px - 1.0 * atr)
+            dynamic_floor_sl = min(dynamic_floor_sl, round(entry_px - 1.0 * atr, prec))
             t["stage_desc"] = f"锁定大波段利润 (保底止损 {dynamic_floor_sl})"
         elif peak_profit_px >= tier1_breakeven_trigger:
-            dynamic_floor_sl = min(dynamic_floor_sl, entry_px - 0.0020 * entry_px)
+            dynamic_floor_sl = min(dynamic_floor_sl, round(entry_px - 0.0020 * entry_px, prec))
             t["stage_desc"] = f"已推保本无风险 (保底止损 {dynamic_floor_sl})"
-        t["trailingStopPx"] = dynamic_floor_sl
+        
+        # If dynamic floor stop ratcheted down (tightened for short), commit and sync to cloud OCO
+        if dynamic_floor_sl < old_sl and old_sl > 0:
+            t["trailingStopPx"] = dynamic_floor_sl
+            sync_cloud_algo_stop(inst_id, "short", dynamic_floor_sl, reason=t["stage_desc"])
+        else:
+            t["trailingStopPx"] = dynamic_floor_sl
 
         # A. Hit Ratchet Floor Stop (Locked Profit Trigger)
         if cur_px >= dynamic_floor_sl and peak_profit_px >= tier1_breakeven_trigger:
@@ -1216,8 +1256,8 @@ def manage_position_tp_and_trailing(f, curr_pos, trackers, timestamp_full, execu
             if pos_key in trackers: del trackers[pos_key]
             return True, "已阶梯锁利"
 
-        # B. Kinetic Momentum Pullback Exit from Peak
-        if peak_profit_px >= 1.5 * atr and cur_px >= (t["lowWaterMark"] + 0.5 * atr):
+        # B. Kinetic Momentum Pullback Exit from Peak (Symmetric 2.0x ATR profit with 0.75x ATR pullback)
+        if peak_profit_px >= momentum_tp_trigger and cur_px >= (t["lowWaterMark"] + momentum_pullback_buffer):
             closed, close_detail = close_position_confirmed(inst_id, "short", pos_sz)
             if not closed:
                 executed_actions.append(f"[{name}] 动能见底移动止盈失败，仓位仍保留: {close_detail}")
@@ -1354,9 +1394,11 @@ def evaluate_asset_signal(f):
         return 0.0, "HOLD", ["⛔ 标的处于AI避险冷却池中，自进化系统禁止开仓"], "⚪ 避险冷却", f"【自进化干预】{inst_name} 胜率不足或连续止损，已被自动关入冷却池避险"
 
     px = f["price"]
-    ema9, ema21, ema55 = f["ema9"], f["ema21"], f["ema55"]
+    ema9 = f.get("ema9", px)
+    ema21 = f.get("ema21", px)
+    ema55 = f.get("ema55", px)
     e21_slope = f.get("ema21_slope_pct", 0.0)
-    rsi = f["rsi"]
+    rsi = f.get("rsi", 50.0)
     rsi_7 = f.get("rsi_7", 50.0)
     vwap_bias = f.get("vwap_bias", 0.0)
     macd_hist = f.get("macd_hist", 0.0)
