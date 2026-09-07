@@ -39,6 +39,11 @@ class RiskConfigApiTests(unittest.TestCase):
         # 沙箱化 .env，防止测试写入生产配置
         self.original_env_file = settings_store.ENV_FILE
         settings_store.ENV_FILE = Path(self.temp.name) / ".env"
+        # 隔离生产 .env 回灌：refresh_settings 会 load_dotenv(真实 .env)，
+        # 用户可能已在后台应用风控套件，测试进程必须对生产配置无感
+        import r20_backend.config as backend_config
+        self.original_loader = backend_config.load_dotenv
+        backend_config.load_dotenv = lambda path: None
         # 快照并清空风控环境变量，保证断言起点干净
         self.saved_env = {k: os.environ.pop(k, None) for k in RISK_KEYS}
         self.client = TestClient(app_module.app)
@@ -49,6 +54,8 @@ class RiskConfigApiTests(unittest.TestCase):
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+        import r20_backend.config as backend_config
+        backend_config.load_dotenv = self.original_loader
         settings_store.ENV_FILE = self.original_env_file
         app_module.admin_auth = self.original_auth
         self.temp.cleanup()
@@ -195,36 +202,67 @@ class RiskConfigApiTests(unittest.TestCase):
 
 
 class PromptRiskContractTests(unittest.TestCase):
-    """SYSTEM_PROMPT 与风控常量、线上布局的三重契约，防止提示词重新写死或漂移。"""
+    """SYSTEM_PROMPT 与风控常量、线上布局的三重契约。
 
-    def _load_trader(self):
+    v7.6.0 架构：System 宪法静态（快照安全），动态风控阈值全部由每轮
+    construct_full_market_prompt 注入的【本周期风险预算】小节实时携带。
+    """
+
+    def setUp(self):
+        import r20_backend.config as backend_config
+        self.saved_env = {k: os.environ.pop(k, None) for k in RISK_KEYS}
+        self.original_loader = backend_config.load_dotenv
+        backend_config.load_dotenv = lambda path: None
+        self._reload_clean()
+
+    def tearDown(self):
+        import r20_backend.config as backend_config
+        backend_config.load_dotenv = self.original_loader
+        for k, v in self.saved_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        self._reload_clean()
+
+    @staticmethod
+    def _reload_clean():
         import importlib
         import risk_constants
         import ai_brain_trader
-        return importlib.reload(risk_constants), importlib.reload(ai_brain_trader)
+        importlib.reload(risk_constants)
+        return importlib.reload(ai_brain_trader)
 
-    def test_system_prompt_interpolates_live_risk_values(self):
+    def test_system_prompt_is_static_constitution(self):
         import ai_brain_trader
-        self.assertIn(f"全系统同向持仓上限 {ai_brain_trader.MAX_SAME_DIRECTION_POSITIONS} 笔",
-                      ai_brain_trader.SYSTEM_PROMPT)
-        self.assertIn(f"杠杆不超过 {ai_brain_trader.MAX_LEVERAGE:g}x", ai_brain_trader.SYSTEM_PROMPT)
-        self.assertIn(f"R:R < {ai_brain_trader.MIN_RISK_REWARD_RATIO:.1f}", ai_brain_trader.SYSTEM_PROMPT)
+        prompt = ai_brain_trader.SYSTEM_PROMPT
+        self.assertIn("以每轮用户消息【本周期风险预算】的实时声明为准", prompt)
+        self.assertIn("目标 R:R ≥ 2.2", prompt)
+        # 宪法不得内嵌任何具体风控数值字面量（防止快照固化过期口径）
+        for forbidden in ("同向持仓上限 3 笔", "同向持仓上限 4 笔", "杠杆不超过 5x",
+                          "门禁为 80%", "绝对底线 2.0", "{same_dir}", "{rr_floor}"):
+            self.assertNotIn(forbidden, prompt, f"宪法内嵌了动态风控字面量: {forbidden}")
 
-    def test_env_override_reflects_into_system_prompt(self):
-        import r20_backend.config as backend_config
+    def test_risk_budget_carries_live_values(self):
+        abt = self._reload_clean()
         os.environ["R20_MAX_SAME_DIRECTION_POSITIONS"] = "5"
         os.environ["R20_MAX_SCALE_IN_COUNT"] = "0"
-        original_loader = backend_config.load_dotenv
-        backend_config.load_dotenv = lambda path: None
         try:
-            rc, abt = self._load_trader()
-            self.assertIn("全系统同向持仓上限 5 笔", abt.SYSTEM_PROMPT)
-            self.assertIn("已禁用一切金字塔加仓", abt.SYSTEM_PROMPT)  # scale=0 切换为禁令段落
+            abt = self._reload_clean()
+            ctx = {}
+            abt.construct_full_market_prompt([], "无", [], [], "2026-09-08 12:00:00",
+                                             usdt_available=1000.0, runtime_context_out=ctx)
+            budget = ctx["risk_budget"]
+            self.assertIn("全系统同向持仓上限: 5 笔", budget)
+            self.assertIn("金字塔加仓: 已禁用", budget)   # scale=0 自动切换禁令文案
+            self.assertIn("盈亏比 R:R 硬底线: 2.0", budget)
+            self.assertIn("新开仓最低置信度门禁: 80%", budget)
+            self.assertIn("止损后同标的冷静期: 30 分钟", budget)
+            # System 宪法保持逐字不变（快照安全）
+            self.assertEqual(abt.SYSTEM_PROMPT, abt._SYSTEM_CORE + abt._PYRAMID + "\n" + abt._SYSTEM_JSON_CONTRACT)
         finally:
-            backend_config.load_dotenv = original_loader
             del os.environ["R20_MAX_SAME_DIRECTION_POSITIONS"]
             del os.environ["R20_MAX_SCALE_IN_COUNT"]
-            self._load_trader()
 
     def test_section_titles_match_live_layout(self):
         """标题即接口：代码分节必须与线上 trading_system 布局一一对应，否则线上会用旧快照内容。"""
