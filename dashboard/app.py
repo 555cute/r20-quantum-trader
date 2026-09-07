@@ -16,6 +16,7 @@ import asyncio
 import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -101,7 +102,19 @@ def get_target_instruments() -> list[dict[str, Any]]:
 
 TARGET_INSTRUMENTS = load_instruments()
 
-app = FastAPI(title="R20 AI Quantitative Matrix", docs_url=None, redoc_url=None)
+@asynccontextmanager
+async def dashboard_lifespan(_: FastAPI):
+    enabled = os.getenv("R20_DASHBOARD_WORKER_ENABLED", "1").lower() in {"1", "true", "yes"}
+    if enabled:
+        start_dashboard_background_worker()
+    try:
+        yield
+    finally:
+        if enabled:
+            stop_dashboard_background_worker()
+
+
+app = FastAPI(title="R20 AI Quantitative Matrix", docs_url=None, redoc_url=None, lifespan=dashboard_lifespan)
 templates = Jinja2Templates(directory=os.path.join(DASHBOARD_DIR, "templates"))
 app.mount("/static", StaticFiles(directory=os.path.join(DASHBOARD_DIR, "static")), name="static")
 
@@ -418,34 +431,44 @@ LAST_CACHE_TIME = 0
 CACHE_LOCK = None
 SYNC_EXECUTOR = ThreadPoolExecutor(max_workers=6, thread_name_prefix="dashboard_sync")
 _BG_WORKER_THREAD = None
-_BG_WORKER_RUNNING = False
+_BG_WORKER_STOP = threading.Event()
+_BG_WORKER_LOCK = threading.Lock()
+
 
 def _dashboard_background_worker_loop():
-    global _BG_WORKER_RUNNING
-    # Initial small pause so server boots cleanly
-    time.sleep(0.5)
-    while _BG_WORKER_RUNNING:
+    if _BG_WORKER_STOP.wait(0.5):
+        return
+    while not _BG_WORKER_STOP.is_set():
         try:
             update_cache_cycle()
         except Exception:
             pass
-        # Refresh every 2 seconds in background
-        time.sleep(2.0)
+        if _BG_WORKER_STOP.wait(2.0):
+            break
+
 
 def start_dashboard_background_worker():
-    global _BG_WORKER_THREAD, _BG_WORKER_RUNNING
-    if _BG_WORKER_THREAD is None or not _BG_WORKER_THREAD.is_alive():
-        _BG_WORKER_RUNNING = True
-        _BG_WORKER_THREAD = threading.Thread(
-            target=_dashboard_background_worker_loop,
-            daemon=True,
-            name="dashboard_cache_worker"
-        )
-        _BG_WORKER_THREAD.start()
+    global _BG_WORKER_THREAD
+    with _BG_WORKER_LOCK:
+        if _BG_WORKER_THREAD is None or not _BG_WORKER_THREAD.is_alive():
+            _BG_WORKER_STOP.clear()
+            _BG_WORKER_THREAD = threading.Thread(
+                target=_dashboard_background_worker_loop,
+                daemon=True,
+                name="dashboard_cache_worker",
+            )
+            _BG_WORKER_THREAD.start()
+
 
 def stop_dashboard_background_worker():
-    global _BG_WORKER_RUNNING
-    _BG_WORKER_RUNNING = False
+    global _BG_WORKER_THREAD
+    with _BG_WORKER_LOCK:
+        _BG_WORKER_STOP.set()
+        if _BG_WORKER_THREAD is not None:
+            _BG_WORKER_THREAD.join(timeout=30)
+            if _BG_WORKER_THREAD.is_alive():
+                raise RuntimeError("Dashboard refresh worker did not stop within 30 seconds")
+            _BG_WORKER_THREAD = None
 
 def get_cache_lock():
     global CACHE_LOCK
@@ -1247,8 +1270,6 @@ async def refresh_cache_if_needed(ttl_seconds: float = 3.0):
         await loop.run_in_executor(SYNC_EXECUTOR, update_cache_cycle)
         return CACHE_DATA
 
-# Auto-start background worker to keep in-memory cache pre-warmed
-start_dashboard_background_worker()
 
 VUE_DIST_DIR = os.path.join(WORKSPACE_DIR, "frontend", "dist")
 VUE_ASSETS_DIR = os.path.join(VUE_DIST_DIR, "assets")

@@ -85,23 +85,22 @@ async def lifespan(_: FastAPI):
     refresh_settings()
     admin_auth.initialize_from_legacy(settings.admin_token or settings.setup_token)
     gateway_enabled = os.getenv("R20_GATEWAY_WORKER_ENABLED", "1").lower() in {"1", "true", "yes"}
+    dashboard_enabled = os.getenv("R20_DASHBOARD_WORKER_ENABLED", "1").lower() in {"1", "true", "yes"}
     if gateway_enabled:
         start_gateway_supervisor()
     try:
-        try:
+        if dashboard_enabled:
             from dashboard.app import start_dashboard_background_worker
             start_dashboard_background_worker()
-        except Exception:
-            pass
         yield
     finally:
         try:
-            from dashboard.app import stop_dashboard_background_worker
-            stop_dashboard_background_worker()
-        except Exception:
-            pass
-        if gateway_enabled:
-            stop_gateway_supervisor()
+            if dashboard_enabled:
+                from dashboard.app import stop_dashboard_background_worker
+                stop_dashboard_background_worker()
+        finally:
+            if gateway_enabled:
+                stop_gateway_supervisor()
 
 
 from fastapi.middleware.gzip import GZipMiddleware
