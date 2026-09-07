@@ -7,12 +7,12 @@ Self-evolution and backups are owned by their dedicated scheduled jobs.
 
 import os
 import json
-import tarfile
 import datetime
-import subprocess
 import sys
 
 WORKSPACE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if WORKSPACE_DIR not in sys.path:
+    sys.path.insert(0, WORKSPACE_DIR)
 DATA_DIR = os.path.join(WORKSPACE_DIR, "data")
 BACKUPS_DIR = os.path.join(WORKSPACE_DIR, "backups")
 LEDGER_JSON_FILE = os.path.join(DATA_DIR, "trading_ledger.json")
@@ -24,38 +24,40 @@ try:
 except Exception:
     notify_daily_summary = None
 
+from r20_backend.account_baseline import load_account_baseline
+from r20_exchange.runtime import state_path
+
+
+def ledger_path() -> str:
+    if LEDGER_JSON_FILE != os.path.join(DATA_DIR, "trading_ledger.json"):
+        return LEDGER_JSON_FILE
+    return str(state_path("trading_ledger.json"))
+
+
 def generate_daily_briefing_and_backup():
     tz_bj = datetime.timezone(datetime.timedelta(hours=8))
     now_bj = datetime.datetime.now(tz_bj)
     now_str = now_bj.strftime("%Y-%m-%d %H:%M:%S")
     date_str = now_bj.strftime("%Y-%m-%d")
 
-    # Read Account Initial State (Supports Dynamic Capital Reset Filter)
-    account_init_file = os.path.join(DATA_DIR, "account_initial_state.json")
-    reset_time_str = "1970-01-01 00:00:00"
-    if os.path.exists(account_init_file):
-        try:
-            with open(account_init_file, "r", encoding="utf-8") as f:
-                acc_init = json.load(f)
-                reset_time_str = acc_init.get("reset_time", "1970-01-01 00:00:00")
-        except Exception:
-            pass
+    reset_time_str = load_account_baseline().get("reset_time", "1970-01-01 00:00:00")
 
-    # 1. Sync full ledger and load trades
     try:
-        sync_script = os.path.join(WORKSPACE_DIR, "scripts", "sync_full_ledger.py")
-        if os.path.exists(sync_script):
-            subprocess.run(f"python3 {sync_script}", shell=True, capture_output=True, text=True, timeout=15)
+        from sync_full_ledger import build_lifecycle_ledger
+        build_lifecycle_ledger()
     except Exception:
         pass
 
     trades = []
-    if os.path.exists(LEDGER_JSON_FILE):
+    path = ledger_path()
+    if os.path.exists(path):
         try:
-            with open(LEDGER_JSON_FILE, "r", encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 trades = json.load(f)
         except Exception:
             pass
+    if not isinstance(trades, list):
+        trades = []
 
     closed_today = [t for t in trades if t.get("status") == "closed" and date_str in str(t.get("close_time", ""))]
     total_trades = len(closed_today)

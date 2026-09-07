@@ -1,20 +1,27 @@
 """Shared, validated R20 trading universe configuration."""
 from __future__ import annotations
+
 import json
 import os
+import sys
 import tempfile
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
+from r20_exchange.runtime import state_path
 
 ROOT = Path(__file__).resolve().parents[1]
 POOL_FILE = ROOT / "data" / "instrument_pool.json"
+
+# Shared coin selection. Quantities are BASE asset units (ctVal normalized to 1).
+# Legacy OKX contract counts were migrated as base_qty = base_sz * nativeCtVal.
 DEFAULT_INSTRUMENTS = [
-    {"instId": "BTC-USDT-SWAP", "name": "BTC", "type": "crypto", "ccy": "BTC", "base_sz": 1, "precision": 1, "ctVal": 0.01, "tickSz": "0.1", "minSz": "0.01", "risk_per_trade_usd": 15.0},
-    {"instId": "ETH-USDT-SWAP", "name": "ETH", "type": "crypto", "ccy": "ETH", "base_sz": 3, "precision": 2, "ctVal": 0.1, "tickSz": "0.01", "minSz": "0.01", "risk_per_trade_usd": 15.0},
-    {"instId": "SOL-USDT-SWAP", "name": "SOL", "type": "crypto", "ccy": "SOL", "base_sz": 7, "precision": 2, "ctVal": 1.0, "tickSz": "0.01", "minSz": "0.01", "risk_per_trade_usd": 15.0},
-    {"instId": "DOGE-USDT-SWAP", "name": "DOGE", "type": "crypto", "ccy": "DOGE", "base_sz": 10, "precision": 4, "ctVal": 1000.0, "tickSz": "0.0001", "minSz": "0.01", "risk_per_trade_usd": 15.0},
-    {"instId": "SUI-USDT-SWAP", "name": "SUI", "type": "crypto", "ccy": "SUI", "base_sz": 50, "precision": 4, "ctVal": 1.0, "tickSz": "0.0001", "minSz": "0.01", "risk_per_trade_usd": 15.0},
-    {"instId": "LINK-USDT-SWAP", "name": "LINK", "type": "crypto", "ccy": "LINK", "base_sz": 64, "precision": 3, "ctVal": 1.0, "tickSz": "0.001", "minSz": "0.01", "risk_per_trade_usd": 15.0},
+    {"instId": "BTC-USDT-SWAP", "name": "BTC", "type": "crypto", "ccy": "BTC", "base_sz": 0.01, "base_qty": 0.01, "precision": 1, "ctVal": 1, "nativeCtVal": 0.01, "tickSz": "0.1", "minSz": "0.01", "risk_per_trade_usd": 15.0, "state": "live"},
+    {"instId": "ETH-USDT-SWAP", "name": "ETH", "type": "crypto", "ccy": "ETH", "base_sz": 0.3, "base_qty": 0.3, "precision": 2, "ctVal": 1, "nativeCtVal": 0.1, "tickSz": "0.01", "minSz": "0.01", "risk_per_trade_usd": 15.0, "state": "live"},
+    {"instId": "SOL-USDT-SWAP", "name": "SOL", "type": "crypto", "ccy": "SOL", "base_sz": 7.0, "base_qty": 7.0, "precision": 2, "ctVal": 1, "nativeCtVal": 1.0, "tickSz": "0.01", "minSz": "0.01", "risk_per_trade_usd": 15.0, "state": "live"},
+    {"instId": "DOGE-USDT-SWAP", "name": "DOGE", "type": "crypto", "ccy": "DOGE", "base_sz": 10000.0, "base_qty": 10000.0, "precision": 4, "ctVal": 1, "nativeCtVal": 1000.0, "tickSz": "0.0001", "minSz": "0.01", "risk_per_trade_usd": 15.0, "state": "live"},
+    {"instId": "SUI-USDT-SWAP", "name": "SUI", "type": "crypto", "ccy": "SUI", "base_sz": 50.0, "base_qty": 50.0, "precision": 4, "ctVal": 1, "nativeCtVal": 1.0, "tickSz": "0.0001", "minSz": "0.01", "risk_per_trade_usd": 15.0, "state": "live"},
+    {"instId": "LINK-USDT-SWAP", "name": "LINK", "type": "crypto", "ccy": "LINK", "base_sz": 64.0, "base_qty": 64.0, "precision": 3, "ctVal": 1, "nativeCtVal": 1.0, "tickSz": "0.001", "minSz": "0.01", "risk_per_trade_usd": 15.0, "state": "live"},
 ]
 
 
@@ -23,43 +30,123 @@ def _precision(tick_size: str) -> int:
     return len(normalized.split(".", 1)[1]) if "." in normalized else 0
 
 
+def _decimal(value: Any, default: str = "0") -> Decimal:
+    raw = default if value in (None, "") else value
+    try:
+        return Decimal(str(raw))
+    except (InvalidOperation, ValueError, TypeError):
+        return Decimal(default)
+
+
+def _as_float(value: Decimal) -> float:
+    return float(value)
+
+
+def normalize_pool_item(item: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a pool row to BASE units. Never keeps OKX contract counts as Binance size."""
+    out = dict(item)
+    native = out.get("nativeCtVal")
+    ct_val = _decimal(out.get("ctVal"), "1")
+    if native in (None, ""):
+        native_ct = ct_val if ct_val != 0 else Decimal("1")
+    else:
+        native_ct = _decimal(native, "1")
+        if native_ct <= 0:
+            native_ct = Decimal("1")
+
+    if out.get("base_qty") not in (None, ""):
+        base_qty = _decimal(out.get("base_qty"), "0")
+    else:
+        base_sz = _decimal(out.get("base_sz"), "0")
+        # Legacy OKX: base_sz was contracts, ctVal was coins/contract.
+        # Already-normalized rows have ctVal=1 and base_sz already in BASE.
+        if ct_val == 1:
+            base_qty = base_sz
+        else:
+            base_qty = base_sz * ct_val
+            native_ct = ct_val if ct_val > 0 else native_ct
+
+    tick_size = str(out.get("tickSz") or "0.0001")
+    inst_id = str(out.get("instId", "")).upper()
+    name = str(out.get("name") or out.get("ccy") or inst_id.split("-", 1)[0]).upper()
+    out.update({
+        "instId": inst_id,
+        "name": name,
+        "type": out.get("type") or "crypto",
+        "ccy": str(out.get("ccy") or name).upper(),
+        "base_qty": _as_float(base_qty),
+        "base_sz": _as_float(base_qty),
+        "precision": int(out["precision"]) if out.get("precision") not in (None, "") else _precision(tick_size),
+        "ctVal": 1,
+        "nativeCtVal": _as_float(native_ct),
+        "tickSz": tick_size,
+        "minSz": str(out.get("minSz") or "0.01"),
+        "risk_per_trade_usd": float(out.get("risk_per_trade_usd") or 15.0),
+        "state": str(out.get("state") or "live"),
+        "quantity_unit": "base",
+    })
+    return out
+
+
 def from_okx_instrument(raw: dict[str, Any]) -> dict[str, Any]:
+    """Build a pool item from adapter-normalized or legacy OKX instrument metadata."""
     inst_id = str(raw.get("instId", "")).upper()
-    base = str(raw.get("baseCcy") or inst_id.split("-", 1)[0]).upper()
+    base = str(raw.get("baseCcy") or raw.get("ccy") or inst_id.split("-", 1)[0]).upper()
     tick_size = str(raw.get("tickSz") or "0.0001")
-    return {
+    native_ct = _decimal(raw.get("nativeCtVal") if raw.get("nativeCtVal") not in (None, "") else raw.get("ctVal"), "1")
+    reported_ct = _decimal(raw.get("ctVal"), "1")
+    min_sz = _decimal(raw.get("minSz"), "1")
+    lot_sz = raw.get("lotSz")
+    min_notional = raw.get("minNotional")
+    # Adapter-normalized metadata already converted minSz/lotSz to BASE and ctVal='1'.
+    if reported_ct == 1 and raw.get("nativeCtVal") not in (None, ""):
+        base_qty = min_sz
+        min_sz_out = str(min_sz)
+    else:
+        base_qty = min_sz * (native_ct if native_ct > 0 else Decimal("1"))
+        native_ct = native_ct if native_ct > 0 else reported_ct
+        min_sz_out = str(base_qty)
+    item = {
         "instId": inst_id,
         "name": base,
         "type": "crypto",
         "ccy": base,
-        "base_sz": 1,
+        "base_sz": _as_float(base_qty),
+        "base_qty": _as_float(base_qty),
         "precision": _precision(tick_size),
-        "ctVal": float(raw.get("ctVal") or 1.0),
+        "ctVal": 1,
+        "nativeCtVal": _as_float(native_ct if native_ct > 0 else Decimal("1")),
         "tickSz": tick_size,
-        "minSz": str(raw.get("minSz") or "1"),
+        "minSz": min_sz_out,
+        "lotSz": None if lot_sz in (None, "") else str(lot_sz),
+        "minNotional": None if min_notional in (None, "") else str(min_notional),
         "risk_per_trade_usd": 15.0,
+        "state": str(raw.get("state") or "live"),
     }
+    return normalize_pool_item(item)
 
 
 def load_instruments() -> list[dict[str, Any]]:
+    """Load the shared coin universe. No network; trading rules are not live-overlaid here."""
     if not POOL_FILE.exists():
-        return [dict(item) for item in DEFAULT_INSTRUMENTS]
+        return [normalize_pool_item(dict(item)) for item in DEFAULT_INSTRUMENTS]
     try:
         payload = json.loads(POOL_FILE.read_text(encoding="utf-8"))
         instruments = payload.get("instruments", payload) if isinstance(payload, dict) else payload
         if isinstance(instruments, list) and instruments:
-            return instruments
+            return [normalize_pool_item(dict(item)) for item in instruments if isinstance(item, dict)]
     except (OSError, json.JSONDecodeError):
         pass
-    return [dict(item) for item in DEFAULT_INSTRUMENTS]
+    return [normalize_pool_item(dict(item)) for item in DEFAULT_INSTRUMENTS]
 
 
 def save_instruments(instruments: list[dict[str, Any]]) -> None:
     POOL_FILE.parent.mkdir(parents=True, exist_ok=True)
+    normalized = [normalize_pool_item(dict(item)) for item in instruments]
     fd, temp_path = tempfile.mkstemp(prefix=".instrument-pool-", suffix=".tmp", dir=POOL_FILE.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump({"version": 1, "instruments": instruments}, handle, ensure_ascii=False, indent=2)
+            json.dump({"version": 1, "instruments": normalized}, handle, ensure_ascii=False, indent=2)
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
@@ -73,6 +160,60 @@ def save_instruments(instruments: list[dict[str, Any]]) -> None:
         pass
 
 
+def resolve_instrument_rules(
+    instruments: list[dict[str, Any]] | None = None,
+    exchange: Any | None = None,
+) -> list[dict[str, Any]]:
+    """Overlay selected-exchange instrument metadata onto the shared coin list.
+
+    Coin selection stays shared. lotSz/minSz/tickSz/minNotional/state/name come from
+    the live adapter (already BASE-normalized, ctVal='1'). Never copies OKX contract counts
+    and never multiplies already-normalized lotSz/minSz by nativeCtVal.
+    """
+    pool = [normalize_pool_item(dict(item)) for item in (instruments if instruments is not None else load_instruments())]
+    adapter = exchange
+    if adapter is None:
+        from r20_exchange.runtime import get_exchange
+        adapter = get_exchange()
+    try:
+        live_rows = adapter.instruments()
+    except Exception:
+        return pool
+    live_map: dict[str, dict[str, Any]] = {}
+    for row in live_rows or []:
+        if isinstance(row, dict) and row.get("instId"):
+            live_map[str(row["instId"]).upper()] = row
+    resolved: list[dict[str, Any]] = []
+    for item in pool:
+        inst_id = str(item.get("instId") or "").upper()
+        meta = live_map.get(inst_id)
+        if not meta:
+            resolved.append(item)
+            continue
+        merged = dict(item)
+        merged["instId"] = str(meta.get("instId") or inst_id).upper()
+        base = str(meta.get("baseCcy") or merged.get("name") or inst_id.split("-", 1)[0]).upper()
+        merged["name"] = base
+        merged["ccy"] = base
+        merged["state"] = str(meta.get("state") or "live")
+        merged["ctVal"] = 1
+        if meta.get("nativeCtVal") not in (None, ""):
+            merged["nativeCtVal"] = _as_float(_decimal(meta.get("nativeCtVal"), "1"))
+        if meta.get("tickSz") not in (None, ""):
+            merged["tickSz"] = str(meta.get("tickSz"))
+            merged["precision"] = _precision(merged["tickSz"])
+        if meta.get("minSz") not in (None, ""):
+            merged["minSz"] = str(meta.get("minSz"))
+        if meta.get("lotSz") not in (None, ""):
+            merged["lotSz"] = str(meta.get("lotSz"))
+        if meta.get("minNotional") not in (None, ""):
+            merged["minNotional"] = str(meta.get("minNotional"))
+        if meta.get("settleCcy") not in (None, ""):
+            merged["settleCcy"] = str(meta.get("settleCcy"))
+        resolved.append(normalize_pool_item(merged))
+    return resolved
+
+
 def sync_instruments_state() -> None:
     """Synchronize trading_state.json, factor_library_snapshot.json, news_sentiment.json,
     and dashboard cache when the trading instrument pool changes."""
@@ -80,8 +221,8 @@ def sync_instruments_state() -> None:
     active_ids = {item["instId"] for item in active_pool}
     active_names = {item["name"] for item in active_pool}
 
-    # 1. Update data/trading_state.json
-    state_file = ROOT / "data" / "trading_state.json"
+    # Refresh the active account's view without touching another account's state.
+    state_file = state_path("trading_state.json")
     state_data: dict[str, Any] = {}
     if state_file.exists():
         try:
@@ -125,6 +266,7 @@ def sync_instruments_state() -> None:
     state_data["instruments"] = new_insts
     state_data["max_positions"] = len(active_pool)
     try:
+        state_file.parent.mkdir(parents=True, exist_ok=True)
         state_file.write_text(json.dumps(state_data, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
         pass
@@ -173,7 +315,7 @@ def sync_instruments_state() -> None:
             pass
 
     # 4. Invalidate dashboard cache file so next fetch generates fresh state
-    dashboard_cache = ROOT / "data" / "dashboard_last_good.json"
+    dashboard_cache = state_path("dashboard_last_good.json")
     if dashboard_cache.exists():
         try:
             dashboard_cache.unlink(missing_ok=True)
@@ -187,11 +329,10 @@ def sync_instruments_state() -> None:
         try:
             fl_script = ROOT / "scripts" / "factor_library.py"
             if fl_script.exists():
-                subprocess.run(f"python3 {fl_script}", shell=True, capture_output=True, timeout=45)
+                subprocess.run([sys.executable, str(fl_script)], capture_output=True, timeout=45)
             nh_script = ROOT / "scripts" / "news_sentiment_harvester.py"
             if nh_script.exists():
-                subprocess.run(f"python3 {nh_script}", shell=True, capture_output=True, timeout=45)
+                subprocess.run([sys.executable, str(nh_script)], capture_output=True, timeout=45)
         except Exception:
             pass
     threading.Thread(target=_run_bg, daemon=True).start()
-

@@ -36,7 +36,7 @@ SCOPE_PATHS = {
     "data": ("data",),
     "scripts": ("scripts",),
     "dashboard": ("dashboard",),
-    "r20_backend": ("r20_backend",),
+    "r20_backend": ("r20_backend", "r20_exchange"),
     "r20_gateway": ("r20_gateway",),
     "tests": ("tests",),
     "recovery_guide": ("RECOVERY_GUIDE.md",),
@@ -102,17 +102,17 @@ def sqlite_hot_backups(timestamp: str, retention: int, destination_dir: Path | N
     if not data_dir.exists():
         return created
 
-    for source in data_dir.glob("*.db"):
+    for source in data_dir.rglob("*.db"):
         if source.name == "r20_admin.db":
             continue
         if source.name.endswith("-wal") or source.name.endswith("-shm"):
             continue
-        destination = destination_dir / f"{source.stem}_{timestamp}.db"
+        if not source.resolve().is_relative_to(data_dir.resolve()):
+            raise RuntimeError("SQLite 备份源必须位于 data/ 目录内")
+        destination = destination_dir / source.relative_to(data_dir).parent / f"{source.stem}_{timestamp}.db"
+        destination.parent.mkdir(parents=True, exist_ok=True)
         try:
-            try:
-                source_conn = sqlite3.connect(f"file:{source.resolve()}?mode=ro", uri=True, timeout=30.0)
-            except Exception:
-                source_conn = sqlite3.connect(str(source), timeout=30.0)
+            source_conn = sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True, timeout=30.0)
             try:
                 target_conn = sqlite3.connect(str(destination), timeout=30.0)
                 try:
@@ -123,10 +123,10 @@ def sqlite_hot_backups(timestamp: str, retention: int, destination_dir: Path | N
                 source_conn.close()
             os.chmod(destination, 0o600)
             created.append(destination)
+            prune((p for p in destination.parent.glob(f"{source.stem}_*.db") if p.is_file()), retention)
         except Exception as exc:
             destination.unlink(missing_ok=True)
             raise RuntimeError(f"SQLite 数据库 {source.name} 热备份失败：{exc}") from exc
-    prune((p for p in destination_dir.glob("*.db") if p.is_file()), retention)
     return created
 
 

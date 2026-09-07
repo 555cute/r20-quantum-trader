@@ -40,6 +40,31 @@ AI_MEMORY_MD_FILE = os.path.join(DATA_DIR, "AI_TRADING_MEMORY.md")
 EVOLUTION_LAST_PROMPT_FILE = os.path.join(DATA_DIR, "self_improvement_last_prompt.txt")
 LOG_FILE = os.path.join(LOGS_DIR, "self_improvement.log")
 EVOLUTION_LOCK_FILE = os.path.join(DATA_DIR, ".self_improvement.lock")
+_LEDGER_DEFAULT = LEDGER_JSON_FILE
+_REPORT_DEFAULT = REPORT_JSON_FILE
+
+
+def _ledger_file() -> str:
+    if LEDGER_JSON_FILE != _LEDGER_DEFAULT:
+        return LEDGER_JSON_FILE
+    from r20_exchange.runtime import state_path
+    return str(state_path("trading_ledger.json"))
+
+
+def _report_file() -> str:
+    if REPORT_JSON_FILE != _REPORT_DEFAULT:
+        return REPORT_JSON_FILE
+    from r20_exchange.runtime import state_path
+    return str(state_path("self_improvement_report.json"))
+
+
+
+def _ledger_incomplete() -> bool:
+    if LEDGER_JSON_FILE != _LEDGER_DEFAULT:
+        return False
+    from r20_backend.account_paths import ledger_is_incomplete
+    return ledger_is_incomplete()
+
 
 from r20_backend.version import __version__
 from r20_backend.file_lock import acquire, release
@@ -118,25 +143,37 @@ def get_cpa_client_config() -> Tuple[str, str]:
     )
 
 def load_closed_trades():
-    account_init_file = os.path.join(DATA_DIR, "account_initial_state.json")
+    if _ledger_incomplete():
+        log_msg("台账不完整，跳过自进化归因")
+        return []
+
     reset_time_str = "1970-01-01 00:00:00"
-    if os.path.exists(account_init_file):
+    if LEDGER_JSON_FILE != _LEDGER_DEFAULT:
+        account_init_file = os.path.join(DATA_DIR, "account_initial_state.json")
+        if os.path.exists(account_init_file):
+            try:
+                with open(account_init_file, "r", encoding="utf-8") as f:
+                    acc_init = json.load(f)
+                    reset_time_str = acc_init.get("reset_time", "1970-01-01 00:00:00")
+            except Exception:
+                pass
+    else:
         try:
-            with open(account_init_file, "r", encoding="utf-8") as f:
-                acc_init = json.load(f)
-                reset_time_str = acc_init.get("reset_time", "1970-01-01 00:00:00")
+            from r20_backend.account_baseline import load_account_baseline
+            reset_time_str = load_account_baseline().get("reset_time", "1970-01-01 00:00:00")
         except Exception:
             pass
 
     closed_trades = []
-    if os.path.exists(LEDGER_JSON_FILE):
+    path = _ledger_file()
+    if os.path.exists(path):
         try:
-            with open(LEDGER_JSON_FILE, "r", encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 t_list = json.load(f)
                 for t in t_list:
                     if t.get("status") == "holding":
                         continue
-                    
+
                     c_time = str(t.get("close_time") or t.get("time") or "")
                     if c_time and c_time < reset_time_str:
                         continue
@@ -361,20 +398,35 @@ def run_self_evolution(force: bool = False):
     timestamp_str = now_bj.strftime("%Y-%m-%d %H:%M:%S")
     log_msg("🧬 启动 R20 AI 大脑自进化认知复盘与实战心法提炼 (v7.2.1 Crypto Focus)...")
 
+    if _ledger_incomplete():
+        log_msg("台账不完整，拒绝用残缺历史覆盖心法归因")
+        report_path = _report_file()
+        if os.path.exists(report_path):
+            try:
+                with open(report_path, "r", encoding="utf-8") as f:
+                    previous = json.load(f)
+                previous["incomplete_ledger"] = True
+                return previous
+            except Exception:
+                pass
+        return {"incomplete_ledger": True, "memory_preserved": True, "core_lessons": [], "change_status": "NO_CHANGE"}
+
     closed_trades = load_closed_trades()
     total_trades = len(closed_trades)
     ledger_revision = hashlib.sha256(
         json.dumps(closed_trades, sort_keys=True, ensure_ascii=False).encode("utf-8")
     ).hexdigest()
-    if not force and os.path.exists(REPORT_JSON_FILE):
+    report_path = _report_file()
+    if not force and os.path.exists(report_path):
         try:
-            with open(REPORT_JSON_FILE, "r", encoding="utf-8") as f:
+            with open(report_path, "r", encoding="utf-8") as f:
                 previous_report = json.load(f)
             if previous_report.get("ledger_revision") == ledger_revision:
                 log_msg("No new closed-trade evidence; keeping the current adaptive configuration")
                 return previous_report
         except Exception:
             pass
+
 
     # 1. Base Stats
     win_trades = [t for t in closed_trades if t["net_pnl"] > 0]
@@ -474,7 +526,7 @@ def run_self_evolution(force: bool = False):
         "llm_error": str(llm_review.get("__llm_error__") or ""),
     }
 
-    atomic_write_json(REPORT_JSON_FILE, report_payload)
+    atomic_write_json(_report_file(), report_payload)
 
     log_msg(f"🧬 自进化认知复盘完成 | 状态={change_status} | 当前保留 {len(long_term_memory)} 条启发式长期记忆")
     try:

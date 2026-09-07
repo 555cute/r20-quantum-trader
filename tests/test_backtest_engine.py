@@ -169,6 +169,20 @@ class MarketDataIntegrityTests(unittest.TestCase):
         self.assertEqual(symbols, ["LINK-USDT-SWAP", "BTC-USDT-SWAP"])
         self.assertNotIn("ASTER-USDT-SWAP", symbols)
 
+    def test_default_loader_uses_selected_exchange_not_okx_host(self):
+        from scripts.backtest_engine import fetch_okx_candles
+
+        class Fake:
+            def candles(self, inst_id, bar="1H", limit=100):
+                return list(reversed([[str(1_700_000_000_000 + i * 3_600_000), "100", "101", "99", "100.5", "1"] for i in range(limit)]))
+
+        with patch("r20_exchange.runtime.get_exchange", return_value=Fake()):
+            rows = fetch_okx_candles("BTC-USDT-SWAP", bar="1H", limit=5)
+        self.assertEqual(len(rows), 5)
+        self.assertEqual(rows[0]["symbol"], "BTC-USDT-SWAP")
+        self.assertGreater(rows[-1]["ts_ms"], rows[0]["ts_ms"])
+
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -4,8 +4,10 @@ Web Dashboard Application Module
 from __future__ import annotations
 from typing import Any
 from pathlib import Path
-from scripts.okx_runtime import replace_cli_prefix as okx_private_command
+from r20_exchange.runtime import get_exchange, selected_environment, state_path
 from scripts.instrument_pool import load_instruments
+from r20_backend.account_baseline import load_account_baseline
+from r20_backend.account_paths import classify_bill
 import os
 import json
 import time
@@ -94,6 +96,95 @@ def _memory_freshness_note() -> str:
         return ""
 
 DASHBOARD_CACHE_FILE = os.path.join(DATA_DIR, "dashboard_last_good.json")
+_BOUND_IDENTITY = None
+
+
+def _scoped_data(current: str, name: str) -> str:
+    if current == os.path.join(DATA_DIR, name):
+        return str(state_path(name))
+    return current
+
+
+def ledger_file() -> str:
+    return _scoped_data(LEDGER_JSON_FILE, "trading_ledger.json")
+
+
+def tracker_file() -> str:
+    return _scoped_data(POSITION_TRACKER_FILE, "position_trackers.json")
+
+
+def snapshots_file() -> str:
+    return _scoped_data(SNAPSHOTS_JSON_FILE, "snapshots.json")
+
+
+def dashboard_cache_file() -> str:
+    return _scoped_data(DASHBOARD_CACHE_FILE, "dashboard_last_good.json")
+
+
+def report_file() -> str:
+    return _scoped_data(REPORT_JSON_FILE, "self_improvement_report.json")
+
+
+def state_file() -> str:
+    return _scoped_data(STATE_JSON_FILE, "trading_state.json")
+
+
+def decisions_file() -> str:
+    return _scoped_data(AI_DECISIONS_FILE, "ai_brain_decisions.json")
+
+
+def history_file() -> str:
+    return _scoped_data(AI_HISTORY_FILE, "ai_brain_history.json")
+
+
+def prompt_file() -> str:
+    return _scoped_data(AI_LAST_PROMPT_FILE, "ai_brain_last_prompt.txt")
+
+
+def dashboard_worker_enabled() -> bool:
+    return os.getenv("R20_DASHBOARD_WORKER_ENABLED", "1").lower() in {"1", "true", "yes"}
+
+
+def bind_account_scope(*, load_cache: bool = True):
+    """Rebuild account paths for the live identity and drop the previous account's memory."""
+    global _BOUND_IDENTITY, CACHE_DATA, LAST_CACHE_TIME
+    env = selected_environment()
+    identity = env.identity
+    if identity == _BOUND_IDENTITY:
+        return env
+    _BOUND_IDENTITY = identity
+    CACHE_DATA = load_persisted_dashboard_cache() if load_cache else {}
+    cached_identity = (CACHE_DATA.get("runtime") or {}).get("identity")
+    cached_exchange = CACHE_DATA.get("exchange")
+    if cached_identity not in {None, identity} or cached_exchange not in {None, env.exchange}:
+        CACHE_DATA = {}
+    LAST_CACHE_TIME = 0
+    return env
+
+
+
+def _exchange_try(method: str, *args, **kwargs):
+    try:
+        client = get_exchange()
+        return True, getattr(client, method)(*args, **kwargs), ""
+    except Exception as exc:
+        return False, None, str(exc)
+
+
+def _stamp_runtime(payload: dict, env=None) -> dict:
+    selected = env if env is not None else selected_environment()
+    view = {
+        "exchange": selected.exchange,
+        "environment": selected.mode,
+        "identity": selected.identity,
+        "quantity_unit": "base",
+        "ctVal": "1",
+    }
+    payload.update(view)
+    payload["runtime"] = view
+    return payload
+
+
 
 
 def get_target_instruments() -> list[dict[str, Any]]:
@@ -118,20 +209,6 @@ app = FastAPI(title="R20 AI Quantitative Matrix", docs_url=None, redoc_url=None,
 templates = Jinja2Templates(directory=os.path.join(DASHBOARD_DIR, "templates"))
 app.mount("/static", StaticFiles(directory=os.path.join(DASHBOARD_DIR, "static")), name="static")
 
-def run_json_cmd_status(cmd):
-    try:
-        res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
-        if res.returncode == 0 and res.stdout.strip():
-            return True, json.loads(res.stdout.strip()), ""
-        return False, None, res.stderr.strip() or res.stdout.strip() or "empty response"
-    except Exception as e:
-        return False, None, str(e)
-
-
-def run_json_cmd(cmd):
-    ok, data, _ = run_json_cmd_status(cmd)
-    return data if ok else None
-
 def _safe_float(value, default=0.0):
     try:
         return float(value)
@@ -141,7 +218,7 @@ def _safe_float(value, default=0.0):
 
 def load_position_trackers():
     try:
-        with open(POSITION_TRACKER_FILE, "r", encoding="utf-8") as handle:
+        with open(tracker_file(), "r", encoding="utf-8") as handle:
             data = json.load(handle)
         return data if isinstance(data, dict) else {}
     except Exception:
@@ -149,17 +226,18 @@ def load_position_trackers():
 
 
 def enrich_position_risk_fields(positions, trackers=None):
-    """Add margin and stop-line fields even when OKX protection lookup is unavailable."""
+    """Add margin and stop-line fields even when protection lookup is unavailable."""
     trackers = trackers if isinstance(trackers, dict) else load_position_trackers()
-    contract_values = {item.get("instId"): _safe_float(item.get("ctVal"), 1.0) for item in load_instruments()}
     for position in positions or []:
         inst_id = str(position.get("instId") or "")
         side = str(position.get("posSide") or position.get("side") or "net").lower()
         position["posSide"] = side
+        position["quantity_unit"] = "base"
+        position["ctVal"] = "1"
         tracker = trackers.get(f"{inst_id}_{side}", {})
         size = abs(_safe_float(position.get("pos_sz", position.get("pos"))))
         price = _safe_float(position.get("markPx")) or _safe_float(position.get("avgPx"))
-        notional = abs(_safe_float(position.get("notional_usdt"))) or round(size * contract_values.get(inst_id, 1.0) * price, 2)
+        notional = abs(_safe_float(position.get("notional_usdt"))) or round(size * price, 2)
         leverage = abs(_safe_float(position.get("lever"), 1.0)) or 1.0
         exchange_margin = abs(_safe_float(position.get("imr")))
         existing_margin = abs(_safe_float(position.get("margin_usdt")))
@@ -229,17 +307,17 @@ def _build_factors_from_local_files(positions, timestamp_full):
         except Exception:
             pass
 
-    if os.path.exists(AI_DECISIONS_FILE):
+    if os.path.exists(decisions_file()):
         try:
-            with open(AI_DECISIONS_FILE, "r", encoding="utf-8") as f:
+            with open(decisions_file(), "r", encoding="utf-8") as f:
                 ai_decisions = json.load(f)
         except Exception:
             pass
 
     inst_map = {}
-    if os.path.exists(STATE_JSON_FILE):
+    if os.path.exists(state_file()):
         try:
-            with open(STATE_JSON_FILE, "r", encoding="utf-8") as f:
+            with open(state_file(), "r", encoding="utf-8") as f:
                 state_data = json.load(f)
                 for ins in state_data.get("instruments", []):
                     if isinstance(ins, dict) and ins.get("instId"):
@@ -344,25 +422,25 @@ def _inject_local_data_into_stale(stale, positions, timestamp_full):
             pass
 
     # AI brain history — local file
-    if os.path.exists(AI_HISTORY_FILE):
+    if os.path.exists(history_file()):
         try:
-            with open(AI_HISTORY_FILE, "r", encoding="utf-8") as f:
+            with open(history_file(), "r", encoding="utf-8") as f:
                 stale["ai_brain_history"] = json.load(f)
         except Exception:
             pass
 
     # Review report — local file
-    if os.path.exists(REPORT_JSON_FILE):
+    if os.path.exists(report_file()):
         try:
-            with open(REPORT_JSON_FILE, "r", encoding="utf-8") as f:
+            with open(report_file(), "r", encoding="utf-8") as f:
                 stale["review"] = json.load(f)
         except Exception:
             pass
 
     # AI last prompt — local file
-    if os.path.exists(AI_LAST_PROMPT_FILE):
+    if os.path.exists(prompt_file()):
         try:
-            with open(AI_LAST_PROMPT_FILE, "r", encoding="utf-8") as f:
+            with open(prompt_file(), "r", encoding="utf-8") as f:
                 stale["ai_last_prompt"] = f.read()
         except Exception:
             pass
@@ -383,9 +461,9 @@ def _inject_local_data_into_stale(stale, positions, timestamp_full):
             pass
 
     # Trades table — local ledger file
-    if os.path.exists(LEDGER_JSON_FILE):
+    if os.path.exists(ledger_file()):
         try:
-            with open(LEDGER_JSON_FILE, "r", encoding="utf-8") as f:
+            with open(ledger_file(), "r", encoding="utf-8") as f:
                 stale["trades"] = json.load(f)[:60]
         except Exception:
             pass
@@ -396,10 +474,9 @@ def _inject_local_data_into_stale(stale, positions, timestamp_full):
 def _is_meaningful_dashboard_snapshot(data):
     return isinstance(data, dict) and isinstance(data.get("account"), dict) and bool(data.get("account")) and "total_eq" in data["account"]
 
-
 def load_persisted_dashboard_cache():
     try:
-        with open(DASHBOARD_CACHE_FILE, "r", encoding="utf-8") as handle:
+        with open(dashboard_cache_file(), "r", encoding="utf-8") as handle:
             data = json.load(handle)
         return data if _is_meaningful_dashboard_snapshot(data) else {}
     except Exception:
@@ -409,7 +486,8 @@ def load_persisted_dashboard_cache():
 def persist_dashboard_cache(data):
     if not _is_meaningful_dashboard_snapshot(data):
         return
-    cache_dir = os.path.dirname(DASHBOARD_CACHE_FILE) or DATA_DIR
+    cache_path = dashboard_cache_file()
+    cache_dir = os.path.dirname(cache_path) or DATA_DIR
     os.makedirs(cache_dir, exist_ok=True)
     fd, temp_path = tempfile.mkstemp(prefix=".dashboard-cache-", suffix=".json", dir=cache_dir)
     try:
@@ -419,14 +497,14 @@ def persist_dashboard_cache(data):
             handle.flush()
             os.fsync(handle.fileno())
         os.chmod(temp_path, 0o600)
-        os.replace(temp_path, DASHBOARD_CACHE_FILE)
-        os.chmod(DASHBOARD_CACHE_FILE, 0o600)
+        os.replace(temp_path, cache_path)
+        os.chmod(cache_path, 0o600)
     finally:
         if os.path.exists(temp_path):
             os.unlink(temp_path)
 
 
-CACHE_DATA = load_persisted_dashboard_cache()
+CACHE_DATA = {}
 LAST_CACHE_TIME = 0
 CACHE_LOCK = None
 SYNC_EXECUTOR = ThreadPoolExecutor(max_workers=6, thread_name_prefix="dashboard_sync")
@@ -440,6 +518,7 @@ def _dashboard_background_worker_loop():
         return
     while not _BG_WORKER_STOP.is_set():
         try:
+            bind_account_scope()
             update_cache_cycle()
         except Exception:
             pass
@@ -484,25 +563,29 @@ def update_cache_cycle():
     timestamp_full = now_bj.strftime("%Y-%m-%d %H:%M:%S (北京时间)")
 
     source_errors = []
+    env = selected_environment()
 
-    # Parallel Phase 1: Fetch Balance, Positions, and Maker Orders concurrently
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        f_bal = pool.submit(run_json_cmd_status, okx_private_command("okx account balance --json"))
-        f_pos = pool.submit(run_json_cmd_status, okx_private_command("okx account positions --json"))
-        f_ord = pool.submit(run_json_cmd_status, okx_private_command("okx swap orders --json"))
-        balance_ok, bal_data, balance_error = f_bal.result()
-        positions_ok, pos_data, positions_error = f_pos.result()
-        orders_ok, orders_data, orders_error = f_ord.result()
+    if not env.configured:
+        source_errors.append("exchange: not configured")
+        balance_ok, bal_data, positions_ok, pos_data, orders_ok, orders_data = False, [], False, [], False, []
+    else:
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            f_bal = pool.submit(_exchange_try, "balance")
+            f_pos = pool.submit(_exchange_try, "positions")
+            f_ord = pool.submit(_exchange_try, "open_orders")
+            balance_ok, bal_data, balance_error = f_bal.result()
+            positions_ok, pos_data, positions_error = f_pos.result()
+            orders_ok, orders_data, orders_error = f_ord.result()
+        if not balance_ok:
+            source_errors.append(f"balance: {balance_error}")
+            bal_data = []
+        if not positions_ok:
+            source_errors.append(f"positions: {positions_error}")
+            pos_data = []
+        if not orders_ok:
+            source_errors.append(f"orders: {orders_error}")
+            orders_data = []
 
-    if not balance_ok:
-        source_errors.append(f"balance: {balance_error}")
-        bal_data = []
-    if not positions_ok:
-        source_errors.append(f"positions: {positions_error}")
-        pos_data = []
-    if not orders_ok:
-        source_errors.append(f"orders: {orders_error}")
-        orders_data = []
 
     total_eq = 0.0
     avail_eq = 0.0
@@ -513,7 +596,7 @@ def update_cache_cycle():
         for d in bal_data[0].get("details", []):
             if d.get("ccy") == "USDT":
                 total_eq = float(d.get("eq", 0.0) or 0.0)
-                avail_eq = float(d.get("availBal", 0.0) or 0.0)
+                avail_eq = float(d.get("availBal") or d.get("availEq") or 0.0)
                 cash_bal = float(d.get("cashBal", 0.0) or 0.0)
                 upl_acc = float(d.get("upl", 0.0) or 0.0)
                 break
@@ -548,19 +631,11 @@ def update_cache_cycle():
 
             avg_px = float(p.get("avgPx", 0) or 0)
             mark_px = float(p.get("markPx", 0) or 0)
-            pos_sz = float(p.get("pos", 0) or 0)
-
-            ct_val = 1.0
+            pos_sz = abs(float(p.get("pos", 0) or 0))
             inst_id_val = p.get("instId", "")
-            for target_item in load_instruments():
-                if target_item["instId"] == inst_id_val:
-                    ct_val = target_item.get("ctVal", 1.0)
-                    break
-            
             okx_notional = float(p.get("notionalUsd", 0) or 0)
-            okx_imr = float(p.get("imr", 0) or 0)
-
-            notional_usdt = round(okx_notional if okx_notional > 0 else (pos_sz * ct_val * (mark_px if mark_px > 0 else avg_px)), 2)
+            okx_imr = float(p.get("imr") or p.get("margin") or 0)
+            notional_usdt = round(okx_notional if okx_notional > 0 else (pos_sz * (mark_px if mark_px > 0 else avg_px)), 2)
             raw_upl_ratio = float(p.get("uplRatio", 0.0) or 0.0)
             real_roi_pct = round(raw_upl_ratio * 100, 2)
             price_chg = round(((mark_px - avg_px) / avg_px * 100) if avg_px > 0 else 0, 2)
@@ -573,8 +648,10 @@ def update_cache_cycle():
                 "name": p.get("instId", "").replace("-USDT-SWAP", ""),
                 "posSide": pos_side,
                 "side": pos_side,
-                "pos": p.get("pos"),
+                "pos": pos_sz,
                 "pos_sz": pos_sz,
+                "quantity_unit": "base",
+                "ctVal": "1",
                 "notional_usdt": notional_usdt,
                 "margin_usdt": margin_usdt_val,
                 "marginSource": "exchange_imr" if okx_imr > 0 else "notional_div_leverage",
@@ -685,27 +762,23 @@ def update_cache_cycle():
             # factor_library, factors, news, review, logs, trades etc. are
             # read from local files and should always be fresh even in STALE mode.
             _inject_local_data_into_stale(stale, stale_positions, timestamp_full)
-            CACHE_DATA = stale
+            CACHE_DATA = _stamp_runtime(stale, env)
             LAST_CACHE_TIME = time.time()
             return
-        CACHE_DATA = {
+        CACHE_DATA = _stamp_runtime({
             "timestamp": timestamp_full,
             "data_health": {"status": "OFFLINE", "partial": True, "errors": source_errors},
             "account": {}, "today_stats": {}, "performance": {},
             "positions_summary": {"total": 0, "max_positions": len(load_instruments()), "items": []},
             "factors": [], "trades": [], "logs": [], "snapshots": [],
-        }
+        }, env)
         LAST_CACHE_TIME = time.time()
         return
 
-    # Parallel Phase 2: Exchange algo orders for live TP/SL protection
     if positions:
         with ThreadPoolExecutor(max_workers=min(len(positions), 6)) as pool:
             futures = {
-                pos["instId"]: pool.submit(
-                    run_json_cmd_status,
-                    okx_private_command(f"okx swap algo orders --instId {pos['instId']} --json")
-                )
+                pos["instId"]: pool.submit(_exchange_try, "protection_orders", pos["instId"])
                 for pos in positions
             }
             algo_results = {inst_id: f.result() for inst_id, f in futures.items()}
@@ -713,17 +786,25 @@ def update_cache_cycle():
         for position in positions:
             algo_ok, algo_orders, algo_error = algo_results.get(position["instId"], (False, [], "timeout"))
             if not algo_ok:
-                source_errors.append(f"algo {position['instId']}: {algo_error}")
+                source_errors.append(f"protection {position['instId']}: {algo_error}")
                 algo_orders = []
             matching_algos = [
                 o for o in (algo_orders or [])
                 if str(o.get("state", "live")).lower() in {"live", "effective"}
                 and str(o.get("posSide", "net")).lower() in {position["posSide"], "net"}
-                and str(o.get("reduceOnly", "true")).lower() in {"true", "1", "yes"}
             ]
-            protected_size = sum(float(o.get("sz", 0) or 0) for o in matching_algos if o.get("slTriggerPx"))
-            full_coverage = protected_size >= float(position["pos_sz"]) * 0.999
+            protected_size = sum(float(o.get("sz", 0) or 0) for o in matching_algos if o.get("slTriggerPx") or o.get("closeAll"))
+            full_coverage = any(o.get("closeAll") for o in matching_algos) or protected_size >= float(position["pos_sz"]) * 0.999
             live_algo = next((o for o in matching_algos if o.get("slTriggerPx") and o.get("tpTriggerPx")), None)
+            ord_type = str((live_algo or (matching_algos[0] if matching_algos else {})).get("ordType") or "")
+            if ord_type == "oco":
+                mechanism = "oco"
+            elif ord_type == "paired_conditional":
+                mechanism = "paired_conditional"
+            else:
+                mechanism = ord_type or "none"
+            position["protectionMechanism"] = mechanism
+            position["ordType"] = ord_type
             if live_algo and full_coverage:
                 position["exchangeSl"] = float(live_algo.get("slTriggerPx", 0) or 0)
                 position["exchangeTp"] = float(live_algo.get("tpTriggerPx", 0) or 0)
@@ -748,21 +829,11 @@ def update_cache_cycle():
 
     enrich_position_risk_fields(positions, trackers)
 
-    # 3. Read Reset Initial State
-    account_init_file = os.path.join(DATA_DIR, "account_initial_state.json")
-    reset_time_str = "1970-01-01 00:00:00"
-    initial_capital_val = float(os.getenv("INITIAL_CAPITAL", "10000.0"))
-    if os.path.exists(account_init_file):
-        try:
-            with open(account_init_file, "r", encoding="utf-8") as f:
-                acc_init = json.load(f)
-                reset_time_str = acc_init.get("reset_time", "1970-01-01 00:00:00")
-                initial_capital_val = float(acc_init.get("initial_capital", 10000.0) or 10000.0)
-        except Exception:
-            pass
+    baseline = load_account_baseline()
+    reset_time_str = baseline.get("reset_time", "1970-01-01 00:00:00")
+    initial_capital_val = float(baseline.get("initial_capital") or os.getenv("INITIAL_CAPITAL", "10000.0") or 10000.0)
 
-    # 4. Load Bills and Real Order-Level Ledger
-    bills_ok, bills_data, bills_error = run_json_cmd_status(okx_private_command("okx account bills --limit 100 --json"))
+    bills_ok, bills_data, bills_error = _exchange_try("bills", 100) if env.configured else (False, [], "not configured")
     if not bills_ok:
         source_errors.append(f"bills: {bills_error}")
         bills_data = []
@@ -782,35 +853,32 @@ def update_cache_cycle():
             if dt_bj < reset_time_str:
                 continue
 
-            sub_type = str(b.get("subType", ""))
-            b_type = str(b.get("type", ""))
-            inst = b.get("instId", "").replace("-USDT-SWAP", "")
+            inst = str(b.get("instId", "")).replace("-USDT-SWAP", "")
             pnl = float(b.get("pnl", 0) or 0)
             fee = float(b.get("fee", 0) or 0)
             bal_chg = float(b.get("balChg", 0) or 0)
             sz = float(b.get("sz", 0) or 0)
+            kind = classify_bill(b)
 
-            # Accumulate all trading fees (Cum & Today)
             cum_total_fees += fee
             if today_bj_str in dt_bj:
                 today_fees += fee
 
-            if b_type == "8" or sub_type in ["173", "174"]:
+            if kind == "funding":
                 funding_pnl = (bal_chg if bal_chg != 0 else pnl)
                 if today_bj_str in dt_bj:
                     today_funding += funding_pnl
-                funding_desc = "收取资金费 (+)" if sub_type == "174" or funding_pnl > 0 else "支付资金费 (-)"
+                funding_desc = "收取资金费 (+)" if funding_pnl > 0 else "支付资金费 (-)"
                 funding_history_list.append({
                     "time": dt_bj,
                     "inst": inst,
                     "type_desc": funding_desc,
                     "pnl": round(funding_pnl, 6),
-                    "pos_sz": f"{sz} 张"
+                    "pos_sz": f"{sz} base"
                 })
                 continue
 
-            if sub_type in ["5", "6"]: # Closed order
-                # Group by exact Minute + Inst + Close Action
+            if kind == "realized":
                 time_min = dt_bj[:16]
                 agg_key = f"{time_min}_{inst}"
                 if agg_key not in orders_by_key:
@@ -906,9 +974,9 @@ def update_cache_cycle():
     # 6. Read Trading State & AI Brain LLM Decisions
     state_data = {}
     ai_decisions = {}
-    if os.path.exists(AI_DECISIONS_FILE):
+    if os.path.exists(decisions_file()):
         try:
-            with open(AI_DECISIONS_FILE, "r", encoding="utf-8") as f:
+            with open(decisions_file(), "r", encoding="utf-8") as f:
                 ai_decisions = json.load(f)
         except Exception:
             pass
@@ -917,9 +985,9 @@ def update_cache_cycle():
     pos_map = {p.get("instId"): p for p in positions} if isinstance(positions, list) else {}
     active_pool = load_instruments()
     inst_state_map = {}
-    if os.path.exists(STATE_JSON_FILE):
+    if os.path.exists(state_file()):
         try:
-            with open(STATE_JSON_FILE, "r", encoding="utf-8") as f:
+            with open(state_file(), "r", encoding="utf-8") as f:
                 state_data = json.load(f)
                 for ins in state_data.get("instruments", []):
                     if isinstance(ins, dict) and ins.get("instId"):
@@ -1020,36 +1088,35 @@ def update_cache_cycle():
             "timestamp": ai_info.get("timestamp"),
         })
 
-    # 7. Read Ledger Lifecycle Trades for Table (Directly sync fresh ledger if stale > 60s)
     ledger_trades = []
+    ledger_path = ledger_file()
     need_ledger_sync = True
-    if os.path.exists(LEDGER_JSON_FILE):
+    if os.path.exists(ledger_path):
         try:
-            mtime = os.path.getmtime(LEDGER_JSON_FILE)
+            mtime = os.path.getmtime(ledger_path)
             if time.time() - mtime < 60:
                 need_ledger_sync = False
         except Exception:
             pass
 
-    if need_ledger_sync:
+    if need_ledger_sync and env.configured:
         try:
-            sync_script = os.path.join(WORKSPACE_DIR, "scripts", "sync_full_ledger.py")
-            if os.path.exists(sync_script):
-                subprocess.run(f"python3 {sync_script}", shell=True, capture_output=True, text=True, timeout=10)
+            from scripts.sync_full_ledger import build_lifecycle_ledger
+            build_lifecycle_ledger()
         except Exception:
             pass
 
-    if os.path.exists(LEDGER_JSON_FILE):
+    if os.path.exists(ledger_path):
         try:
-            with open(LEDGER_JSON_FILE, "r", encoding="utf-8") as f:
+            with open(ledger_path, "r", encoding="utf-8") as f:
                 ledger_trades = json.load(f)
         except Exception:
             pass
-    
-    # Filter lifecycle trades past reset_time
+    if not isinstance(ledger_trades, list):
+        ledger_trades = []
+
     valid_ledger_trades = []
     for t in ledger_trades:
-        # Check either close_time or open_time >= reset_time
         c_time = str(t.get("close_time", ""))
         o_time = str(t.get("open_time", ""))
         t_time = str(t.get("time", ""))
@@ -1058,11 +1125,10 @@ def update_cache_cycle():
 
     trades_table = valid_ledger_trades[:60]
 
-    # 8. Read Review & Adaptive Config
     review_data = {}
-    if os.path.exists(REPORT_JSON_FILE):
+    if os.path.exists(report_file()):
         try:
-            with open(REPORT_JSON_FILE, "r", encoding="utf-8") as f:
+            with open(report_file(), "r", encoding="utf-8") as f:
                 review_data = json.load(f)
         except Exception:
             pass
@@ -1071,9 +1137,9 @@ def update_cache_cycle():
 
     # 9. Read Snapshots
     snapshots_list = []
-    if os.path.exists(SNAPSHOTS_JSON_FILE):
+    if os.path.exists(snapshots_file()):
         try:
-            with open(SNAPSHOTS_JSON_FILE, "r", encoding="utf-8") as f:
+            with open(snapshots_file(), "r", encoding="utf-8") as f:
                 snaps = json.load(f)
                 if isinstance(snaps, list):
                     # Filter strictly >= reset_time
@@ -1111,17 +1177,17 @@ def update_cache_cycle():
             pass
 
     ai_last_prompt_text = ""
-    if os.path.exists(AI_LAST_PROMPT_FILE):
+    if os.path.exists(prompt_file()):
         try:
-            with open(AI_LAST_PROMPT_FILE, "r", encoding="utf-8") as f:
+            with open(prompt_file(), "r", encoding="utf-8") as f:
                 ai_last_prompt_text = f.read()
         except Exception:
             pass
 
     ai_history_list = []
-    if os.path.exists(AI_HISTORY_FILE):
+    if os.path.exists(history_file()):
         try:
-            with open(AI_HISTORY_FILE, "r", encoding="utf-8") as f:
+            with open(history_file(), "r", encoding="utf-8") as f:
                 raw_history = json.load(f)
                 # Keep up to 25 records and trim heavy repeated prompts in older history
                 for idx, item in enumerate(raw_history[:25]):
@@ -1147,9 +1213,9 @@ def update_cache_cycle():
     ai_memory_md_content = load_trading_memory_md()
 
     ai_last_prompt_text = ""
-    if os.path.exists(AI_LAST_PROMPT_FILE):
+    if os.path.exists(prompt_file()):
         try:
-            with open(AI_LAST_PROMPT_FILE, "r", encoding="utf-8") as f:
+            with open(prompt_file(), "r", encoding="utf-8") as f:
                 ai_last_prompt_text = f.read()
         except Exception:
             pass
@@ -1168,8 +1234,8 @@ def update_cache_cycle():
             "last_success_at": timestamp_full,
             "cache_age_seconds": 0,
             "timezone": "Asia/Shanghai",
-            "bills_complete": False,
-            "bills_coverage_note": "OKX latest 100 bills; NAV remains the cumulative equity source of truth"
+            "bills_complete": bills_ok,
+            "bills_coverage_note": "latest 100 bills; realized/commission/funding kept separate; NAV is cumulative equity source of truth"
         },
         "system": {
             "disk": {
@@ -1255,20 +1321,36 @@ def update_cache_cycle():
             "reasoning_effort": os.getenv("LLM_REASONING_EFFORT", "high"),
             "api_format": "openai_chat",
         }
+    _stamp_runtime(CACHE_DATA, env)
     persist_dashboard_cache(CACHE_DATA)
     LAST_CACHE_TIME = time.time()
 
-async def refresh_cache_if_needed(ttl_seconds: float = 3.0):
-    global LAST_CACHE_TIME, CACHE_DATA
-    if time.time() - LAST_CACHE_TIME <= ttl_seconds and CACHE_DATA:
-        return CACHE_DATA
-    lock = get_cache_lock()
-    async with lock:
-        if time.time() - LAST_CACHE_TIME <= ttl_seconds and CACHE_DATA:
-            return CACHE_DATA
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(SYNC_EXECUTOR, update_cache_cycle)
-        return CACHE_DATA
+def serve_cached_dashboard():
+    env = bind_account_scope()
+    payload = CACHE_DATA or {}
+    if payload:
+        return _stamp_runtime(dict(payload), env)
+    return _stamp_runtime({
+        "timestamp": datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S (北京时间)"),
+        "data_health": {"status": "IDLE", "partial": True, "errors": ["account refresh required"]},
+        "account": {},
+        "today_stats": {},
+        "performance": {},
+        "positions_summary": {"total": 0, "items": []},
+        "factors": [],
+        "trades": [],
+        "logs": [],
+        "snapshots": [],
+    }, env)
+
+
+def refresh_account_snapshot():
+    """Session-protected admin route should call this; never expose it as a public POST."""
+    bind_account_scope()
+    update_cache_cycle()
+    return CACHE_DATA
+
+
 
 
 VUE_DIST_DIR = os.path.join(WORKSPACE_DIR, "frontend", "dist")
@@ -1420,13 +1502,7 @@ async def public_tab_spa_routes(request: Request):
 
 @app.get("/api/all")
 async def get_all_data():
-    global CACHE_DATA, LAST_CACHE_TIME
-    # Return pre-warmed in-memory snapshot immediately (<1ms)
-    if not CACHE_DATA or time.time() - LAST_CACHE_TIME > 5.0:
-        data = await refresh_cache_if_needed(1.5)
-    else:
-        data = CACHE_DATA
-    # Realtime data: strictly never cache in browser (max-age=0), micro-cache at edge for 2s with fast revalidation
+    data = serve_cached_dashboard()
     return JSONResponse(
         data,
         headers={"Cache-Control": "public, max-age=0, s-maxage=2, stale-while-revalidate=5"},
@@ -1435,15 +1511,13 @@ async def get_all_data():
 
 @app.get("/api/overview")
 async def get_overview():
-    global CACHE_DATA, LAST_CACHE_TIME
-    if not CACHE_DATA or time.time() - LAST_CACHE_TIME > 12.0:
-        data = await refresh_cache_if_needed(2.5)
-    else:
-        data = CACHE_DATA
+    data = serve_cached_dashboard()
     return JSONResponse(
         data,
         headers={"Cache-Control": "public, max-age=1, s-maxage=3, stale-while-revalidate=5"},
     )
+
+
 
 if __name__ == "__main__":
     import uvicorn

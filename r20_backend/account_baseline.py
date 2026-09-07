@@ -8,13 +8,24 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from r20_exchange.runtime import state_path
 from .config import ROOT
 
-BASELINE_FILE = ROOT / "data" / "account_initial_state.json"
+_UNPATCHED_BASELINE = ROOT / "data" / "account_initial_state.json"
+BASELINE_FILE = _UNPATCHED_BASELINE
 BJ_TZ = timezone(timedelta(hours=8))
 DEFAULT_CAPITAL = 10_000.0
 MIN_CAPITAL = 1.0
 MAX_CAPITAL = 1_000_000_000.0
+
+
+def resolve_baseline_file() -> Path:
+    """Tests may patch BASELINE_FILE; production never reads the unscoped legacy file."""
+    if Path(BASELINE_FILE) != _UNPATCHED_BASELINE:
+        return Path(BASELINE_FILE)
+    return state_path("account_initial_state.json")
+
+
 
 
 def _number(value: Any, default: float) -> float:
@@ -26,10 +37,11 @@ def _number(value: Any, default: float) -> float:
 
 
 def load_account_baseline() -> dict[str, Any]:
+    path = resolve_baseline_file()
     data: dict[str, Any] = {}
-    if BASELINE_FILE.exists():
+    if path.exists():
         try:
-            loaded = json.loads(BASELINE_FILE.read_text(encoding="utf-8"))
+            loaded = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(loaded, dict):
                 data = loaded
         except (OSError, json.JSONDecodeError):
@@ -53,8 +65,9 @@ def update_initial_capital(initial_capital: float) -> dict[str, Any]:
         "initial_capital": capital,
         "capital_updated_at": datetime.now(BJ_TZ).strftime("%Y-%m-%d %H:%M:%S"),
     }
-    BASELINE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_path = tempfile.mkstemp(prefix=".account-baseline-", suffix=".json", dir=BASELINE_FILE.parent)
+    path = resolve_baseline_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(prefix=".account-baseline-", suffix=".json", dir=path.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(updated, handle, ensure_ascii=False, indent=2)
@@ -62,8 +75,8 @@ def update_initial_capital(initial_capital: float) -> dict[str, Any]:
             handle.flush()
             os.fsync(handle.fileno())
         os.chmod(temp_path, 0o600)
-        os.replace(temp_path, BASELINE_FILE)
-        os.chmod(BASELINE_FILE, 0o600)
+        os.replace(temp_path, path)
+        os.chmod(path, 0o600)
     finally:
         if os.path.exists(temp_path):
             os.unlink(temp_path)

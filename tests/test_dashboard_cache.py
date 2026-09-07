@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+
 
 import dashboard.app as dashboard
 
@@ -24,7 +26,8 @@ class DashboardPersistentCacheTests(unittest.TestCase):
         payload = {"timestamp": "2026-09-02 20:00:00", "account": {"total_eq": 4100.0}, "factors": [{"name": "BTC"}]}
         dashboard.persist_dashboard_cache(payload)
         self.assertEqual(dashboard.load_persisted_dashboard_cache(), payload)
-        self.assertEqual(self.cache.stat().st_mode & 0o777, 0o600)
+        if os.name == "posix":
+            self.assertEqual(self.cache.stat().st_mode & 0o777, 0o600)
 
     def test_empty_account_is_never_saved_or_used_as_last_good(self):
         dashboard.persist_dashboard_cache({"account": {}})
@@ -33,7 +36,7 @@ class DashboardPersistentCacheTests(unittest.TestCase):
         self.assertEqual(dashboard.load_persisted_dashboard_cache(), {})
 
     def test_enriches_stale_positions_with_margin_and_tracker_stop(self):
-        positions=[{"instId":"ETH-USDT-SWAP","side":"short","pos":3,"avgPx":2370,"markPx":2372,"lever":"5","protectionStatus":"unknown_stale"}]
+        positions=[{"instId":"ETH-USDT-SWAP","side":"short","pos":0.3,"avgPx":2370,"markPx":2372,"lever":"5","protectionStatus":"unknown_stale"}]
         trackers={"ETH-USDT-SWAP_short":{"trailingStopPx":2410.31,"takeProfitPx":2290.59,"stage_desc":"持有监控中","strategy_tag":"阻力抛压","cloudProtection":{"verifiedAt":"2026-09-02 18:15:00","detail":"cloud OCO coverage verified (3/3)"}}}
         enriched=dashboard.enrich_position_risk_fields(positions,trackers)[0]
         self.assertEqual(enriched["notional_usdt"],711.6)
@@ -42,6 +45,8 @@ class DashboardPersistentCacheTests(unittest.TestCase):
         self.assertEqual(enriched["displayStop"],2410.31)
         self.assertEqual(enriched["stopSource"],"local_tracker")
         self.assertEqual(enriched["protectionStatus"],"verification_stale")
+        self.assertEqual(enriched["quantity_unit"],"base")
+        self.assertEqual(enriched["ctVal"],"1")
 
     def test_exchange_margin_and_cloud_stop_take_priority(self):
         positions=[{"instId":"SOL-USDT-SWAP","posSide":"short","pos":6,"avgPx":98.4,"markPx":98.5,"lever":"3","imr":"201.25","exchangeSl":"100.06","protectionStatus":"fully_protected"}]
@@ -82,6 +87,26 @@ class DashboardPersistentCacheTests(unittest.TestCase):
         self.assertEqual(f0["smart_money"]["weighted_long_pct"], 65.4)
         self.assertEqual(f0["adx_1h"], 31.7)
         shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_identity_switch_discards_in_memory_account(self):
+        dashboard.CACHE_DATA = {"account": {"total_eq": 4100.0}, "exchange": "okx", "runtime": {"identity": "okx:demo:old"}}
+        dashboard._BOUND_IDENTITY = "okx:demo:old"
+        class Env:
+            exchange = "binance"
+            mode = "demo"
+            identity = "binance:demo:new"
+            configured = False
+            fingerprint = "new"
+        try:
+            with patch.object(dashboard, "selected_environment", return_value=Env), \
+                 patch.object(dashboard, "load_persisted_dashboard_cache", return_value={}):
+                dashboard.bind_account_scope()
+            self.assertEqual(dashboard.CACHE_DATA, {})
+            self.assertEqual(dashboard._BOUND_IDENTITY, "binance:demo:new")
+        finally:
+            dashboard.CACHE_DATA = {}
+            dashboard._BOUND_IDENTITY = None
+
 
 
 if __name__ == "__main__":

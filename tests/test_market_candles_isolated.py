@@ -27,7 +27,8 @@ class ChartCandleAuthenticityTests(unittest.TestCase):
             namespace: dict[str, Any] = {
                 "app": app, "Any": Any, "Response": Response, "HTTPException": HTTPException,
                 "ROOT": root, "time": time, "json": json, "_CANDLES_CACHE": {},
-                "urllib": types.SimpleNamespace(request=types.SimpleNamespace(Request=urllib.request.Request, urlopen=Mock(side_effect=OSError("offline market failure")))),
+                "selected_environment": Mock(return_value=types.SimpleNamespace(exchange="okx", mode="demo")),
+                "get_exchange": Mock(side_effect=OSError("offline market failure")),
             }
             exec(compile(ast.Module(body=[route], type_ignores=[]), str(source), "exec"), namespace)
             with TestClient(app) as client:

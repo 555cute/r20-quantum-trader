@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-
 import r20_backend.account_baseline as baseline
 
 
@@ -34,7 +34,8 @@ class AccountBaselineTests(unittest.TestCase):
         self.assertEqual(saved["reset_time"], original["reset_time"])
         self.assertEqual(saved["total_trades"], 12)
         self.assertEqual(result["previous_initial_capital"], 4061.04)
-        self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
+        if os.name == "posix":
+            self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
 
     def test_invalid_capital_is_rejected_without_writing(self):
         with self.assertRaises(ValueError):
@@ -46,6 +47,16 @@ class AccountBaselineTests(unittest.TestCase):
             value = baseline.load_account_baseline()
         self.assertEqual(value["initial_capital"], 8765.43)
         self.assertEqual(value["reset_time"], "1970-01-01 00:00:00")
+
+    def test_unpatched_resolve_does_not_read_legacy_file(self):
+        scoped = Path(self.temp.name) / "exchanges" / "okx" / "demo" / "abc" / "account_initial_state.json"
+        with patch.object(baseline, "BASELINE_FILE", baseline._UNPATCHED_BASELINE), \
+             patch.object(baseline, "state_path", return_value=scoped):
+            loaded = baseline.load_account_baseline()
+        self.assertEqual(loaded["reset_time"], "1970-01-01 00:00:00")
+        self.assertFalse(scoped.exists())
+
+
 
 
 if __name__ == "__main__":

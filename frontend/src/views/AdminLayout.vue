@@ -65,7 +65,7 @@ const navGroups = computed(() => [
   {
     label: t('admin.tradingGateway'),
     items: [
-      { id: 'security', label: t('admin.accountInstruments', 'OKX 账户与标的池'), icon: Wallet },
+      { id: 'security', label: t('admin.accountInstruments', '账户与标的池'), icon: Wallet },
       { id: 'gateway', label: t('admin.gatewayJobs', '任务网关'), icon: RefreshCw },
       { id: 'notify', label: t('admin.notifications', '消息通知'), icon: Radio },
       { id: 'backup', label: t('admin.backups', '备份与还原'), icon: FileCode },

@@ -267,29 +267,51 @@ class AiFactorTraderPositionProtectionTest(unittest.TestCase):
         self.assertFalse(closed); self.assertEqual(reason,"持仓监控中"); close.assert_not_called()
 
     def test_cloud_oco_gap_is_repaired_and_verified(self):
-        responses=[
-            {"ok":True,"data":[],"stderr":"","stdout":"[]"},
-            {"ok":True,"data":{"algoId":"88"},"stderr":"","stdout":"{}"},
-            {"ok":True,"data":[{"state":"live","posSide":"long","side":"sell","reduceOnly":"true","sz":"4","tpTriggerPx":"106","slTriggerPx":"101"}],"stderr":"","stdout":"[]"},
-        ]
-        with patch.object(ai_factor_trader,"run_cmd_result",side_effect=responses) as run, patch.object(ai_factor_trader.time,"sleep"):
-            ok,detail=ai_factor_trader.ensure_cloud_position_protection("SOL-USDT-SWAP","long",4,106,101)
-        self.assertTrue(ok); self.assertIn("repaired and verified",detail)
-        self.assertIn("--ordType oco",run.call_args_list[1].args[0])
-        self.assertIn("--reduceOnly",run.call_args_list[1].args[0])
+        class _Ex:
+            def __init__(self):
+                self.calls = []
+                self.seq = [
+                    [],
+                    [{"state": "live", "posSide": "long", "ordType": "oco", "sz": "4", "tpTriggerPx": "106", "slTriggerPx": "101"}],
+                ]
+            def protection_orders(self, inst_id):
+                self.calls.append(("protection_orders", inst_id))
+                return self.seq.pop(0)
+            def place_protection(self, inst_id, pos_side, size, tp_px, sl_px):
+                self.calls.append(("place_protection", inst_id, pos_side, size, tp_px, sl_px))
+                return {"algoId": "88"}
+        ex = _Ex()
+        with patch.object(ai_factor_trader, "get_exchange", return_value=ex), patch.object(ai_factor_trader.time, "sleep"):
+            ok, detail = ai_factor_trader.ensure_cloud_position_protection("SOL-USDT-SWAP", "long", 4, 106, 101)
+        self.assertTrue(ok)
+        self.assertIn("repaired and verified", detail)
+        self.assertEqual(ex.calls[1][0], "place_protection")
+        self.assertEqual(ex.calls[1][1], "SOL-USDT-SWAP")
 
     def test_stale_order_query_failure_aborts_cleanup(self):
-        with patch.object(ai_factor_trader,"run_cmd_result",return_value={"ok":False,"data":None,"stderr":"timeout","stdout":""}):
-            ok,detail=ai_factor_trader.clean_stale_open_orders()
-        self.assertFalse(ok); self.assertIn("timeout",detail)
+        class _Ex:
+            def open_orders(self, inst_id=None):
+                raise RuntimeError("timeout")
+        with patch.object(ai_factor_trader, "get_exchange", return_value=_Ex()):
+            ok, detail = ai_factor_trader.clean_stale_open_orders()
+        self.assertFalse(ok)
+        self.assertIn("timeout", detail)
 
     def test_stale_order_cancel_uses_valid_cli_and_fail_closed(self):
-        order={"instId":"SOL-USDT-SWAP","ordId":"11","state":"live","cTime":"1"}
-        responses=[{"ok":True,"data":[order],"stderr":"","stdout":"[]"},{"ok":False,"data":None,"stderr":"rejected","stdout":""}]
-        with patch.object(ai_factor_trader,"run_cmd_result",side_effect=responses) as run, patch.object(ai_factor_trader.time,"time",return_value=1000):
-            ok,detail=ai_factor_trader.clean_stale_open_orders()
-        self.assertFalse(ok); self.assertIn("rejected",detail)
-        self.assertIn("swap cancel SOL-USDT-SWAP --ordId 11",run.call_args_list[1].args[0])
+        class _Ex:
+            def __init__(self):
+                self.calls = []
+            def open_orders(self, inst_id=None):
+                return [{"instId": "SOL-USDT-SWAP", "ordId": "11", "state": "live", "cTime": "1"}]
+            def cancel_order(self, inst_id, order_id):
+                self.calls.append((inst_id, order_id))
+                raise RuntimeError("rejected")
+        ex = _Ex()
+        with patch.object(ai_factor_trader, "get_exchange", return_value=ex), patch.object(ai_factor_trader.time, "time", return_value=1000):
+            ok, detail = ai_factor_trader.clean_stale_open_orders()
+        self.assertFalse(ok)
+        self.assertIn("rejected", detail)
+        self.assertEqual(ex.calls, [("SOL-USDT-SWAP", "11")])
 
     def test_cloud_oco_failure_closes_position_fail_closed(self):
         position={"pos":4.0,"side":"long","avgPx":103.55,"upl":-4.0}

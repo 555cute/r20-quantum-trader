@@ -126,7 +126,7 @@ router.afterEach((to) => {
     isNoIndex = true
     const adminLabels: Record<string, string> = {
       'admin-overview': '运行总览',
-      'admin-security': 'OKX 账户与标的池',
+      'admin-security': '账户与标的池',
       'admin-council': '模型委员会',
       'admin-policy': '策略版本快照',
       'admin-llm': '模型连接与供应商',

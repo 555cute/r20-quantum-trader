@@ -30,6 +30,11 @@ export interface PositionItem {
   displayStop?: number
   takeProfitPx?: number
   cloud_oco_verified?: boolean
+  protectionStatus?: string
+  protectionCoveragePct?: number
+  protection_mechanism?: string
+  ordType?: string
+  quantity_unit?: string
 }
 
 export interface PendingOrderItem {
@@ -104,6 +109,9 @@ export interface LLMRuntime {
 export interface DashboardResponse {
   timestamp: string
   is_stale: boolean
+  exchange?: string
+  environment?: string
+  quantity_unit?: string
   account: AccountSummary
   positions_summary: {
     total_count: number

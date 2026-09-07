@@ -44,6 +44,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 COPY r20_backend/ ./r20_backend/
 COPY r20_gateway/ ./r20_gateway/
+COPY r20_exchange/ ./r20_exchange/
 COPY scripts/ ./scripts/
 COPY plugins/ ./plugins/
 COPY dashboard/ ./dashboard/

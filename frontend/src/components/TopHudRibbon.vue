@@ -107,7 +107,7 @@ const ocoProtectedRatio = computed(() => {
           class="text-[9px] sm:text-[10px] lg:text-[11px] font-mono px-1.5 py-0.2 rounded border font-bold shrink-0"
           style="background-color: var(--bg-badge); color: var(--text-muted); border-color: var(--border-subtle);"
         >
-          {{ t('hud.prodTag') }}
+          {{ store.exchangeLabel }}
         </span>
       </div>
 
@@ -302,7 +302,7 @@ const ocoProtectedRatio = computed(() => {
         </div>
         <div class="flex items-center justify-between text-[10px] sm:text-[11px] font-mono" style="color: var(--text-faint);">
           <span>{{ t('hud.long') }}: <strong class="text-emerald-400">{{ longCount }}</strong> {{ t('hud.short') }}: <strong class="text-rose-400">{{ shortCount }}</strong> ({{ t('hud.totalPos') }}{{ totalPosCount }}{{ t('hud.tradesCount') }})</span>
-          <span class="text-emerald-400 font-bold">{{ t('hud.ocoLabel') }}: {{ ocoProtectedRatio }}</span>
+          <span class="text-emerald-400 font-bold">{{ store.usesPairedConditional ? t('hud.pairedConditional') : t('hud.ocoLabel') }}: {{ ocoProtectedRatio }}</span>
         </div>
       </div>
     </div>

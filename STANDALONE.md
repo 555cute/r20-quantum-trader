@@ -44,6 +44,29 @@ OKX supports separate LIVE/DEMO API keys or local CLI OAuth. Never grant withdra
 
 CLI OAuth is tied to the service user's HOME. Complete authorization as that user. Never copy another installation's `~/.okx/`. `python scripts/r20_okx_setup.py` performs an external read-only preflight; run it deliberately before enabling trading, not as an automatic installation step.
 
+## Exchange selection: OKX or Binance USD-M
+
+The account page at `/admin/security` selects the trading venue and environment. Binance support is limited to USD-M USDT perpetual futures; spot, coin-margined futures and withdrawals are not exposed.
+
+```sh
+R20_EXCHANGE=binance
+R20_BINANCE_ENV=demo
+BINANCE_DEMO_API_KEY=
+BINANCE_DEMO_SECRET_KEY=
+BINANCE_LIVE_API_KEY=
+BINANCE_LIVE_SECRET_KEY=
+```
+
+Configure the relevant keys in the admin page or deployment environment. Demo and live keys are strictly separate; missing demo keys never fall back to live keys. Binance uses `https://demo-fapi.binance.com` for demo and `https://fapi.binance.com` for live. No custom signed-request host is accepted. The Binance trading transport uses REST, not the OKX CLI; optional OKX news enrichment remains a separate dependency.
+
+Saving exchange credentials or switching environments requires a superadmin session and a target-bound phrase such as `SWITCH BINANCE DEMO`. The trading-cycle lock stays held across configuration writes. A manual trader run requires `RUN BINANCE DEMO TRADER` for that selected environment. Local configuration status does not imply verified exchange connectivity.
+
+Both adapters expose base-asset quantities. Decimal quantities are rounded down to the venue's quantity step; only the OKX adapter converts base quantities to contract counts. The execution layer confirms leverage and retains the risk/reward and position checks.
+
+Binance has no equivalent atomic OKX OCO attachment here. Protection consists of two exchange-hosted conditional orders with linked client IDs. Hedge mode does not send `reduceOnly`; close-all TP/SL does not send quantity. Failure or uncertain responses are reconciled by client ID, and partial-entry cleanup must confirm terminal entry state and flat exposure before removing protection. These controls are not a guarantee against market or connectivity losses.
+
+Binance closed-position history is reconstructed from available user fills, not invented from a balance delta. The audit scan is bounded by the API's recent history window (up to 90 days), and previously saved older closed cycles are retained. Incomplete windows, changing inventory or unsupported non-USDT fee conversion are reported as incomplete rather than attributed to a fabricated trade. Historical leverage/margin/ROI that cannot be established stays unknown. The dashboard's bill endpoint is a bounded recent view, not an all-time statement.
+
 ## Choose exactly one Gateway owner
 
 ### Backend-owned: local process or Docker
@@ -82,7 +105,7 @@ The control plane is **not read-only**. `POST /api/v1/admin/gateway/jobs/{job_id
 
 ## Persistence and recovery
 
-Preserve `.env`, the encrypted secret stores and their encryption keys, JSON configuration/state, and SQLite databases. Gateway uses `data/r20_gateway.db`, authentication uses `data/r20_admin.db`, and the trade database is `data/r20_quant.db`. Use the backup subsystem to obtain consistent SQLite copies. See [RECOVERY_GUIDE.md](RECOVERY_GUIDE.md).
+Preserve `.env`, the encrypted secret stores and their encryption keys, JSON configuration/state, and SQLite databases. Gateway uses `data/r20_gateway.db` and authentication uses `data/r20_admin.db`. Account-sensitive state (ledger, trackers, baseline, snapshots and `r20_quant.db`) is isolated under `data/exchanges/<exchange>/<mode>/<credential-fingerprint>/`. Shared prompt, council and memory configuration remains under `data/`. Old root-level account files are left untouched and are not automatically assigned to a new account. Verify ownership and quantity units before any manual migration. SQLite hot backups retain these nested account directories. See [RECOVERY_GUIDE.md](RECOVERY_GUIDE.md).
 
 Docker requires a running Linux container engine (Docker Desktop/WSL2 on Windows). Its image contains the Python backend, built Vue assets and Node/OKX CLI runtime. Runtime secrets are excluded from the build context and injected at deployment. A bind mount over `/app/data` hides image seed files; use the checkout's initialized data directory or initialize it explicitly.
 

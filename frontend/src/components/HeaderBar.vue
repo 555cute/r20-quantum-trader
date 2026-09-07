@@ -78,7 +78,7 @@ const tabs = computed(() => [
         <span
           class="w-1.5 h-1.5 rounded-full shrink-0"
           :class="store.isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'"
-          title="OKX V5 PROD"
+          :title="store.exchangeLabel"
         ></span>
         <span
           v-if="store.isStale"

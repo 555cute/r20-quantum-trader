@@ -188,8 +188,8 @@ const allProtected = computed(() =>
         >
           <ShieldCheck v-if="allProtected" class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
           <ShieldAlert v-else class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
-          <span class="hidden md:inline">{{ allProtected ? t('desk.ocoProtected', '100% 交易所云端 OCO 止损') : '部分仓位未设止损' }}</span>
-          <span class="md:hidden">{{ allProtected ? '100% OCO' : '未全覆盖' }}</span>
+          <span class="hidden md:inline">{{ store.usesPairedConditional ? t('hud.pairedConditional') : allProtected ? t('desk.ocoProtected') : '部分仓位未设止损' }}</span>
+          <span class="md:hidden">{{ store.usesPairedConditional ? '配对条件单' : allProtected ? '100% 保护' : '未全覆盖' }}</span>
         </div>
 
         <!-- Toggle Chart Deck Button -->
@@ -285,7 +285,7 @@ const allProtected = computed(() =>
 
               <!-- 持仓量 -->
               <td class="py-3 px-4 2xl:px-6 2xl:py-3.5 font-bold num-tabular" style="color: var(--text-main);">
-                {{ pos.pos }} <span class="text-[10px] 2xl:text-xs font-normal" style="color: var(--text-faint);">张</span>
+                {{ pos.pos }} <span class="text-[10px] 2xl:text-xs font-normal" style="color: var(--text-faint);">{{ t('desk.contracts') }}</span>
               </td>
 
               <!-- 开仓均价 -->

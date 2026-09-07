@@ -45,3 +45,21 @@ class DashboardLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 worker = self.module._BG_WORKER_THREAD
                 self.assertTrue(worker.is_alive())
             self.assertFalse(worker.is_alive())
+
+    async def test_disabled_get_all_does_not_hit_exchange(self):
+        class Env:
+            exchange = "okx"
+            mode = "demo"
+            identity = "okx:demo:test"
+            configured = False
+            fingerprint = "test"
+        with patch.dict(os.environ, {"R20_DASHBOARD_WORKER_ENABLED": "0"}), \
+             patch.object(self.module, "update_cache_cycle") as refresh, \
+             patch.object(self.module, "selected_environment", return_value=Env), \
+             patch.object(self.module, "get_exchange", side_effect=AssertionError("network forbidden")):
+            async with self.module.app.router.lifespan_context(self.module.app):
+                payload = self.module.serve_cached_dashboard()
+            refresh.assert_not_called()
+            self.assertEqual(payload["exchange"], "okx")
+            self.assertEqual(payload["quantity_unit"], "base")
+            self.assertEqual(payload.get("account"), {})

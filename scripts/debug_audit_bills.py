@@ -1,38 +1,40 @@
-from okx_runtime import replace_cli_prefix as okx_private_command
-import subprocess
-import json
 import datetime
+import os
+import sys
 
-res = subprocess.run(okx_private_command("okx account bills --limit 100 --json"), shell=True, capture_output=True, text=True)
-bills = json.loads(res.stdout) if res.stdout else []
+WORKSPACE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if WORKSPACE_DIR not in sys.path:
+    sys.path.insert(0, WORKSPACE_DIR)
 
-print("=== 01:11:20 REBOOT AFTERMATH BILLS (Chronological) ===")
+from r20_backend.account_paths import classify_bill
+from r20_exchange.runtime import get_exchange
+
+bills = get_exchange().bills(limit=100) or []
+print("=== BILLS (chronological) ===")
 total_pnl = 0.0
 total_fee = 0.0
 total_funding = 0.0
 
-for b in reversed(bills):
-    ts = int(b.get("ts", 0))/1000.0
+for bill in reversed(bills):
+    ts = int(bill.get("ts", 0) or 0) / 1000.0
     dt = datetime.datetime.fromtimestamp(ts, tz=datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
-    if dt >= "2026-08-29 01:11:20":
-        b_type = str(b.get("type"))
-        sub_type = str(b.get("subType"))
-        inst = b.get("instId", "").replace("-USDT-SWAP", "")
-        pnl = float(b.get("pnl", 0) or 0)
-        fee = float(b.get("fee", 0) or 0)
-        bal_chg = float(b.get("balChg", 0) or 0)
-        bal = float(b.get("bal", 0) or 0)
-        
-        total_pnl += pnl
-        total_fee += fee
-        if b_type == "8" or sub_type in ["173", "174"]:
-            total_funding += (bal_chg if bal_chg != 0 else pnl)
-            print(f"[{dt}] 资金费 | {inst:<5} | 资金费扣除={bal_chg:+.4f} | 账户余额={bal:.2f}")
-        elif sub_type in ["3", "4"]:
-            print(f"[{dt}] 开仓扣费 | {inst:<5} | 手续费={fee:+.4f} | 账户余额={bal:.2f}")
-        elif sub_type in ["5", "6"]:
-            print(f"[{dt}] 平仓结算 | {inst:<5} | 毛盈亏={pnl:+.4f} | 手续费={fee:+.4f} | 净变动={bal_chg:+.4f} | 账户余额={bal:.2f}")
+    if dt < "2026-08-29 01:11:20":
+        continue
+    inst = str(bill.get("instId", "")).replace("-USDT-SWAP", "")
+    pnl = float(bill.get("pnl", 0) or 0)
+    fee = float(bill.get("fee", 0) or 0)
+    bal_chg = float(bill.get("balChg", 0) or 0)
+    kind = classify_bill(bill)
+    total_pnl += pnl
+    total_fee += fee
+    if kind == "funding":
+        funding = bal_chg if bal_chg != 0 else pnl
+        total_funding += funding
+        print(f"[{dt}] funding | {inst:<5} | {funding:+.4f}")
+    elif kind == "commission":
+        print(f"[{dt}] commission | {inst:<5} | fee={fee:+.4f}")
+    elif kind == "realized":
+        print(f"[{dt}] realized | {inst:<5} | pnl={pnl:+.4f} | fee={fee:+.4f} | net={pnl + fee:+.4f}")
 
 print("----------------------------------------------------")
-print(f"汇总: 平仓毛盈亏总和={total_pnl:+.2f} U, 累计手续费={total_fee:+.2f} U, 资金费={total_funding:+.2f} U")
-print(f"真实账户净变动 = {total_pnl + total_fee:+.2f} U")
+print(f"sum pnl={total_pnl:+.2f} fee={total_fee:+.2f} funding={total_funding:+.2f} net={total_pnl + total_fee + total_funding:+.2f}")

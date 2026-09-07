@@ -88,6 +88,32 @@ class BackupMethodTests(unittest.TestCase):
         self.assertEqual(check.execute("SELECT value FROM x").fetchone()[0], "ok")
         check.close()
 
+    def test_scoped_account_databases_keep_distinct_hot_backup_paths(self):
+        expected = {"exchanges/okx/demo/account-a": "okx", "exchanges/binance/demo/account-b": "binance"}
+        connections = []
+        try:
+            for scope, marker in expected.items():
+                source = self.root / "data" / scope / "r20_quant.db"
+                source.parent.mkdir(parents=True)
+                connection = sqlite3.connect(source)
+                connections.append(connection)
+                connection.execute("PRAGMA journal_mode=WAL")
+                connection.execute("CREATE TABLE marker(value TEXT)")
+                connection.execute("INSERT INTO marker VALUES (?)", (marker,))
+                connection.commit()
+            created = runtime.sqlite_hot_backups("scoped", 2)
+            recovered = {}
+            for path in created:
+                check = sqlite3.connect(path)
+                try:
+                    recovered[path.parent.relative_to(runtime.SQLITE_DIR).as_posix()] = check.execute("SELECT value FROM marker").fetchone()[0]
+                finally:
+                    check.close()
+            self.assertEqual(recovered, expected)
+        finally:
+            for connection in connections:
+                connection.close()
+
     def test_simple_backup_test_local_connectivity(self):
         headers = self.login()
         resp = self.client.post(

@@ -21,7 +21,7 @@ import datetime
 import json
 import math
 import sys
-import urllib.request
+
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -183,29 +183,15 @@ def _parse_okx_candle_row(row: Any, inst_id: str) -> Dict[str, Any]:
 
 
 def fetch_okx_candles(inst_id: str, bar: str = "1H", limit: int = 100) -> List[Dict[str, Any]]:
-    """Fetch historical K-line candles from the OKX public market endpoint. Never fabricates samples."""
-    url = f"https://www.okx.com/api/v5/market/candles?instId={inst_id}&bar={bar}&limit={limit}"
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+    """Fetch historical K-line candles from the selected exchange. Never fabricates samples."""
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
+        from r20_exchange.runtime import get_exchange
+        raw = get_exchange().candles(inst_id, bar=bar, limit=limit)
     except Exception as exc:
         raise MarketDataError(f"failed to fetch candles for {inst_id}: {exc}", symbol=inst_id, code="missing") from exc
-
-    if not isinstance(payload, dict) or payload.get("code") != "0" or not payload.get("data"):
-        detail = ""
-        if isinstance(payload, dict):
-            detail = str(payload.get("msg") or payload.get("code") or "")
-        raise MarketDataError(
-            f"missing candles for {inst_id}" + (f": {detail}" if detail else ""),
-            symbol=inst_id,
-            code="missing",
-        )
-    raw = payload.get("data")
     if not isinstance(raw, list) or not raw:
         raise MarketDataError(f"missing candles for {inst_id}", symbol=inst_id, code="missing")
-    candles = [_parse_okx_candle_row(row, inst_id) for row in reversed(raw)]
-    return candles
+    return [_parse_okx_candle_row(row, inst_id) for row in reversed(raw)]
 
 
 class BacktestEngine:
