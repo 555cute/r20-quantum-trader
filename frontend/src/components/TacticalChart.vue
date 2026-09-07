@@ -965,10 +965,11 @@ onMounted(() => {
   document.addEventListener('click', handleClickOutside)
   nextTick(() => {
     initChart()
-    // 3s 静默增量拉取，保证数据绝对准确对齐
+    // 静默增量拉取，页面隐藏时停止，页面可见时 4s 轮询，大幅释放 10M 带宽
     timer = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return
       loadCandles(true, false)
-    }, 3000)
+    }, 4000)
     countdownTimer = setInterval(updateCountdown, 1000)
   })
 })

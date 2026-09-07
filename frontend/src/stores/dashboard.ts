@@ -76,6 +76,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
       isRefreshing.value = true
     }
     try {
+      // 携带时间戳，允许客户端由 s-maxage=3 在 Cloudflare 边缘微缓存并快速合并回源
       const resp = await fetch(`/api/all?_t=${Date.now()}`, {
         headers: {
           'Accept-Encoding': 'gzip, deflate, br',
@@ -103,12 +104,37 @@ export const useDashboardStore = defineStore('dashboard', () => {
     }
   }
 
-  function startPolling(intervalMs = 3000) {
+  let isVisibilityBound = false
+  let currentInterval = 4000
+
+  function handleVisibilityChange() {
+    if (typeof document === 'undefined') return
+    if (document.hidden) {
+      // 用户离开网页 / 手机切到后台 / 锁屏：立即暂停轮询，彻底释放 10M 带宽！
+      stopPolling()
+    } else {
+      // 用户切回网页：立即拉取最新数据，并恢复轮询
+      fetchDashboard(true)
+      startPolling(currentInterval)
+    }
+  }
+
+  function startPolling(intervalMs = 4000) {
+    currentInterval = intervalMs
     stopPolling()
     fetchDashboard(false)
     pollingTimer.value = setInterval(() => {
+      // 若页面处于后台，绝不发无谓的网络请求
+      if (typeof document !== 'undefined' && document.hidden) {
+        return
+      }
       fetchDashboard(true)
     }, intervalMs)
+
+    if (!isVisibilityBound && typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange)
+      isVisibilityBound = true
+    }
   }
 
   function stopPolling() {
