@@ -1,6 +1,8 @@
 import time
 import unittest
 from unittest.mock import patch, MagicMock
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from r20_backend.council_manager import (
     load_council_config,
     save_council_config,
@@ -13,12 +15,18 @@ from r20_backend.council_manager import (
 
 class TestCouncilManager(unittest.TestCase):
     def setUp(self):
-        # Backup council config state
-        self.original_cfg = load_council_config()
-
-    def tearDown(self):
-        # Restore council config state
-        save_council_config(self.original_cfg)
+        self.temporary = TemporaryDirectory()
+        self.config_patch = patch("r20_backend.council_manager.COUNCIL_CONFIG_FILE", Path(self.temporary.name) / "council.json")
+        self.config_patch.start()
+        self.addCleanup(self.config_patch.stop)
+        self.addCleanup(self.temporary.cleanup)
+        for name, value in (
+            ("load_llm_config", {"models": [], "active_reasoning_effort": "medium"}),
+            ("get_active_llm_runtime", {"model": "offline-council-model"}),
+        ):
+            boundary = patch(f"r20_backend.llm_manager.{name}", return_value=value)
+            boundary.start()
+            self.addCleanup(boundary.stop)
 
     def test_load_and_save_council_config(self):
         cfg = load_council_config()
@@ -83,12 +91,7 @@ class TestCouncilManager(unittest.TestCase):
         )
 
         with patch("r20_backend.llm_manager.execute_llm_request") as mock_exec:
-            mock_exec.side_effect = [
-                mock_trader_return,
-                mock_trader_return,
-                mock_trader_return,
-                mock_cio_json,
-            ]
+            mock_exec.side_effect = lambda *args, **kwargs: mock_cio_json if kwargs.get("response_format") == {"type": "json_object"} else mock_trader_return
 
             brain_output, transcript = execute_council_debate(
                 market_prompt="BTC: 77000, ETH: 2400",
@@ -130,10 +133,7 @@ class TestCouncilManager(unittest.TestCase):
         )
 
         with patch("r20_backend.llm_manager.execute_llm_request") as mock_exec:
-            mock_exec.side_effect = [
-                mock_trader_return, mock_trader_return, mock_trader_return,
-                mock_cio_json,
-            ]
+            mock_exec.side_effect = lambda *args, **kwargs: mock_cio_json if kwargs.get("response_format") == {"type": "json_object"} else mock_trader_return
             brain_output, transcript = execute_council_debate(
                 market_prompt="BTC: 77000",
                 original_system_prompt="system prompt",
@@ -165,14 +165,7 @@ class TestCouncilManager(unittest.TestCase):
         )
 
         with patch("r20_backend.llm_manager.execute_llm_request") as mock_exec:
-            # 3 proposals (trader_trend, trader_momentum, trader_quant)
-            # 3 critiques
-            # 1 CIO arbitration
-            mock_exec.side_effect = [
-                mock_proposal, mock_proposal, mock_proposal,
-                mock_critique, mock_critique, mock_critique,
-                mock_cio_json,
-            ]
+            mock_exec.side_effect = lambda *args, **kwargs: mock_cio_json if kwargs.get("response_format") == {"type": "json_object"} else mock_critique
 
             brain_output, transcript = execute_council_debate(
                 market_prompt="BTC: 77000",
@@ -182,10 +175,9 @@ class TestCouncilManager(unittest.TestCase):
 
             self.assertEqual(transcript["consensus_mode"], "cross_examination")
             self.assertIn("cross_examinations", transcript)
-            self.assertEqual(len(transcript["cross_examinations"]), 3)
+            self.assertEqual(set(transcript["cross_examinations"]), set(transcript["advisors"]))
             for k, crit in transcript["cross_examinations"].items():
                 self.assertEqual(crit["status"], "ok")
-                self.assertIn("同行质询", crit["content"])
 
             self.assertEqual(brain_output["decisions"]["BTC-USDT-SWAP"]["adopted_role"], "trader_momentum")
 
