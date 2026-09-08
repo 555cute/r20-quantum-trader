@@ -2,6 +2,7 @@
 from contextlib import nullcontext
 from copy import deepcopy
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -9,6 +10,8 @@ from typing import Any
 from unittest.mock import patch
 
 from deploy import update_docker as updater
+
+_REAL_FILE_LOCK = updater.file_lock
 
 
 class SimulatedDocker(updater.DockerDeployment):
@@ -133,6 +136,56 @@ class DockerDeploymentTests(unittest.TestCase):
         self.assertEqual(result["current"]["id"], self.deploy.old_id)
         self.assertEqual(self.deploy.current_container["Image"], self.deploy.old_id)
         self.assertIsNone(json.loads(self.deploy.state_path.read_text())["pending"])
+
+    def test_dry_run_reports_both_locks_without_mutation(self):
+        with patch.object(updater, "file_lock", side_effect=AssertionError("dry-run acquired a lock")):
+            result = self.deploy.apply(
+                rollback=False, image=self.deploy.new_id, no_pull=True, dry_run=True, lock_timeout=0,
+            )
+        data = self.root / "data"
+        self.assertEqual(result["trading_locks"], [
+            str(data / updater.FACTOR_LOCK_NAME), str(data / updater.BRAIN_LOCK_NAME),
+        ])
+        self.assertEqual(self.deploy.rollouts, 0)
+        self.assertEqual(self.env.read_text(), "OPERATOR_SETTING=retained\n")
+        self.assertFalse(self.deploy.state_path.exists())
+
+    @unittest.skipUnless(os.name == "posix", "real flock requires a Linux/POSIX host")
+    def test_busy_brain_lock_blocks_mutation_and_releases_factor(self):
+        data = self.root / "data"
+        env_before = self.env.read_bytes()
+        with patch.object(updater, "file_lock", _REAL_FILE_LOCK):
+            with _REAL_FILE_LOCK(data / updater.BRAIN_LOCK_NAME, 0):
+                with self.assertRaises(updater.DeploymentError):
+                    self.update()
+                with _REAL_FILE_LOCK(data / updater.FACTOR_LOCK_NAME, 0):
+                    self.assertFalse(self.deploy.state_path.exists())
+        self.assertEqual(self.env.read_bytes(), env_before)
+        self.assertEqual(self.deploy.current_container["Id"], "old-container")
+        self.assertEqual(self.deploy.rollouts, 0)
+
+    @unittest.skipUnless(os.name == "posix", "real flock requires a Linux/POSIX host")
+    def test_update_and_recovery_exclude_other_trading_cycles(self):
+        original_run = self.deploy.run
+        checked_images = []
+
+        def guarded_run(*args, **kwargs):
+            for lock_path in self.deploy.trading_lock_paths(self.deploy.container()):
+                with self.assertRaises(updater.DeploymentError):
+                    with _REAL_FILE_LOCK(lock_path, 0):
+                        pass
+            checked_images.append(kwargs["image"])
+            return original_run(*args, **kwargs)
+
+        self.deploy.run = guarded_run
+        self.deploy.outcome = "unhealthy"
+        with patch.object(updater, "file_lock", _REAL_FILE_LOCK):
+            with self.assertRaises(updater.DeploymentError):
+                self.update()
+        self.assertEqual(checked_images, [self.deploy.new_id, self.deploy.old_id])
+        self.assertEqual(self.deploy.current_container["Image"], self.deploy.old_id)
+        self.assertIsNone(json.loads(self.deploy.state_path.read_text())["pending"])
+
 
 
 if __name__ == "__main__":

@@ -22,6 +22,8 @@ from typing import Any
 
 STATE_NAME = ".r20-deploy-state.json"
 LOCK_NAME = ".r20-deploy.lock"
+FACTOR_LOCK_NAME = ".ai_factor_trader.lock"
+BRAIN_LOCK_NAME = ".ai_brain_cycle.lock"
 IMAGE_KEY = re.compile(r"^\s*(?:export\s+)?R20_IMAGE\s*=")
 IMAGE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@-]*$")
 
@@ -143,7 +145,7 @@ class DockerDeployment:
 
     def ensure_local_host(self) -> None:
         if sys.platform != "linux":
-            raise DeploymentError("Run this command on the Linux Docker host so the trading lock shares the container's filesystem")
+            raise DeploymentError("Run this command on the Linux Docker host so the trading locks share the container's filesystem")
         # DOCKER_CONTEXT overrides DOCKER_HOST in the Docker CLI.
         context = os.environ.get("DOCKER_CONTEXT")
         endpoint = None if context else os.environ.get("DOCKER_HOST")
@@ -152,7 +154,7 @@ class DockerDeployment:
             contexts = json.loads(self.run(command, label="Inspect Docker context"))
             endpoint = contexts[0].get("Endpoints", {}).get("docker", {}).get("Host", "")
         if not endpoint.startswith("unix://"):
-            raise DeploymentError("A local Unix Docker socket is required; remote Docker contexts cannot safely share the trading lock")
+            raise DeploymentError("A local Unix Docker socket is required; remote Docker contexts cannot safely share the trading locks")
 
     def config(self, image: str | None = None) -> dict[str, Any]:
         config = json.loads(self.run(self.compose + ["config", "--format", "json"], image=image, label="Render Compose configuration"))
@@ -219,14 +221,14 @@ class DockerDeployment:
             "channel": state.get("channel"),
         }
 
-    def trading_lock_path(self, container: dict[str, Any]) -> Path:
+    def trading_lock_paths(self, container: dict[str, Any]) -> tuple[Path, Path]:
         data = next((entry for entry in container.get("Mounts", []) if entry["Destination"] == "/app/data"), None)
         if data is None or data["Type"] != "bind" or not data.get("RW"):
-            raise DeploymentError("A writable /app/data bind mount is required to share R20's trading-cycle lock")
+            raise DeploymentError("A writable /app/data bind mount is required to share R20's trading-cycle locks")
         path = Path(data["Source"])
         if not path.is_dir():
             raise DeploymentError("The data bind source is not accessible on this Docker host")
-        return path / ".ai_factor_trader.lock"
+        return path / FACTOR_LOCK_NAME, path / BRAIN_LOCK_NAME
 
     def check_pin_file(self) -> None:
         path = self.root / ".env"
@@ -294,7 +296,7 @@ class DockerDeployment:
         state = self.load_state()
         before = self.container()
         old = self.live_record(before)
-        lock_path = self.trading_lock_path(before)
+        factor_lock, brain_lock = self.trading_lock_paths(before)
         rollback_target = None
         if rollback:
             rollback_target = state.get("current") if state.get("pending") else state.get("previous")
@@ -313,14 +315,15 @@ class DockerDeployment:
         self.check_runtime_configuration(self.config(requested), before)
         if dry_run:
             return {"dry_run": True, "operation": "rollback" if rollback else "update", "current": old,
-                    "requested": requested, "will_pull": not rollback and not no_pull, "trading_lock": str(lock_path),
+                    "requested": requested, "will_pull": not rollback and not no_pull,
+                    "trading_locks": [str(factor_lock), str(brain_lock)],
                     "preserves": ["Compose files", "data/logs/backups", "DNS", "ports", "network", "application credentials/settings"]}
 
         with file_lock(self.root / LOCK_NAME, 0):
             if self.container()["Id"] != before["Id"] or self.load_state() != state:
                 raise DeploymentError("Deployment changed during preflight; inspect status and retry")
             if not rollback and not no_pull:
-                print("Resolving the candidate image before acquiring the trading lock...", flush=True)
+                print("Resolving the candidate image before acquiring the trading locks...", flush=True)
                 self.run(["docker", "pull", requested], timeout=600, label="Pull candidate image")
             resolved = self.inspect_image(requested)
             target = self.image_record(resolved, requested)
@@ -328,41 +331,43 @@ class DockerDeployment:
                 raise DeploymentError("Rollback image identity no longer matches its record")
             self.check_runtime_configuration(self.config(target["image"]), before)
             print("Waiting for the R20 trading cycle to finish...", flush=True)
-            with file_lock(lock_path, lock_timeout):
-                if self.container()["Id"] != before["Id"]:
-                    raise DeploymentError("The service container changed while waiting for its trading lock")
-                transaction = {"version": 1, "service": self.service, "channel": channel,
-                               "current": state["current"] if state.get("pending") else old,
-                               "previous": state.get("previous"), "pending": target}
-                self.save_state(transaction)
-                try:
-                    already_healthy = target["id"] == old["id"] and before["State"].get("Health", {}).get("Status") == "healthy"
-                    after = before if already_healthy else self.switch(target, before)
-                    pin_image(self.root / ".env", target["image"])
-                    previous = old if target["id"] != old["id"] and not state.get("pending") else state.get("previous")
-                    completed = {**transaction, "current": target, "previous": previous,
-                                 "pending": None, "updated_at": datetime.now(timezone.utc).isoformat()}
-                    self.save_state(completed)
-                except CommandTimeout:
-                    # A timed-out Docker CLI is not proof the daemon stopped.
-                    # Leave durable recovery information; do not race a second up.
-                    raise
-                except Exception as original_error:
-                    if state.get("pending"):
-                        raise DeploymentError("Recovery rollback failed; original recovery state is retained. Inspect status before retrying") from original_error
-                    print("Rollout failed; restoring the previous image without touching data...", flush=True)
+            deadline = time.monotonic() + lock_timeout
+            with file_lock(factor_lock, max(0.0, deadline - time.monotonic())):
+                with file_lock(brain_lock, max(0.0, deadline - time.monotonic())):
+                    if self.container()["Id"] != before["Id"]:
+                        raise DeploymentError("The service container changed while waiting for its trading locks")
+                    transaction = {"version": 1, "service": self.service, "channel": channel,
+                                   "current": state["current"] if state.get("pending") else old,
+                                   "previous": state.get("previous"), "pending": target}
+                    self.save_state(transaction)
                     try:
-                        self.switch(old, before)
-                        pin_image(self.root / ".env", old["image"])
-                        restored = {**transaction, "current": old, "pending": None,
-                                    "updated_at": datetime.now(timezone.utc).isoformat()}
-                        self.save_state(restored)
-                    except Exception as rollback_error:
-                        raise DeploymentError("Rollout and rollback verification failed; recovery state is retained. Inspect status before taking further action") from rollback_error
-                    raise DeploymentError(f"Rollout failed; previous image restored and healthy. {original_error}") from original_error
-                return {"operation": "rollback" if rollback else "update", "health": "healthy", "container_id": after["Id"],
-                        "current": target, "previous": completed.get("previous"), "image_pin": str(self.root / ".env"),
-                        "configuration_preserved": True}
+                        already_healthy = target["id"] == old["id"] and before["State"].get("Health", {}).get("Status") == "healthy"
+                        after = before if already_healthy else self.switch(target, before)
+                        pin_image(self.root / ".env", target["image"])
+                        previous = old if target["id"] != old["id"] and not state.get("pending") else state.get("previous")
+                        completed = {**transaction, "current": target, "previous": previous,
+                                     "pending": None, "updated_at": datetime.now(timezone.utc).isoformat()}
+                        self.save_state(completed)
+                    except CommandTimeout:
+                        # A timed-out Docker CLI is not proof the daemon stopped.
+                        # Leave durable recovery information; do not race a second up.
+                        raise
+                    except Exception as original_error:
+                        if state.get("pending"):
+                            raise DeploymentError("Recovery rollback failed; original recovery state is retained. Inspect status before retrying") from original_error
+                        print("Rollout failed; restoring the previous image without touching data...", flush=True)
+                        try:
+                            self.switch(old, before)
+                            pin_image(self.root / ".env", old["image"])
+                            restored = {**transaction, "current": old, "pending": None,
+                                        "updated_at": datetime.now(timezone.utc).isoformat()}
+                            self.save_state(restored)
+                        except Exception as rollback_error:
+                            raise DeploymentError("Rollout and rollback verification failed; recovery state is retained. Inspect status before taking further action") from rollback_error
+                        raise DeploymentError(f"Rollout failed; previous image restored and healthy. {original_error}") from original_error
+                    return {"operation": "rollback" if rollback else "update", "health": "healthy", "container_id": after["Id"],
+                            "current": target, "previous": completed.get("previous"), "image_pin": str(self.root / ".env"),
+                            "configuration_preserved": True}
 
 
 def parser() -> argparse.ArgumentParser:
@@ -374,7 +379,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--image", help="Update channel/tag/digest; omitted uses the previously recorded channel")
     result.add_argument("--no-pull", action="store_true", help="Use an already available local image; useful for offline recovery")
     result.add_argument("--dry-run", action="store_true", help="Read-only plan: no pull, locks, files, or container changes")
-    result.add_argument("--lock-timeout", type=float, default=300, help="Maximum wait for an active trading cycle, in seconds")
+    result.add_argument("--lock-timeout", type=float, default=300, help="Maximum wait for active trading-cycle locks, in seconds")
     result.add_argument("--wait-timeout", type=int, default=90, help="Maximum wait for container health")
     result.add_argument("--stop-timeout", type=int, default=30, help="Grace period for the old container")
     return result
