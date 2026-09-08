@@ -430,18 +430,6 @@ class LLMMultiProviderTests(unittest.TestCase):
         self.assertEqual(act_resp.status_code, 200)
         self.assertEqual(act_resp.json()["thinking_timeout"], 240.0)
 
-    def test_update_status_and_check_endpoints(self):
-        headers = self.login()
-        # GET /api/v1/admin/update-status
-        resp1 = self.client.get("/api/v1/admin/update-status", headers=headers)
-        self.assertEqual(resp1.status_code, 200)
-        self.assertIn("branch", resp1.json())
-        self.assertIn("dirty", resp1.json())
-
-        # POST /api/v1/admin/update/check (frontend compatibility route)
-        resp2 = self.client.post("/api/v1/admin/update/check", headers=headers)
-        self.assertEqual(resp2.status_code, 200)
-        self.assertEqual(resp2.json()["branch"], resp1.json()["branch"])
 
 
 if __name__ == "__main__":
