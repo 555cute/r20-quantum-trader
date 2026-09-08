@@ -11,7 +11,13 @@ defineProps<{
   rows: T[]
   rowKey?: (row: T, i: number) => string | number
   emptyText?: string
+  /** flat: no own card wrapper — embed inside an existing panel */
+  flat?: boolean
+  /** clickable rows (cursor hint; behavior via @row-click) */
+  clickable?: boolean
 }>()
+
+defineEmits<{ (e: 'row-click', row: T): void }>()
 
 defineSlots<{
   [name: `cell-${string}`]: (props: { row: any; value: any }) => any
@@ -23,7 +29,7 @@ const has = (name: string) => !!slots[name]
 </script>
 
 <template>
-  <div class="overflow-x-auto rounded-xl border" style="border-color: var(--border-subtle); background-color: var(--bg-card);">
+  <div class="overflow-x-auto" :class="flat ? '' : 'rounded-xl border'" :style="flat ? {} : { borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-card)' }">
     <table class="w-full text-xs font-mono border-collapse">
       <thead>
         <tr class="sticky top-0 z-10" style="background-color: var(--bg-card);">
@@ -45,7 +51,9 @@ const has = (name: string) => !!slots[name]
           v-for="(row, i) in rows"
           :key="rowKey ? rowKey(row, i) : i"
           class="transition-colors hover:bg-[var(--bg-card-hover)]"
+          :class="clickable ? 'cursor-pointer' : ''"
           style="border-bottom: 1px solid var(--border-subtle);"
+          @click="$emit('row-click', row)"
         >
           <td
             v-for="col in columns"
