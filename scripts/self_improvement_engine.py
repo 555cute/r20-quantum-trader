@@ -538,14 +538,8 @@ def run_self_evolution(force: bool = False):
         insights = []
     if not isinstance(actions_taken, list):
         actions_taken = []
-    
-    raw_asset_mults = llm_review.get("asset_multipliers", {})
-    if not isinstance(raw_asset_mults, dict):
-        raw_asset_mults = {}
-    asset_mults = {
-        asset: clamp(raw_asset_mults.get(asset, 1.0), 0.5, 1.5, 1.0)
-        for asset in TARGET_INSTRUMENTS
-    }
+
+    llm_failed = bool(llm_review.get("__llm_error__"))
     change_status, long_term_memory, preserve_existing_memory = resolve_memory_update(
         change_status, llm_review.get("ai_long_term_memory", []), existing_core_lessons
     )
@@ -578,16 +572,25 @@ def run_self_evolution(force: bool = False):
     except Exception as exc:
         log_msg(f"Markdown mirror sync skipped: {exc}")
 
-    # Persist asset multipliers to data/asset_multipliers.json so brain trader can consume
-    try:
-        mults_payload = {
-            "timestamp": timestamp_str,
-            "multipliers": asset_mults,
-            "updated_by": "self_improvement_engine",
-        }
-        atomic_write_json(os.path.join(DATA_DIR, "asset_multipliers.json"), mults_payload)
-    except Exception as exc:
-        log_msg(f"Failed to persist asset multipliers: {exc}")
+    # Genuine LLM failures must not create or reset adaptive multipliers.
+    # Prior memory is preserved separately; do not treat a missing review as 1.0.
+    if not llm_failed:
+        try:
+            raw_asset_mults = llm_review.get("asset_multipliers", {})
+            if not isinstance(raw_asset_mults, dict):
+                raw_asset_mults = {}
+            asset_mults = {
+                asset: clamp(raw_asset_mults.get(asset, 1.0), 0.5, 1.5, 1.0)
+                for asset in TARGET_INSTRUMENTS
+            }
+            mults_payload = {
+                "timestamp": timestamp_str,
+                "multipliers": asset_mults,
+                "updated_by": "self_improvement_engine",
+            }
+            atomic_write_json(os.path.join(DATA_DIR, "asset_multipliers.json"), mults_payload)
+        except Exception as exc:
+            log_msg(f"Failed to persist asset multipliers: {exc}")
 
     # Reflect concurrent toggle/rollback even when the model returns NO_CHANGE.
     _, _, long_term_memory = memory_service.read_trading_context(AI_MEMORY_MD_FILE, AI_MEMORY_FILE)

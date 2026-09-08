@@ -208,6 +208,149 @@ class SelfEvolutionSafetyTests(unittest.TestCase):
         self.assertEqual(self.llm.call_args.kwargs["existing_memory_md"], "")
 
 
+class AssetMultiplierPersistenceTests(unittest.TestCase):
+    """Error-to-review-to-persistence: isolated mocks, no live providers or notifications."""
+
+    EXISTING_MULT_BYTES = b'{"multipliers": {"BTC": 0.73}, "note": "custom-non-default"}\n'
+
+    def start_patch(self, patcher):
+        value = patcher.start()
+        self.addCleanup(patcher.stop)
+        return value
+
+    def setUp(self):
+        temporary = TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.network = self.start_patch(patch("socket.socket", side_effect=AssertionError("network forbidden")))
+        self.urlopen = self.start_patch(patch("urllib.request.urlopen", side_effect=AssertionError("HTTP forbidden")))
+        from r20_backend.llm_manager import LlmHttpError, LlmIncompleteError, parse_model_json_object
+        import scripts.sync_full_ledger  # noqa: F401
+        self.LlmHttpError = LlmHttpError
+        self.LlmIncompleteError = LlmIncompleteError
+        self.llm_execute = Mock()
+        llm_mod = ModuleType("r20_backend.llm_manager")
+        llm_mod.parse_model_json_object = parse_model_json_object
+        llm_mod.execute_llm_request = self.llm_execute
+        llm_mod.get_active_llm_runtime = Mock(return_value={
+            "model": "test-model",
+            "reasoning_effort": "high",
+            "api_format": "openai_chat",
+            "base_url": "https://example.test/v1",
+            "api_key": "sk-test",
+            "thinking_timeout": 90.0,
+        })
+        dependencies = {}
+        for name, attrs in {
+            "r20_backend.config": {"settings": None},
+            "r20_backend.llm_manager": llm_mod,
+            "instrument_pool": {"load_instruments": Mock(return_value=[{"name": "BTC"}])},
+            "prompt_library": {
+                "active_profile": Mock(return_value={"name": "稳健"}),
+                "apply_module_layout": lambda template, *args, **kwargs: template,
+            },
+            "r20_gateway.telemetry": {"ModelCallTelemetry": Mock()},
+            "qq_notifier": {"notify_evolution_report": Mock()},
+        }.items():
+            if name == "r20_backend.llm_manager":
+                dependencies[name] = llm_mod
+                continue
+            module = ModuleType(name)
+            module.__dict__.update(attrs)
+            dependencies[name] = module
+        self.start_patch(patch.dict(sys.modules, dependencies))
+        self.start_patch(patch.dict("os.environ", {
+            "LLM_API_KEY": "sk-test",
+            "LLM_BASE_URL": "https://example.test/v1",
+            "LLM_MODEL": "test-model",
+        }, clear=False))
+        source = Path(__file__).resolve().parents[1] / "scripts" / "self_improvement_engine.py"
+        spec = importlib.util.spec_from_file_location("isolated_evolution_multipliers", source)
+        self.engine = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.engine)
+        for name in ("PROJECT_ROOT", "WORKSPACE_DIR", "DATA_DIR", "LOGS_DIR"):
+            self.start_patch(patch.object(self.engine, name, str(self.root)))
+        for name in ("LEDGER_JSON_FILE", "REPORT_JSON_FILE", "AI_DECISIONS_FILE", "AI_MEMORY_FILE",
+                     "AI_MEMORY_MD_FILE", "EVOLUTION_LAST_PROMPT_FILE", "LOG_FILE", "EVOLUTION_LOCK_FILE",
+                     "SIGNAL_JOURNAL_FILE"):
+            self.start_patch(patch.object(self.engine, name, str(self.root / name)))
+        for name in ("WORKSPACE_DIR", "DATA_DIR"):
+            self.start_patch(patch.object(shield, name, self.root))
+        for name in ("STRUCTURED_MEMORY_FILE", "AI_MEMORY_MD_FILE"):
+            self.start_patch(patch.object(shield, name, self.root / ("shield_" + name)))
+        self.start_patch(patch.object(self.engine, "log_msg"))
+        self.start_patch(patch.object(self.engine, "TARGET_INSTRUMENTS", ["BTC"]))
+        self.start_patch(patch.object(self.engine, "load_closed_trades", return_value=[
+            {"net_pnl": 2, "fee": 0.1}, {"net_pnl": -1, "fee": 0.1}]))
+
+        def guarded_open(original):
+            def checked(file, *args, **kwargs):
+                if not isinstance(file, int):
+                    self.assertTrue(contained(file, self.root), str(file))
+                return original(file, *args, **kwargs)
+            return checked
+
+        self.start_patch(patch("builtins.open", guarded_open(builtins.open)))
+        self.start_patch(patch("io.open", guarded_open(io.open)))
+        self.mult_path = Path(self.engine.DATA_DIR) / "asset_multipliers.json"
+
+
+    def _install_execute(self, kind):
+        self.llm_execute.reset_mock()
+        self.llm_execute.side_effect = None
+        self.llm_execute.return_value = None
+        if kind == "malformed":
+            self.llm_execute.return_value = (
+                '{"change_status": "ADD", "asset_multipliers": {"BTC": 0.2}',
+                "",
+                {},
+                0.01,
+            )
+            return "LlmBusinessJsonError"
+        if kind == "incomplete":
+            self.llm_execute.side_effect = self.LlmIncompleteError(
+                "response incomplete", output_chars=18, reason="max_output_tokens")
+            return "LlmIncompleteError"
+        self.llm_execute.side_effect = self.LlmHttpError("provider 503")
+        return "LlmHttpError"
+
+    def _run_cycle(self):
+        self.engine.run_self_evolution(force=True)
+        self.network.assert_not_called()
+        self.urlopen.assert_not_called()
+        return json.loads(Path(self.engine.REPORT_JSON_FILE).read_text(encoding="utf-8"))
+
+
+    def test_llm_review_failures_do_not_create_or_reset_multipliers(self):
+        for kind in ("malformed", "incomplete", "provider"):
+            token = self._install_execute(kind)
+            for present in (True, False):
+                with self.subTest(kind=kind, present=present):
+                    self.llm_execute.reset_mock()
+                    if present:
+                        self.mult_path.write_bytes(self.EXISTING_MULT_BYTES)
+                    elif self.mult_path.exists():
+                        self.mult_path.unlink()
+                    report = self._run_cycle()
+                    self.assertIn(token, report["llm_error"])
+                    self.assertTrue(report["memory_preserved"])
+                    if present:
+                        self.assertEqual(self.mult_path.read_bytes(), self.EXISTING_MULT_BYTES)
+                    else:
+                        self.assertFalse(self.mult_path.exists())
+
+    def test_successful_review_writes_bounded_multipliers(self):
+        self.llm_execute.side_effect = None
+        self.llm_execute.return_value = (
+            json.dumps({"change_status": "NO_CHANGE", "asset_multipliers": {"BTC": 2.4}}),
+            "", {}, 0.01,
+        )
+        report = self._run_cycle()
+        self.assertFalse(report["llm_error"])
+        payload = json.loads(self.mult_path.read_text(encoding="utf-8"))
+        self.assertEqual(payload["multipliers"], {"BTC": 1.5})
+
+
 class ClosedTradeEvidenceTests(unittest.TestCase):
     def start_patch(self, patcher):
         value = patcher.start()
