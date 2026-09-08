@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { useToast } from '../../composables/useToast'
 const toast = useToast()
-import { ref, onMounted , watch} from 'vue'
+import { ref, onMounted } from 'vue'
 import PageHeader from '../../components/admin/PageHeader.vue'
 import { useI18n } from '../../composables/useI18n'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
-import { ShieldAlert, Wallet, Save, Terminal, KeyRound, RefreshCw, Layers, Trash2, X, LogOut, Unlink } from 'lucide-vue-next'
+import {ShieldAlert, Wallet, Save, KeyRound, RefreshCw, Layers, Trash2, Unlink} from 'lucide-vue-next'
 
 const { api } = useApi()
 const auth = useAuthStore()
@@ -28,7 +28,6 @@ const cliCheck = ref<any>(null)
 const installingCli = ref(false)
 
 // ---- backup API keys ----
-const keysOpen = ref(false)
 const keys = ref({ live_key: '', live_secret: '', live_pass: '', demo_key: '', demo_secret: '', demo_pass: '' })
 
 // ---- capital ----

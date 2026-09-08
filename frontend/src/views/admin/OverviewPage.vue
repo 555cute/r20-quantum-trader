@@ -13,7 +13,7 @@ import BaseEmpty from '../../components/base/BaseEmpty.vue';
 import TimeAgo from '../../components/base/TimeAgo.vue';
 import { fmtNum } from '../../utils/format';
 
-const { t, tm } = useI18n();
+const { t } = useI18n();
 
 const runtime = ref<any>(null);
 const loading = ref(false);

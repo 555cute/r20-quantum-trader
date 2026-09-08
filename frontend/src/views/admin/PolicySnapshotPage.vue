@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { useToast } from '../../composables/useToast'
 const toast = useToast()
-import { ref, onMounted , watch} from 'vue'
+import { ref, onMounted } from 'vue'
 import { useI18n } from '../../composables/useI18n'
 const { t } = useI18n()
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
-import {
-  Layers,
+import {Layers,
   FileText,
   Sparkles,
   ShieldCheck,
@@ -20,13 +19,7 @@ import {
   BookmarkPlus,
   RotateCcw,
   Archive,
-  History,
-  CheckCircle2,
-  AlertCircle,
-  FolderDown,
-  FileCode,
-  Trash2,
-} from 'lucide-vue-next'
+  Trash2} from 'lucide-vue-next'
 
 const { api } = useApi()
 const auth = useAuthStore()

@@ -85,7 +85,7 @@ onMounted(load)
             { key: 'detail', label: '操作者与审计详情' },
           ]"
           :rows="filtered()"
-          :row-key="(r: any, i: number) => i"
+          :row-key="(_r: any, i: number) => i"
           empty-text="暂无符合条件的审计记录"
           @row-click="detailRec = $event"
         >

@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { useToast } from '../../composables/useToast'
 const toast = useToast()
-import { ref, computed, onMounted , watch} from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import PageHeader from '../../components/admin/PageHeader.vue'
 import { useI18n } from '../../composables/useI18n'
 const { t } = useI18n()
 import { useApi } from '../../composables/useApi'
-import { MessageCircle, Zap, CheckCircle2, AlertCircle } from 'lucide-vue-next'
+import {Zap} from 'lucide-vue-next'
 
 const { api } = useApi()
 const config = ref<any>(null)

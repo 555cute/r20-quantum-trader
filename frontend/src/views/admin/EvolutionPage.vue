@@ -1,20 +1,17 @@
 <script setup lang="ts">
 import { useToast } from '../../composables/useToast'
 const toast = useToast()
-import { ref, computed, onMounted , watch} from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import PageHeader from '../../components/admin/PageHeader.vue'
 import { useI18n } from '../../composables/useI18n'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
-import {
-  Brain,
+import {Brain,
   Sparkles,
   RefreshCw,
   Clock,
   Plus,
   Trash2,
-  CheckCircle2,
-  AlertCircle,
   Save,
   PlayCircle,
   BookOpen,
@@ -23,9 +20,7 @@ import {
   ShieldCheck,
   RotateCcw,
   ToggleLeft,
-  ToggleRight,
-  ShieldAlert,
-} from 'lucide-vue-next'
+  ToggleRight} from 'lucide-vue-next'
 
 const { api } = useApi()
 const auth = useAuthStore()
@@ -44,11 +39,9 @@ const workingModules = ref<any[]>([])
 const structuredLessons = ref<any[]>([])
 const memoryVersion = ref<string | null>(null)
 const newMemoryText = ref('')
-const newCategory = ref('TACTICAL')
 const evolutionReport = ref<any>(null)
 
 // Scheduler settings
-const briefingTimes = ref<string[]>(['02:00', '08:00', '14:00', '20:00'])
 
 const selectedProfile = computed(() => (lib.value?.profiles || []).find((p: any) => p.id === selectedProfileId.value) || null)
 
@@ -147,7 +140,7 @@ async function addMemoryItem() {
   if (busy.value || loading.value) return
   busy.value = 'add'
   try {
-    const res = await api('/api/v1/admin/memory', {
+    await api('/api/v1/admin/memory', {
       method: 'POST',
       body: JSON.stringify({ text, expected_version: expectedMemoryVersion() }),
     })

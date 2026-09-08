@@ -1,25 +1,21 @@
 <script setup lang="ts">
 import { useToast } from '../../composables/useToast'
 const toast = useToast()
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from '../../composables/useI18n'
 const { t } = useI18n()
 import { useApi } from '../../composables/useApi'
 import PageHeader from '../../components/admin/PageHeader.vue'
 import DangerZone from '../../components/admin/DangerZone.vue'
-import {
-  ShieldAlert,
+import {ShieldAlert,
   Save,
   RotateCcw,
-  CheckCircle2,
-  AlertCircle,
   Loader2,
   Info,
   Layers,
   Target,
   Flame,
-  TrendingUp,
-} from 'lucide-vue-next'
+  TrendingUp} from 'lucide-vue-next'
 
 const { api } = useApi()
 

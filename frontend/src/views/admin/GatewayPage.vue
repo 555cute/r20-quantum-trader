@@ -1,13 +1,19 @@
 <script setup lang="ts">
 import { useToast } from '../../composables/useToast'
 const toast = useToast()
-import { ref, computed, onMounted , watch} from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from '../../composables/useI18n'
 const { t } = useI18n()
 import { useApi } from '../../composables/useApi'
 import { Zap, RefreshCw, RotateCcw, Server, Clock, AlertTriangle } from 'lucide-vue-next'
 
 const { api } = useApi()
+
+/** 调度时间 ISO → MM-DD HH:MM:SS */
+function fmtJobTime(iso: string): string {
+  const v = String(iso || '').replace('T', ' ')
+  return v.length >= 16 ? v.slice(5, 19) : v
+}
 const gw = ref<any>(null)
 const loading = ref(true)
 

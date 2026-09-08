@@ -2,12 +2,9 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTheme } from '../composables/useTheme'
-import {
-  BookOpen, ShieldCheck, Cpu, FileText, Sparkles, ArrowLeft,
-  ExternalLink, Copy, Check, Terminal, Users, Brain, TrendingUp,
-  Layers, Lock, ShieldAlert, ChevronRight, Menu, X, Play, RefreshCw,
-  Sun, Moon, Zap, Activity, Database, Server
-} from 'lucide-vue-next'
+import {ShieldCheck, Cpu, FileText, ArrowLeft,
+  ExternalLink, Copy, Terminal, Users, Brain, TrendingUp,
+  Layers, Lock, ShieldAlert, ChevronRight, Menu, X, Sun, Moon, Server} from 'lucide-vue-next'
 
 const router = useRouter()
 const { theme, toggleTheme } = useTheme()

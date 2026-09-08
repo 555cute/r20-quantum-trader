@@ -1,17 +1,15 @@
 <script setup lang="ts">
 import { useToast } from '../../composables/useToast'
 const toast = useToast()
-import { ref, computed, onMounted , watch} from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from '../../composables/useI18n'
 import PageHeader from '../../components/admin/PageHeader.vue'
 const { t } = useI18n()
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
-import {
-  FileText, Plus, ArrowUp, ArrowDown, Eye, CheckCircle2, Save,
+import {Plus, ArrowUp, ArrowDown, Eye, CheckCircle2, Save,
   ToggleLeft, ToggleRight, History, RotateCcw, Trash2, Copy,
-  Download, Upload, FileUp, Sparkles, X, Code, BookOpen, Layers
-} from 'lucide-vue-next'
+  Download, Upload, FileUp, Sparkles, X, BookOpen, Layers} from 'lucide-vue-next'
 
 const { api } = useApi()
 const auth = useAuthStore()

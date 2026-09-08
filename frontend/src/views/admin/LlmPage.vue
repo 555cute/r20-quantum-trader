@@ -5,16 +5,11 @@ import PageHeader from '../../components/admin/PageHeader.vue'
 import { useI18n } from '../../composables/useI18n'
 const { t } = useI18n()
 import { useApi } from '../../composables/useApi'
-import {
-  Cpu,
-  Plus,
-  Zap,
+import {Plus,
   Trash2,
   CheckCircle2,
   AlertCircle,
   RefreshCw,
-  Copy,
-  Check,
   Search,
   ArrowLeft,
   Settings,
@@ -23,12 +18,9 @@ import {
   EyeOff,
   DownloadCloud,
   Wrench,
-  Image as ImageIcon,
-  MessageSquare,
-  Sparkles,
+  Image as Sparkles,
   Clock,
-  Save,
-} from 'lucide-vue-next'
+  Save} from 'lucide-vue-next'
 
 const { api } = useApi()
 
@@ -87,7 +79,6 @@ const modelForm = ref<any>({
 })
 
 // Copied feedback
-const copiedText = ref<string | null>(null)
 
 // Global Reasoning & Thinking Timeout State
 const thinkingTimeoutInput = ref<number>(120)
@@ -102,7 +93,7 @@ async function saveGlobalSettings() {
   savingSettings.value = true
   settingsResult.value = null
   try {
-    const res = await api('/api/v1/admin/llm/settings', {
+    await api('/api/v1/admin/llm/settings', {
       method: 'POST',
       body: JSON.stringify({
         thinking_timeout: Number(thinkingTimeoutInput.value) || 120,
@@ -533,14 +524,6 @@ async function runTestModel(m: any) {
     testLoading.value = false
     testingModelId.value = null
   }
-}
-
-function copyToClipboard(txt: string) {
-  navigator.clipboard.writeText(txt)
-  copiedText.value = txt
-  setTimeout(() => {
-    copiedText.value = null
-  }, 1800)
 }
 
 function toggleCapability(cap: string) {

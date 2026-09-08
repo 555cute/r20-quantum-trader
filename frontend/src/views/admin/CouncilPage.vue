@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { useToast } from '../../composables/useToast'
 const toast = useToast()
-import { ref, onMounted , watch} from 'vue'
+import { ref, onMounted } from 'vue'
 import PageHeader from '../../components/admin/PageHeader.vue'
 import { useI18n } from '../../composables/useI18n'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
-import {
-  Users,
+import {Users,
   Shield,
   Zap,
   Cpu,
@@ -19,15 +18,11 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
-  SlidersHorizontal,
-  Layers,
-  Sparkles,
   ToggleLeft,
   ToggleRight,
   Sliders,
   Download,
-  Upload,
-} from 'lucide-vue-next'
+  Upload} from 'lucide-vue-next'
 
 const { api } = useApi()
 const auth = useAuthStore()

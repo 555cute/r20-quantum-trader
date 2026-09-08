@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { useToast } from '../../composables/useToast'
 const toast = useToast()
-import { ref, computed, onMounted , watch} from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from '../../composables/useI18n'
 const { t } = useI18n()
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
-import { HardDrive, RefreshCw, PlugZap, Save, PlayCircle, Archive, AlertCircle, Download, Upload, RotateCcw } from 'lucide-vue-next'
+import {HardDrive, RefreshCw, PlugZap, Save, PlayCircle, Archive, Download, Upload, RotateCcw} from 'lucide-vue-next'
 
 const { api } = useApi()
 const auth = useAuthStore()

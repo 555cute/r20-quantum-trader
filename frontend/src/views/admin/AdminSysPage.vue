@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { useToast } from '../../composables/useToast'
 const toast = useToast()
-import { ref, onMounted , watch} from 'vue'
+import { ref, onMounted } from 'vue'
 import { useI18n } from '../../composables/useI18n'
 const { t } = useI18n()
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
-import { UserCog, KeyRound, Plus, Lock, Unlock, ShieldCheck, AlertCircle } from 'lucide-vue-next'
+import {UserCog, KeyRound, Plus, Lock, Unlock, ShieldCheck} from 'lucide-vue-next'
 
 const { api } = useApi()
 const auth = useAuthStore()
