@@ -133,6 +133,39 @@ class LlmCredentialRotationTests(unittest.TestCase):
         env_text = self.lm.LLM_CONFIG_FILE.parent.joinpath(".env").read_text(encoding="utf-8")
         self.assertIn("LLM_API_KEY=sk-ROTATED", env_text)
 
+
+    def test_user_added_legacy_named_provider_survives_reload(self):
+        saved = self.lm.upsert_provider({
+            "id": "grok",
+            "name": "Grok",
+            "base_url": "https://api.x.ai/v1",
+            "api_key": "sk-GROK",
+            "api_format": "openai_chat",
+        })
+        self.assertEqual(saved["id"], "grok")
+        reloaded = self.lm.init_llm_config()
+        grok = next((p for p in reloaded["providers"] if p["id"] == "grok"), None)
+        self.assertIsNotNone(grok, "保存 grok 后再次加载不能把它当旧内置供应商丢掉")
+        self.assertEqual(grok["api_key"], "sk-GROK")
+        self.assertEqual(grok["base_url"], "https://api.x.ai/v1")
+
+    def test_empty_legacy_provider_is_dropped_only_on_first_seed(self):
+        self.lm._atomic_write_json(self.lm.LLM_CONFIG_FILE, {
+            "version": "3.1",
+            "providers": [{
+                "id": "siliconflow",
+                "name": "SiliconFlow",
+                "base_url": "https://api.siliconflow.cn/v1",
+                "api_key": "",
+                "api_format": "openai_chat",
+                "models": [],
+            }],
+            "models": [],
+        })
+        reloaded = self.lm.init_llm_config()
+        self.assertNotIn("siliconflow", {p["id"] for p in reloaded["providers"]})
+        self.assertTrue(reloaded.get("defaults_seeded"))
+
     def test_upsert_model_does_not_snapshot_provider_key(self):
         """新增模型不再把供应商密钥复制到模型条目（密钥只存供应商一处）。"""
         self.lm.upsert_model("gw", {"id": "glm-5.3-flash", "name": "GLM"})

@@ -453,7 +453,9 @@ def init_llm_config() -> Dict[str, Any]:
     # 之后尊重用户自己的开关。老配置文件（无标记）视为首次：合并一次并落标记，升级无感。
     seed_defaults = not data.get("defaults_seeded")
     default_by_id = {dp["id"]: dp for dp in DEFAULT_PROVIDERS}
-    # (ignore legacy hardcoded providers from older versions)
+    # 旧版内置供应商只在首次播种时清掉「无密钥、无模型」的残留。
+    # 播种完成后用户主动添加 grok/deepseek/openrouter 等必须保留；
+    # 否则 POST 保存成功，下一次 GET/init 会把供应商从磁盘抹掉。
     legacy_ids = {
         "siliconflow", "openrouter", "kelivoin", "tensdaq", "deepseek",
         "alhubmix", "suixiang", "dashscope", "zhipu", "grok", "volcengine"
@@ -461,7 +463,14 @@ def init_llm_config() -> Dict[str, Any]:
 
     for found in existing_providers:
         pid = found.get("id")
-        if not pid or pid in legacy_ids:
+        if not pid:
+            continue
+        if (
+            pid in legacy_ids
+            and seed_defaults
+            and not str(found.get("api_key") or "").strip()
+            and not (found.get("models") or [])
+        ):
             continue
         dp = default_by_id.get(pid)
         if dp:
