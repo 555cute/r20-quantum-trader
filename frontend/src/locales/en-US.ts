@@ -183,6 +183,14 @@ export const enUS = {
   },
 
   // Secondary Tabs
+  cmd: {
+    placeholder: 'Type a command or page…',
+    pages: 'Pages', tabs: 'Views', actions: 'Actions',
+    toDark: 'Switch to dark theme', toLight: 'Switch to light theme',
+    cvdOn: 'Color-blind safe P&L: on', cvdOff: 'Color-blind safe P&L: off',
+    openTerminal: 'Open trading terminal', refresh: 'Refresh data now',
+    navigate: 'navigate', select: 'select', noMatch: 'No matching commands',
+  },
   news: {
     tempBand: 'L/S TEMPERATURE',
     mentions: 'Mentions',

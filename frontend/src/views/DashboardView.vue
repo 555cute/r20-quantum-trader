@@ -14,6 +14,7 @@ import SelfEvolutionLab from '../components/SelfEvolutionLab.vue'
 import TradesLedger from '../components/TradesLedger.vue'
 import AiBrainHistory from '../components/AiBrainHistory.vue'
 import FloatingActions from '../components/FloatingActions.vue'
+import CommandPalette from '../components/CommandPalette.vue'
 import {
   LayoutGrid,
   Cpu,
@@ -261,5 +262,6 @@ function setLayout(mode: 'dual' | 'stacked') {
 
     <!-- Global Floating Actions -->
     <FloatingActions />
+    <CommandPalette />
   </div>
 </template>
