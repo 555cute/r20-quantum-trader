@@ -1,3 +1,4 @@
+import threading
 import time
 import unittest
 from unittest.mock import patch, MagicMock
@@ -243,6 +244,58 @@ class TestCouncilManager(unittest.TestCase):
 
             # CIO still completed safely
             self.assertEqual(brain_output["decisions"]["BTC-USDT-SWAP"]["adopted_role"], "REJECT_ALL")
+
+    def test_overrunning_traders_still_reserve_cio(self):
+        cfg = load_council_config()
+        cfg["consensus_mode"] = "standard"
+        save_council_config(cfg)
+
+        mock_cio_json = (
+            '{"macro_assessment": "交易员在阶段截止点自行结束后才终审", "position_management": [], '
+            '"decisions": {"BTC-USDT-SWAP": {"action": "WAIT", "adopted_role": "REJECT_ALL", "reasoning": "防守"}}}'
+        )
+        started = threading.Event()
+        trader_done = []
+        cio_started = []
+
+        def fake_trader(role_id, role_spec, market_prompt, master_constitutional_rules, timeout=20.0):
+            started.set()
+            time.sleep(float(timeout))
+            trader_done.append(time.monotonic())
+            return {
+                "proposal_id": f"{role_id}_prop",
+                "role_id": role_id,
+                "role_name": role_spec.get("name", role_id),
+                "status": "ok",
+                "content": "honored-timeout",
+                "reasoning": "",
+                "latency_ms": int(float(timeout) * 1000),
+                "weight": 1.0,
+            }
+
+        def fake_cio(*args, **kwargs):
+            cio_started.append(time.monotonic())
+            return (mock_cio_json, "", {}, 20)
+
+        t0 = time.monotonic()
+        with patch("r20_backend.council_manager._call_single_trader", side_effect=fake_trader), \
+             patch("r20_backend.llm_manager.execute_llm_request", side_effect=fake_cio):
+            brain_output, transcript = execute_council_debate(
+                market_prompt="BTC: 77000",
+                original_system_prompt="system prompt",
+                timeout=8.0,
+            )
+
+        self.assertTrue(started.is_set())
+        self.assertTrue(trader_done)
+        self.assertTrue(cio_started)
+        self.assertGreaterEqual(min(cio_started), max(trader_done))
+        self.assertLessEqual(max(trader_done) - t0, 8.0 - MIN_SAFE_REASONING_TIME + 0.3)
+        self.assertLessEqual(min(cio_started) - t0, 8.0 - MIN_SAFE_REASONING_TIME + 0.3)
+        for advisor in transcript["advisors"].values():
+            self.assertEqual(advisor["status"], "ok")
+        self.assertEqual(brain_output["decisions"]["BTC-USDT-SWAP"]["adopted_role"], "REJECT_ALL")
+
 
 
 if __name__ == "__main__":

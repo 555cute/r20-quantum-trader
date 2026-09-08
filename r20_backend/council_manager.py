@@ -35,7 +35,65 @@ COUNCIL_CONFIG_FILE = DATA_DIR / "council_config.json"
 VALID_CONSENSUS_MODES = {"standard", "cross_examination"}
 DEFAULT_CONSENSUS_MODE = "standard"
 MIN_SAFE_REASONING_TIME: float = 5.0
+STAGE_CLEANUP_MARGIN: float = 0.25
 DEFAULT_COUNCIL_TIMEOUT: float = 60.0
+
+
+def _role_timeout_result(role_id: str, role_spec: Dict[str, Any], message: str) -> Dict[str, Any]:
+    return {
+        "proposal_id": f"{role_id}_prop",
+        "role_id": role_id,
+        "role_name": role_spec.get("name", role_id),
+        "model_used": role_spec.get("model_id") or "unknown",
+        "status": "error",
+        "content": message,
+        "reasoning": "",
+        "latency_ms": 0,
+        "weight": 0.0,
+    }
+
+
+def _run_roles_parallel(
+    role_keys: List[str],
+    submitter,
+    roles: Dict[str, Any],
+    deadline: float,
+    stage_budget: float,
+) -> Dict[str, Dict[str, Any]]:
+    """Run role workers against one stage deadline, then leave the CIO reserve.
+
+    Running urllib/thread work cannot be force-cancelled. Workers get a timeout
+    that ends STAGE_CLEANUP_MARGIN before `stage_deadline`; the waiter joins at
+    `stage_deadline` so exited workers are collected before CIO. shutdown(wait=False)
+    only drops stragglers that ignored their timeout.
+    """
+    results: Dict[str, Dict[str, Any]] = {}
+    if not role_keys:
+        return results
+    stage_deadline = min(
+        time.time() + max(0.05, float(stage_budget)),
+        deadline - MIN_SAFE_REASONING_TIME,
+    )
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(role_keys)))
+    try:
+        worker_timeout = max(0.05, stage_deadline - time.time() - STAGE_CLEANUP_MARGIN)
+        futures = {pool.submit(submitter, key, worker_timeout): key for key in role_keys}
+        wait_s = max(0.05, stage_deadline - time.time())
+        done, pending = concurrent.futures.wait(list(futures), timeout=wait_s)
+        for fut in done:
+            key = futures[fut]
+            try:
+                results[key] = fut.result()
+            except Exception as exc:
+                results[key] = _role_timeout_result(key, roles.get(key, {}), f"Proposal exception: {exc}")
+        overtime = "交易员方案提交超时，已为 CIO 预留终审时间"
+        for fut in pending:
+            key = futures[fut]
+            results[key] = _role_timeout_result(key, roles.get(key, {}), overtime)
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+    return results
+
 
 DEFAULT_PRESET_TEMPLATES: Dict[str, Dict[str, Any]] = {
     "trader_trend": {
@@ -529,31 +587,13 @@ def execute_council_debate(
 
         # Stage 1: Round 1 Independent Proposals
         round1_budget = max(2.0, min(rem * 0.35, rem - (MIN_SAFE_REASONING_TIME * 2.0)))
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(trader_keys))) as pool:
-            futures = {
-                pool.submit(
-                    _call_single_trader,
-                    key,
-                    roles[key],
-                    market_prompt,
-                    original_system_prompt,
-                    round1_budget,
-                ): key
-                for key in trader_keys
-            }
-            for fut in concurrent.futures.as_completed(futures):
-                key = futures[fut]
-                try:
-                    trader_proposals[key] = fut.result()
-                except Exception as exc:
-                    trader_proposals[key] = {
-                        "proposal_id": f"{key}_prop",
-                        "role_id": key,
-                        "role_name": roles[key].get("name", key),
-                        "status": "error",
-                        "content": f"Proposal exception: {exc}",
-                        "weight": 0.0,
-                    }
+        trader_proposals = _run_roles_parallel(
+            trader_keys,
+            lambda key, timeout: _call_single_trader(key, roles[key], market_prompt, original_system_prompt, timeout),
+            roles,
+            deadline,
+            round1_budget,
+        )
 
         # Stage 2: Round 2 Cross-Examination Critiques
         rem = deadline - time.time()
@@ -569,42 +609,25 @@ def execute_council_debate(
                 }
         else:
             round2_budget = max(2.0, min(rem * 0.40, rem - MIN_SAFE_REASONING_TIME))
-            with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(trader_keys))) as pool:
-                critique_futures = {}
-                for k in trader_keys:
-                    my_prop = trader_proposals.get(k, {}).get("content", "（该交易员第一轮未提交有效提案）")
-                    peers_text_list = []
-                    for pk in trader_keys:
-                        if pk != k:
-                            p_res = trader_proposals.get(pk, {})
-                            p_id = p_res.get("proposal_id", f"{pk}_prop")
-                            p_name = p_res.get("role_name", pk)
-                            peers_text_list.append(
-                                f"=== 【{p_name}】(提案标识: {p_id}) ===\n"
-                                f"{p_res.get('content', '（未提交）')}"
-                            )
-                    peers_text = "\n\n".join(peers_text_list) if peers_text_list else "（无其他同行提案）"
-                    critique_futures[pool.submit(
-                        _call_single_trader_critique,
-                        k,
-                        roles[k],
-                        my_prop,
-                        peers_text,
-                        original_system_prompt,
-                        round2_budget,
-                    )] = k
-                for fut in concurrent.futures.as_completed(critique_futures):
-                    k = critique_futures[fut]
-                    try:
-                        trader_critiques[k] = fut.result()
-                    except Exception as exc:
-                        trader_critiques[k] = {
-                            "role_id": k,
-                            "role_name": roles[k].get("name", k),
-                            "status": "error",
-                            "content": f"质询异常: {exc}",
-                            "latency_ms": 0,
-                        }
+
+            def _critique(key: str, timeout: float) -> Dict[str, Any]:
+                my_prop = trader_proposals.get(key, {}).get("content", "（该交易员第一轮未提交有效提案）")
+                peers_text_list = []
+                for pk in trader_keys:
+                    if pk != key:
+                        p_res = trader_proposals.get(pk, {})
+                        p_id = p_res.get("proposal_id", f"{pk}_prop")
+                        p_name = p_res.get("role_name", pk)
+                        peers_text_list.append(
+                            f"=== 【{p_name}】(提案标识: {p_id}) ===\n"
+                            f"{p_res.get('content', '（未提交）')}"
+                        )
+                peers_text = "\n\n".join(peers_text_list) if peers_text_list else "（无其他同行提案）"
+                return _call_single_trader_critique(
+                    key, roles[key], my_prop, peers_text, original_system_prompt, timeout,
+                )
+
+            trader_critiques = _run_roles_parallel(trader_keys, _critique, roles, deadline, round2_budget)
     else:
         # === MODE: Standard (Single-Round Proposals -> CIO Verdict) ===
         rem = deadline - time.time()
@@ -614,31 +637,13 @@ def execute_council_debate(
             )
 
         member_timeout = max(2.0, min(rem * 0.50, rem - MIN_SAFE_REASONING_TIME))
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(trader_keys))) as pool:
-            futures = {
-                pool.submit(
-                    _call_single_trader,
-                    key,
-                    roles[key],
-                    market_prompt,
-                    original_system_prompt,
-                    member_timeout,
-                ): key
-                for key in trader_keys
-            }
-            for fut in concurrent.futures.as_completed(futures):
-                key = futures[fut]
-                try:
-                    trader_proposals[key] = fut.result()
-                except Exception as exc:
-                    trader_proposals[key] = {
-                        "proposal_id": f"{key}_prop",
-                        "role_id": key,
-                        "role_name": roles[key].get("name", key),
-                        "status": "error",
-                        "content": f"Proposal exception: {exc}",
-                        "weight": 0.0,
-                    }
+        trader_proposals = _run_roles_parallel(
+            trader_keys,
+            lambda key, timeout: _call_single_trader(key, roles[key], market_prompt, original_system_prompt, timeout),
+            roles,
+            deadline,
+            member_timeout,
+        )
 
     # Compile the Structured Investment Committee Docket
     transcript_blocks = []
