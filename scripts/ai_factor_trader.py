@@ -48,6 +48,7 @@ import time
 import datetime
 import subprocess
 from decimal import Decimal, InvalidOperation, ROUND_DOWN
+import tempfile
 from r20_backend.file_lock import acquire, release
 from typing import Tuple, Dict, Any, List, Optional
 from concurrent.futures import ThreadPoolExecutor
@@ -194,31 +195,6 @@ def effective_risk_per_trade(pool_risk_usd: float, usdt_available: float = None)
     return cap
 
 
-def quantize_size(raw_sz: float, min_sz: float) -> float:
-    """按交易所最小下单步长(minSz)向下量化张数。
-
-    关键修正：历史实现把数量强制取整并抬到「至少 1 张」，而 OKX 多数永续的 minSz 实为 0.01 张，
-    导致小资金账户仓位被向上放大最多 100 倍(如 BTC 0.01 张=7.92U 名义被抬成 1 张=792U)。
-    现在低于最小步长时返回 0.0 由上层跳过该标的，而不是放大成 1 张。
-    """
-    step = float(min_sz or 0) or 1.0
-    try:
-        raw = float(raw_sz or 0.0)
-    except (TypeError, ValueError):
-        return 0.0
-    if raw <= 0:
-        return 0.0
-    return round(math.floor(raw / step + 1e-9) * step, 10)
-
-
-def max_size_within_margin(usdt_available: float, leverage: float, price: float, ct_val: float, min_sz: float) -> float:
-    """可用余额硬顶：单笔保证金不得超过可用余额的 MAX_MARGIN_EQUITY_RATIO，超出部分直接砍掉。"""
-    if not usdt_available or usdt_available <= 0 or price <= 0 or ct_val <= 0:
-        return float("inf")
-    max_margin = float(usdt_available) * MAX_MARGIN_EQUITY_RATIO
-    raw = (max_margin * max(1.0, float(leverage or 1.0))) / (float(price) * float(ct_val))
-    return quantize_size(raw, min_sz)
-# MIN_SCALE_IN_CONFIDENCE (顺势加仓最低 AI 置信度) 由 risk_constants 单一事实源注入
 
 
 
@@ -283,12 +259,12 @@ def _ensure_state_dir(path: str) -> None:
 def refresh_account_state_paths(env=None) -> None:
     """Bind account-scoped files to the frozen exchange/env/credential identity."""
     global LEDGER_JSON_FILE, POSITION_TRACKER_FILE, STOP_COOLDOWN_FILE
-    global TRADER_LOCK_FILE, TRADER_SLOT_FILE, TRADING_STATE_FILE
+    global TRADER_SLOT_FILE, TRADING_STATE_FILE, SIGNAL_JOURNAL_FILE
     global AI_POSITION_MANAGEMENT_FILE
     LEDGER_JSON_FILE = str(state_path("trading_ledger.json", env))
     POSITION_TRACKER_FILE = str(state_path("position_trackers.json", env))
     STOP_COOLDOWN_FILE = str(state_path("stop_cooldown.json", env))
-    TRADER_LOCK_FILE = str(state_path(".ai_factor_trader.lock", env))
+    SIGNAL_JOURNAL_FILE = str(state_path("signal_journal.json", env))
     TRADER_SLOT_FILE = str(state_path(".ai_factor_trader_slot.json", env))
     TRADING_STATE_FILE = str(state_path("trading_state.json", env))
     AI_POSITION_MANAGEMENT_FILE = str(state_path("ai_position_management.json", env))
@@ -360,7 +336,7 @@ def plan_base_quantity(
     lev = _as_decimal(leverage)
     if lev < 1:
         lev = Decimal("1")
-    requested_margin = _as_decimal(planned_margin) if planned_margin not in (None, "") else _as_decimal(risk_usd)
+    requested_margin = _as_decimal(planned_margin) if planned_margin not in (None, "") else avail
     if requested_margin <= 0:
         requested_margin = avail
     usable_margin = min(requested_margin, avail) if avail > 0 else Decimal("0")
@@ -400,7 +376,7 @@ def _normalize_position_side(row: Dict[str, Any]) -> Tuple[str, float]:
 
 
 def apply_confirmed_leverage(inst_id: str, leverage: Any, pos_side: str) -> Tuple[bool, str, Decimal]:
-    requested = _as_decimal(leverage)
+    requested = min(_as_decimal(leverage), _as_decimal(MAX_LEVERAGE))
     if requested < 1:
         return False, "leverage must be >= 1", Decimal("0")
     lev_int = int(requested.to_integral_value(rounding=ROUND_DOWN))
@@ -539,11 +515,11 @@ def check_black_swan_sentinel() -> Tuple[bool, str]:
     # Check news sentiment file
     if os.path.exists(NEWS_SENTIMENT_FILE):
         try:
-            with open(NEWS_SENTIMENT_FILE, "r", encoding="utf-8") as f:
-                n_data = json.load(f)
-                score = float(n_data.get("overall_score", 50.0))
-                if score <= 20.0:
-                    return True, f"🚨 监测到突发黑天鹅极度恶性利空舆情 (情绪指数: {score:.1f})，触发全网黑天鹅紧急熔断！"
+            from r20_backend.news_config import load_news_snapshot
+            n_data = load_news_snapshot(NEWS_SENTIMENT_FILE)
+            score = float(n_data.get("overall_score", 50.0))
+            if score <= 20.0:
+                return True, f"监测到极度恶性利空舆情 (情绪指数: {score:.1f})，触发新闻熔断"
         except Exception:
             pass
 
@@ -650,37 +626,9 @@ def prune_trackers(trackers: Dict[str, Any], real_pos_dict: Dict[str, Any]) -> i
 
 def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size, price: float, tp_px: float, sl_px: float) -> Tuple[bool, str]:
     """Submit a protected limit order; acceptance is not treated as a fill."""
-    env = selected_environment()
     effective_px = float(price)
     effective_tp = float(tp_px)
     effective_sl = float(sl_px)
-
-    if getattr(env, "simulated", False):
-        try:
-            ok, ticker, _err = _call_exchange("ticker", inst_id)
-            last_raw = ticker.get("last") if ok and isinstance(ticker, dict) else None
-            demo_last = float(last_raw) if last_raw not in (None, "") else 0.0
-            if demo_last > 0 and effective_px > 0:
-                divergence = abs(effective_px - demo_last) / demo_last
-                if divergence > 0.05:
-                    scale = demo_last / effective_px
-                    last_text = str(last_raw)
-                    prec = len(last_text.split(".")[1]) if "." in last_text else 4
-                    effective_px = round(effective_px * scale, prec)
-                    effective_tp = round(effective_tp * scale, prec)
-                    effective_sl = round(effective_sl * scale, prec)
-                    if pos_side == "long":
-                        if effective_sl >= effective_px:
-                            effective_sl = round(effective_px * 0.98, prec)
-                        if effective_tp <= effective_px:
-                            effective_tp = round(effective_px * 1.04, prec)
-                    else:
-                        if effective_sl <= effective_px:
-                            effective_sl = round(effective_px * 1.02, prec)
-                        if effective_tp >= effective_px:
-                            effective_tp = round(effective_px * 0.96, prec)
-        except Exception:
-            pass
 
     from scripts.order_risk import validate_quote_geometry_and_rr
     action_type = "BUY_LONG" if pos_side == "long" else "SELL_SHORT"
@@ -806,9 +754,9 @@ def clean_orphan_protections(real_pos_dict: Dict[str, Any]) -> Tuple[bool, str]:
 
 def build_signal_snapshot(f: dict) -> dict:
     """抽取开仓时刻的因果动力学与数理快照，供自进化复盘做真实因果归因（而非事后倒推）。"""
-    calc = f.get("calculus_dynamics") or {}
-    prob = f.get("probability_theory") or {}
-    integ = f.get("definite_integrals") or {}
+    calc = f.get("calculus") or f.get("calculus_dynamics") or {}
+    prob = calc.get("probability_theory") or f.get("probability_theory") or {}
+    integ = calc.get("definite_integrals") or f.get("definite_integrals") or {}
     micro = f.get("microstructure") or {}
     money = f.get("smart_money_derivatives") or {}
     trend = f.get("trend_momentum") or {}
@@ -833,7 +781,7 @@ def build_signal_snapshot(f: dict) -> dict:
         "energy_integral": integ.get("energy_integral"),
         "deviation_area_integral": integ.get("deviation_area_integral"),
         "adx": trend.get("adx"),
-        "rsi": trend.get("rsi"),
+        "rsi": f.get("rsi", trend.get("rsi")),
         "funding_rate": micro.get("funding_rate"),
         "composite_alpha_score": f.get("composite_alpha_score"),
         "smart_money_net": money.get("net_flow") or money.get("taker_net"),
@@ -841,17 +789,26 @@ def build_signal_snapshot(f: dict) -> dict:
 
 
 def record_signal_snapshot(snap: dict) -> None:
-    """把开仓时刻的数理快照写入 signal_journal.json，保留最近 500 条供复盘 join。"""
+    """Record submitted-order evidence, not a fill; scoped to the frozen account."""
+    temp_path = None
     try:
+        _ensure_state_dir(SIGNAL_JOURNAL_FILE)
         journal = []
         if os.path.exists(SIGNAL_JOURNAL_FILE):
             with open(SIGNAL_JOURNAL_FILE, "r", encoding="utf-8") as handle:
                 journal = json.load(handle)
         journal.append(snap)
-        with open(SIGNAL_JOURNAL_FILE, "w", encoding="utf-8") as handle:
-            json.dump(journal[-500:], handle, ensure_ascii=False, indent=2)
-    except Exception as e:
-        print(f"Failed to record signal snapshot: {e}")
+        fd, temp_path = tempfile.mkstemp(prefix=".signals-", suffix=".tmp", dir=os.path.dirname(SIGNAL_JOURNAL_FILE))
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(journal[-500:], handle, ensure_ascii=False, indent=2, allow_nan=False)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, SIGNAL_JOURNAL_FILE)
+    except (OSError, ValueError, TypeError) as exc:
+        print(f"Failed to record signal snapshot: {exc}")
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.unlink(temp_path)
 
 
 def record_trade(trade_data):
@@ -1229,11 +1186,11 @@ def fetch_single_instrument_data(item, all_positions, usdt_available):
     # 4. Load Real-time News Sentiment
     if os.path.exists(NEWS_SENTIMENT_FILE):
         try:
-            with open(NEWS_SENTIMENT_FILE, "r", encoding="utf-8") as f_news:
-                n_data = json.load(f_news)
-                coins_s = n_data.get("coins_sentiment", {})
-                if name in coins_s:
-                    f["sentiment_score"] = float(coins_s[name].get("sentiment_factor_score", 0.0) or 0.0)
+            from r20_backend.news_config import load_news_snapshot
+            n_data = load_news_snapshot(NEWS_SENTIMENT_FILE)
+            coins_s = n_data.get("coins_sentiment", {})
+            if name in coins_s and not n_data.get("sentiment_stale"):
+                f["sentiment_score"] = float(coins_s[name].get("sentiment_factor_score", 0.0) or 0.0)
         except Exception:
             pass
 
@@ -1264,8 +1221,8 @@ def fetch_single_instrument_data(item, all_positions, usdt_available):
     if pos_mult > 0 and atr_val > 0 and f["price"] > 0:
         f["sz"] = plan_base_quantity(
             price=f["price"],
-            available_margin=usdt_available,
-            leverage=1,
+            available_margin=_as_decimal(usdt_available) * _as_decimal(MAX_MARGIN_EQUITY_RATIO),
+            leverage=MAX_LEVERAGE,
             lot_sz=filters["lotSz"],
             min_sz=filters["minSz"],
             min_notional=filters["minNotional"],
@@ -1413,20 +1370,9 @@ def manage_position_tp_and_trailing(f, curr_pos, trackers, timestamp_full, execu
             "lowWaterMark": cur_px,
             "trailingStopPx": round((entry_px - atr * profile["sl_atr_mult"]) if is_long else (entry_px + atr * profile["sl_atr_mult"]), prec),
             "takeProfitPx": round((entry_px + max(atr * profile["tp_atr_mult"], entry_px * profile["min_profit_ratio"])) if is_long else (entry_px - max(atr * profile["tp_atr_mult"], entry_px * profile["min_profit_ratio"])), prec),
-            "signal_snapshot": build_signal_snapshot(f),
+            "observation_snapshot": build_signal_snapshot(f),
             "stage_desc": "持有监控中"
         }
-        record_signal_snapshot({
-            "instId": inst_id,
-            "name": name,
-            "side": curr_pos["side"],
-            "entryTs": now_ts,
-            "entryTime": timestamp_full,
-            "entryPx": entry_px,
-            "sz": pos_sz,
-            "policy_version": f.get("policy_version", ""),
-            "snapshot": trackers[pos_key]["signal_snapshot"],
-        })
 
     t = trackers[pos_key]
     if not t.get("policy_version") and f.get("policy_version"):
@@ -2012,8 +1958,6 @@ def single_trader_cycle(func):
         cycle_environment = None
         lock_handle = None
         try:
-            cycle_environment = freeze_environment()
-            refresh_account_state_paths(cycle_environment)
             os.makedirs(DATA_DIR, exist_ok=True)
             _ensure_state_dir(TRADER_LOCK_FILE)
             lock_handle = open(TRADER_LOCK_FILE, "a+", encoding="utf-8")
@@ -2024,6 +1968,9 @@ def single_trader_cycle(func):
                 lock_handle = None
                 print("[Trader] Skip: another portfolio cycle is still running")
                 return None
+            # Match the control-plane configuration lock before selecting an account.
+            cycle_environment = freeze_environment()
+            refresh_account_state_paths(cycle_environment)
             now_slot = int(time.time()) // 900
             if os.path.exists(TRADER_SLOT_FILE):
                 try:
@@ -2098,10 +2045,6 @@ def submit_entry_with_confirmed_leverage(
     prec: int,
 ) -> str:
     """Set+confirm leverage, size in BASE, then submit. Never retry an uncertain send."""
-    lev_ok, lev_err, confirmed_lev = apply_confirmed_leverage(inst_id, ai_lever, pos_side)
-    if not lev_ok:
-        executed_actions.append(f"[{f['name']}] 杠杆未在交易所确认，拒绝开仓: {lev_err}")
-        return "uncertain" if is_uncertain_submit(lev_err) else "rejected"
 
     remaining_cap = remaining_asset_margin(usdt_available, curr_margin)
 
@@ -2109,37 +2052,25 @@ def submit_entry_with_confirmed_leverage(
     usable_margin = min(
         _as_decimal(planned_margin) if planned_margin and planned_margin > 0 else _as_decimal(usdt_available),
         _as_decimal(usdt_available),
+        _as_decimal(usdt_available) * _as_decimal(MAX_MARGIN_EQUITY_RATIO),
         _as_decimal(remaining_cap),
     )
+    risk_budget = effective_risk_per_trade(f.get("risk_per_trade_usd", 0), usdt_available)
+    if usable_margin <= 0 or not math.isfinite(risk_budget) or risk_budget <= 0:
+        executed_actions.append(f"[{f['name']}] 无可用保证金或有效风险预算，拒绝开仓")
+        return "rejected"
     filters = {
-        "lotSz": f.get("lotSz") or Decimal("0"),
-        "minSz": f.get("minSz") or Decimal("0"),
-        "tickSz": f.get("tickSz") or Decimal("0"),
-        "minNotional": f.get("minNotional") or Decimal("0"),
+        "lotSz": _as_decimal(f.get("lotSz")),
+        "minSz": _as_decimal(f.get("minSz")),
+        "tickSz": _as_decimal(f.get("tickSz")),
+        "minNotional": _as_decimal(f.get("minNotional")),
     }
     if filters["lotSz"] <= 0 or filters["minSz"] <= 0:
         live = instrument_filters(inst_id)
         filters.update(live)
-    actual_sz = plan_base_quantity(
-        price=f["price"],
-        available_margin=usable_margin,
-        leverage=confirmed_lev,
-        lot_sz=filters["lotSz"],
-        min_sz=filters["minSz"],
-        min_notional=filters["minNotional"],
-        risk_usd=f.get("risk_per_trade_usd", 0),
-        stop_distance=sl_dist,
-        planned_margin=usable_margin,
-    )
-    risk_sz = _as_decimal(f.get("sz") or 0)
-    if risk_sz > 0 and actual_sz > risk_sz * 2:
-        actual_sz = floor_to_step(risk_sz * 2, filters["lotSz"])
-        if filters["minSz"] > 0 and actual_sz < filters["minSz"]:
-            actual_sz = Decimal("0")
-    if actual_sz <= 0:
-        executed_actions.append(f"[{f['name']}] BASE数量量化后为0，拒绝开仓")
+    if filters["lotSz"] <= 0 or filters["minSz"] <= 0 or filters["tickSz"] <= 0:
+        executed_actions.append(f"[{f['name']}] 交易所数量或价格精度不可用，拒绝开仓")
         return "rejected"
-
     tick = filters["tickSz"]
     if pos_side == "long":
         raw_px = ai_decision.get("entry_price") if (ai_decision and ai_decision.get("entry_price", 0) > 0) else (f.get("bidPx") or f["price"])
@@ -2160,9 +2091,58 @@ def submit_entry_with_confirmed_leverage(
         if tp_px >= limit_px:
             tp_px = _quantize_px(limit_px - max(tp_dist, f["price"] * 0.024), tick, prec)
 
+    from scripts.order_risk import validate_quote_geometry_and_rr
+    action = "BUY_LONG" if pos_side == "long" else "SELL_SHORT"
+    valid, reason, _ = validate_quote_geometry_and_rr(action, limit_px, tp_px, sl_px)
+    if not valid:
+        executed_actions.append(f"[{f['name']}] 开仓报价未通过核心风控: {reason}")
+        return "rejected"
+
+    lev_ok, lev_err, confirmed_lev = apply_confirmed_leverage(inst_id, ai_lever, pos_side)
+    if not lev_ok:
+        executed_actions.append(f"[{f['name']}] 杠杆未在交易所确认，拒绝开仓: {lev_err}")
+        return "uncertain" if is_uncertain_submit(lev_err) else "rejected"
+    actual_sz = plan_base_quantity(
+        price=limit_px,
+        available_margin=usable_margin,
+        leverage=confirmed_lev,
+        lot_sz=filters["lotSz"],
+        min_sz=filters["minSz"],
+        min_notional=filters["minNotional"],
+        risk_usd=risk_budget,
+        stop_distance=abs(_as_decimal(limit_px) - _as_decimal(sl_px)),
+        planned_margin=usable_margin,
+    )
+    risk_sz = _as_decimal(f.get("sz") or 0)
+    if risk_sz > 0 and actual_sz > risk_sz * 2:
+        actual_sz = floor_to_step(risk_sz * 2, filters["lotSz"])
+        if filters["minSz"] > 0 and actual_sz < filters["minSz"]:
+            actual_sz = Decimal("0")
+    if actual_sz <= 0 or actual_sz * _as_decimal(limit_px) < filters["minNotional"]:
+        executed_actions.append(f"[{f['name']}] BASE数量量化后为0，拒绝开仓")
+        return "rejected"
+
+
+    submitted_at = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
     accepted, order_ref = submit_protected_limit_order(inst_id, side, pos_side, actual_sz, limit_px, tp_px, sl_px)
     qty_text = format(actual_sz.normalize(), "f")
     if accepted:
+        record_signal_snapshot({
+            "instId": inst_id,
+            "name": f["name"],
+            "posSide": pos_side,
+            "order_id": order_ref,
+            "entryTime": submitted_at,
+            "status": "submitted",
+            "policy_version": f.get("policy_version", ""),
+            "policy_hash": f.get("policy_hash", ""),
+            "strategy": strat_tag,
+            "snapshot": {
+                **build_signal_snapshot(f),
+                "entry_price": limit_px, "take_profit_price": tp_px, "stop_loss_price": sl_px,
+                "quantity": qty_text, "leverage": float(confirmed_lev),
+            },
+        })
         if is_scale_in:
             tracker = trackers.get(f"{inst_id}_{pos_side}", {})
             tracker["scale_count"] = tracker.get("scale_count", 0) + 1

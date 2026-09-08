@@ -708,6 +708,8 @@ class BinanceExchange:
             raise RuntimeError("Binance open interest unavailable")
         base = _decimal(oi["openInterest"])
         price = _decimal((mark or {}).get("markPrice") or "0") if isinstance(mark, dict) else Decimal("0")
+        if price <= 0:
+            raise RuntimeError("Binance mark price unavailable for open-interest valuation")
         return {"oi": _text(base), "oiCcy": _text(base), "oiUsd": _text(base * price), "ts": str(oi.get("time") or "")}
 
     def long_short_ratio(self, inst_id: str) -> float | None:
@@ -726,10 +728,11 @@ class BinanceExchange:
         return float(_decimal(ratio))
 
     def taker_volume(self, inst_id: str) -> dict[str, Any] | None:
+        symbol = _to_symbol(inst_id)
         try:
             rows = self._public(
                 "/futures/data/takerlongshortRatio",
-                {"symbol": _to_symbol(inst_id), "period": "5m", "limit": 1},
+                {"symbol": symbol, "period": "5m", "limit": 1},
             )
         except RuntimeError:
             return None
@@ -740,7 +743,15 @@ class BinanceExchange:
         sell = row.get("sellVol")
         if buy in (None, "") or sell in (None, ""):
             return None
-        return {"buyVol": str(buy), "sellVol": str(sell)}
+        try:
+            mark = self._public("/fapi/v1/premiumIndex", {"symbol": symbol})
+        except RuntimeError:
+            return None
+        price = _decimal((mark or {}).get("markPrice") or "0") if isinstance(mark, dict) else Decimal("0")
+        if price <= 0:
+            return None
+        # Convert BASE volumes to estimated USDT notional at the current mark price.
+        return {"buyVol": _text(_decimal(buy) * price), "sellVol": _text(_decimal(sell) * price)}
 
     def balance(self) -> list[dict[str, Any]]:
         row = self._private("GET", "/fapi/v2/account")
@@ -1082,6 +1093,17 @@ class BinanceExchange:
         open_notional = sum((_decimal(item.get("price") or "0") * _decimal(item.get("qty") or "0") for item in opens), Decimal("0"))
         close_notional = sum((_decimal(item.get("price") or "0") * _decimal(item.get("qty") or "0") for item in closes), Decimal("0"))
         pnl = sum((_decimal(item.get("realizedPnl") or "0") for item in cycle), Decimal("0"))
+        entry_order_ids: list[str] = []
+        seen_ids: set[str] = set()
+        for item in opens:
+            raw_id = item.get("orderId")
+            if raw_id in (None, ""):
+                continue
+            oid = str(raw_id)
+            if oid in seen_ids:
+                continue
+            seen_ids.add(oid)
+            entry_order_ids.append(oid)
         return {
             "instId": inst_id,
             "direction": direction,
@@ -1099,6 +1121,7 @@ class BinanceExchange:
             "type": "1",
             "pnlRatio": None,
             "posId": str(cycle[0].get("orderId") or ""),
+            "entryOrderIds": entry_order_ids,
             "quantity_unit": "base",
         }
 

@@ -52,6 +52,8 @@ class FakeExchange:
         }
         self._candles = _trend_candles()
         self._oi = {"oi": "100", "oiCcy": "100", "oiUsd": "6500000", "ts": "1"}
+        self._ls = None
+        self._taker = None
 
     def ticker(self, inst_id):
         self.calls.append(("ticker", inst_id))
@@ -79,11 +81,11 @@ class FakeExchange:
 
     def long_short_ratio(self, inst_id):
         self.calls.append(("long_short_ratio", inst_id))
-        return None
+        return self._ls
 
     def taker_volume(self, inst_id):
         self.calls.append(("taker_volume", inst_id))
-        return None
+        return None if self._taker is None else dict(self._taker)
 
 
 class TestMarketDataServiceOffline(unittest.TestCase):
@@ -109,9 +111,15 @@ class TestMarketDataServiceOffline(unittest.TestCase):
         self.assertEqual(fetch_funding_rate("BTC-USDT-SWAP"), 0.01)
         self.assertEqual(fetch_open_interest("BTC-USDT-SWAP")["oi"], "100")
 
-    def test_binance_enrichment_stays_unavailable(self):
+    def test_missing_ls_and_taker_stay_unavailable(self):
         self.assertIsNone(fetch_long_short_ratio("BTC-USDT-SWAP"))
         self.assertIsNone(fetch_taker_volume("BTC-USDT-SWAP"))
+
+    def test_ls_and_taker_pass_through_when_adapter_has_them(self):
+        self.exchange._ls = 1.84
+        self.exchange._taker = {"buyVol": "200000", "sellVol": "50000"}
+        self.assertEqual(fetch_long_short_ratio("BTC-USDT-SWAP"), 1.84)
+        self.assertEqual(fetch_taker_volume("BTC-USDT-SWAP"), {"buyVol": 200000.0, "sellVol": 50000.0})
 
     def test_indicators_from_real_candles(self):
         inds = fetch_indicators_batch("BTC-USDT-SWAP", ["adx", "kdj", "bbwidth", "cmf"], bar="1H")
@@ -137,6 +145,11 @@ class TestMarketDataServiceOffline(unittest.TestCase):
     def test_format_oi_uses_base_times_price_not_quote_times_price(self):
         text = format_oi_usd({"oi": "2", "oiCcy": "2"}, last_price=65000)
         self.assertIn("万", text)
+
+    def test_format_oi_missing_or_zero_is_none(self):
+        self.assertIsNone(format_oi_usd(None))
+        self.assertIsNone(format_oi_usd({"oiUsd": "0"}))
+        self.assertIsNone(format_oi_usd({"oi": "0"}, last_price=65000))
 
 
 if __name__ == "__main__":

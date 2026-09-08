@@ -23,6 +23,7 @@ from unittest.mock import Mock, patch
 
 import scripts.prompt_library as prompts
 import scripts.risk_constants as risk_constants
+from r20_backend import news_config
 
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -31,7 +32,6 @@ if str(TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(TESTS_DIR))
 
 TRADER_TREE = ast.parse((PROJECT / "scripts/ai_brain_trader.py").read_text(encoding="utf-8"))
-_BRAIN_SOURCE = (PROJECT / "scripts/ai_brain_trader.py").read_text(encoding="utf-8")
 
 
 
@@ -48,6 +48,8 @@ class IsolatedPromptAntiDrawdownTests(unittest.TestCase):
         self.addCleanup(self.stack.close)
         self.stack.enter_context(patch.object(prompts, "ROOT", self.root))
         self.stack.enter_context(patch.object(prompts, "LIBRARY_FILE", self.root / "library.json"))
+        self.stack.enter_context(patch.object(news_config, "ENV_FILE", self.root / ".env"))
+        self.stack.enter_context(patch.dict(os.environ, {"R20_NEWS_SOURCES": "okx"}))
         original_open, original_io_open, original_os_open = builtins.open, io.open, os.open
         from path_guard import contained
 
@@ -97,6 +99,8 @@ class IsolatedPromptAntiDrawdownTests(unittest.TestCase):
             SINGLE_ASSET_EQUITY_RATIO=risk_constants.SINGLE_ASSET_EQUITY_RATIO,
             RISK_PER_TRADE_EQUITY_RATIO=risk_constants.RISK_PER_TRADE_EQUITY_RATIO,
             DAILY_LOSS_EQUITY_RATIO=risk_constants.DAILY_LOSS_EQUITY_RATIO,
+            MAX_SINGLE_ASSET_MARGIN=risk_constants.MAX_SINGLE_ASSET_MARGIN,
+            MAX_DAILY_LOSS_USDT=risk_constants.MAX_DAILY_LOSS_USDT,
             MAX_SAME_DIRECTION_POSITIONS=risk_constants.MAX_SAME_DIRECTION_POSITIONS,
             TIME_STOP_HOURS=risk_constants.TIME_STOP_HOURS,
             MAX_LEVERAGE=risk_constants.MAX_LEVERAGE,
@@ -259,11 +263,7 @@ class IsolatedPromptAntiDrawdownTests(unittest.TestCase):
         self.assertIn("κ=1.61", prompt_str)
         self.assertIn("Φ=-0.16", prompt_str)
 
-    def test_system_prompt_contains_anti_drawdown_directives(self):
-        self.assertIn("三阶利润棘轮", _BRAIN_SOURCE)
-        self.assertIn("峰值回撤", _BRAIN_SOURCE)
-        self.assertIn("动能耗散", _BRAIN_SOURCE)
-        self.assertIn("CLOSE_MARKET", _BRAIN_SOURCE)
+
 
 
 

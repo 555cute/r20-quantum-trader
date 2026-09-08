@@ -153,6 +153,122 @@ class LedgerAccountScopeTests(unittest.TestCase):
         self.assertTrue(history_fetch_incomplete(FakeIncomplete("no")))
         self.assertFalse(history_fetch_incomplete(RuntimeError("timeout")))
 
+    def _closed_history(self, **overrides):
+        row = {
+            "instId": "BTC-USDT-SWAP",
+            "direction": "long",
+            "openAvgPx": "100",
+            "closeAvgPx": "110",
+            "pnl": "10",
+            "fee": "-0.4",
+            "lever": "5",
+            "closeTotalPos": "0.1",
+            "cTime": "1700000000000",
+            "uTime": "1700003600000",
+            "type": "1",
+            "pnlRatio": "0.2",
+            "posId": "pos-1",
+        }
+        row.update(overrides)
+        return row
+
+    def _journal(self, **overrides):
+        rec = {
+            "name": "BTC",
+            "instId": "BTC-USDT-SWAP",
+            "posSide": "long",
+            "order_id": "1001",
+            "entryTime": "2023-11-16 00:00:00",
+            "snapshot": {"velocity": 1.2, "atr": 10},
+            "policy_version": "p1",
+            "policy_hash": "h1",
+            "strategy": "⚡ 趋势",
+            "status": "submitted",
+        }
+        rec.update(overrides)
+        return rec
+
+    def _write_journal(self, records):
+        (self.root / "signal_journal.json").write_text(json.dumps(records), encoding="utf-8")
+
+    def test_entry_order_ids_join_same_account_journal(self):
+        self._write_journal([
+            self._journal(order_id="1001", snapshot={"velocity": 1.2}),
+            self._journal(order_id="1002", snapshot={"velocity": 2.2}, strategy="scale"),
+        ])
+        result = ledger.build_lifecycle_ledger(FakeExchange(history=[
+            self._closed_history(entryOrderIds=["1001", "1002"]),
+        ]))
+        closed = result[0]
+        self.assertEqual(closed["status"], "closed")
+        self.assertEqual(closed["net_pnl"], 9.6)
+        self.assertEqual(closed["signal_snapshot"], {"velocity": 1.2})
+        self.assertEqual(closed["snapshot_source"], "journal_order_id")
+        self.assertEqual(closed["entry_order_id"], "1001")
+        self.assertEqual(closed["entryOrderIds"], ["1001", "1002"])
+        self.assertEqual(closed["scale_in_snapshots"][0]["order_id"], "1002")
+        self.assertEqual(closed["policy_version"], "p1")
+        self.assertEqual(closed["strategy"], "⚡ 趋势")
+        self.assertEqual(closed["instId"], "BTC-USDT-SWAP")
+        self.assertEqual(closed["posSide"], "long")
+
+    def test_submitted_journal_without_fills_is_not_snapshot(self):
+        self._write_journal([self._journal(entryTime="2023-11-14 22:13:20")])
+        result = ledger.build_lifecycle_ledger(FakeExchange(history=[self._closed_history()]))
+        self.assertNotIn("signal_snapshot", result[0])
+        self.assertNotEqual(result[0].get("snapshot_source"), "journal_order_id")
+
+    def test_wrong_pos_side_does_not_join_journal(self):
+        self._write_journal([self._journal(posSide="short")])
+        result = ledger.build_lifecycle_ledger(FakeExchange(history=[
+            self._closed_history(entryOrderIds=["1001"]),
+        ]))
+        self.assertNotIn("signal_snapshot", result[0])
+        self.assertEqual(result[0].get("entryOrderIds"), ["1001"])
+
+    def test_other_account_journal_is_not_read(self):
+        other = self.root / "other-account"
+        other.mkdir()
+        (other / "signal_journal.json").write_text(json.dumps([self._journal()]), encoding="utf-8")
+        result = ledger.build_lifecycle_ledger(FakeExchange(history=[
+            self._closed_history(entryOrderIds=["1001"]),
+        ]))
+        self.assertNotIn("signal_snapshot", result[0])
+
+    def test_okx_without_entry_order_ids_keeps_inline_only(self):
+        inline = {"velocity": 0.4}
+        result = ledger.build_lifecycle_ledger(FakeExchange(history=[
+            self._closed_history(signal_snapshot=inline),
+        ]))
+        self.assertEqual(result[0]["signal_snapshot"], inline)
+        self.assertEqual(result[0]["snapshot_source"], "inline")
+
+    def test_unmatched_first_fill_does_not_use_later_scale_in(self):
+        self._write_journal([self._journal(order_id="1002")])
+        result = ledger.build_lifecycle_ledger(FakeExchange(history=[
+            self._closed_history(entryOrderIds=["1001", "1002"]),
+        ]))
+        self.assertNotIn("signal_snapshot", result[0])
+
+    def test_refresh_preserves_existing_inline_snapshot(self):
+        first = ledger.build_lifecycle_ledger(FakeExchange(history=[
+            self._closed_history(signal_snapshot={"velocity": 0.7}),
+        ]))
+        closed_id = first[0]["id"]
+        self.assertEqual(first[0]["signal_snapshot"], {"velocity": 0.7})
+        second = ledger.build_lifecycle_ledger(FakeExchange(history=[self._closed_history()]))
+        preserved = next(row for row in second if row["id"] == closed_id)
+        self.assertEqual(preserved["signal_snapshot"], {"velocity": 0.7})
+        self.assertEqual(preserved["snapshot_source"], "inline")
+
+    def test_blank_order_ids_are_not_verifiable(self):
+        self._write_journal([self._journal(order_id="1001")])
+        result = ledger.build_lifecycle_ledger(FakeExchange(history=[
+            self._closed_history(entryOrderIds=["", None, "null"]),
+        ]))
+        self.assertNotIn("signal_snapshot", result[0])
+        self.assertNotIn("entryOrderIds", result[0])
+
 
 if __name__ == "__main__":
     unittest.main()

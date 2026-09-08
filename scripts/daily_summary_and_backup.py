@@ -78,14 +78,9 @@ def generate_daily_briefing_and_backup():
 
     # 3. Macro Sentiment & News
     news_file = os.path.join(DATA_DIR, "news_sentiment.json")
-    macro_env = "偏多震荡"
-    if os.path.exists(news_file):
-        try:
-            with open(news_file, "r", encoding="utf-8") as f:
-                n_data = json.load(f)
-                macro_env = n_data.get("macro_sentiment", "偏多震荡")
-        except Exception:
-            pass
+    from r20_backend.news_config import load_news_snapshot
+    n_data = load_news_snapshot(news_file)
+    macro_env = n_data.get("macro_sentiment") or "无可验证情绪数据"
 
     briefing_text = (
         f"📅 日期：{date_str}（北京时间）\n"

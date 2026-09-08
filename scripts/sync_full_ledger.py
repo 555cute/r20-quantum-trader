@@ -22,6 +22,7 @@ from scripts.instrument_pool import load_instruments
 DATA_DIR = os.path.join(WORKSPACE_DIR, "data")
 LEDGER_JSON_FILE = os.path.join(DATA_DIR, "trading_ledger.json")
 POSITION_TRACKER_FILE = os.path.join(DATA_DIR, "position_trackers.json")
+SIGNAL_JOURNAL_FILE = os.path.join(DATA_DIR, "signal_journal.json")
 TARGET_INSTRUMENTS = load_instruments()
 
 
@@ -37,6 +38,10 @@ def ledger_path() -> str:
 
 def tracker_path() -> str:
     return _path(POSITION_TRACKER_FILE, "position_trackers.json")
+
+
+def journal_path() -> str:
+    return _path(SIGNAL_JOURNAL_FILE, "signal_journal.json")
 
 
 def _load_json(path: str, default):
@@ -75,6 +80,132 @@ def _history_rows(raw):
 def _net_pnl(gross: float, fee: float) -> float:
     """pnl is realized only; fee is signed commission. Net = pnl + fee, never fee-in-pnl twice."""
     return round(gross + fee, 2)
+
+
+def _normalize_entry_order_ids(raw):
+    if not isinstance(raw, (list, tuple)):
+        return []
+    seen = []
+    for item in raw:
+        oid = str(item or "").strip()
+        if not oid or oid.lower() in {"none", "null"} or oid in seen:
+            continue
+        seen.append(oid)
+    return seen
+
+
+def _normalize_pos_side(value) -> str:
+    text = str(value or "").strip().lower()
+    if text in {"long", "多"}:
+        return "long"
+    if text in {"short", "空"}:
+        return "short"
+    return text
+
+
+def load_account_signal_journal(path: str | None = None):
+    """This account's submit journal. Not fill evidence; never reads another account."""
+    journal_file = path or journal_path()
+    raw = _load_json(journal_file, [])
+    if not isinstance(raw, list):
+        return []
+    return [rec for rec in raw if isinstance(rec, dict)]
+
+
+def match_journal_entry_evidence(journal, *, inst_id: str, pos_side: str, entry_order_ids):
+    """Bind the cycle's first real open order to this account's journal order_id/instId/posSide."""
+    order_ids = _normalize_entry_order_ids(entry_order_ids)
+    inst_id = str(inst_id or "").strip()
+    wanted_side = _normalize_pos_side(pos_side)
+    if not order_ids or not inst_id or wanted_side not in {"long", "short"}:
+        return None
+    by_order = {}
+    for rec in journal or []:
+        if not isinstance(rec, dict):
+            continue
+        oid = str(rec.get("order_id") or "").strip()
+        if not oid or oid.lower() in {"none", "null"}:
+            continue
+        rec_inst = str(rec.get("instId") or "").strip()
+        rec_side = _normalize_pos_side(rec.get("posSide") if rec.get("posSide") not in (None, "") else rec.get("side"))
+        if rec_inst != inst_id or rec_side != wanted_side:
+            continue
+        by_order.setdefault(oid, rec)
+    primary = by_order.get(order_ids[0])
+    if primary is None:
+        return None
+    snapshot = primary.get("snapshot") if isinstance(primary.get("snapshot"), dict) else None
+    scale_ins = []
+    for oid in order_ids[1:]:
+        rec = by_order.get(oid)
+        if rec is None:
+            continue
+        snap = rec.get("snapshot") if isinstance(rec.get("snapshot"), dict) else None
+        if snap is None:
+            continue
+        scale_ins.append({
+            "order_id": oid,
+            "snapshot": snap,
+            "entryTime": rec.get("entryTime"),
+            "strategy": rec.get("strategy"),
+        })
+    evidence = {
+        "signal_snapshot": snapshot,
+        "snapshot_source": "journal_order_id",
+        "entryOrderIds": order_ids,
+        "entry_order_id": order_ids[0],
+        "scale_in_snapshots": scale_ins,
+    }
+    if primary.get("strategy") not in (None, ""):
+        evidence["strategy"] = str(primary.get("strategy"))
+    if primary.get("policy_version") not in (None, ""):
+        evidence["policy_version"] = primary.get("policy_version")
+    if primary.get("policy_hash") not in (None, ""):
+        evidence["policy_hash"] = primary.get("policy_hash")
+    return evidence
+
+
+def closed_cycle_entry_evidence(history_row, journal):
+    """Verifiable entry evidence only. No time/name nearest guess."""
+    if not isinstance(history_row, dict):
+        return {}
+    inst_id = str(history_row.get("instId") or "").strip()
+    pos_side = _normalize_pos_side(history_row.get("direction") or history_row.get("posSide"))
+    order_ids = _normalize_entry_order_ids(history_row.get("entryOrderIds"))
+    matched = match_journal_entry_evidence(
+        journal, inst_id=inst_id, pos_side=pos_side, entry_order_ids=order_ids
+    )
+    if matched is not None:
+        return matched
+    evidence = {}
+    if order_ids:
+        evidence["entryOrderIds"] = order_ids
+    inline = history_row.get("signal_snapshot")
+    if isinstance(inline, dict):
+        evidence["signal_snapshot"] = inline
+        evidence["snapshot_source"] = "inline"
+    return evidence
+
+
+def _carry_closed_evidence(new_row, existing_row):
+    if not isinstance(new_row, dict) or not isinstance(existing_row, dict):
+        return new_row
+    if new_row.get("signal_snapshot") is None and isinstance(existing_row.get("signal_snapshot"), dict):
+        new_row["signal_snapshot"] = existing_row["signal_snapshot"]
+        if not new_row.get("snapshot_source"):
+            new_row["snapshot_source"] = existing_row.get("snapshot_source") or "inline"
+        if existing_row.get("strategy") not in (None, ""):
+            new_row["strategy"] = existing_row["strategy"]
+        for key in ("policy_version", "policy_hash", "entry_order_id", "scale_in_snapshots"):
+            if new_row.get(key) in (None, "", []) and existing_row.get(key) not in (None, "", []):
+                new_row[key] = existing_row[key]
+    if not new_row.get("entryOrderIds") and existing_row.get("entryOrderIds"):
+        new_row["entryOrderIds"] = existing_row["entryOrderIds"]
+    if not new_row.get("instId") and existing_row.get("instId"):
+        new_row["instId"] = existing_row["instId"]
+    if not new_row.get("posSide") and existing_row.get("posSide"):
+        new_row["posSide"] = existing_row["posSide"]
+    return new_row
 
 
 def build_lifecycle_ledger(exchange=None):
@@ -135,6 +266,7 @@ def build_lifecycle_ledger(exchange=None):
 
     pool_ids = {item["instId"] for item in TARGET_INSTRUMENTS}
     trades_lifecycle = []
+    journal = load_account_signal_journal()
 
     for p in pos_data:
         pos_sz = abs(float(p.get("pos", 0.0) or 0.0))
@@ -259,12 +391,16 @@ def build_lifecycle_ledger(exchange=None):
                     exit_reason = "🎯 目标止盈达成" if net_pnl > 3.0 else ("🛑 止损离场" if net_pnl < -1.0 else "🛡️ 保本平仓")
             else:
                 exit_reason = "🎯 目标止盈达成" if net_pnl > 3.0 else ("🛑 止损出场" if net_pnl < -1.0 else "🛡️ 保本平仓")
-        trades_lifecycle.append({
+        pos_side = "long" if side == "多" else "short"
+        evidence = closed_cycle_entry_evidence(h, journal)
+        row = {
             "id": f"pos_hist_{h.get('posId') or u_ts}_{inst}_{direction}_{u_ts}",
             "inst": inst,
+            "instId": inst_id,
+            "posSide": pos_side,
             "side": side,
             "lever": f"{lever:g}x" if lever > 0 else None,
-            "strategy": strat_tag,
+            "strategy": evidence.get("strategy") or strat_tag,
             "margin": margin_usdt,
             "sz": close_pos_sz,
             "quantity_unit": "base",
@@ -284,7 +420,12 @@ def build_lifecycle_ledger(exchange=None):
             "duration": duration_str,
             "status": "closed",
             "exit_reason": exit_reason,
-        })
+        }
+        for key in ("signal_snapshot", "snapshot_source", "entryOrderIds", "entry_order_id",
+                    "scale_in_snapshots", "policy_version", "policy_hash"):
+            if key in evidence:
+                row[key] = evidence[key]
+        trades_lifecycle.append(row)
 
     # Exchange history is windowed; refresh known cycles without deleting older ones.
     closed_by_id = {
@@ -293,7 +434,7 @@ def build_lifecycle_ledger(exchange=None):
     }
     for row in trades_lifecycle:
         if row.get("status") == "closed":
-            closed_by_id[row["id"]] = row
+            closed_by_id[row["id"]] = _carry_closed_evidence(row, closed_by_id.get(row["id"]))
     current_holdings = [row for row in trades_lifecycle if row.get("status") != "closed"]
     trades_lifecycle = current_holdings + sorted(
         closed_by_id.values(), key=lambda row: str(row.get("close_time") or ""), reverse=True

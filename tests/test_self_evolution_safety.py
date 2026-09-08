@@ -50,7 +50,8 @@ class SelfEvolutionSafetyTests(unittest.TestCase):
         for name in ("PROJECT_ROOT", "WORKSPACE_DIR", "DATA_DIR", "LOGS_DIR"):
             self.start_patch(patch.object(self.engine, name, str(self.root)))
         for name in ("LEDGER_JSON_FILE", "REPORT_JSON_FILE", "AI_DECISIONS_FILE", "AI_MEMORY_FILE",
-                     "AI_MEMORY_MD_FILE", "EVOLUTION_LAST_PROMPT_FILE", "LOG_FILE", "EVOLUTION_LOCK_FILE"):
+                     "AI_MEMORY_MD_FILE", "EVOLUTION_LAST_PROMPT_FILE", "LOG_FILE", "EVOLUTION_LOCK_FILE",
+                     "SIGNAL_JOURNAL_FILE"):
             self.start_patch(patch.object(self.engine, name, str(self.root / name)))
         for name in ("WORKSPACE_DIR", "DATA_DIR"):
             self.start_patch(patch.object(shield, name, self.root))
@@ -205,6 +206,173 @@ class SelfEvolutionSafetyTests(unittest.TestCase):
         report = self.run_cycle()
         self.assertEqual(report["core_lessons"], [])
         self.assertEqual(self.llm.call_args.kwargs["existing_memory_md"], "")
+
+
+class ClosedTradeEvidenceTests(unittest.TestCase):
+    def start_patch(self, patcher):
+        value = patcher.start()
+        self.addCleanup(patcher.stop)
+        return value
+
+    def setUp(self):
+        temporary = TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.network = self.start_patch(patch("socket.socket", side_effect=AssertionError("network forbidden")))
+        self.urlopen = self.start_patch(patch("urllib.request.urlopen", side_effect=AssertionError("HTTP forbidden")))
+        dependencies = {}
+        for name, attrs in {
+            "r20_backend.config": {"settings": None},
+            "instrument_pool": {"load_instruments": Mock(return_value=[{"name": "BTC"}])},
+            "prompt_library": {"active_profile": Mock(), "apply_module_layout": Mock()},
+            "r20_gateway.telemetry": {"ModelCallTelemetry": Mock()},
+            "qq_notifier": {"notify_evolution_report": Mock()},
+        }.items():
+            module = ModuleType(name)
+            module.__dict__.update(attrs)
+            dependencies[name] = module
+        self.start_patch(patch.dict(sys.modules, dependencies))
+        source = Path(__file__).resolve().parents[1] / "scripts" / "self_improvement_engine.py"
+        spec = importlib.util.spec_from_file_location("isolated_evolution_evidence", source)
+        self.engine = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.engine)
+        for name in ("PROJECT_ROOT", "WORKSPACE_DIR", "DATA_DIR", "LOGS_DIR"):
+            self.start_patch(patch.object(self.engine, name, str(self.root)))
+        self.ledger_path = self.root / "trading_ledger.json"
+        self.journal_path = self.root / "signal_journal.json"
+        self.start_patch(patch.object(self.engine, "LEDGER_JSON_FILE", str(self.ledger_path)))
+        self.start_patch(patch.object(self.engine, "SIGNAL_JOURNAL_FILE", str(self.journal_path)))
+        self.start_patch(patch.object(self.engine, "REPORT_JSON_FILE", str(self.root / "self_improvement_report.json")))
+        self.start_patch(patch.object(self.engine, "LOG_FILE", str(self.root / "self_improvement.log")))
+        self.start_patch(patch.object(self.engine, "EVOLUTION_LOCK_FILE", str(self.root / ".self_improvement.lock")))
+        self.start_patch(patch.object(self.engine, "log_msg"))
+        self.start_patch(patch.object(self.engine, "TARGET_INSTRUMENTS", ["BTC"]))
+
+        def guarded_open(original):
+            def checked(file, *args, **kwargs):
+                if not isinstance(file, int):
+                    self.assertTrue(contained(file, self.root), str(file))
+                return original(file, *args, **kwargs)
+            return checked
+
+        self.start_patch(patch("builtins.open", guarded_open(builtins.open)))
+        self.start_patch(patch("io.open", guarded_open(io.open)))
+
+    def _write_json(self, path, payload):
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+    def _closed_row(self, **overrides):
+        row = {
+            "id": "pos_hist_1_BTC_long_1",
+            "inst": "BTC",
+            "instId": "BTC-USDT-SWAP",
+            "posSide": "long",
+            "status": "closed",
+            "open_time": "2023-11-15 06:13:20",
+            "close_time": "2023-11-15 07:13:20",
+            "gross_pnl": 10.0,
+            "pnl": 10.0,
+            "net_pnl": 9.6,
+            "fee": -0.4,
+            "strategy": "⚡ 趋势",
+            "exit_reason": "止盈",
+        }
+        row.update(overrides)
+        return row
+
+    def _journal(self, **overrides):
+        rec = {
+            "name": "BTC",
+            "instId": "BTC-USDT-SWAP",
+            "posSide": "long",
+            "order_id": "1001",
+            "entryTime": "2023-11-16 00:00:00",
+            "snapshot": {"velocity": 1.2, "atr": 10},
+            "policy_version": "p1",
+            "policy_hash": "h1",
+            "strategy": "⚡ 趋势",
+            "status": "submitted",
+        }
+        rec.update(overrides)
+        return rec
+
+    def test_incomplete_ledger_returns_no_closed_trades(self):
+        self._write_json(self.ledger_path, [self._closed_row()])
+        self._write_json(self.root / "ledger_sync_status.json", {"incomplete": True, "status": "unavailable"})
+        self.assertEqual(self.engine.load_closed_trades(), [])
+
+    def test_holding_and_non_closed_are_not_learning_evidence(self):
+        self._write_json(self.ledger_path, [
+            self._closed_row(status="holding", net_pnl=-99),
+            self._closed_row(id="open-1", status="open", net_pnl=5),
+            self._closed_row(id="missing-status", status=None, net_pnl=5),
+            self._closed_row(id="ok", net_pnl=9.6),
+        ])
+        trades = self.engine.load_closed_trades()
+        self.assertEqual([t["net_pnl"] for t in trades], [9.6])
+
+    def test_evolution_uses_net_pnl_not_gross(self):
+        self._write_json(self.ledger_path, [self._closed_row(gross_pnl=10.0, pnl=10.0, net_pnl=9.6)])
+        trades = self.engine.load_closed_trades()
+        self.assertEqual(trades[0]["net_pnl"], 9.6)
+        self.assertNotEqual(trades[0]["net_pnl"], trades[0]["gross_pnl"])
+
+    def test_future_or_name_time_journal_is_not_entry_evidence(self):
+        self._write_json(self.ledger_path, [self._closed_row()])
+        self._write_json(self.journal_path, [self._journal()])
+        trades = self.engine.load_closed_trades()
+        self.assertEqual(len(trades), 1)
+        self.assertIsNone(trades[0]["entry_snapshot"])
+
+    def test_unfilled_submitted_journal_is_not_a_fill(self):
+        self._write_json(self.ledger_path, [self._closed_row()])
+        self._write_json(self.journal_path, [self._journal(entryTime="2023-11-15 06:13:20")])
+        trades = self.engine.load_closed_trades()
+        self.assertIsNone(trades[0]["entry_snapshot"])
+
+    def test_wrong_pos_side_or_inst_is_not_evidence(self):
+        self._write_json(self.ledger_path, [self._closed_row(entryOrderIds=["1001"])])
+        self._write_json(self.journal_path, [
+            self._journal(posSide="short"),
+            self._journal(order_id="1001", instId="ETH-USDT-SWAP", snapshot={"velocity": 9}),
+        ])
+        trades = self.engine.load_closed_trades()
+        self.assertIsNone(trades[0]["entry_snapshot"])
+
+    def test_first_entry_order_id_joins_account_journal(self):
+        self._write_json(self.ledger_path, [self._closed_row(entryOrderIds=["1001", "1002"])])
+        self._write_json(self.journal_path, [
+            self._journal(order_id="1001", snapshot={"velocity": 1.2}),
+            self._journal(order_id="1002", snapshot={"velocity": 2.2}, strategy="scale"),
+        ])
+        trades = self.engine.load_closed_trades()
+        self.assertEqual(trades[0]["entry_snapshot"], {"velocity": 1.2})
+        self.assertEqual(trades[0]["snapshot_source"], "journal_order_id")
+        self.assertEqual(trades[0]["scale_in_snapshots"][0]["snapshot"], {"velocity": 2.2})
+        self.assertEqual(trades[0]["policy_version"], "p1")
+
+    def test_scale_in_cannot_substitute_unmatched_first_order(self):
+        self._write_json(self.ledger_path, [self._closed_row(entryOrderIds=["999", "1001"])])
+        self._write_json(self.journal_path, [self._journal(order_id="1001")])
+        trades = self.engine.load_closed_trades()
+        self.assertIsNone(trades[0]["entry_snapshot"])
+
+    def test_inline_snapshot_kept_without_order_ids(self):
+        inline = {"velocity": 0.5}
+        self._write_json(self.ledger_path, [self._closed_row(signal_snapshot=inline, snapshot_source="inline")])
+        self._write_json(self.journal_path, [self._journal()])
+        trades = self.engine.load_closed_trades()
+        self.assertEqual(trades[0]["entry_snapshot"], inline)
+        self.assertEqual(trades[0]["snapshot_source"], "inline")
+
+    def test_incomplete_evolution_does_not_call_llm(self):
+        self._write_json(self.ledger_path, [self._closed_row()])
+        self._write_json(self.root / "ledger_sync_status.json", {"incomplete": True, "status": "unavailable"})
+        llm = self.start_patch(patch.object(self.engine, "call_llm_evolution_review"))
+        report = self.engine.run_self_evolution(force=True)
+        llm.assert_not_called()
+        self.assertTrue(report["incomplete_ledger"])
+        self.assertTrue(report["memory_preserved"])
 
 
 SAFE = "【合理经验】4H多头回踩均线支撑时开多"

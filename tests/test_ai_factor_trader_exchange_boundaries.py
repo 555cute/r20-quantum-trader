@@ -2,6 +2,8 @@
 No network, no credentials, injectable fake exchange only.
 """
 from __future__ import annotations
+import ast
+from contextlib import ExitStack
 
 import json
 import sys
@@ -16,6 +18,52 @@ sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT))
 
 import scripts.ai_factor_trader as aft
+from fastapi import HTTPException
+from r20_exchange import runtime as exchange_runtime
+
+_APP_TREE = ast.parse((ROOT / "r20_backend" / "app.py").read_text(encoding="utf-8"))
+
+
+class TraderConfigLockTests(unittest.TestCase):
+    def test_configuration_and_all_account_cycles_share_one_lock(self):
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
+            root = Path(directory)
+            for key in ("LEDGER_JSON_FILE", "POSITION_TRACKER_FILE", "STOP_COOLDOWN_FILE",
+                        "SIGNAL_JOURNAL_FILE", "TRADER_SLOT_FILE", "TRADING_STATE_FILE",
+                        "AI_POSITION_MANAGEMENT_FILE"):
+                stack.enter_context(patch.object(aft, key, str(root / key)))
+            stack.enter_context(patch.object(aft, "DATA_DIR", str(root)))
+            stack.enter_context(patch.object(aft, "TRADER_LOCK_FILE", str(root / ".ai_factor_trader.lock")))
+            stack.enter_context(patch.object(exchange_runtime, "DATA_DIR", root))
+            stack.enter_context(patch("scripts.okx_runtime._load_dotenv", return_value={
+                "R20_EXCHANGE": "binance", "R20_BINANCE_ENV": "demo",
+                "BINANCE_DEMO_API_KEY": "fixture-key", "BINANCE_DEMO_SECRET_KEY": "fixture-secret",
+            }))
+            namespace = {"DATA_DIR": root, "HTTPException": HTTPException}
+            nodes = [node for node in _APP_TREE.body if isinstance(node, ast.FunctionDef) and
+                     node.name in {"_acquire_trader_cycle_lock", "_release_trader_cycle_lock"}]
+            exec(compile(ast.Module(body=nodes, type_ignores=[]), "app-cycle-lock", "exec"), namespace)
+            acquire_config = namespace["_acquire_trader_cycle_lock"]
+            release_config = namespace["_release_trader_cycle_lock"]
+            ran = []
+
+            @aft.single_trader_cycle
+            def cycle():
+                ran.append(exchange_runtime.selected_environment().exchange)
+                with self.assertRaises(HTTPException) as blocked:
+                    acquire_config()
+                self.assertEqual(blocked.exception.status_code, 409)
+
+            handle = acquire_config()
+            try:
+                cycle()
+                self.assertEqual(ran, [])
+            finally:
+                release_config(handle)
+            cycle()
+            self.assertEqual(ran, ["binance"])
+            handle = acquire_config()
+            release_config(handle)
 
 
 class FakeExchange:
@@ -139,53 +187,77 @@ class PlanBaseQuantityTests(unittest.TestCase):
 
 
 class LeverageConfirmTests(unittest.TestCase):
-    def test_unconfirmed_leverage_blocks_place(self):
-        exchange = FakeExchange()
-        exchange.leverage_payload = {}
-        with patch.object(aft, "get_exchange", return_value=exchange), patch.object(aft, "selected_environment") as env:
-            env.return_value = MagicMock(simulated=False)
-            result = aft.submit_entry_with_confirmed_leverage(
-                "BTC-USDT-SWAP", "buy", "long",
-                {"name": "BTC", "price": 100000.0, "sz": Decimal("0.001"), "risk_per_trade_usd": 15,
-                 "lotSz": Decimal("0.001"), "minSz": Decimal("0.001"), "tickSz": Decimal("0.1"), "minNotional": Decimal("5"),
-                 "bidPx": 99999.0},
-                {"entry_price": 100000.0, "take_profit_price": 103000.0, "stop_loss_price": 98500.0},
-                "test", "🧠 AI", 100.0, 100.0, 10, False, 0.0, {}, [], set(), 3000.0, 1500.0, 1,
-            )
-        self.assertEqual(result, "rejected")
-        self.assertFalse(any(c[0] == "place_protected_limit_order" for c in exchange.calls))
-        self.assertTrue(any(c[0] == "set_leverage" for c in exchange.calls))
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.journal = Path(self.temp.name) / "signal_journal.json"
+        self.exchange = FakeExchange()
+        self.exchange.leverage_payload = {"lever": "5"}
+        for target, value in (
+            ("SIGNAL_JOURNAL_FILE", str(self.journal)),
+            ("get_exchange", lambda: self.exchange),
+            ("notify_trade_open", None),
+        ):
+            patcher = patch.object(aft, target, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
-    def test_confirmed_leverage_then_place_uses_same_budget(self):
-        exchange = FakeExchange()
-        exchange.leverage_payload = {"lever": "10"}
-        actions = []
-        available = Decimal("100")
-        planned_margin = Decimal("100")
-        confirmed = Decimal("10")
-        price = Decimal("100000")
-        with patch.object(aft, "get_exchange", return_value=exchange), patch.object(aft, "selected_environment") as env:
-            env.return_value = MagicMock(simulated=False)
-            result = aft.submit_entry_with_confirmed_leverage(
-                "BTC-USDT-SWAP", "buy", "long",
-                {"name": "BTC", "price": float(price), "sz": Decimal("0.02"), "risk_per_trade_usd": 15,
-                 "lotSz": Decimal("0.001"), "minSz": Decimal("0.001"), "tickSz": Decimal("0.1"), "minNotional": Decimal("5"),
-                 "bidPx": 100000.0},
-                {"entry_price": 100000.0, "take_profit_price": 106000.0, "stop_loss_price": 97000.0},
-                "test", "🧠 AI", float(available), float(planned_margin), 10, False, 0.0, {}, actions, set(), 6000.0, 3000.0, 1,
-            )
-        self.assertEqual(result, "accepted")
-        self.assertTrue(any(c[0] == "set_leverage" and c[2] == 10 for c in exchange.calls))
-        place = [c for c in exchange.calls if c[0] == "place_protected_limit_order"]
-        self.assertEqual(len(place), 1)
-        qty = aft._as_decimal(place[0][4])
-        notional = qty * price
-        max_notional = min(planned_margin, available) * confirmed
-        self.assertGreater(qty, Decimal("0"))
-        self.assertLess(qty, Decimal("1"))
-        self.assertLessEqual(notional, max_notional)
-        self.assertGreater(notional, available)
-        self.assertEqual(qty, aft.floor_to_step(qty, Decimal("0.001")))
+    def submit(self, *, side="long", price=100.0, entry=100.0, tp=130.0, sl=90.0,
+               available=100.0, planned=100.0, leverage=5, step="0.001", risk=15.0):
+        return aft.submit_entry_with_confirmed_leverage(
+            "BTC-USDT-SWAP", "buy" if side == "long" else "sell", side,
+            {"name": "BTC", "price": price, "sz": Decimal("10"), "risk_per_trade_usd": risk,
+             "lotSz": Decimal(step), "minSz": Decimal(step),
+             "tickSz": Decimal("0.1"), "minNotional": Decimal("5"),
+             "bidPx": price, "askPx": price,
+             "calculus": {"velocity": 0.3, "probability_theory": {"continuation_prob_pct": 70}}},
+            {"entry_price": entry, "take_profit_price": tp, "stop_loss_price": sl},
+            "test", "AI", available, planned, leverage, False, 0.0,
+            {}, [], set(), 30.0, 1.0, 1,
+        )
+
+    def test_unconfirmed_leverage_blocks_place(self):
+        self.exchange.leverage_payload = {}
+        self.assertEqual(self.submit(), "rejected")
+        self.assertFalse(any(c[0] == "place_protected_limit_order" for c in self.exchange.calls))
+        self.assertFalse(self.journal.exists())
+
+    def test_actual_limit_price_and_configured_margin_cap_bound_both_sides(self):
+        for side, tp, sl in (("long", 202.0, 199.0), ("short", 198.0, 201.0)):
+            with self.subTest(side=side):
+                self.exchange.calls.clear()
+                self.assertEqual(self.submit(side=side, entry=200.0, tp=tp, sl=sl, leverage=50), "accepted")
+                order = next(c for c in self.exchange.calls if c[0] == "place_protected_limit_order")
+                self.assertEqual(order[4], Decimal("0.500"))
+                self.assertEqual(order[5], 200.0)
+                self.assertEqual(next(c[2] for c in self.exchange.calls if c[0] == "set_leverage"), 5)
+        journal = json.loads(self.journal.read_text(encoding="utf-8"))
+        self.assertEqual([r["posSide"] for r in journal], ["long", "short"])
+        self.assertTrue(all(r["order_id"] == "ord-1" and r["status"] == "submitted" for r in journal))
+        self.assertEqual(journal[0]["snapshot"]["continuation_prob_pct"], 70)
+
+    def test_actual_stop_distance_limits_loss_not_default_atr_distance(self):
+        self.assertEqual(self.submit(entry=100.0, tp=160.0, sl=80.0), "accepted")
+        order = next(c for c in self.exchange.calls if c[0] == "place_protected_limit_order")
+        self.assertEqual(order[4], Decimal("0.100"))
+        self.assertEqual(order[4] * Decimal("20"), Decimal("2"))
+
+    def test_small_account_uses_fractional_base_and_unaffordable_order_is_not_inflated(self):
+        args = dict(price=80000.0, entry=80000.0, tp=83000.0, sl=79000.0, step="0.0001")
+        self.assertEqual(self.submit(available=20.0, **args), "accepted")
+        order = next(c for c in self.exchange.calls if c[0] == "place_protected_limit_order")
+        self.assertEqual(order[4], Decimal("0.0002"))
+        before = self.journal.read_bytes()
+        self.exchange.calls.clear()
+        self.assertEqual(self.submit(available=1.0, **args), "rejected")
+        self.assertFalse(any(c[0] == "place_protected_limit_order" for c in self.exchange.calls))
+        self.assertEqual(self.journal.read_bytes(), before)
+
+    def test_uncertain_submission_is_not_retried_or_recorded_as_entry_evidence(self):
+        self.exchange.place_error = RuntimeError("upstream timeout")
+        self.assertEqual(self.submit(), "uncertain")
+        self.assertEqual(sum(c[0] == "place_protected_limit_order" for c in self.exchange.calls), 1)
+        self.assertFalse(self.journal.exists())
 
 
 class ProtectionCoverageTests(unittest.TestCase):
@@ -262,6 +334,16 @@ class AccountStateIsolationTests(unittest.TestCase):
     def test_refresh_uses_state_path_not_legacy_data_root(self):
         with tempfile.TemporaryDirectory() as td:
             account_dir = Path(td) / "exchanges" / "binance" / "demo" / "abc"
+            saved_paths = {
+                key: getattr(aft, key) for key in (
+                    "LEDGER_JSON_FILE", "POSITION_TRACKER_FILE", "STOP_COOLDOWN_FILE",
+                    "SIGNAL_JOURNAL_FILE", "TRADER_LOCK_FILE", "TRADER_SLOT_FILE",
+                    "TRADING_STATE_FILE", "AI_POSITION_MANAGEMENT_FILE",
+                )
+            }
+            patcher = patch.multiple(aft, **saved_paths)
+            patcher.start()
+            self.addCleanup(patcher.stop)
             legacy = Path(td) / "legacy"
             legacy.mkdir()
             (legacy / "position_trackers.json").write_text(json.dumps({"LEGACY": 1}), encoding="utf-8")

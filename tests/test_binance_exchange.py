@@ -611,6 +611,7 @@ class BinanceExchangeTests(unittest.TestCase):
         self.assertEqual(rows[0]["fee"], "-0.04")
         self.assertEqual(rows[0]["direction"], "long")
         self.assertEqual(rows[0]["instId"], INST)
+        self.assertEqual(rows[0]["entryOrderIds"], ["8"])
 
     def test_positions_history_rejects_mid_window_add_reduce(self):
         install_defaults(self.session, hedge=True, positions=[{**LONG_POS, "positionAmt": "1"}])
@@ -641,6 +642,8 @@ class BinanceExchangeTests(unittest.TestCase):
         self.assertEqual(rows[0]["closeAvgPx"], "105")
         self.assertEqual(rows[0]["pnl"], "5")
         self.assertIsNone(rows[0]["lever"])
+        self.assertEqual(rows[1]["entryOrderIds"], ["1"])
+        self.assertEqual(rows[0]["entryOrderIds"], ["2"])
         self.assertEqual(sum(Decimal(row["fee"]) for row in rows), Decimal("-0.04"))
 
     def test_positions_history_bnb_fee_is_incomplete(self):
@@ -747,6 +750,56 @@ class BinanceExchangeTests(unittest.TestCase):
         with self.assertRaises(RuntimeError) as raised:
             self._exchange().positions_history()
         self.assertTrue(getattr(raised.exception, "incomplete", False))
+
+    def test_funding_rate_converts_last_funding_to_percent(self):
+        self.session.on("GET", "/fapi/v1/premiumIndex", {"symbol": "BTCUSDT", "lastFundingRate": "0.0001", "markPrice": "65000"})
+        self.assertEqual(self._exchange().funding_rate(INST), 0.01)
+
+    def test_open_interest_usd_is_base_times_mark(self):
+        self.session.on("GET", "/fapi/v1/openInterest", {"symbol": "BTCUSDT", "openInterest": "2", "time": 1})
+        self.session.on("GET", "/fapi/v1/premiumIndex", {"symbol": "BTCUSDT", "markPrice": "65000", "lastFundingRate": "0.0001"})
+        oi = self._exchange().open_interest(INST)
+        self.assertEqual(oi["oi"], "2")
+        self.assertEqual(oi["oiUsd"], "130000")
+
+    def test_long_short_ratio_reads_global_account_ratio(self):
+        self.session.on("GET", "/futures/data/globalLongShortAccountRatio", [{"symbol": "BTCUSDT", "longShortRatio": "1.84"}])
+        self.assertEqual(self._exchange().long_short_ratio(INST), 1.84)
+
+    def test_taker_volume_converts_base_contracts_to_usdt(self):
+        self.session.on("GET", "/futures/data/takerlongshortRatio", [{"buyVol": "2", "sellVol": "1", "buySellRatio": "2"}])
+        self.session.on("GET", "/fapi/v1/premiumIndex", {"symbol": "BTCUSDT", "markPrice": "65000"})
+        vol = self._exchange().taker_volume(INST)
+        self.assertEqual(vol["buyVol"], "130000")
+        self.assertEqual(vol["sellVol"], "65000")
+
+    def test_ls_and_taker_unavailable_on_failure(self):
+        self.assertIsNone(self._exchange().long_short_ratio(INST))
+        self.assertIsNone(self._exchange().taker_volume(INST))
+
+    def test_taker_unavailable_without_mark(self):
+        self.session.on("GET", "/futures/data/takerlongshortRatio", [{"buyVol": "2", "sellVol": "1"}])
+        self.session.on("GET", "/fapi/v1/premiumIndex", {"symbol": "BTCUSDT", "markPrice": "0"})
+        self.assertIsNone(self._exchange().taker_volume(INST))
+
+    def test_funding_rate_unavailable_without_last_rate(self):
+        self.session.on("GET", "/fapi/v1/premiumIndex", {"symbol": "BTCUSDT", "markPrice": "65000"})
+        with self.assertRaises(RuntimeError):
+            self._exchange().funding_rate(INST)
+
+    def test_positions_history_entry_order_ids_dedupe_opens_not_closes(self):
+        install_defaults(self.session, hedge=True)
+        self.session.on("GET", "/fapi/v1/income", [{"symbol": "BTCUSDT", "incomeType": "REALIZED_PNL", "income": "8", "asset": "USDT", "time": 4, "tranId": 1}])
+        self.session.on("GET", "/fapi/v1/userTrades", [
+            {"symbol": "BTCUSDT", "id": 1, "orderId": 8, "side": "BUY", "positionSide": "LONG", "price": "50000", "qty": "0.001", "realizedPnl": "0", "commission": "0.01", "commissionAsset": "USDT", "time": 1},
+            {"symbol": "BTCUSDT", "id": 2, "orderId": 8, "side": "BUY", "positionSide": "LONG", "price": "50000", "qty": "0.001", "realizedPnl": "0", "commission": "0.01", "commissionAsset": "USDT", "time": 2},
+            {"symbol": "BTCUSDT", "id": 3, "orderId": 10, "side": "BUY", "positionSide": "LONG", "price": "51000", "qty": "0.001", "realizedPnl": "0", "commission": "0.01", "commissionAsset": "USDT", "time": 3},
+            {"symbol": "BTCUSDT", "id": 4, "orderId": 11, "side": "SELL", "positionSide": "LONG", "price": "58000", "qty": "0.003", "realizedPnl": "8", "commission": "0.01", "commissionAsset": "USDT", "time": 4},
+        ])
+        rows = self._exchange().positions_history()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["entryOrderIds"], ["8", "10"])
+        self.assertNotIn("11", rows[0]["entryOrderIds"])
 
 if __name__ == "__main__":
     unittest.main()

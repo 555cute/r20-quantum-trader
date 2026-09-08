@@ -38,6 +38,7 @@ MANAGED_KEYS = {
     "R20_SETUP_TOKEN",
     "R20_ADMIN_TOKEN",
     "R20_MANUAL_CLOSE_ENABLED",
+    "R20_NEWS_SOURCES",
 }
 
 # 执行层风控参数（后台「风控管理页」写入，scripts/risk_constants.py 读取）

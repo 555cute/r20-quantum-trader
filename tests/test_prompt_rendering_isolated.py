@@ -22,6 +22,7 @@ from typing import Any, Dict, List
 from unittest.mock import Mock, patch
 
 import scripts.prompt_library as prompts
+from r20_backend import news_config
 # 纯配置数据模块（import 时只读 .env，早于 IO 栅栏安装）：风控提示词函数引用的
 # 全部大写常量由此注入沙箱命名空间，新增风控参数无需再改本测试。
 import scripts.risk_constants as risk_constants
@@ -42,6 +43,8 @@ class Sandbox(unittest.TestCase):
         self.addCleanup(self.stack.close)
         self.stack.enter_context(patch.object(prompts, "ROOT", self.root))
         self.stack.enter_context(patch.object(prompts, "LIBRARY_FILE", self.root / "library.json"))
+        self.stack.enter_context(patch.object(news_config, "ENV_FILE", self.root / ".env"))
+        self.stack.enter_context(patch.dict(os.environ, {"R20_NEWS_SOURCES": "okx"}))
         original_open, original_io_open, original_os_open = builtins.open, io.open, os.open
         from path_guard import contained
 

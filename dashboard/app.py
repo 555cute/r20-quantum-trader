@@ -23,6 +23,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from r20_backend.news_config import load_news_snapshot
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DASHBOARD_DIR = BASE_DIR
@@ -414,12 +415,7 @@ def _inject_local_data_into_stale(stale, positions, timestamp_full):
         stale["state_snapshot"] = state_data
 
     # News intelligence — local file, no OKX dependency
-    if os.path.exists(NEWS_SENTIMENT_FILE):
-        try:
-            with open(NEWS_SENTIMENT_FILE, "r", encoding="utf-8") as f:
-                stale["news_intelligence"] = json.load(f)
-        except Exception:
-            pass
+    stale["news_intelligence"] = load_news_snapshot(NEWS_SENTIMENT_FILE)
 
     # AI brain history — local file
     if os.path.exists(history_file()):
@@ -1169,13 +1165,7 @@ def update_cache_cycle():
     })
 
     # 10. Read News & AI Decisions History
-    news_data = {}
-    if os.path.exists(NEWS_SENTIMENT_FILE):
-        try:
-            with open(NEWS_SENTIMENT_FILE, "r", encoding="utf-8") as f:
-                news_data = json.load(f)
-        except Exception:
-            pass
+    news_data = load_news_snapshot(NEWS_SENTIMENT_FILE)
 
     ai_last_prompt_text = ""
     if os.path.exists(prompt_file()):
@@ -1329,8 +1319,9 @@ def update_cache_cycle():
 def serve_cached_dashboard():
     env = bind_account_scope()
     payload = CACHE_DATA or {}
+    news_data = load_news_snapshot(NEWS_SENTIMENT_FILE)
     if payload:
-        return _stamp_runtime(dict(payload), env)
+        return _stamp_runtime({**payload, "news_intelligence": news_data}, env)
     return _stamp_runtime({
         "timestamp": datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S") + " (北京时间)",
 
@@ -1343,6 +1334,7 @@ def serve_cached_dashboard():
         "trades": [],
         "logs": [],
         "snapshots": [],
+        "news_intelligence": news_data,
     }, env)
 
 

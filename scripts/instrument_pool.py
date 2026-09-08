@@ -378,7 +378,7 @@ def sync_instruments_state() -> None:
         except Exception:
             pass
 
-    # 3. Update data/news_sentiment.json to prune deleted coins and ensure active coins
+    # Prune deleted coins; adding a symbol cannot manufacture sentiment observations.
     news_file = ROOT / "data" / "news_sentiment.json"
     if news_file.exists():
         try:
@@ -386,22 +386,6 @@ def sync_instruments_state() -> None:
             if isinstance(news_data, dict) and "coins_sentiment" in news_data:
                 coins_dict = news_data["coins_sentiment"]
                 cleaned_coins = {c: s for c, s in coins_dict.items() if c in active_names}
-                for name in active_names:
-                    if name not in cleaned_coins:
-                        cleaned_coins[name] = {
-                            "ccy": name,
-                            "label": "neutral",
-                            "bullish_ratio": "50.0%",
-                            "bearish_ratio": "50.0%",
-                            "bullish_pct": "50.0%",
-                            "bearish_pct": "50.0%",
-                            "long_short_ratio": "1.00",
-                            "bull_cnt": 0,
-                            "bear_cnt": 0,
-                            "neutral_cnt": 0,
-                            "mentions": 0,
-                            "sentiment_factor_score": 0.0,
-                        }
                 news_data["coins_sentiment"] = cleaned_coins
                 news_file.write_text(json.dumps(news_data, ensure_ascii=False, indent=2), encoding="utf-8")
         except Exception:

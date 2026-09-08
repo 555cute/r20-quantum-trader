@@ -38,7 +38,7 @@ from r20_exchange.runtime import get_exchange, selected_environment, state_path
 from r20_backend.backup_secrets import credential_status as backup_credential_status, save_credentials as save_backup_credentials
 from r20_backend.prompt_views import EVOLUTION_USER_TEMPLATE, TRADING_USER_TEMPLATE, rendered_snapshots
 from r20_backend.settings_store import mask, remove_env, update_env
-from r20_backend import risk_config
+from r20_backend import risk_config, news_config
 from r20_backend.notifications import _env as notification_env, diagnose_channel, test_channel
 from r20_backend.audit import recent as recent_audit, record as audit_record
 from r20_backend.client_ip import client_ip as resolve_client_ip, user_agent as resolve_user_agent
@@ -814,11 +814,6 @@ def top_sitemap_xml() -> Response:
     return Response(content="""<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://www.r20.cn/</loc><priority>1.0</priority></url><url><loc>https://www.r20.cn/factors</loc><priority>0.9</priority></url><url><loc>https://www.r20.cn/news</loc><priority>0.8</priority></url><url><loc>https://www.r20.cn/lab</loc><priority>0.8</priority></url><url><loc>https://www.r20.cn/history</loc><priority>0.8</priority></url><url><loc>https://www.r20.cn/docs</loc><priority>0.9</priority></url></urlset>""", media_type="application/xml")
 
 
-@app.api_route("/trading", methods=["GET", "HEAD"], include_in_schema=False)
-@app.api_route("/factors", methods=["GET", "HEAD"], include_in_schema=False)
-@app.api_route("/news", methods=["GET", "HEAD"], include_in_schema=False)
-@app.api_route("/lab", methods=["GET", "HEAD"], include_in_schema=False)
-@app.api_route("/history", methods=["GET", "HEAD"], include_in_schema=False)
 @app.get("/docs/images/{img_name}", include_in_schema=False)
 def docs_image(img_name: str) -> FileResponse:
     """站内文档配图本地同源托管：避免国内无 VPN 时 raw.githubusercontent.com 外链加载失败。
@@ -833,6 +828,11 @@ def docs_image(img_name: str) -> FileResponse:
                         headers={"Cache-Control": "public, max-age=86400, s-maxage=604800"})
 
 
+@app.api_route("/trading", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route("/factors", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route("/news", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route("/lab", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route("/history", methods=["GET", "HEAD"], include_in_schema=False)
 @app.api_route("/docs", methods=["GET", "HEAD"], include_in_schema=False)
 @app.api_route("/docs/{subpath:path}", methods=["GET", "HEAD"], include_in_schema=False)
 def public_tab_spa_page(subpath: str = "") -> FileResponse:
@@ -1240,6 +1240,41 @@ def admin_exchange_runtime(x_r20_session: str | None = Header(default=None, alia
     refresh_settings()
     require_admin_header(x_r20_admin_token, x_r20_session)
     return _local_exchange_runtime()
+
+
+class NewsConfigUpdate(BaseModel):
+    sources: list[str]
+
+
+def _news_config_view() -> dict[str, Any]:
+    try:
+        sources = news_config.selected_sources()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "sources": list(sources),
+        "available_sources": news_config.SOURCE_OPTIONS,
+        "feed": news_config.load_news_snapshot(DATA_DIR / "news_sentiment.json", sources),
+        "effect": "来源选择已生效；已关闭来源的旧缓存不会再进入策略。下一次新闻任务按选择采集，也可手动采集。保存本身不联网。",
+    }
+
+
+@app.get("/api/v1/admin/news/config")
+def admin_news_config(x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
+    require_admin_header(x_r20_session=x_r20_session)
+    return _news_config_view()
+
+
+@app.put("/api/v1/admin/news/config")
+def update_news_config(payload: NewsConfigUpdate, x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
+    actor = require_superadmin(x_r20_session)
+    try:
+        sources = news_config.normalize_sources(payload.sources)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    update_env({"R20_NEWS_SOURCES": ",".join(sources)})
+    audit_record("news.config.update", "success", {"actor": actor["username"], "sources": list(sources)})
+    return {"updated": True, **_news_config_view()}
 
 
 class RiskConfigUpdate(BaseModel):
@@ -3352,6 +3387,8 @@ def cache(resource: str, x_r20_admin_token: str | None = Header(default=None), x
         raise HTTPException(status_code=404, detail="unknown cache resource")
     if resource == "ledger":
         require_admin_header(x_r20_admin_token, x_r20_session)
+    if resource == "sentiment":
+        return JSONResponse(news_config.load_news_snapshot(DATA_DIR / filename))
     return JSONResponse(read_json(filename, {} if resource != "ledger" else []))
 
 

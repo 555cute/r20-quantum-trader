@@ -21,10 +21,12 @@ from r20_exchange.runtime import get_exchange, state_path
 # 风控提示词与执行层共用单一事实源，防止「提示词口径 vs 代码口径」漂移
 from risk_constants import (
     DAILY_LOSS_EQUITY_RATIO,
+    MAX_DAILY_LOSS_USDT,
     MAX_LEVERAGE,
     MAX_MARGIN_EQUITY_RATIO,
     MAX_SAME_DIRECTION_POSITIONS,
     MAX_SCALE_IN_COUNT,
+    MAX_SINGLE_ASSET_MARGIN,
     MIN_ENTRY_CONFIDENCE,
     MIN_RISK_REWARD_RATIO,
     MIN_SCALE_IN_CONFIDENCE,
@@ -609,7 +611,7 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
 - ∫ 定积分能量学: {integral_line}
 - ⚅ 概率论与统计风险: {prob_line}
 - ∂ 分周期速度/加速度/冲量: {calc_tf_line or 'UNKNOWN'}
-- 衍生品博弈: 资金费率: {p['fundingRate'] if p.get('fundingRate') is not None else 'UNAVAILABLE'}% | OI未平仓: {p['oiUsd']} | 多空比: {p['lsRatio']} | 5M主动吃单净差: {p['takerNetUsd']}
+- 衍生品博弈: 资金费率: {f"{p['fundingRate']}%" if p.get('fundingRate') is not None else 'UNAVAILABLE'} | OI未平仓: {p['oiUsd']} | 多空比: {p['lsRatio']} | 5M主动吃单净差: {p['takerNetUsd']}
 - 15M K线(倒序12根 [O,H,L,C,V]): {k15}
 - 1H K线(倒序12根 [O,H,L,C,V]): {k1h}
 - 4H K线(倒序8根 [O,H,L,C,V]): {k4h}"""
@@ -701,19 +703,19 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
     # Damaged authority raises; empty authority never falls back to legacy text.
     memory_lessons = render_trading_memory(AI_MEMORY_MD_FILE, AI_MEMORY_FILE)
 
-    # Harvest Latest Live News & Multi-Coin Sentiment
+    # Source-filtered optional news; stale/absent news is not evidence of a calm market.
+    from r20_backend.news_config import load_news_snapshot
+    ns_data = load_news_snapshot(NEWS_SENTIMENT_FILE, limit=6)
     news_briefs = []
-    macro_env = "中性平衡"
-    if os.path.exists(NEWS_SENTIMENT_FILE):
-        try:
-            with open(NEWS_SENTIMENT_FILE, "r", encoding="utf-8") as f:
-                ns_data = json.load(f)
-                macro_env = ns_data.get("macro_sentiment", "中性平衡")
-                for n in ns_data.get("latest_news", [])[:6]:
-                    news_briefs.append(f"- [{n.get('time', '')}] {n.get('title', '')} ({n.get('summary', '')[:80]}...)")
-        except Exception:
-            pass
-
+    macro_env = ns_data.get("macro_sentiment") or "无可验证情绪数据"
+    if ns_data.get("sentiment_stale"):
+        macro_env += "（旧情绪缓存，不能视为当前市场结论）"
+    for n in ns_data.get("latest_news", []):
+        stale_note = "旧缓存，未验证最新状态" if n.get("stale") else "公开资讯"
+        news_briefs.append(
+            f"- [{n.get('time', '')}] [{n.get('source_name', '')} / {stale_note}] "
+            f"{n.get('title', '')} ({n.get('summary', '')[:80]})"
+        )
     news_text = "\n".join(news_briefs) if news_briefs else "无可验证新闻输入；不得据此推断市场平稳或不存在事件风险"
 
     avail_balance_str = f"{usdt_available:.2f} USDT" if usdt_available is not None and usdt_available >= 0 else "[MISSING_CONTEXT:account_balance]"
@@ -726,8 +728,8 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
         _m_lo = round(_eq * 0.03, 2)
         _m_hi = round(_eq * min(0.12, MAX_MARGIN_EQUITY_RATIO), 2)
         _m_strong = round(_eq * MAX_MARGIN_EQUITY_RATIO, 2)
-        _asset_cap = round(_eq * SINGLE_ASSET_EQUITY_RATIO, 2)
-        _daily_stop = round(max(_eq * DAILY_LOSS_EQUITY_RATIO, 1.0), 2)
+        _asset_cap = min(MAX_SINGLE_ASSET_MARGIN, max(round(_eq * SINGLE_ASSET_EQUITY_RATIO, 2), 1.0))
+        _daily_stop = min(MAX_DAILY_LOSS_USDT, max(round(_eq * DAILY_LOSS_EQUITY_RATIO, 2), 1.0))
         risk_budget_text = (
             f"【本周期风险预算｜按实际可用余额 {_eq:.2f} USDT 与后台风控配置自适应推导，严禁套用任何固定绝对金额】:\n"
             f"- 常规单笔保证金: {_m_lo} ~ {_m_hi} USDT (可用余额 3%~{min(0.12, MAX_MARGIN_EQUITY_RATIO):.0%})\n"
@@ -763,7 +765,7 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
 
 ======================= 【全网实时重大快讯与宏观情报】 =======================
 【宏观环境基调】: {macro_env}
-【最新核心资讯要闻（第三方OKX新闻增强，不作为所选交易所执行行情，缺失不阻塞）】:
+【最新核心资讯要闻（按用户选择的信息源采集，不作为交易指令或执行行情；缺失不阻塞）】:
 {news_text}
 
 ======================= 【账户当前持仓与风险敞口全景】 =======================
@@ -840,7 +842,7 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
         "risk_budget": risk_budget_text,
         "account_positions": f"【账户持仓概况】: {pos_summary}\n【当前活动在途持仓明细】:\n{active_pos_text}",
         "pending_orders": f"【当前在途挂单列表】:\n{pending_orders_text}",
-        "news_intelligence": f"【宏观环境基调】: {macro_env}\n【最新核心资讯要闻（第三方OKX新闻增强，不作为所选交易所执行行情，缺失不阻塞）】:\n{news_text}",
+        "news_intelligence": f"【宏观环境基调】: {macro_env}\n【最新核心资讯要闻（按用户选择的信息源采集，不作为交易指令或执行行情；缺失不阻塞）】:\n{news_text}",
         "trading_memory": memory_lessons.strip(),
         "market_matrix": all_market_str,
     }
@@ -860,7 +862,12 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
         runtime_context_out.update(runtime_vars)
         if policy_snapshot:
             runtime_context_out["policy_snapshot"] = policy_snapshot
-    return apply_module_layout(prompt, profile, "trading_user", f"{profile.get('name', '稳健')}交易用户提示词模板", context=runtime_vars)
+    rendered = apply_module_layout(prompt, profile, "trading_user", f"{profile.get('name', '稳健')}交易用户提示词模板", context=runtime_vars)
+    # Execution limits are live account state, not an optional profile preference.
+    # Older/custom base modules can replace the time/balance group and omit this state.
+    if risk_budget_text not in rendered:
+        rendered = f"{risk_budget_text}\n\n{rendered}"
+    return rendered
 
 def validate_and_filter_decision(p: Dict[str, Any], d_item: Dict[str, Any], active_inst_ids: set, active_position_sides: Dict[str, str]) -> tuple[str, str, float]:
     """
@@ -990,7 +997,7 @@ def assemble_decision_cache(
                 "askPx": p.get("askPx"),
                 "chg24h": p.get("chg24h")
             },
-            "raw_funding_rate": f"{p['fundingRate']}%" if p.get('fundingRate') else "--",
+            "raw_funding_rate": f"{p['fundingRate']}%" if p.get('fundingRate') is not None else "--",
             "raw_oi": p.get('oiUsd') or "--",
             "raw_taker_vol": p.get('takerNetUsd') or "--",
             "raw_ls_ratio": str(p.get('lsRatio')) if p.get('lsRatio') is not None else "--"

@@ -40,8 +40,10 @@ AI_MEMORY_MD_FILE = os.path.join(DATA_DIR, "AI_TRADING_MEMORY.md")
 EVOLUTION_LAST_PROMPT_FILE = os.path.join(DATA_DIR, "self_improvement_last_prompt.txt")
 LOG_FILE = os.path.join(LOGS_DIR, "self_improvement.log")
 EVOLUTION_LOCK_FILE = os.path.join(DATA_DIR, ".self_improvement.lock")
+SIGNAL_JOURNAL_FILE = os.path.join(DATA_DIR, "signal_journal.json")
 _LEDGER_DEFAULT = LEDGER_JSON_FILE
 _REPORT_DEFAULT = REPORT_JSON_FILE
+_JOURNAL_DEFAULT = SIGNAL_JOURNAL_FILE
 
 
 def _ledger_file() -> str:
@@ -58,10 +60,23 @@ def _report_file() -> str:
     return str(state_path("self_improvement_report.json"))
 
 
+def _journal_file() -> str:
+    if SIGNAL_JOURNAL_FILE != _JOURNAL_DEFAULT:
+        return SIGNAL_JOURNAL_FILE
+    from r20_exchange.runtime import state_path
+    return str(state_path("signal_journal.json"))
+
+
 
 def _ledger_incomplete() -> bool:
     if LEDGER_JSON_FILE != _LEDGER_DEFAULT:
-        return False
+        status_path = os.path.join(os.path.dirname(LEDGER_JSON_FILE), "ledger_sync_status.json")
+        try:
+            with open(status_path, "r", encoding="utf-8") as handle:
+                status = json.load(handle)
+            return bool(isinstance(status, dict) and (status.get("incomplete") or status.get("status") == "unavailable"))
+        except Exception:
+            return False
     from r20_backend.account_paths import ledger_is_incomplete
     return ledger_is_incomplete()
 
@@ -71,6 +86,7 @@ from r20_backend.file_lock import acquire, release
 from instrument_pool import load_instruments
 from prompt_library import active_profile, apply_module_layout
 from r20_gateway.telemetry import ModelCallTelemetry
+from scripts.sync_full_ledger import match_journal_entry_evidence
 TARGET_INSTRUMENTS = [item["name"] for item in load_instruments()]
 
 def atomic_write_json(path: str, payload: Any) -> None:
@@ -142,36 +158,29 @@ def get_cpa_client_config() -> Tuple[str, str]:
         os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY") or "",
     )
 
+
 def load_signal_journal():
-    """读取开仓时刻的数理快照日志，按标的分组，供平仓台账 join 真实因果证据。"""
-    journal_file = os.path.join(DATA_DIR, "signal_journal.json")
-    by_inst = {}
+    """Account-scoped submit journal. Not fill evidence; never reads another account."""
+    journal_file = _journal_file()
     if not os.path.exists(journal_file):
-        return by_inst
+        return []
     try:
         with open(journal_file, "r", encoding="utf-8") as f:
-            for rec in json.load(f):
-                inst = str(rec.get("name") or rec.get("inst") or "")
-                if inst:
-                    by_inst.setdefault(inst, []).append(rec)
+            raw = json.load(f)
     except Exception as e:
         log_msg(f"读取 signal_journal 异常: {e}")
-    return by_inst
+        return []
+    if not isinstance(raw, list):
+        return []
+    return [rec for rec in raw if isinstance(rec, dict)]
 
 
-def _match_snapshot(journal_by_inst, inst, open_time):
-    """按开仓时间就近匹配（不晚于开仓时间的最后一条）开仓快照。"""
-    candidates = journal_by_inst.get(inst) or []
-    if not candidates or not open_time:
-        return None
-    best = None
-    for rec in candidates:
-        if str(rec.get("entryTime") or "") <= str(open_time):
-            if best is None or str(rec.get("entryTime") or "") > str(best.get("entryTime") or ""):
-                best = rec
-    if best is None and candidates:
-        best = candidates[0]
-    return (best or {}).get("snapshot")
+
+
+def _closed_net_pnl(trade: Dict[str, Any]) -> float:
+    if "net_pnl" in trade and trade.get("net_pnl") is not None and trade.get("net_pnl") != "":
+        return float(trade.get("net_pnl") or 0.0)
+    return float(trade.get("pnl", 0.0) or 0.0)
 
 
 def load_closed_trades():
@@ -196,7 +205,7 @@ def load_closed_trades():
         except Exception:
             pass
 
-    journal_by_inst = load_signal_journal()
+    journal_records = load_signal_journal()
     closed_trades = []
     path = _ledger_file()
     if os.path.exists(path):
@@ -204,7 +213,7 @@ def load_closed_trades():
             with open(path, "r", encoding="utf-8") as f:
                 t_list = json.load(f)
                 for t in t_list:
-                    if t.get("status") == "holding":
+                    if not isinstance(t, dict) or t.get("status") != "closed":
                         continue
 
                     c_time = str(t.get("close_time") or t.get("time") or "")
@@ -214,11 +223,42 @@ def load_closed_trades():
                     inst = str(t.get("inst") or t.get("name") or "OTHER")
                     if inst not in TARGET_INSTRUMENTS:
                         continue
-                    pnl = float(t.get("pnl", 0.0) or 0.0)
-                    gross = float(t.get("gross_pnl", pnl) or pnl)
+                    net = _closed_net_pnl(t)
+                    gross = float(t.get("gross_pnl", net) or net)
                     fee = abs(float(t.get("fee", 0.0) or 0.0))
                     strat = str(t.get("strategy") or "⚡ 趋势")
                     reason = str(t.get("exit_reason") or t.get("remark") or "")
+                    snapshot = t.get("signal_snapshot")
+                    if not isinstance(snapshot, dict):
+                        snapshot = t.get("entry_snapshot") if isinstance(t.get("entry_snapshot"), dict) else None
+                    source = t.get("snapshot_source")
+                    scale_ins = t.get("scale_in_snapshots") if isinstance(t.get("scale_in_snapshots"), list) else []
+                    policy_version = t.get("policy_version") or ""
+                    policy_hash = t.get("policy_hash") or ""
+                    pos_raw = t.get("posSide") or t.get("side")
+                    pos_key = str(pos_raw or "").strip().lower()
+                    pos_side = pos_key if pos_key in {"long", "short"} else ""
+                    if snapshot is None:
+                        inst_id = str(t.get("instId") or "").strip()
+                        if not inst_id and inst and inst != "OTHER":
+                            inst_id = f"{inst}-USDT-SWAP"
+                        matched = match_journal_entry_evidence(
+                            journal_records,
+                            inst_id=inst_id,
+                            pos_side=pos_raw,
+                            entry_order_ids=t.get("entryOrderIds"),
+                        )
+                        if matched:
+                            snap = matched.get("signal_snapshot")
+                            snapshot = snap if isinstance(snap, dict) else None
+                            source = matched.get("snapshot_source")
+                            scale_ins = matched.get("scale_in_snapshots") or []
+                            if matched.get("strategy"):
+                                strat = matched["strategy"]
+                            if matched.get("policy_version") not in (None, ""):
+                                policy_version = matched["policy_version"]
+                            if matched.get("policy_hash") not in (None, ""):
+                                policy_hash = matched["policy_hash"]
 
                     closed_trades.append({
                         "inst": inst,
@@ -228,9 +268,14 @@ def load_closed_trades():
                         "margin": t.get("margin", "--"),
                         "gross_pnl": round(gross, 2),
                         "fee": round(fee, 2),
-                        "net_pnl": round(pnl, 2),
+                        "net_pnl": round(net, 2),
                         "exit_reason": reason,
-                        "entry_snapshot": t.get("signal_snapshot") or _match_snapshot(journal_by_inst, inst, t.get("open_time")),
+                        "entry_snapshot": snapshot,
+                        "snapshot_source": source,
+                        "scale_in_snapshots": scale_ins,
+                        "policy_version": policy_version,
+                        "policy_hash": policy_hash,
+                        "posSide": pos_side if pos_side in {"long", "short"} else "",
                     })
         except Exception as e:
             log_msg(f"读取交易台账异常: {e}")

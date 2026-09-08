@@ -24,7 +24,8 @@ if str(_PROJECT_ROOT) not in sys.path:
 # 独立运行（cron/手动）时也要拿到 .env 里的最新风控配置；backend 调度路径下重复加载无害。
 try:
     from r20_backend.config import load_dotenv as _load_dotenv
-    _load_dotenv(_PROJECT_ROOT / ".env")
+    from r20_backend.config_path import env_file_path
+    _load_dotenv(env_file_path(_PROJECT_ROOT))
 except Exception:
     pass
 
