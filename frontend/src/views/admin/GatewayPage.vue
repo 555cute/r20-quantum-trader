@@ -77,13 +77,13 @@ onMounted(load)
 <template>
   <div class="space-y-4">
     <div class="flex items-center justify-between">
-      <p class="text-xs text-[#707E94] font-mono">调度任务、事件投递队列与死信重放；Gateway 仅记录无内容遥测。</p>
-      <span class="text-[10px] font-mono text-blue-400 bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20">日常运行 · 4/4</span>
+      <p class="text-xs text-[var(--text-faint)] font-mono">调度任务、事件投递队列与死信重放；Gateway 仅记录无内容遥测。</p>
+      <span class="text-[11px] font-mono text-blue-400 bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20">日常运行 · 4/4</span>
     </div>
 
     <div v-if="bannerMsg" class="p-3 rounded-lg text-xs font-mono border" :class="bannerMsg.type === 'ok' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-rose-500/10 border-rose-500/20 text-rose-400'">{{ bannerMsg.text }}</div>
 
-    <div v-if="loading" class="py-12 text-center text-xs font-mono text-[#707E94]"><RefreshCw class="w-5 h-5 animate-spin inline mr-1.5 text-blue-400" />正在加载网关状态...</div>
+    <div v-if="loading" class="py-12 text-center text-xs font-mono text-[var(--text-faint)]"><RefreshCw class="w-5 h-5 animate-spin inline mr-1.5 text-blue-400" />正在加载网关状态...</div>
 
     <template v-else-if="gw">
       <!-- Worker & Stats Cards -->
@@ -91,22 +91,22 @@ onMounted(load)
         <div class="rounded-xl border p-4 shadow-xs transition-colors" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
           <div class="flex items-center space-x-2 text-[11px] font-mono mb-2" style="color: var(--text-muted);"><Server class="w-4 h-4 text-emerald-500" /><span>Gateway 进程</span></div>
           <div class="text-lg font-black font-mono" :class="gw.running ? 'text-emerald-500' : 'text-rose-500'">{{ gw.running ? 'ONLINE' : 'OFFLINE' }}</div>
-          <div class="text-[10px] font-mono mt-1" style="color: var(--text-faint);">PID {{ gw.pid || '--' }} · v{{ gw.version }}</div>
+          <div class="text-[11px] font-mono mt-1" style="color: var(--text-faint);">PID {{ gw.pid || '--' }} · v{{ gw.version }}</div>
         </div>
         <div class="rounded-xl border p-4 shadow-xs transition-colors" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
           <div class="flex items-center space-x-2 text-[11px] font-mono mb-2" style="color: var(--text-muted);"><Zap class="w-4 h-4 text-blue-500" /><span>投递队列</span></div>
           <div class="text-lg font-black font-mono num-tabular" style="color: var(--text-main);">{{ deliveredCount }}<span class="text-xs" style="color: var(--text-muted);"> / {{ deliveryTotal }}</span></div>
-          <div class="text-[10px] font-mono mt-1" style="color: var(--text-faint);">待处理 {{ gw.stats?.pending ?? 0 }} · 重试 {{ gw.stats?.retry ?? 0 }}</div>
+          <div class="text-[11px] font-mono mt-1" style="color: var(--text-faint);">待处理 {{ gw.stats?.pending ?? 0 }} · 重试 {{ gw.stats?.retry ?? 0 }}</div>
         </div>
         <div class="rounded-xl border p-4 shadow-xs transition-colors" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
           <div class="flex items-center space-x-2 text-[11px] font-mono mb-2" style="color: var(--text-muted);"><AlertTriangle class="w-4 h-4 text-amber-500" /><span>死信 / 关键事件</span></div>
           <div class="text-lg font-black font-mono num-tabular" :class="(gw.stats?.dead ?? 0) > 0 ? 'text-rose-500' : 'text-emerald-500'">{{ gw.stats?.dead ?? 0 }}<span class="text-xs" style="color: var(--text-muted);"> / {{ gw.event_health?.critical_total ?? 0 }}</span></div>
-          <div class="text-[10px] font-mono mt-1" style="color: var(--text-faint);">关键未达 {{ gw.event_health?.critical_unmet ?? 0 }} · 失败 {{ gw.event_health?.critical_failed ?? 0 }}</div>
+          <div class="text-[11px] font-mono mt-1" style="color: var(--text-faint);">关键未达 {{ gw.event_health?.critical_unmet ?? 0 }} · 失败 {{ gw.event_health?.critical_failed ?? 0 }}</div>
         </div>
         <div class="rounded-xl border p-4 shadow-xs transition-colors" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
           <div class="flex items-center space-x-2 text-[11px] font-mono mb-2" style="color: var(--text-muted);"><Clock class="w-4 h-4 text-purple-500" /><span>调度任务</span></div>
           <div class="text-lg font-black font-mono num-tabular" style="color: var(--text-main);">{{ gw.scheduler?.jobs?.length ?? 0 }}</div>
-          <div class="text-[10px] font-mono mt-1" :class="overdueCount > 0 ? 'text-rose-500' : 'text-emerald-500'">{{ overdueCount > 0 ? overdueCount + ' 个任务逾期!' : '无逾期任务' }}</div>
+          <div class="text-[11px] font-mono mt-1" :class="overdueCount > 0 ? 'text-rose-500' : 'text-emerald-500'">{{ overdueCount > 0 ? overdueCount + ' 个任务逾期!' : '无逾期任务' }}</div>
         </div>
       </div>
 
@@ -148,7 +148,7 @@ onMounted(load)
         <div class="px-4 py-3 border-b flex items-center justify-between" style="border-color: var(--border-subtle); background-color: var(--bg-card-subtle);">
           <div class="flex items-center space-x-2">
             <h2 class="text-xs font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">事件投递队列 (最近 50 条)</h2>
-            <span class="text-[10px] font-mono px-2 py-0.2 rounded border font-bold" style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);">
+            <span class="text-[11px] font-mono px-2 py-0.2 rounded border font-bold" style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);">
               {{ gw.deliveries?.length || 0 }} 记录
             </span>
           </div>
@@ -179,10 +179,10 @@ onMounted(load)
                 <td class="py-2.5 px-3 num-tabular" style="color: var(--text-muted);">{{ d.attempts ?? d.attempt_count ?? 1 }}</td>
                 <td class="py-2.5 px-3 num-tabular" style="color: var(--text-faint);">{{ d.created_at || d.time || '--' }}</td>
                 <td class="py-2.5 px-4 text-right">
-                  <button v-if="d.status === 'dead'" @click="replayDelivery(d.id)" class="flex items-center space-x-1 ml-auto px-2 py-1 rounded-md border text-[10px] font-mono cursor-pointer transition-colors" style="background-color: var(--color-warn-bg); border-color: var(--color-warn-border); color: var(--color-warn);">
+                  <button v-if="d.status === 'dead'" @click="replayDelivery(d.id)" class="flex items-center space-x-1 ml-auto px-2 py-1 rounded-md border text-[11px] font-mono cursor-pointer transition-colors" style="background-color: var(--color-warn-bg); border-color: var(--color-warn-border); color: var(--color-warn);">
                     <RotateCcw class="w-3 h-3" /><span>重放</span>
                   </button>
-                  <span v-else class="text-[10px]" style="color: var(--text-faint);">--</span>
+                  <span v-else class="text-[11px]" style="color: var(--text-faint);">--</span>
                 </td>
               </tr>
               <tr v-if="!gw.deliveries || gw.deliveries.length === 0">

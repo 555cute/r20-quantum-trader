@@ -133,7 +133,7 @@ async function handleLogin() {
           </button>
         </div>
 
-        <p class="mt-4 text-[10px] font-mono leading-relaxed" style="color: var(--text-faint);">
+        <p class="mt-4 text-[11px] font-mono leading-relaxed" style="color: var(--text-faint);">
           {{ isEn ? 'Default account: admin. Automatically locks for 15 minutes after 5 consecutive failures. All login attempts and IPs are permanently recorded in audit logs.' : '默认账号为 admin；连续失败 5 次会自动临时锁定 15 分钟。所有登录动作与 IP 将持久化记录于操作审计日志中。' }}
         </p>
       </div>

@@ -247,8 +247,8 @@ onMounted(load)
 <template>
   <div class="space-y-4">
     <div class="flex items-center justify-between">
-      <p class="text-xs text-[#707E94] font-mono">支持本地/云端全量数据灾备、备份打包直接下载、本地备份上传与一键全量恢复。</p>
-      <span class="text-[10px] font-mono text-blue-400 bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20">集成与保障 · 2/3</span>
+      <p class="text-xs text-[var(--text-faint)] font-mono">支持本地/云端全量数据灾备、备份打包直接下载、本地备份上传与一键全量恢复。</p>
+      <span class="text-[11px] font-mono text-blue-400 bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20">集成与保障 · 2/3</span>
     </div>
 
     <div v-if="bannerMsg" class="p-3 rounded-lg text-xs font-mono border" :class="bannerMsg.type === 'ok' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : bannerMsg.type === 'warn' ? 'bg-amber-500/10 border-amber-500/20 text-amber-400' : 'bg-rose-500/10 border-rose-500/20 text-rose-400'">
@@ -329,8 +329,8 @@ onMounted(load)
             <input ref="uploadFileInput" type="file" accept=".tar.gz,.tgz" class="hidden" @change="onFileSelected" />
             <button @click="triggerUpload" :disabled="busy !== ''" class="flex items-center space-x-1 px-3 py-2 rounded-lg border text-xs font-mono font-bold cursor-pointer disabled:opacity-40 transition-all shadow-xs" style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--color-brand);"><Upload class="w-3.5 h-3.5" /><span>{{ busy === 'upload' ? '正在上传...' : '上传备份包' }}</span></button>
           </template>
-          <span v-else class="text-[10px] font-mono" style="color: var(--text-faint);">只读视图 · 修改需超级管理员登录</span>
-          <span class="ml-auto text-[10px] font-mono font-bold" :class="simple.configured ? 'text-emerald-500' : 'text-amber-500'">{{ simple.configured ? '● 目标已配置' : '● 目标未配置' }}</span>
+          <span v-else class="text-[11px] font-mono" style="color: var(--text-faint);">只读视图 · 修改需超级管理员登录</span>
+          <span class="ml-auto text-[11px] font-mono font-bold" :class="simple.configured ? 'text-emerald-500' : 'text-amber-500'">{{ simple.configured ? '● 目标已配置' : '● 目标未配置' }}</span>
         </div>
       </div>
 
@@ -343,7 +343,7 @@ onMounted(load)
             <div class="flex justify-between border rounded-lg px-3 py-2" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);"><span style="color: var(--text-muted);">状态</span><span class="text-emerald-500 font-bold">{{ simple.latest.status || 'success' }}</span></div>
           </div>
           <div v-else class="py-6 text-center text-xs font-mono" style="color: var(--text-faint);">尚无匹配的灾备清单记录</div>
-          <div class="text-[10px] font-mono mt-3 leading-relaxed" style="color: var(--text-faint);">{{ status?.schedule }}</div>
+          <div class="text-[11px] font-mono mt-3 leading-relaxed" style="color: var(--text-faint);">{{ status?.schedule }}</div>
         </div>
 
         <!-- Local archives -->
@@ -353,7 +353,7 @@ onMounted(load)
               <Archive class="w-4 h-4 text-cyan-400" />
               <h2 class="text-xs font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">备份归档清单 ({{ status?.local_archives?.length ?? 0 }})</h2>
             </div>
-            <span class="text-[10px] font-mono" style="color: var(--text-faint);">支持直接下载与一键恢复</span>
+            <span class="text-[11px] font-mono" style="color: var(--text-faint);">支持直接下载与一键恢复</span>
           </div>
           <div class="table-scroll-container">
             <table v-if="status?.local_archives?.length" class="w-full text-left text-xs font-mono whitespace-nowrap">

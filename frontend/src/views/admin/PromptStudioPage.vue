@@ -345,7 +345,7 @@ onMounted(loadLib)
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-1">
       <div class="flex items-center space-x-2">
         <Sparkles class="w-4 h-4 text-blue-400 shrink-0" />
-        <p class="text-xs text-[#8A99AD] font-sans">
+        <p class="text-xs text-[var(--text-muted)] font-sans">
           核心交易消息管线自由编排，支持标准语义变量插槽。右侧仅对照模板拼接文本与源码，不代表实时发送消息。
         </p>
       </div>
@@ -403,13 +403,13 @@ onMounted(loadLib)
         v-for="v in templateVariables"
         :key="v.key"
         @click="insertVarIntoActiveModule(v.key)"
-        class="flex items-center space-x-1 px-2 py-1 rounded-lg border text-[10px] transition-all cursor-pointer shadow-xs hover:border-[var(--color-brand)]"
+        class="flex items-center space-x-1 px-2 py-1 rounded-lg border text-[11px] transition-all cursor-pointer shadow-xs hover:border-[var(--color-brand)]"
         style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-main);"
         :title="`${v.description}\n点击插入到正在编辑的模块 #${activeEditingIdx + 1}`"
       >
         <span class="font-bold" style="color: var(--color-brand);">+</span>
         <span class="font-sans font-medium">{{ v.label }}</span>
-        <code class="text-[9px] ml-0.5 font-mono opacity-60">&#123;&#123;{{ v.key }}&#125;&#125;</code>
+        <code class="text-[11px] ml-0.5 font-mono opacity-60">&#123;&#123;{{ v.key }}&#125;&#125;</code>
       </button>
     </div>
 
@@ -430,11 +430,11 @@ onMounted(loadLib)
       <!-- Left: Profile List -->
       <div class="rounded-xl border p-3 space-y-2 h-fit shadow-xs transition-colors" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
         <div class="flex items-center justify-between px-1 pb-2 border-b" style="border-color: var(--border-subtle);">
-          <span class="text-[10px] font-bold uppercase tracking-wider" style="color: var(--text-faint);">策略方案列表</span>
+          <span class="text-[11px] font-bold uppercase tracking-wider" style="color: var(--text-faint);">策略方案列表</span>
           <button
             v-if="auth.isSuperadmin"
             @click="createProfile"
-            class="flex items-center space-x-1 px-2 py-1 rounded-lg text-[10px] font-bold cursor-pointer shadow-xs transition-colors"
+            class="flex items-center space-x-1 px-2 py-1 rounded-lg text-[11px] font-bold cursor-pointer shadow-xs transition-colors"
             style="background-color: var(--text-main); color: var(--bg-card);"
           >
             <Plus class="w-3 h-3" />
@@ -453,11 +453,11 @@ onMounted(loadLib)
           >
             <div class="flex items-center justify-between">
               <span class="text-xs font-bold transition-colors" style="color: var(--text-main);">{{ p.name }}</span>
-              <span v-if="p.id === lib.active_profile_id" class="text-[9px] font-bold px-1.5 py-0.2 rounded border" style="background-color: var(--color-up-bg); color: var(--color-up); border-color: var(--color-up-border);">
+              <span v-if="p.id === lib.active_profile_id" class="text-[11px] font-bold px-1.5 py-0.2 rounded border" style="background-color: var(--color-up-bg); color: var(--color-up); border-color: var(--color-up-border);">
                 当前生效
               </span>
             </div>
-            <div class="text-[10px] mt-1 line-clamp-1" style="color: var(--text-muted);">
+            <div class="text-[11px] mt-1 line-clamp-1" style="color: var(--text-muted);">
               {{ p.description || '无详细描述' }}
             </div>
           </button>
@@ -503,7 +503,7 @@ onMounted(loadLib)
             <div class="flex items-center justify-between mb-2 gap-2">
               <!-- Title & Ordering -->
               <div class="flex items-center space-x-2 min-w-0 flex-1">
-                <span class="w-5 h-5 rounded font-bold text-[10px] flex items-center justify-center shrink-0 border" style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-muted);">
+                <span class="w-5 h-5 rounded font-bold text-[11px] flex items-center justify-center shrink-0 border" style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-muted);">
                   #{{ idx + 1 }}
                 </span>
                 <button
@@ -593,7 +593,7 @@ onMounted(loadLib)
               :disabled="!dirty"
               class="btn-primary-text flex items-center space-x-1.5 px-4 py-2 rounded-lg font-bold transition-all shadow-xs"
               :class="dirty ? 'cursor-pointer hover:bg-blue-600 active:scale-95' : 'opacity-40 cursor-not-allowed'"
-              style="background-color: #2563EB; color: #FFFFFF !important;"
+              style="background-color: var(--color-info); color: #FFFFFF !important;"
             >
               <Save class="w-4 h-4" style="color: #FFFFFF;" />
               <span style="color: #FFFFFF;">保存当前方案{{ dirty ? ' *' : '' }}</span>
@@ -602,7 +602,7 @@ onMounted(loadLib)
               v-if="selectedProfileId !== lib.active_profile_id && auth.isSuperadmin"
               @click="activateProfile"
               class="btn-primary-text flex items-center space-x-1.5 px-3.5 py-2 rounded-lg font-bold cursor-pointer hover:bg-emerald-600 transition-all shadow-xs"
-              style="background-color: #059669; color: #FFFFFF !important;"
+              style="background-color: var(--color-up); color: #FFFFFF !important;"
             >
               <CheckCircle2 class="w-4 h-4" style="color: #FFFFFF;" />
               <span style="color: #FFFFFF;">激活为实盘方案</span>
@@ -652,14 +652,14 @@ onMounted(loadLib)
             <div class="flex p-0.5 rounded-lg border" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
               <button
                 @click="previewMode = 'rendered'"
-                class="px-2 py-0.5 rounded text-[9px] font-bold cursor-pointer transition-all"
+                class="px-2 py-0.5 rounded text-[11px] font-bold cursor-pointer transition-all"
                 :style="previewMode === 'rendered' ? { backgroundColor: 'var(--text-main)', color: 'var(--bg-card)' } : { color: 'var(--text-muted)' }"
               >
                 拼接文本
               </button>
               <button
                 @click="previewMode = 'template'"
-                class="px-2 py-0.5 rounded text-[9px] font-bold cursor-pointer transition-all"
+                class="px-2 py-0.5 rounded text-[11px] font-bold cursor-pointer transition-all"
                 :style="previewMode === 'template' ? { backgroundColor: 'var(--text-main)', color: 'var(--bg-card)' } : { color: 'var(--text-muted)' }"
               >
                 模板源码
@@ -667,14 +667,14 @@ onMounted(loadLib)
             </div>
             <button
               @click="copyPreview"
-              class="px-2 py-1 rounded-lg border text-[10px] font-mono cursor-pointer transition-all shadow-xs"
+              class="px-2 py-1 rounded-lg border text-[11px] font-mono cursor-pointer transition-all shadow-xs"
               style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-main);"
             >
               复制
             </button>
           </div>
         </div>
-        <div class="text-[10px] flex items-center justify-between font-mono" style="color: var(--text-faint);">
+        <div class="text-[11px] flex items-center justify-between font-mono" style="color: var(--text-faint);">
           <span>{{ previewMode === 'rendered' ? '仅本地拼接，未代入实时数据；base合并以发送阶段为准' : '显示模块包含的原始模版语法与插槽' }}</span>
           <span class="num-tabular font-bold" style="color: var(--color-brand);">{{ compiledPreview.length }} 字符</span>
         </div>
@@ -696,7 +696,7 @@ onMounted(loadLib)
             </div>
             <div>
               <h3 class="text-sm font-bold" style="color: var(--text-main);">系统数据插槽与变量字典</h3>
-              <p class="text-[10px]" style="color: var(--text-muted);">可以在任意提示词模块中自由引用，系统推演时将自动替换为最新真实数据</p>
+              <p class="text-[11px]" style="color: var(--text-muted);">可以在任意提示词模块中自由引用，系统推演时将自动替换为最新真实数据</p>
             </div>
           </div>
           <button @click="variableGuideVisible = false" class="cursor-pointer p-1" style="color: var(--text-muted);">
@@ -713,24 +713,24 @@ onMounted(loadLib)
           >
             <div class="flex items-center justify-between">
               <div class="flex items-center space-x-2">
-                <span class="px-2 py-0.5 rounded text-[9px] font-bold border" style="background-color: var(--color-brand-bg); border-color: var(--color-brand-border); color: var(--color-brand);">
+                <span class="px-2 py-0.5 rounded text-[11px] font-bold border" style="background-color: var(--color-brand-bg); border-color: var(--color-brand-border); color: var(--color-brand);">
                   {{ v.category }}
                 </span>
                 <span class="text-xs font-bold" style="color: var(--text-main);">{{ v.label }}</span>
-                <code class="px-2 py-0.5 rounded border font-mono text-[10px]" style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--color-warn);">
+                <code class="px-2 py-0.5 rounded border font-mono text-[11px]" style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--color-warn);">
                   &#123;&#123;{{ v.key }}&#125;&#125;
                 </code>
               </div>
               <button
                 @click="insertVarIntoActiveModule(v.key); variableGuideVisible = false"
-                class="btn-primary-text px-2.5 py-1 rounded-lg font-bold text-[10px] cursor-pointer shadow-xs hover:bg-blue-600 transition-colors"
-                style="background-color: #2563EB; color: #FFFFFF !important;"
+                class="btn-primary-text px-2.5 py-1 rounded-lg font-bold text-[11px] cursor-pointer shadow-xs hover:bg-blue-600 transition-colors"
+                style="background-color: var(--color-info); color: #FFFFFF !important;"
               >
                 <span style="color: #FFFFFF;">插入到当前模块</span>
               </button>
             </div>
             <p class="text-[11px] font-sans" style="color: var(--text-muted);">{{ v.description }}</p>
-            <div v-if="v.sample" class="border rounded-lg p-2.5 text-[10px] font-mono whitespace-pre-wrap max-h-24 overflow-y-auto" style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-muted);">
+            <div v-if="v.sample" class="border rounded-lg p-2.5 text-[11px] font-mono whitespace-pre-wrap max-h-24 overflow-y-auto" style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-muted);">
               {{ v.sample }}
             </div>
           </div>
@@ -762,7 +762,7 @@ onMounted(loadLib)
             </div>
             <div>
               <h3 class="text-sm font-bold" style="color: var(--text-main);">导入策略方案包</h3>
-              <p class="text-[10px]" style="color: var(--text-muted);">支持标准导出包 (v1~v4)、整库导出文件与裸方案对象三种 JSON 格式</p>
+              <p class="text-[11px]" style="color: var(--text-muted);">支持标准导出包 (v1~v4)、整库导出文件与裸方案对象三种 JSON 格式</p>
             </div>
           </div>
           <button @click="importVisible = false" class="cursor-pointer p-1" style="color: var(--text-muted);">
@@ -848,11 +848,11 @@ onMounted(loadLib)
         >
           <div>
             <div class="text-xs font-bold" style="color: var(--text-main);">{{ h.note || h.summary || h.id || h.revision_id }}</div>
-            <div class="text-[10px] num-tabular" style="color: var(--text-faint);">{{ h.created_at || h.time }} · {{ h.actor || 'system' }}</div>
+            <div class="text-[11px] num-tabular" style="color: var(--text-faint);">{{ h.created_at || h.time }} · {{ h.actor || 'system' }}</div>
           </div>
           <button
             @click="rollback(h.id || h.revision_id)"
-            class="flex items-center space-x-1 px-2.5 py-1 rounded-lg border text-[10px] cursor-pointer transition-all shadow-xs"
+            class="flex items-center space-x-1 px-2.5 py-1 rounded-lg border text-[11px] cursor-pointer transition-all shadow-xs"
             style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-main);"
           >
             <RotateCcw class="w-3 h-3" />

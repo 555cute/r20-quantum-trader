@@ -64,7 +64,7 @@ onMounted(() => {
     <div class="flex items-center justify-between">
       <p class="text-xs font-mono" style="color: var(--text-muted);">核对 AI 宏观基调与逐币动作，并审查交易、后台与任务调度三路实时日志流。</p>
       <span
-        class="text-[10px] font-mono px-2 py-1 rounded border font-bold"
+        class="text-[11px] font-mono px-2 py-1 rounded border font-bold"
         style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);"
       >
         日常运行 · 决策与审计
@@ -77,7 +77,7 @@ onMounted(() => {
         <div class="flex items-center space-x-2">
           <Terminal class="w-4 h-4 text-purple-400" />
           <h2 class="text-xs font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">系统实时日志流</h2>
-          <span class="text-[9px] font-mono px-1.5 py-0.5 rounded border font-bold" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-faint);">最新在前</span>
+          <span class="text-[11px] font-mono px-1.5 py-0.5 rounded border font-bold" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-faint);">最新在前</span>
         </div>
         <!-- Log Selector Tabs -->
         <div class="flex flex-wrap gap-1 p-1 rounded-lg border" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">

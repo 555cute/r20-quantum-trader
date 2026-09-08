@@ -633,7 +633,7 @@ onMounted(() => {
                   全局思考推演与超时上限 (Reasoning & Thinking Timeout)
                 </h2>
                 <span
-                  class="px-2 py-0.5 rounded text-[10px] font-mono font-bold border"
+                  class="px-2 py-0.5 rounded text-[11px] font-mono font-bold border"
                   style="background-color: var(--color-brand-bg); border-color: var(--color-brand-border); color: var(--color-brand);"
                 >
                   当前上限: {{ cfg?.thinking_timeout || 120 }}s
@@ -649,7 +649,7 @@ onMounted(() => {
             @click="saveGlobalSettings"
             :disabled="savingSettings"
             class="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold text-white transition-all cursor-pointer shadow-xs disabled:opacity-40"
-            style="background-color: #2563EB; border-color: #3B82F6;"
+            style="background-color: var(--color-info); border-color: var(--color-info);"
           >
             <RefreshCw v-if="savingSettings" class="w-3.5 h-3.5 animate-spin" />
             <Save v-else class="w-3.5 h-3.5" />
@@ -660,11 +660,11 @@ onMounted(() => {
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
           <!-- Active Model & Reasoning Effort Status -->
           <div class="p-3 rounded-xl border space-y-1.5 font-mono" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
-            <div class="text-[10px]" style="color: var(--text-faint);">当前主脑活跃模型</div>
+            <div class="text-[11px]" style="color: var(--text-faint);">当前主脑活跃模型</div>
             <div class="text-xs font-bold truncate text-blue-400">
               {{ cfg?.active_model_id || '未选择' }}
             </div>
-            <div class="text-[10px] flex items-center space-x-1" style="color: var(--text-muted);">
+            <div class="text-[11px] flex items-center space-x-1" style="color: var(--text-muted);">
               <span>思考强度:</span>
               <span class="font-bold uppercase text-emerald-400">{{ cfg?.active_reasoning_effort || 'HIGH' }}</span>
             </div>
@@ -678,10 +678,10 @@ onMounted(() => {
           <!-- Thinking Timeout Input Field -->
           <div class="p-3 rounded-xl border space-y-1.5 font-mono sm:col-span-1 lg:col-span-2" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
             <div class="flex items-center justify-between">
-              <label class="text-[10px] font-bold" style="color: var(--text-muted);">
+              <label class="text-[11px] font-bold" style="color: var(--text-muted);">
                 思考时间上限 (秒 / Seconds)
               </label>
-              <span class="text-[10px]" style="color: var(--text-faint);">有效范围: 10 ~ 1800 秒</span>
+              <span class="text-[11px]" style="color: var(--text-faint);">有效范围: 10 ~ 1800 秒</span>
             </div>
             <div class="flex flex-wrap items-center gap-2">
               <input
@@ -701,7 +701,7 @@ onMounted(() => {
                 <button
                   type="button"
                   @click="setPresetTimeout(30)"
-                  class="px-2 py-1 rounded text-[10px] border cursor-pointer transition-all"
+                  class="px-2 py-1 rounded text-[11px] border cursor-pointer transition-all"
                   :class="thinkingTimeoutInput === 30 ? 'bg-blue-500/20 text-blue-400 border-blue-500 font-bold' : 'text-gray-400 hover:text-white border-transparent'"
                 >
                   30s (极速)
@@ -709,7 +709,7 @@ onMounted(() => {
                 <button
                   type="button"
                   @click="setPresetTimeout(60)"
-                  class="px-2 py-1 rounded text-[10px] border cursor-pointer transition-all"
+                  class="px-2 py-1 rounded text-[11px] border cursor-pointer transition-all"
                   :class="thinkingTimeoutInput === 60 ? 'bg-blue-500/20 text-blue-400 border-blue-500 font-bold' : 'text-gray-400 hover:text-white border-transparent'"
                 >
                   60s (标准)
@@ -717,7 +717,7 @@ onMounted(() => {
                 <button
                   type="button"
                   @click="setPresetTimeout(120)"
-                  class="px-2 py-1 rounded text-[10px] border cursor-pointer transition-all"
+                  class="px-2 py-1 rounded text-[11px] border cursor-pointer transition-all"
                   :class="thinkingTimeoutInput === 120 ? 'bg-blue-500/20 text-blue-400 border-blue-500 font-bold' : 'text-gray-400 hover:text-white border-transparent'"
                 >
                   120s (推荐)
@@ -725,7 +725,7 @@ onMounted(() => {
                 <button
                   type="button"
                   @click="setPresetTimeout(180)"
-                  class="px-2 py-1 rounded text-[10px] border cursor-pointer transition-all"
+                  class="px-2 py-1 rounded text-[11px] border cursor-pointer transition-all"
                   :class="thinkingTimeoutInput === 180 ? 'bg-blue-500/20 text-blue-400 border-blue-500 font-bold' : 'text-gray-400 hover:text-white border-transparent'"
                 >
                   180s (深度)
@@ -733,7 +733,7 @@ onMounted(() => {
                 <button
                   type="button"
                   @click="setPresetTimeout(300)"
-                  class="px-2 py-1 rounded text-[10px] border cursor-pointer transition-all"
+                  class="px-2 py-1 rounded text-[11px] border cursor-pointer transition-all"
                   :class="thinkingTimeoutInput === 300 ? 'bg-blue-500/20 text-blue-400 border-blue-500 font-bold' : 'text-gray-400 hover:text-white border-transparent'"
                 >
                   300s (长思考链)
@@ -833,7 +833,7 @@ onMounted(() => {
                 <span class="font-bold text-sm" style="color: var(--text-main);">{{ prov.name }}</span>
                 <span
                   v-if="prov.models?.some((m: any) => m.id === cfg?.active_model_id)"
-                  class="px-1.5 py-0.2 rounded text-[9px] font-bold border"
+                  class="px-1.5 py-0.2 rounded text-[11px] font-bold border"
                   style="background-color: var(--color-up-bg); border-color: var(--color-up-border); color: var(--color-up);"
                 >
                   主脑活跃
@@ -854,7 +854,7 @@ onMounted(() => {
               :style="prov.enabled ? {
                 backgroundColor: 'rgba(16, 185, 129, 0.12)',
                 borderColor: 'rgba(16, 185, 129, 0.25)',
-                color: '#10B981',
+                color: 'var(--color-up)',
               } : {
                 backgroundColor: 'rgba(239, 68, 68, 0.08)',
                 borderColor: 'rgba(239, 68, 68, 0.2)',
@@ -931,7 +931,7 @@ onMounted(() => {
             <div class="p-3.5 flex items-center justify-between">
               <div>
                 <span class="font-medium" style="color: var(--text-main);">API 交互协议</span>
-                <div class="text-[10px]" style="color: var(--text-faint);">选择该端点底层支持的通信协议标准</div>
+                <div class="text-[11px]" style="color: var(--text-faint);">选择该端点底层支持的通信协议标准</div>
               </div>
               <select
                 v-model="providerForm.api_format"
@@ -1011,7 +1011,7 @@ onMounted(() => {
           <div>
             <div class="flex items-center justify-between mb-1.5">
               <label class="text-xs font-bold" style="color: var(--text-muted);">API Key</label>
-              <span v-if="selectedProvider.has_key" class="text-[10px] text-emerald-500 font-bold">
+              <span v-if="selectedProvider.has_key" class="text-[11px] text-emerald-500 font-bold">
                 ✓ 密钥已就绪
               </span>
             </div>
@@ -1072,7 +1072,7 @@ onMounted(() => {
           <button
             @click="saveProviderConfig"
             class="px-6 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs btn-primary-text"
-            style="background-color: #2563EB; color: #FFFFFF;"
+            style="background-color: var(--color-info); color: #FFFFFF;"
           >
             保存供应商配置
           </button>
@@ -1111,8 +1111,8 @@ onMounted(() => {
                   </span>
                   <span
                     v-if="m.id === cfg?.active_model_id"
-                    class="px-2 py-0.5 rounded-full text-[10px] font-bold border"
-                    style="background-color: rgba(16, 185, 129, 0.12); border-color: rgba(16, 185, 129, 0.25); color: #10B981;"
+                    class="px-2 py-0.5 rounded-full text-[11px] font-bold border"
+                    style="background-color: rgba(16, 185, 129, 0.12); border-color: rgba(16, 185, 129, 0.25); color: var(--color-up);"
                   >
                     主脑生效
                   </span>
@@ -1137,14 +1137,14 @@ onMounted(() => {
                   <span
                     v-if="m.capabilities?.includes('tools')"
                     class="p-1 rounded-full border flex items-center justify-center"
-                    style="background-color: rgba(59, 130, 246, 0.08); border-color: rgba(59, 130, 246, 0.2); color: #60A5FA;"
+                    style="background-color: rgba(59, 130, 246, 0.08); border-color: rgba(59, 130, 246, 0.2); color: var(--color-info);"
                     title="支持工具调用"
                   >
                     <Wrench class="w-3 h-3" />
                   </span>
                   <span
                     v-if="m.capabilities?.includes('reasoning') || m.reasoning_type !== 'none'"
-                    class="px-2 py-0.5 rounded-full text-[10px] border flex items-center gap-1 font-bold text-amber-400"
+                    class="px-2 py-0.5 rounded-full text-[11px] border flex items-center gap-1 font-bold text-amber-400"
                     style="background-color: rgba(245, 158, 11, 0.08); border-color: rgba(245, 158, 11, 0.2);"
                     title="支持长链推演"
                   >
@@ -1166,7 +1166,7 @@ onMounted(() => {
                 v-if="m.id !== cfg?.active_model_id"
                 @click="activateModel(m)"
                 class="px-3 py-1 rounded-xl text-xs font-bold border transition-all cursor-pointer shadow-xs btn-primary-text"
-                style="background-color: #2563EB; color: #FFFFFF;"
+                style="background-color: var(--color-info); color: #FFFFFF;"
                 title="一键设为主脑"
               >
                 启用
@@ -1223,7 +1223,7 @@ onMounted(() => {
               <AlertCircle v-else class="w-4 h-4" />
               <span>{{ testResult.ok ? `模型测试通过 (耗时: ${testResult.latency_ms}ms)` : '连通性测试未通过' }}</span>
             </div>
-            <span class="text-[10px] opacity-75 font-mono">状态: {{ testResult.status_code || 0 }}</span>
+            <span class="text-[11px] opacity-75 font-mono">状态: {{ testResult.status_code || 0 }}</span>
           </div>
 
           <div v-if="testResult.ok" class="space-y-1 text-xs" style="color: var(--text-main);">
@@ -1285,8 +1285,8 @@ onMounted(() => {
           @click="detailTab = 'config'"
           class="flex items-center space-x-2 px-6 py-2.5 rounded-xl font-bold text-xs cursor-pointer transition-all border"
           :style="detailTab === 'config' ? {
-            backgroundColor: '#2563EB',
-            borderColor: '#1D4ED8',
+            backgroundColor: 'var(--color-info)',
+            borderColor: 'var(--color-info)',
             color: '#FFFFFF',
             boxShadow: '0 2px 10px rgba(37,99,235,0.35)',
           } : {
@@ -1303,8 +1303,8 @@ onMounted(() => {
           @click="detailTab = 'models'"
           class="flex items-center space-x-2 px-6 py-2.5 rounded-xl font-bold text-xs cursor-pointer transition-all border"
           :style="detailTab === 'models' ? {
-            backgroundColor: '#2563EB',
-            borderColor: '#1D4ED8',
+            backgroundColor: 'var(--color-info)',
+            borderColor: 'var(--color-info)',
             color: '#FFFFFF',
             boxShadow: '0 2px 10px rgba(37,99,235,0.35)',
           } : {
@@ -1336,7 +1336,7 @@ onMounted(() => {
               获取 {{ selectedProvider?.name }} 远端可用模型
             </h3>
           </div>
-          <span class="text-[10px]" style="color: var(--text-faint);">探测 /models 兼容端点</span>
+          <span class="text-[11px]" style="color: var(--text-faint);">探测 /models 兼容端点</span>
         </div>
 
         <!-- Probe Configuration (仅当需要微调或端点无预存 Key 时作为高级选项展开) -->
@@ -1347,14 +1347,14 @@ onMounted(() => {
               <span class="font-mono text-[11px] text-blue-400">{{ customFetchUrl || selectedProvider?.base_url }}</span>
             </div>
             <div class="flex items-center space-x-1.5">
-              <span v-if="selectedProvider?.has_key" class="text-[10px] text-emerald-400 font-bold">
+              <span v-if="selectedProvider?.has_key" class="text-[11px] text-emerald-400 font-bold">
                 ✓ 使用已存凭证
               </span>
               <button
                 @click="executeRemoteFetch"
                 :disabled="fetchingRemote"
                 class="flex items-center space-x-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer shadow-xs btn-primary-text"
-                style="background-color: #2563EB; color: #FFFFFF;"
+                style="background-color: var(--color-info); color: #FFFFFF;"
               >
                 <RefreshCw class="w-3.5 h-3.5" :class="fetchingRemote ? 'animate-spin' : ''" />
                 <span>{{ fetchingRemote ? '正在探测...' : '重新探测' }}</span>
@@ -1372,7 +1372,7 @@ onMounted(() => {
             style="background-color: var(--color-up-bg); border-color: var(--color-up-border); color: var(--color-up);"
           >
             <span class="font-bold">✓ 成功探测到 {{ remoteFetchResult.total }} 个可用模型</span>
-            <span class="text-[10px] opacity-80 font-mono">{{ remoteFetchResult.endpoint_used }}</span>
+            <span class="text-[11px] opacity-80 font-mono">{{ remoteFetchResult.endpoint_used }}</span>
           </div>
           <div
             v-else
@@ -1418,7 +1418,7 @@ onMounted(() => {
               <button
                 @click="importRemoteModel(rm, true)"
                 class="px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer shadow-xs btn-primary-text"
-                style="background-color: #2563EB; color: #FFFFFF;"
+                style="background-color: var(--color-info); color: #FFFFFF;"
               >
                 添加并启用
               </button>
@@ -1465,7 +1465,7 @@ onMounted(() => {
           <h3 class="text-sm font-bold uppercase" style="color: var(--text-main);">
             {{ editingModel ? '编辑模型' : '添加新模型' }}
           </h3>
-          <span class="text-[10px]" style="color: var(--text-faint);">所属: {{ selectedProvider?.name }}</span>
+          <span class="text-[11px]" style="color: var(--text-faint);">所属: {{ selectedProvider?.name }}</span>
         </div>
 
         <div class="space-y-3">
@@ -1514,7 +1514,7 @@ onMounted(() => {
                 type="button"
                 @click="toggleCapability('tools')"
                 class="px-2.5 py-1 rounded-lg border text-xs font-medium cursor-pointer transition-all"
-                :style="modelForm.capabilities.includes('tools') ? { backgroundColor: 'rgba(59, 130, 246, 0.2)', borderColor: '#60A5FA', color: '#60A5FA' } : { backgroundColor: 'var(--bg-card-subtle)', borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }"
+                :style="modelForm.capabilities.includes('tools') ? { backgroundColor: 'rgba(59, 130, 246, 0.2)', borderColor: 'var(--color-info)', color: 'var(--color-info)' } : { backgroundColor: 'var(--bg-card-subtle)', borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }"
               >
                 工具调用 (tools)
               </button>
@@ -1522,7 +1522,7 @@ onMounted(() => {
                 type="button"
                 @click="toggleCapability('reasoning')"
                 class="px-2.5 py-1 rounded-lg border text-xs font-medium cursor-pointer transition-all"
-                :style="modelForm.capabilities.includes('reasoning') ? { backgroundColor: 'rgba(245, 158, 11, 0.2)', borderColor: '#F59E0B', color: '#F59E0B' } : { backgroundColor: 'var(--bg-card-subtle)', borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }"
+                :style="modelForm.capabilities.includes('reasoning') ? { backgroundColor: 'rgba(245, 158, 11, 0.2)', borderColor: 'var(--color-warn)', color: 'var(--color-warn)' } : { backgroundColor: 'var(--bg-card-subtle)', borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }"
               >
                 🧠 链式思考 (CoT)
               </button>
@@ -1587,7 +1587,7 @@ onMounted(() => {
           <button
             @click="saveModelForm"
             class="px-5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs btn-primary-text"
-            style="background-color: #2563EB; color: #FFFFFF;"
+            style="background-color: var(--color-info); color: #FFFFFF;"
           >
             保存模型
           </button>

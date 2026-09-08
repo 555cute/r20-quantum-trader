@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { useDashboardStore } from '../stores/dashboard'
 import { useI18n } from '../composables/useI18n'
-import { Sparkles, Brain, Cpu, AlertTriangle, CheckCircle2, Clock, Activity, ShieldCheck, FileText, RefreshCw } from 'lucide-vue-next'
+import { Sparkles, Brain, Cpu, AlertTriangle, CheckCircle2, Clock, Activity, ShieldCheck, FileText } from 'lucide-vue-next'
 
 const store = useDashboardStore()
 const { t, isEn } = useI18n()
@@ -17,56 +17,6 @@ const changeStatus = computed(() => review.value?.change_status || 'NO_CHANGE')
 const insights = computed<string[]>(() => review.value?.insights || review.value?.diagnosis_insights || [])
 const actionsTaken = computed<string[]>(() => review.value?.actions_taken || [])
 const overwriteReason = computed(() => review.value?.memory_overwrites_reason || review.value?.summary || '')
-
-type BadgeTone = 'up' | 'warn' | 'down' | 'muted'
-type MemoryPanelState = 'loading' | 'transport_error' | 'unavailable' | 'uninitialized' | 'empty' | 'ready'
-
-const transportStale = computed(() => !store.isConnected && store.data != null)
-
-const memoryPanel = computed<MemoryPanelState>(() => {
-  if (store.data == null) {
-    return store.loading || store.isConnected ? 'loading' : 'transport_error'
-  }
-  const status = store.data.ai_trading_memory_status
-  if (status === 'unavailable') return 'unavailable'
-  if (status === 'empty') return 'empty'
-  if (status === 'uninitialized') return 'uninitialized'
-  if (status === 'ready' && memoryMd.value.trim()) return 'ready'
-  if (memoryMd.value.trim()) return 'ready'
-  return 'uninitialized'
-})
-
-const injection = computed<{ label: string; tone: BadgeTone }>(() => {
-  if (memoryPanel.value === 'ready' && transportStale.value) {
-    return { label: t('lab.promptStale'), tone: 'warn' }
-  }
-  switch (memoryPanel.value) {
-    case 'ready':
-      return { label: t('lab.promptStatus'), tone: 'up' }
-    case 'empty':
-      return { label: t('lab.promptInactive'), tone: 'muted' }
-    case 'uninitialized':
-      return { label: t('lab.promptUninitialized'), tone: 'warn' }
-    case 'unavailable':
-    case 'transport_error':
-      return { label: t('lab.promptUnavailable'), tone: 'down' }
-    default:
-      return { label: t('lab.memoryLoading'), tone: 'muted' }
-  }
-})
-
-function badgeStyle(tone: BadgeTone): Record<string, string> {
-  if (tone === 'up') {
-    return { backgroundColor: 'var(--color-up-bg)', borderColor: 'var(--color-up-border)', color: 'var(--color-up)' }
-  }
-  if (tone === 'down') {
-    return { backgroundColor: 'var(--color-down-bg)', borderColor: 'var(--color-down-border)', color: 'var(--color-down)' }
-  }
-  if (tone === 'warn') {
-    return { backgroundColor: 'var(--color-warn-bg)', borderColor: 'var(--color-warn-border)', color: 'var(--color-warn)' }
-  }
-  return { backgroundColor: 'var(--bg-badge)', borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }
-}
 </script>
 
 <template>
@@ -83,7 +33,7 @@ function badgeStyle(tone: BadgeTone): Record<string, string> {
               {{ t('lab.labTitle') }}
             </h2>
             <span
-              class="text-[10px] font-mono px-2 py-0.5 rounded border font-bold"
+              class="text-[11px] font-mono px-2 py-0.5 rounded border font-bold"
               :class="changeStatus === 'EVOLVED' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' : 'text-amber-400 bg-amber-500/10 border-amber-500/30'"
             >
               {{ t('lab.status') }}: {{ changeStatus }}
@@ -145,48 +95,22 @@ function badgeStyle(tone: BadgeTone): Record<string, string> {
               </h3>
             </div>
             <span
-              class="text-[10px] font-mono px-2 py-0.5 rounded border font-bold"
-              :style="badgeStyle(injection.tone)"
+              class="text-[11px] font-mono px-2 py-0.5 rounded border font-bold text-emerald-400"
+              style="background-color: var(--bg-badge); border-color: var(--border-subtle);"
             >
               {{ t('lab.memoryBadge') }}
             </span>
           </div>
           <div
-            v-if="transportStale"
-            class="mb-2 rounded-lg border p-2 text-[11px] font-mono"
-            :style="badgeStyle('warn')"
-          >
-            {{ t('lab.memoryStale') }}
-          </div>
-          <div
             class="p-3.5 rounded-lg border text-xs font-mono leading-relaxed max-h-[440px] overflow-y-auto whitespace-pre-wrap select-text"
             style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-main);"
-            aria-live="polite"
           >
-            <div v-if="memoryPanel === 'loading'" class="flex items-center space-x-2" style="color: var(--text-muted);">
-              <RefreshCw aria-hidden="true" class="w-3.5 h-3.5 animate-spin motion-reduce:animate-none shrink-0" />
-              <span>{{ t('lab.memoryLoading') }}</span>
-            </div>
-            <div v-else-if="memoryPanel === 'transport_error'" style="color: var(--color-warn);">
-              {{ t('lab.memoryTransportError') }}
-            </div>
-            <div v-else-if="memoryPanel === 'unavailable'" style="color: var(--color-down);">
-              {{ t('lab.memoryUnavailable') }}
-            </div>
-            <div v-else-if="memoryPanel === 'uninitialized'" class="space-y-2 whitespace-normal" style="color: var(--text-muted);">
-              <p>{{ t('lab.memoryUninitialized') }}</p>
-              <p>{{ t('lab.memoryInitHint') }}</p>
-              <a href="/admin/evolution" class="inline-flex font-bold hover:underline focus-visible:outline-2 focus-visible:outline-offset-4" style="color: var(--color-brand);">{{ t('lab.memoryInitLink') }}</a>
-            </div>
-            <div v-else-if="memoryPanel === 'empty'" class="whitespace-normal" style="color: var(--text-muted);">
-              {{ t('lab.memoryEmpty') }}
-            </div>
-            <div v-else>{{ memoryMd }}</div>
+            {{ memoryMd || (isEn ? 'Loading immutable heuristics...' : '正在读取长期心法知识库...') }}
           </div>
         </div>
-        <div class="pt-3 mt-3 border-t text-[11px] font-mono flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between" style="border-color: var(--border-subtle); color: var(--text-faint);">
-          <span class="min-w-0 break-all">{{ t('lab.storageFile') }}: <code>data/structured_trading_memory.json</code></span>
-          <span class="shrink-0 font-bold px-2 py-0.5 rounded border" :style="badgeStyle(injection.tone)">{{ injection.label }}</span>
+        <div class="pt-3 mt-3 border-t text-[11px] font-mono flex items-center justify-between" style="border-color: var(--border-subtle); color: var(--text-faint);">
+          <span>{{ t('lab.storageFile') }}: <code>data/AI_TRADING_MEMORY.md</code></span>
+          <span class="text-emerald-400 font-bold">{{ t('lab.promptStatus') }}</span>
         </div>
       </div>
 
@@ -204,7 +128,7 @@ function badgeStyle(tone: BadgeTone): Record<string, string> {
               </h3>
             </div>
             <span
-              class="text-[10px] font-mono px-2 py-0.5 rounded border font-bold"
+              class="text-[11px] font-mono px-2 py-0.5 rounded border font-bold"
               style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--text-muted);"
             >
               PF: {{ profitFactor }}
@@ -213,7 +137,7 @@ function badgeStyle(tone: BadgeTone): Record<string, string> {
 
           <!-- 决策理由 -->
           <div v-if="overwriteReason" class="p-3 rounded-lg border text-xs font-mono leading-relaxed" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
-            <div class="text-[10px] uppercase mb-1 font-bold text-amber-400">{{ t('lab.verdictReason') }}</div>
+            <div class="text-[11px] uppercase mb-1 font-bold text-amber-400">{{ t('lab.verdictReason') }}</div>
             <p class="text-xs font-sans leading-relaxed" style="color: var(--text-main);">
               {{ overwriteReason }}
             </p>
@@ -221,7 +145,7 @@ function badgeStyle(tone: BadgeTone): Record<string, string> {
 
           <!-- 诊断洞察列表 -->
           <div class="space-y-2">
-            <div class="text-[10px] font-mono uppercase font-bold" style="color: var(--text-faint);">
+            <div class="text-[11px] font-mono uppercase font-bold" style="color: var(--text-faint);">
               {{ t('lab.diagnosisInsights') }} ({{ insights.length }})
             </div>
             <div class="space-y-1.5 max-h-[220px] overflow-y-auto pr-1">
@@ -244,7 +168,7 @@ function badgeStyle(tone: BadgeTone): Record<string, string> {
 
           <!-- 执行行动清单 -->
           <div v-if="actionsTaken.length > 0" class="space-y-1.5 pt-1">
-            <div class="text-[10px] font-mono uppercase font-bold" style="color: var(--text-faint);">
+            <div class="text-[11px] font-mono uppercase font-bold" style="color: var(--text-faint);">
               {{ t('lab.actionsTaken') }} ({{ actionsTaken.length }})
             </div>
             <div class="space-y-1">

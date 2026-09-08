@@ -30,7 +30,7 @@ function toggle(i: number) {
             <h2 class="text-xs sm:text-[13px] 2xl:text-sm font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
               AI 宏观多周期推演基调与决策审计
             </h2>
-            <span class="text-[10px] 2xl:text-[11px] font-mono px-1.5 py-0.5 rounded border" style="background-color: var(--bg-badge); color: var(--color-brand); border-color: var(--border-subtle);">
+            <span class="text-[11px] 2xl:text-[11px] font-mono px-1.5 py-0.5 rounded border" style="background-color: var(--bg-badge); color: var(--color-brand); border-color: var(--border-subtle);">
               15m 周期
             </span>
           </div>
@@ -68,7 +68,7 @@ function toggle(i: number) {
             </span>
             <span
               v-if="item.council_transcript"
-              class="px-2 py-0.5 rounded text-[10px] 2xl:text-xs font-mono font-bold border shrink-0"
+              class="px-2 py-0.5 rounded text-[11px] 2xl:text-xs font-mono font-bold border shrink-0"
               style="background-color: var(--bg-badge); border-color: var(--border-medium); color: var(--text-main);"
             >
               🏛️ 委员会决策
@@ -87,7 +87,7 @@ function toggle(i: number) {
         <div v-if="expanded.has(i)" class="mt-3 2xl:mt-4 space-y-3 2xl:space-y-4 border-t pt-3 2xl:pt-4" style="border-color: var(--border-subtle);">
           <!-- Macro Summary -->
           <div>
-            <div class="text-[10px] 2xl:text-xs font-bold font-mono uppercase mb-1" style="color: var(--text-faint);">
+            <div class="text-[11px] 2xl:text-xs font-bold font-mono uppercase mb-1" style="color: var(--text-faint);">
               宏观研判总结:
             </div>
             <p class="text-xs 2xl:text-sm font-sans leading-relaxed" style="color: var(--text-main);">
@@ -106,7 +106,7 @@ function toggle(i: number) {
                 <Users class="w-4 h-4 2xl:w-4.5 2xl:h-4.5" />
                 <span>【多角色模型现场辩论纪要】</span>
               </div>
-              <span class="text-[10px] 2xl:text-xs font-mono" style="color: var(--text-faint);">
+              <span class="text-[11px] 2xl:text-xs font-mono" style="color: var(--text-faint);">
                 协作总时延: {{ item.council_transcript.total_duration_ms }}ms
               </span>
             </div>
@@ -121,7 +121,7 @@ function toggle(i: number) {
               >
                 <div class="flex items-center justify-between font-bold">
                   <span style="color: var(--text-main);">{{ adv.role_name }}</span>
-                  <span class="text-[10px] 2xl:text-xs" style="color: var(--text-faint);">{{ adv.model_used }}</span>
+                  <span class="text-[11px] 2xl:text-xs" style="color: var(--text-faint);">{{ adv.model_used }}</span>
                 </div>
                 <p class="text-[11px] 2xl:text-xs leading-relaxed whitespace-pre-wrap max-h-36 2xl:max-h-52 overflow-y-auto pr-0.5 select-text" style="color: var(--text-muted);">
                   {{ adv.content }}
@@ -132,7 +132,7 @@ function toggle(i: number) {
             <!-- Arbitrator summary -->
             <div class="mt-1 pt-2 border-t text-xs 2xl:text-sm font-bold flex items-center justify-between" style="border-color: var(--border-subtle); color: var(--color-up);">
               <span>⚖️ 首席仲裁官裁决收口: 采纳专家参谋核心论点，生成统一发单指令</span>
-              <span class="text-[10px] 2xl:text-xs font-normal" style="color: var(--text-faint);">
+              <span class="text-[11px] 2xl:text-xs font-normal" style="color: var(--text-faint);">
                 终审模型: {{ item.council_transcript.arbitrator?.model_used }}
               </span>
             </div>
@@ -144,11 +144,11 @@ function toggle(i: number) {
             class="p-3 2xl:p-4 rounded-xl border space-y-1.5 2xl:space-y-2 font-mono text-xs 2xl:text-sm"
             style="background-color: var(--bg-card); border-color: var(--border-subtle);"
           >
-            <span class="text-[10px] 2xl:text-xs font-bold block uppercase" style="color: var(--text-faint);">在途持仓管理指令</span>
+            <span class="text-[11px] 2xl:text-xs font-bold block uppercase" style="color: var(--text-faint);">在途持仓管理指令</span>
             <div v-for="(p, j) in item.position_management" :key="j" class="flex flex-wrap items-center gap-x-2 gap-y-0.5 2xl:gap-x-3" style="color: var(--text-muted);">
               <strong style="color: var(--text-main);">{{ p.instId }}</strong>
               <span
-                class="px-2 py-0.5 rounded font-bold border text-[10px] 2xl:text-xs"
+                class="px-2 py-0.5 rounded font-bold border text-[11px] 2xl:text-xs"
                 :style="{
                   backgroundColor: p.action?.includes('HOLD') ? 'var(--bg-badge)' : 'var(--color-warn-bg)',
                   borderColor: p.action?.includes('HOLD') ? 'var(--border-subtle)' : 'var(--color-warn-border)',

@@ -61,7 +61,7 @@ async function copyToClipboard(text: string, targetName: string) {
               <h3 class="text-sm font-bold uppercase tracking-wide flex items-center gap-2" style="color: var(--text-main);">
                 <span>{{ APP_NAME }}</span>
                 <span
-                  class="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold border"
+                  class="px-1.5 py-0.2 rounded text-[11px] font-mono font-bold border"
                   style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);"
                 >
                   {{ APP_VERSION }}
@@ -104,7 +104,7 @@ async function copyToClipboard(text: string, targetName: string) {
                 <span class="font-bold block truncate" style="color: var(--text-main);">
                   系统开发与使用文档 (Docs)
                 </span>
-                <span class="text-[10px] truncate block" style="color: var(--text-faint);">
+                <span class="text-[11px] truncate block" style="color: var(--text-faint);">
                   架构说明 · 提示词变量插槽 · 物理拦截插件规范
                 </span>
               </div>
@@ -134,7 +134,7 @@ async function copyToClipboard(text: string, targetName: string) {
                 <span class="font-bold block truncate" style="color: var(--text-main);">
                   GitHub 官方开源主仓
                 </span>
-                <span class="text-[10px] truncate block" style="color: var(--text-faint);">
+                <span class="text-[11px] truncate block" style="color: var(--text-faint);">
                   555cute/r20-quantum-trader (MIT License)
                 </span>
               </div>
@@ -162,7 +162,7 @@ async function copyToClipboard(text: string, targetName: string) {
               </span>
               <button
                 @click="copyToClipboard('cd frontend && npm run build', 'build')"
-                class="px-2 py-1 rounded border text-[10px] font-mono cursor-pointer transition-colors shrink-0 flex items-center space-x-1"
+                class="px-2 py-1 rounded border text-[11px] font-mono cursor-pointer transition-colors shrink-0 flex items-center space-x-1"
                 style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-main);"
               >
                 <Check v-if="copiedTarget === 'build'" class="w-3 h-3 text-emerald-500" />
@@ -180,7 +180,7 @@ async function copyToClipboard(text: string, targetName: string) {
               </span>
               <button
                 @click="copyToClipboard('/app/venv/bin/python3 -m unittest discover -s tests -p &quot;test_*.py&quot;', 'test')"
-                class="px-2 py-1 rounded border text-[10px] font-mono cursor-pointer transition-colors shrink-0 flex items-center space-x-1"
+                class="px-2 py-1 rounded border text-[11px] font-mono cursor-pointer transition-colors shrink-0 flex items-center space-x-1"
                 style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-main);"
               >
                 <Check v-if="copiedTarget === 'test'" class="w-3 h-3 text-emerald-500" />
@@ -192,7 +192,7 @@ async function copyToClipboard(text: string, targetName: string) {
         </div>
 
         <!-- Footer -->
-        <div class="pt-2 text-center text-[10px]" style="color: var(--text-faint);">
+        <div class="pt-2 text-center text-[11px]" style="color: var(--text-faint);">
           R20 QUANTUM TRADER · ENTERPRISE QUANTITATIVE FRAMEWORK
         </div>
       </div>

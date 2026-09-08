@@ -196,7 +196,7 @@ onMounted(loadData)
 
     <!-- Effect banner -->
     <div class="p-3 rounded-lg text-[11px] font-mono border flex items-start gap-2" style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-muted);">
-      <Info class="w-3.5 h-3.5 shrink-0 mt-0.5" style="color: var(--accent, #3875F6);" />
+      <Info class="w-3.5 h-3.5 shrink-0 mt-0.5" style="color: var(--accent, var(--color-info));" />
       <div class="space-y-1">
         <p>{{ effectText || '保存后下一巡检周期自动生效，无需重启。' }}</p>
         <p class="opacity-80">注：本页为执行层代码硬拦截；「物理拦截插件」与「提示词工坊」中的 AI 侧门禁（如置信度、顺势铁律）在各自页面独立配置，双层防线互为兜底。</p>
@@ -233,10 +233,10 @@ onMounted(loadData)
         >
           <div class="flex items-center justify-between gap-2">
             <h3 class="text-xs font-black font-mono" style="color: var(--text-main);">{{ s.name }}</h3>
-            <span v-if="activeSuiteId === s.id" class="text-[9px] font-mono px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-400">当前生效</span>
-            <span v-else class="text-[9px] font-mono opacity-60" style="color: var(--text-muted);">{{ s.tagline }}</span>
+            <span v-if="activeSuiteId === s.id" class="text-[11px] font-mono px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-400">当前生效</span>
+            <span v-else class="text-[11px] font-mono opacity-60" style="color: var(--text-muted);">{{ s.tagline }}</span>
           </div>
-          <p class="text-[10px] font-mono leading-relaxed flex-1" style="color: var(--text-muted);">{{ s.desc }}</p>
+          <p class="text-[11px] font-mono leading-relaxed flex-1" style="color: var(--text-muted);">{{ s.desc }}</p>
           <button
             @click="applySuite(s)"
             :disabled="busy !== '' || activeSuiteId === s.id"
@@ -259,7 +259,7 @@ onMounted(loadData)
           <component :is="groupIcons[group.id] || ShieldAlert" class="w-4 h-4" style="color: var(--text-main);" />
           <div>
             <h2 class="text-xs font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">{{ group.label }}</h2>
-            <p class="text-[10px] font-mono mt-0.5" style="color: var(--text-muted);">{{ group.desc }}</p>
+            <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);">{{ group.desc }}</p>
           </div>
         </div>
 
@@ -273,10 +273,10 @@ onMounted(loadData)
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2 flex-wrap">
                 <span class="text-xs font-mono font-bold" style="color: var(--text-main);">{{ p.label }}</span>
-                <span v-if="isCustomized(p)" class="text-[9px] font-mono px-1.5 py-0.5 rounded border border-amber-500/30 bg-amber-500/10 text-amber-400">已自定义</span>
+                <span v-if="isCustomized(p)" class="text-[11px] font-mono px-1.5 py-0.5 rounded border border-amber-500/30 bg-amber-500/10 text-amber-400">已自定义</span>
               </div>
-              <p class="text-[10px] font-mono mt-1 leading-relaxed" style="color: var(--text-muted);">{{ p.desc }}</p>
-              <p class="text-[9px] font-mono mt-0.5 opacity-60" style="color: var(--text-muted);">
+              <p class="text-[11px] font-mono mt-1 leading-relaxed" style="color: var(--text-muted);">{{ p.desc }}</p>
+              <p class="text-[11px] font-mono mt-0.5 opacity-60" style="color: var(--text-muted);">
                 默认 {{ toDisplay(p, p.default) }} {{ p.unit }} · 范围 {{ toDisplay(p, p.min) }} ~ {{ toDisplay(p, p.max) }} {{ p.unit }} · <span class="opacity-70">{{ p.key }}</span>
               </p>
             </div>
@@ -293,7 +293,7 @@ onMounted(loadData)
                   style="background: transparent; color: var(--text-main);"
                   :class="draft[p.key] < p.min || draft[p.key] > p.max ? 'ring-1 ring-rose-500' : ''"
                 />
-                <span class="px-2 text-[10px] font-mono whitespace-nowrap select-none" style="color: var(--text-muted);">{{ p.unit }}</span>
+                <span class="px-2 text-[11px] font-mono whitespace-nowrap select-none" style="color: var(--text-muted);">{{ p.unit }}</span>
               </div>
               <button
                 v-if="Math.abs((draft[p.key] ?? 0) - p.default) > 1e-9"
@@ -312,7 +312,7 @@ onMounted(loadData)
       <!-- Danger zone: reset -->
       <div class="rounded-xl border p-4" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
         <h2 class="text-xs font-black font-mono uppercase tracking-wide mb-1" style="color: var(--text-main);">恢复出厂基线</h2>
-        <p class="text-[10px] font-mono mb-3" style="color: var(--text-muted);">清除全部自定义覆盖值，执行层回退到代码默认基线。需输入确认短语。</p>
+        <p class="text-[11px] font-mono mb-3" style="color: var(--text-muted);">清除全部自定义覆盖值，执行层回退到代码默认基线。需输入确认短语。</p>
         <div class="flex flex-col sm:flex-row gap-2 sm:items-center">
           <input
             v-model="resetConfirm"

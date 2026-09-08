@@ -8,8 +8,8 @@ const { api } = useApi()
 const auth = useAuthStore()
 const config = ref<any>(null)
 const runtime = ref<any>(null)
-const exchangeRuntime = ref<any>(null)
 const loading = ref(true)
+const bannerMsg = ref<{ text: string; type: 'ok' | 'err' | 'warn' } | null>(null)
 
 // ---- OAuth ----
 const oauthSite = ref('global')
@@ -26,7 +26,6 @@ const installingCli = ref(false)
 // ---- backup API keys ----
 const keysOpen = ref(false)
 const keys = ref({ live_key: '', live_secret: '', live_pass: '', demo_key: '', demo_secret: '', demo_pass: '' })
-const binanceKeys = ref({ live_key: '', live_secret: '', demo_key: '', demo_secret: '' })
 
 // ---- capital ----
 const newCapital = ref<string>('')
@@ -57,18 +56,12 @@ const sourceLabel: Record<string, string> = {
 async function loadAll() {
   loading.value = true
   try {
-    const [cfg, localRt] = await Promise.all([
-      api('/api/v1/admin/config'),
-      api('/api/v1/admin/exchange/runtime'),
-    ])
+    const [cfg, rt] = await Promise.all([api('/api/v1/admin/config'), api('/api/v1/admin/okx/runtime')])
     config.value = cfg
-    if (!cfg.editable.exchange) cfg.editable.exchange = 'okx'
-    if (!cfg.editable.binance_environment) cfg.editable.binance_environment = 'demo'
-    if (!cfg.editable.okx_environment) cfg.editable.okx_environment = 'demo'
-    exchangeRuntime.value = localRt
-    runtime.value = null
+    applyRuntime(rt)
     newCapital.value = String(cfg.editable?.initial_capital ?? '')
     manualClose.value = !!cfg.editable?.manual_close_enabled
+    oauthSite.value = rt?.oauth?.site || 'global'
     const inst = await api('/api/v1/admin/instruments')
     instruments.value = inst.instruments || []
     instLimits.value = inst.limits || instLimits.value
@@ -200,35 +193,25 @@ async function installCli() {
 }
 
 async function saveEnvironment() {
-  const exchange = config.value.editable.exchange || 'okx'
-  const environment = exchange === 'binance'
-    ? (config.value.editable.binance_environment || 'demo')
-    : (config.value.editable.okx_environment || 'demo')
-  const phrase = `SWITCH ${String(exchange).toUpperCase()} ${String(environment).toUpperCase()}`
-  const liveNote = environment === 'live' ? '\n⚠ 当前将切换到 LIVE 实盘，真实资金可能被下单。' : '\n当前为模拟盘 DEMO。'
-  const approved = prompt(`保存交易账户配置\n交易所：${String(exchange).toUpperCase()}\n账户模式：${String(environment).toUpperCase()}${liveNote}\n输入确认短语：${phrase}`)
-  if (approved?.trim().toUpperCase() !== phrase) {
-    bannerMsg.value = { text: `未输入 ${phrase}，配置未保存`, type: 'warn' }
-    return
+  const environment = config.value.editable.okx_environment
+  if (environment === 'live') {
+    const approved = prompt('切换到 LIVE 实盘环境\n输入 LIVE 确认已核对实盘 Key 权限与 IP 白名单')
+    if (approved?.trim().toUpperCase() !== 'LIVE') {
+      bannerMsg.value = { text: '未输入 LIVE，环境未切换', type: 'warn' }
+      return
+    }
   }
   try {
-    const body: Record<string, string> = { exchange, confirmation: phrase }
-    if (exchange === 'binance') body.binance_environment = environment
-    else body.okx_environment = environment
+    const body: any = { okx_environment: environment }
     if (keys.value.live_key) body.okx_live_api_key = keys.value.live_key
     if (keys.value.live_secret) body.okx_live_secret_key = keys.value.live_secret
     if (keys.value.live_pass) body.okx_live_passphrase = keys.value.live_pass
     if (keys.value.demo_key) body.okx_demo_api_key = keys.value.demo_key
     if (keys.value.demo_secret) body.okx_demo_secret_key = keys.value.demo_secret
     if (keys.value.demo_pass) body.okx_demo_passphrase = keys.value.demo_pass
-    if (binanceKeys.value.live_key) body.binance_live_api_key = binanceKeys.value.live_key
-    if (binanceKeys.value.live_secret) body.binance_live_secret_key = binanceKeys.value.live_secret
-    if (binanceKeys.value.demo_key) body.binance_demo_api_key = binanceKeys.value.demo_key
-    if (binanceKeys.value.demo_secret) body.binance_demo_secret_key = binanceKeys.value.demo_secret
     await api('/api/v1/admin/config', { method: 'PUT', body: JSON.stringify(body) })
     keys.value = { live_key: '', live_secret: '', live_pass: '', demo_key: '', demo_secret: '', demo_pass: '' }
-    binanceKeys.value = { live_key: '', live_secret: '', demo_key: '', demo_secret: '' }
-    bannerMsg.value = { text: `${String(exchange).toUpperCase()} ${String(environment).toUpperCase()} 环境与凭证已安全保存`, type: 'ok' }
+    bannerMsg.value = { text: `OKX ${environment.toUpperCase()} 环境与凭证已安全保存`, type: 'ok' }
     await loadAll()
   } catch (e: any) {
     bannerMsg.value = { text: `保存失败：${e.message}`, type: 'err' }
@@ -291,9 +274,9 @@ async function removeInstrument(item: any) {
 }
 
 async function loadPositions() {
-  snapshotState.value = '正在读取当前持仓与挂单…'
+  snapshotState.value = '正在从 OKX 读取当前持仓与挂单…'
   try {
-    const d = await api('/api/v1/admin/account-snapshot')
+    const d = await api('/api/v1/admin/okx/account-snapshot')
     snapshot.value = d
     snapshotState.value = ''
   } catch (e: any) {
@@ -301,18 +284,6 @@ async function loadPositions() {
     snapshot.value = null
   }
 }
-
-async function refreshAccountCache() {
-  snapshotState.value = '正在刷新账户缓存（显式动作，非自动）…'
-  try {
-    const d = await api('/api/v1/admin/account/refresh', { method: 'POST' })
-    snapshotState.value = ''
-    bannerMsg.value = { text: d.configured ? `已刷新 ${String(d.exchange || '').toUpperCase()} ${String(d.environment || '').toUpperCase()}` : (d.notes || []).join(' ') || '未配置，未发外部请求', type: d.configured ? 'ok' : 'warn' }
-  } catch (e: any) {
-    snapshotState.value = e.message
-  }
-}
-
 
 function openClose(pos: any) {
   if (!manualClose.value) { bannerMsg.value = { text: '请先启用后台手动平仓并保存开关', type: 'err' }; return }
@@ -359,10 +330,10 @@ onMounted(loadAll)
         </div>
         <div>
           <h1 class="text-xs sm:text-[13px] font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
-            账户连接与交易标的池
+            OKX 账户连接与交易标的池
           </h1>
           <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);">
-            选择 OKX 或 Binance USD-M，配置 demo/live 凭证；空白密钥不覆盖现有值
+            OKX 官方账户授权连接、实盘/模拟盘环境切换、初始本金基准与交易标的管理
           </p>
         </div>
       </div>
@@ -379,53 +350,38 @@ onMounted(loadAll)
     <div v-if="loading" class="py-12 text-center text-xs font-mono" style="color: var(--text-muted);">正在加载...</div>
 
     <template v-else-if="config">
-      <!-- 1. exchange account & environment -->
+      <!-- 1. OKX account & environment -->
       <div class="rounded-xl border p-4 sm:p-5 space-y-4 shadow-xs transition-colors" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
         <div class="flex items-center justify-between pb-3 border-b" style="border-color: var(--border-subtle);">
           <div class="flex items-center space-x-2">
             <ShieldAlert class="w-4 h-4" style="color: var(--color-brand);" />
-            <h2 class="text-sm font-bold font-mono" style="color: var(--text-main);">1. 交易所账号连接与交易环境</h2>
+            <h2 class="text-sm font-bold font-mono" style="color: var(--text-main);">1. OKX 账号连接与交易环境</h2>
           </div>
-          <span class="text-[10px] font-mono px-2 py-0.5 rounded border font-bold" :class="exchangeRuntime?.configured ? 'text-emerald-500 border-emerald-500/30 bg-emerald-500/10' : 'text-amber-500 border-amber-500/30 bg-amber-500/10'">
-            {{ (exchangeRuntime?.exchange || config.editable.exchange || 'EXCHANGE').toUpperCase() }} · {{ (exchangeRuntime?.environment || 'demo').toUpperCase() }} · {{ exchangeRuntime?.configured ? '已配置' : '未配置' }}
+          <span v-if="runtime" class="text-[11px] font-mono px-2 py-0.5 rounded border font-bold" :class="runtime.ready ? 'text-emerald-500 border-emerald-500/30 bg-emerald-500/10' : runtime.degraded ? 'text-amber-500 border-amber-500/30 bg-amber-500/10' : 'text-rose-500 border-rose-500/30 bg-rose-500/10'">
+            {{ runtime.ready ? 'READY · 可运行' : runtime.demo_oauth_unavailable ? 'DEGRADED · DEMO OAuth接口不可用' : runtime.degraded ? 'DEGRADED · OKX当前环境接口不可用' : 'NOT READY · 禁止交易' }}
           </span>
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
-          <div>
-            <label for="exchange-select" class="block text-[11px] mb-1 font-mono" style="color: var(--text-muted);">交易所</label>
-            <select id="exchange-select" v-model="config.editable.exchange" class="w-full rounded-lg px-3 py-2 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);">
-              <option value="okx">OKX USDT 永续</option>
-              <option value="binance">Binance USD-M USDT 永续</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-[11px] mb-1 font-mono" style="color: var(--text-muted);">本地配置状态</label>
-            <div class="text-[11px] font-mono py-2" style="color: var(--text-muted);">{{ exchangeRuntime?.status || 'unconfigured' }} · {{ (exchangeRuntime?.notes || []).join(' ') || '不会自动访问交易所' }}</div>
-          </div>
-        </div>
-
-        <div v-if="config.editable.exchange !== 'binance'" class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-4">
+        <div v-if="runtime" class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-4">
           <!-- runtime detail -->
           <div>
-            <div v-if="runtime" class="text-xs font-mono leading-relaxed space-y-1" style="color: var(--text-muted);">
+            <div class="text-xs font-mono leading-relaxed space-y-1" style="color: var(--text-muted);">
               <div>当前环境：<strong style="color: var(--text-main);">{{ (runtime.selected_mode || 'demo').toUpperCase() }}</strong></div>
               <div>CLI：<span style="color: var(--text-main);">{{ runtime.cli?.installed ? (runtime.cli.version || '已安装') : '未安装' }} · {{ runtime.cli?.path || 'PATH 中不可见' }}</span></div>
               <div>认证来源：<span style="color: var(--color-brand);">{{ sourceLabel[runtime.credential_source] || runtime.credential_source }}</span></div>
               <div>连接账号：<span style="color: var(--text-main);">{{ runtime.oauth?.account_label || (runtime.oauth?.status === 'logged_in' ? 'OAuth 已连接（OKX CLI 当前不返回账号昵称/UID）' : '--') }}</span></div>
               <div>OAuth：<span style="color: var(--text-main);">{{ runtime.oauth?.status }}{{ runtime.oauth?.site ? ' · ' + runtime.oauth.site : '' }}</span></div>
-              <div class="text-[10px]" style="color: var(--text-faint);">权限：{{ (runtime.oauth?.scopes || []).join(', ') || '--' }}</div>
+              <div class="text-[11px]" style="color: var(--text-faint);">权限：{{ (runtime.oauth?.scopes || []).join(', ') || '--' }}</div>
               <div>只读探针：<span :class="runtime.read_probe?.ok ? 'text-emerald-500' : runtime.degraded ? 'text-amber-500' : 'text-rose-500'">{{ runtime.read_probe?.detail || '--' }}</span></div>
-              <div v-if="runtime.live_control_probe" class="text-[10px]">LIVE 对照探针：<span :class="runtime.live_control_probe.ok ? 'text-emerald-500' : 'text-rose-500'">{{ runtime.live_control_probe.detail }}</span></div>
+              <div v-if="runtime.live_control_probe" class="text-[11px]">LIVE 对照探针：<span :class="runtime.live_control_probe.ok ? 'text-emerald-500' : 'text-rose-500'">{{ runtime.live_control_probe.detail }}</span></div>
               <div v-if="runtime.issues?.length" class="mt-2 text-[11px]" :class="runtime.degraded ? 'text-amber-500' : 'text-rose-500'">
                 <div v-for="(issue, i) in runtime.issues" :key="i">• {{ issue }}</div>
               </div>
-              <div v-if="runtime.steps?.length" class="mt-2 text-[10px]" style="color: var(--text-faint);">
+              <div v-if="runtime.steps?.length" class="mt-2 text-[11px]" style="color: var(--text-faint);">
                 <div class="font-bold mb-0.5" style="color: var(--text-muted);">操作指引</div>
                 <div v-for="(s, i) in runtime.steps" :key="i">• {{ s }}</div>
               </div>
             </div>
-            <p v-else class="text-xs leading-relaxed" style="color: var(--text-muted);">尚未执行连接诊断。页面加载不会访问交易所；需要时再主动检查 CLI、OAuth 和账户连接。</p>
             <div class="flex gap-2 mt-3">
               <button @click="rediagnose" class="flex items-center space-x-1 px-3 py-1.5 rounded-lg border text-xs font-mono cursor-pointer transition-all shadow-xs" style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-main);"><RefreshCw class="w-3.5 h-3.5" /><span>重新诊断</span></button>
               <button @click="checkCli" class="px-3 py-1.5 rounded-lg border text-xs font-mono cursor-pointer transition-all shadow-xs" style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-main);">检测 Node/npm/CLI</button>
@@ -440,8 +396,8 @@ onMounted(loadAll)
           <!-- OAuth panel -->
           <div class="rounded-lg p-3.5 border shadow-xs" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
             <div class="text-[11px] font-bold font-mono mb-2" style="color: var(--text-main);">官方 OAuth 授权（推荐）</div>
-            <div class="text-[10px] font-mono mb-2 leading-relaxed" style="color: var(--text-muted);">授权码登录，无需向 R20 提供 OKX 密码、API Key 或 2FA。</div>
-            <label class="block text-[10px] mb-1 font-mono" style="color: var(--text-muted);">OKX 站点</label>
+            <div class="text-[11px] font-mono mb-2 leading-relaxed" style="color: var(--text-muted);">授权码登录，无需向 R20 提供 OKX 密码、API Key 或 2FA。</div>
+            <label class="block text-[11px] mb-1 font-mono" style="color: var(--text-muted);">OKX 站点</label>
             <select v-model="oauthSite" class="w-full rounded-lg px-2 py-1.5 text-xs font-mono outline-none border mb-2" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);">
               <option value="global">Global · www.okx.com</option>
               <option value="eea">EEA · my.okx.com</option>
@@ -498,18 +454,18 @@ onMounted(loadAll)
             <div v-if="oauthState" class="mt-2 text-[11px] font-mono text-amber-500">{{ oauthState }}</div>
 
             <div v-if="oauthResult?.kind === 'device'" class="mt-2 p-2.5 rounded-lg border space-y-1.5" style="background-color: var(--color-brand-bg); border-color: var(--color-brand-border);">
-              <div class="text-[10px] font-bold font-mono" style="color: var(--text-main);">请在浏览器完成 OKX 官方授权</div>
-              <div class="text-[10px] font-mono break-all"><a :href="oauthResult.verification_uri" target="_blank" rel="noopener" class="underline" style="color: var(--color-brand);">{{ oauthResult.verification_uri }}</a></div>
+              <div class="text-[11px] font-bold font-mono" style="color: var(--text-main);">请在浏览器完成 OKX 官方授权</div>
+              <div class="text-[11px] font-mono break-all"><a :href="oauthResult.verification_uri" target="_blank" rel="noopener" class="underline" style="color: var(--color-brand);">{{ oauthResult.verification_uri }}</a></div>
               <div class="text-center py-1.5 rounded border" style="background-color: var(--bg-card); border-color: var(--border-subtle);"><span class="text-lg font-black font-mono tracking-widest" style="color: var(--text-main);">{{ oauthResult.user_code }}</span></div>
-              <div class="text-[10px] font-mono" style="color: var(--text-muted);">有效期约 {{ Math.ceil(Number(oauthResult.expires_in || 600) / 60) }} 分钟</div>
+              <div class="text-[11px] font-mono" style="color: var(--text-muted);">有效期约 {{ Math.ceil(Number(oauthResult.expires_in || 600) / 60) }} 分钟</div>
               <button @click="checkOauth" class="w-full px-2 py-1.5 rounded-lg border text-[11px] font-mono cursor-pointer transition-all shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-medium); color: var(--text-main);">我已授权，检查状态</button>
             </div>
             <div v-else-if="oauthResult?.kind === 'logged_in'" class="mt-2 p-2.5 rounded-lg border text-[11px] font-mono text-emerald-500" style="background-color: var(--color-up-bg); border-color: var(--color-up-border);">
               <div class="flex items-center justify-between">
                 <span>✅ 当前已经登录 · 站点 {{ oauthResult.site }}</span>
-                <span class="text-[10px] text-emerald-400">已就绪</span>
+                <span class="text-[11px] text-emerald-400">已就绪</span>
               </div>
-              <div class="text-[10px] break-all mt-1" style="color: var(--text-muted);">{{ (oauthResult.scopes || []).join(', ') }}</div>
+              <div class="text-[11px] break-all mt-1" style="color: var(--text-muted);">{{ (oauthResult.scopes || []).join(', ') }}</div>
             </div>
             <div v-else-if="oauthResult?.kind === 'error'" class="mt-2 p-2.5 rounded-lg border text-[11px] font-mono text-rose-500" style="background-color: var(--color-down-bg); border-color: var(--color-down-border);">{{ oauthResult.message }}</div>
           </div>
@@ -520,11 +476,7 @@ onMounted(loadAll)
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
             <div>
               <label class="block text-[11px] mb-1 font-mono" style="color: var(--text-muted);">当前交易环境</label>
-              <select v-if="config.editable.exchange === 'binance'" v-model="config.editable.binance_environment" class="w-full rounded-lg px-3 py-2 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);">
-                <option value="demo">模拟盘 DEMO</option>
-                <option value="live">实盘 LIVE</option>
-              </select>
-              <select v-else v-model="config.editable.okx_environment" class="w-full rounded-lg px-3 py-2 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);">
+              <select v-model="config.editable.okx_environment" class="w-full rounded-lg px-3 py-2 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);">
                 <option value="demo">模拟盘 DEMO</option>
                 <option value="live">实盘 LIVE</option>
               </select>
@@ -541,38 +493,22 @@ onMounted(loadAll)
             </div>
           </div>
 
-          <details v-if="config.editable.exchange !== 'binance'" class="mt-3">
-            <summary class="cursor-pointer text-[11px] font-mono select-none" style="color: var(--color-brand);">备用方式：分别配置 OKX LIVE / DEMO API Key（无人值守部署）</summary>
+          <details class="mt-3">
+            <summary class="cursor-pointer text-[11px] font-mono select-none" style="color: var(--color-brand);">备用方式：分别配置 LIVE / DEMO API Key（无人值守部署）</summary>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3 p-3 rounded-lg border shadow-xs" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
               <div class="space-y-2">
-                <div class="text-[10px] font-bold font-mono" style="color: var(--text-main);">实盘 LIVE · {{ config.editable.okx_live_configured ? '已配置' : '未配置' }}</div>
+                <div class="text-[11px] font-bold font-mono" style="color: var(--text-main);">实盘 LIVE Key</div>
                 <input v-model="keys.live_key" type="password" placeholder="API Key（留空保持现有）" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" />
-                <input v-model="keys.live_secret" type="password" placeholder="Secret Key（留空不覆盖）" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" />
-                <input v-model="keys.live_pass" type="password" placeholder="Passphrase（留空不覆盖）" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" />
+                <input v-model="keys.live_secret" type="password" placeholder="Secret Key" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" />
+                <input v-model="keys.live_pass" type="password" placeholder="Passphrase" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" />
               </div>
               <div class="space-y-2">
-                <div class="text-[10px] font-bold font-mono" style="color: var(--text-main);">模拟盘 DEMO · {{ config.editable.okx_demo_configured ? '已配置' : '未配置' }}</div>
+                <div class="text-[11px] font-bold font-mono" style="color: var(--text-main);">模拟盘 DEMO Key</div>
                 <input v-model="keys.demo_key" type="password" placeholder="API Key（留空保持现有）" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" />
-                <input v-model="keys.demo_secret" type="password" placeholder="Secret Key（留空不覆盖）" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" />
-                <input v-model="keys.demo_pass" type="password" placeholder="Passphrase（留空不覆盖）" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" />
+                <input v-model="keys.demo_secret" type="password" placeholder="Secret Key" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" />
+                <input v-model="keys.demo_pass" type="password" placeholder="Passphrase" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" />
               </div>
-            </div>
-          </details>
-
-          <details v-else class="mt-3" open>
-            <summary class="cursor-pointer text-[11px] font-mono select-none" style="color: var(--color-brand);">Binance USD-M 分组凭证 · 空白不覆盖</summary>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3 p-3 rounded-lg border shadow-xs" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
-              <div class="space-y-2">
-                <div class="text-[10px] font-bold font-mono" style="color: var(--text-main);">实盘 LIVE · {{ config.editable.binance_live_configured ? '已配置' : '未配置' }}</div>
-                <input v-model="binanceKeys.live_key" type="password" placeholder="API Key（留空保持现有）" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" autocomplete="off" />
-                <input v-model="binanceKeys.live_secret" type="password" placeholder="Secret Key（留空不覆盖）" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" autocomplete="off" />
-              </div>
-              <div class="space-y-2">
-                <div class="text-[10px] font-bold font-mono" style="color: var(--text-main);">模拟盘 DEMO · {{ config.editable.binance_demo_configured ? '已配置' : '未配置' }}</div>
-                <input v-model="binanceKeys.demo_key" type="password" placeholder="API Key（留空保持现有）" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" autocomplete="off" />
-                <input v-model="binanceKeys.demo_secret" type="password" placeholder="Secret Key（留空不覆盖）" class="w-full rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" autocomplete="off" />
-              </div>
-              <div class="sm:col-span-2 text-[10px] font-mono" style="color: var(--text-faint);">LIVE 与 DEMO 密钥严格隔离。明文密钥不会出现在响应中。</div>
+              <div class="sm:col-span-2 text-[11px] font-mono" style="color: var(--text-faint);">OAuth 与 API Key 二选一即可。不要为同一运行用户同时配置 CLI API Key Profile 和 OAuth。</div>
             </div>
           </details>
         </div>
@@ -636,9 +572,9 @@ onMounted(loadAll)
                 <td class="py-2.5 px-3" style="color: var(--text-muted);">{{ item.name }}</td>
                 <td class="py-2.5 px-3 num-tabular" style="color: var(--text-faint);">{{ item.ctType || 'SWAP' }}</td>
                 <td class="py-2.5 px-3">
-                  <span v-if="item.protected" class="px-1.5 py-0.5 rounded-[3px] text-[10px] font-mono font-bold border" style="background-color: var(--color-warn-bg); border-color: var(--color-warn-border); color: var(--color-warn);">🔒 保底必选</span>
-                  <span v-else-if="item.has_tracker" class="px-1.5 py-0.5 rounded-[3px] text-[10px] font-mono font-bold border" style="background-color: var(--color-brand-bg); border-color: var(--color-brand-border); color: var(--color-brand);">持仓中</span>
-                  <span v-else class="text-[10px] font-mono px-1.5 py-0.5 rounded-[3px] border" style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--text-faint);">可移除</span>
+                  <span v-if="item.protected" class="px-1.5 py-0.5 rounded-[3px] text-[11px] font-mono font-bold border" style="background-color: var(--color-warn-bg); border-color: var(--color-warn-border); color: var(--color-warn);">🔒 保底必选</span>
+                  <span v-else-if="item.has_tracker" class="px-1.5 py-0.5 rounded-[3px] text-[11px] font-mono font-bold border" style="background-color: var(--color-brand-bg); border-color: var(--color-brand-border); color: var(--color-brand);">持仓中</span>
+                  <span v-else class="text-[11px] font-mono px-1.5 py-0.5 rounded-[3px] border" style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--text-faint);">可移除</span>
                 </td>
                 <td class="py-2.5 px-4 text-right">
                   <button @click="removeInstrument(item)" :disabled="item.protected || item.has_tracker" class="p-1 rounded hover:opacity-80 text-rose-400 disabled:opacity-20 cursor-pointer transition-opacity" title="从标的池移除">
@@ -649,7 +585,7 @@ onMounted(loadAll)
             </tbody>
           </table>
         </div>
-        <p class="px-4 py-2 border-t text-[10px] font-mono" style="border-color: var(--border-subtle); color: var(--text-faint);">BTC 为系统保底标的不可删除；有在途追踪器的标的禁止移除；最多 {{ instLimits.maximum }} 个。</p>
+        <p class="px-4 py-2 border-t text-[11px] font-mono" style="border-color: var(--border-subtle); color: var(--text-faint);">BTC 为系统保底标的不可删除；有在途追踪器的标的禁止移除；最多 {{ instLimits.maximum }} 个。</p>
       </div>
 
       <!-- 4. positions & emergency close -->
@@ -659,16 +595,10 @@ onMounted(loadAll)
             <KeyRound class="w-4 h-4 text-rose-500" />
             <h2 class="text-xs font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">4. 当前持仓与应急平仓</h2>
           </div>
-          <div class="flex gap-2">
-            <button @click="refreshAccountCache" class="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg border text-xs font-mono cursor-pointer transition-all shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-medium); color: var(--text-main);">
-              <RefreshCw class="w-3.5 h-3.5" />
-              <span>刷新大屏账户缓存</span>
-            </button>
-            <button @click="loadPositions" class="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg border text-xs font-mono cursor-pointer transition-all shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-medium); color: var(--text-main);">
-              <RefreshCw class="w-3.5 h-3.5" />
-              <span>刷新持仓与挂单</span>
-            </button>
-          </div>
+          <button @click="loadPositions" class="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg border text-xs font-mono cursor-pointer transition-all shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-medium); color: var(--text-main);">
+            <RefreshCw class="w-3.5 h-3.5" />
+            <span>刷新持仓与挂单</span>
+          </button>
         </div>
         <div v-if="snapshotState" class="px-4 pt-2 text-[11px] font-mono text-amber-500">{{ snapshotState }}</div>
         <div v-if="snapshot" class="px-4 pt-2 text-[11px] font-mono" style="color: var(--text-muted);">
@@ -680,7 +610,7 @@ onMounted(loadAll)
             <thead>
               <tr class="border-b text-[11px] uppercase tracking-wider font-bold" style="border-color: var(--border-subtle); background-color: var(--bg-card-subtle); color: var(--text-muted);">
                 <th class="py-2.5 px-4">仓位标的</th>
-                <th class="py-2.5 px-3">基础数量</th>
+                <th class="py-2.5 px-3">张数</th>
                 <th class="py-2.5 px-3">模式</th>
                 <th class="py-2.5 px-3">未实现盈亏</th>
                 <th class="py-2.5 px-4 text-right">操作</th>
@@ -690,7 +620,7 @@ onMounted(loadAll)
               <tr v-for="p in snapshot.positions" :key="p.instId + p.posSide" class="border-b last:border-b-0 hover:bg-[var(--bg-card-hover)] transition-colors" style="border-color: var(--border-subtle);">
                 <td class="py-2.5 px-4">
                   <strong style="color: var(--text-main);">{{ p.instId }}</strong>
-                  <span class="ml-1.5 px-1.5 py-0.2 rounded text-[9px] font-bold border" :style="p.posSide === 'long' ? { backgroundColor: 'var(--color-up-bg)', borderColor: 'var(--color-up-border)', color: 'var(--color-up)' } : { backgroundColor: 'var(--color-down-bg)', borderColor: 'var(--color-down-border)', color: 'var(--color-down)' }">
+                  <span class="ml-1.5 px-1.5 py-0.2 rounded text-[11px] font-bold border" :style="p.posSide === 'long' ? { backgroundColor: 'var(--color-up-bg)', borderColor: 'var(--color-up-border)', color: 'var(--color-up)' } : { backgroundColor: 'var(--color-down-bg)', borderColor: 'var(--color-down-border)', color: 'var(--color-down)' }">
                     {{ (p.posSide || 'net').toUpperCase() }}
                   </span>
                 </td>
@@ -698,15 +628,15 @@ onMounted(loadAll)
                 <td class="py-2.5 px-3 text-[11px]" style="color: var(--text-faint);">{{ p.mgnMode || '--' }}</td>
                 <td class="py-2.5 px-3 font-bold num-tabular" :class="Number(p.upl || 0) >= 0 ? 'text-emerald-500' : 'text-rose-500'">{{ Number(p.upl || 0).toFixed(4) }}</td>
                 <td class="py-2.5 px-4 text-right">
-                  <button @click="openClose(p)" class="px-2.5 py-1 rounded-md text-[10px] font-mono font-bold border transition-all cursor-pointer shadow-xs" style="background-color: var(--color-down-bg); border-color: var(--color-down-border); color: var(--color-down);">快速平仓</button>
+                  <button @click="openClose(p)" class="px-2.5 py-1 rounded-md text-[11px] font-mono font-bold border transition-all cursor-pointer shadow-xs" style="background-color: var(--color-down-bg); border-color: var(--color-down-border); color: var(--color-down);">快速平仓</button>
                 </td>
               </tr>
             </tbody>
           </table>
           <div v-else-if="snapshot" class="py-6 text-center text-xs font-mono text-emerald-500">✓ 当前环境 0 活跃持仓</div>
-          <div v-else class="py-6 text-center text-xs font-mono" style="color: var(--text-faint);">点击“刷新持仓与挂单”从所选交易所读取最新状态</div>
+          <div v-else class="py-6 text-center text-xs font-mono" style="color: var(--text-faint);">点击"刷新持仓与挂单"从 OKX 读取最新实时状态</div>
         </div>
-        <p class="px-4 py-2 border-t text-[10px] font-mono" style="border-color: var(--border-subtle); color: var(--text-faint);">平仓流程：复核交易所、环境与仓位 → 撤销冲突委托 → 市价减仓/平仓 → 确认仓位归零后清理保护。需先启用手动平仓开关。</p>
+        <p class="px-4 py-2 border-t text-[11px] font-mono" style="border-color: var(--border-subtle); color: var(--text-faint);">平仓流程：复核环境与仓位 → 撤销同标的冲突委托 → autoCxl 市价平仓 → 轮询确认仓位归零。需先启用上方手动平仓开关。</p>
       </div>
     </template>
 

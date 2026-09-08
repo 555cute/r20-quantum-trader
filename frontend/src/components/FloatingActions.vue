@@ -80,7 +80,7 @@ function copyPrompt() {
           </div>
           <div>
             <h3 class="text-sm font-bold" style="color: var(--text-main);">实时 AI 大脑提示词审计</h3>
-            <p class="text-[10px]" style="color: var(--text-faint);">当前轮次真实发往大模型网关的完整 System + User Prompt 原文</p>
+            <p class="text-[11px]" style="color: var(--text-faint);">当前轮次真实发往大模型网关的完整 System + User Prompt 原文</p>
           </div>
         </div>
         <div class="flex items-center space-x-2">

@@ -161,7 +161,7 @@ function clean(v: any, fallback = '--'): string {
                 <div class="flex items-center space-x-1.5">
                   <span class="font-bold text-sm 2xl:text-base" style="color: var(--text-main);">{{ t.inst }}</span>
                   <span :class="t.side === '多' ? 'capsule-direction-long' : 'capsule-direction-short'">
-                    {{ t.side }} {{ t.lever || '--' }}
+                    {{ t.side }} {{ t.lever || '3x' }}
                   </span>
                 </div>
               </td>
@@ -184,13 +184,13 @@ function clean(v: any, fallback = '--'): string {
               </td>
               <td class="py-3 px-3 2xl:px-5 2xl:py-3.5">
                 <span class="num-tabular" style="color: var(--text-main);">{{ formatPx(t.open_px) }}</span>
-                <span class="text-[10px] 2xl:text-xs ml-1 num-tabular" style="color: var(--text-faint);">({{ (t.open_time || '--').substring(5, 19) }})</span>
+                <span class="text-[11px] 2xl:text-xs ml-1 num-tabular" style="color: var(--text-faint);">({{ (t.open_time || '--').substring(5, 19) }})</span>
               </td>
               <td class="py-3 px-3 2xl:px-5 2xl:py-3.5">
                 <span class="num-tabular" :style="{ color: t.status === 'holding' ? 'var(--color-brand)' : 'var(--text-main)' }">
                   {{ t.status === 'holding' ? '盯盘中' : formatPx(t.close_px) }}
                 </span>
-                <span class="text-[10px] 2xl:text-xs ml-1 num-tabular" style="color: var(--text-faint);">
+                <span class="text-[11px] 2xl:text-xs ml-1 num-tabular" style="color: var(--text-faint);">
                   ({{ t.status === 'holding' ? '--' : (t.close_time || '--').substring(5, 19) }})
                 </span>
               </td>
@@ -202,20 +202,18 @@ function clean(v: any, fallback = '--'): string {
                   {{ getPnl(t) >= 0 ? '+' : '' }}{{ getPnl(t).toFixed(2) }} U
                 </span>
                 <span
-                  v-if="t.roi_pct != null || t.roi != null"
-                  class="text-[10px] 2xl:text-xs ml-1 num-tabular"
+                  class="text-[11px] 2xl:text-xs ml-1 num-tabular"
                   :style="{ color: getRoi(t) >= 0 ? 'var(--color-up)' : 'var(--color-down)' }"
                 >
                   ({{ getRoi(t) >= 0 ? '+' : '' }}{{ getRoi(t).toFixed(1) }}%)
                 </span>
-                <span v-else class="text-[10px] ml-1 num-tabular" style="color: var(--text-muted);">(--)</span>
               </td>
               <td class="py-3 px-3 2xl:px-5 2xl:py-3.5 text-center num-tabular" style="color: var(--text-muted);">
                 {{ clean(t.hold_duration, '--') }}
               </td>
               <td class="py-3 px-4 2xl:px-6 2xl:py-3.5 text-xs 2xl:text-sm" style="color: var(--text-muted);">
                 <span
-                  class="px-2 py-0.5 rounded-[3px] text-[10px] 2xl:text-xs font-mono font-bold border mr-1.5 inline-flex items-center"
+                  class="px-2 py-0.5 rounded-[3px] text-[11px] 2xl:text-xs font-mono font-bold border mr-1.5 inline-flex items-center"
                   :style="{
                     backgroundColor: t.status === 'holding' ? 'var(--color-brand-bg)' : 'var(--bg-badge)',
                     borderColor: t.status === 'holding' ? 'var(--color-brand-border)' : 'var(--border-subtle)',

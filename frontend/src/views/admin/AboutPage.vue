@@ -83,8 +83,8 @@ onMounted(() => {
 <template>
   <div class="space-y-4 font-mono text-xs">
     <div class="flex items-center justify-between">
-      <p class="text-xs text-[#707E94]">确认版本状态，执行安全快进（Fast-Forward）更新。</p>
-      <span class="text-[10px] text-blue-400 bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20">治理 · 3/3</span>
+      <p class="text-xs text-[var(--text-faint)]">确认版本状态，执行安全快进（Fast-Forward）更新。</p>
+      <span class="text-[11px] text-blue-400 bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20">治理 · 3/3</span>
     </div>
 
     <div v-if="loading" class="py-12 text-center" style="color: var(--text-muted);">正在加载组件与版本数据...</div>
@@ -98,7 +98,7 @@ onMounted(() => {
               <Info class="w-4 h-4" style="color: var(--color-brand);" />
               <h2 class="text-sm font-bold" style="color: var(--text-main);">关于 R20</h2>
             </div>
-            <span class="text-[10px] px-2 py-0.5 rounded border font-bold" style="background-color: var(--color-up-bg); color: var(--color-up); border-color: var(--color-up-border);">OPEN SOURCE</span>
+            <span class="text-[11px] px-2 py-0.5 rounded border font-bold" style="background-color: var(--color-up-bg); color: var(--color-up); border-color: var(--color-up-border);">OPEN SOURCE</span>
           </div>
           <div class="space-y-1.5" style="color: var(--text-muted);">
             <div>产品架构: <strong style="color: var(--text-main);">{{ about.product?.name }}</strong></div>
@@ -115,7 +115,7 @@ onMounted(() => {
         <div class="rounded-xl border p-4 sm:p-5 shadow-xs transition-colors" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
           <div class="flex items-center justify-between pb-3 mb-3 border-b" style="border-color: var(--border-subtle);">
             <h2 class="text-sm font-bold" style="color: var(--text-main);">组件版本</h2>
-            <span class="text-[10px]" style="color: var(--text-faint);">生产运行栈</span>
+            <span class="text-[11px]" style="color: var(--text-faint);">生产运行栈</span>
           </div>
           <div class="table-scroll-container">
             <table class="w-full text-left whitespace-nowrap">
@@ -137,28 +137,28 @@ onMounted(() => {
             <ShieldCheck class="w-4 h-4 text-emerald-500" />
             <h2 class="text-sm font-bold" style="color: var(--text-main);">安全更新 (Git Fast-Forward)</h2>
           </div>
-          <span class="text-[10px] px-2 py-0.5 rounded border font-bold" style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);">FF-ONLY</span>
+          <span class="text-[11px] px-2 py-0.5 rounded border font-bold" style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);">FF-ONLY</span>
         </div>
 
         <!-- Git Status Telemetry Grid -->
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-4">
           <div class="p-2.5 rounded-lg border" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
-            <div class="text-[10px]" style="color: var(--text-faint);">当前分支</div>
+            <div class="text-[11px]" style="color: var(--text-faint);">当前分支</div>
             <div class="text-xs font-bold mt-0.5" style="color: var(--text-main);">{{ about.update?.branch || 'main' }}</div>
           </div>
           <div class="p-2.5 rounded-lg border" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
-            <div class="text-[10px]" style="color: var(--text-faint);">本地提交 (HEAD)</div>
+            <div class="text-[11px]" style="color: var(--text-faint);">本地提交 (HEAD)</div>
             <div class="text-xs font-bold mt-0.5 text-blue-400">{{ about.update?.local || '--' }}</div>
           </div>
           <div class="p-2.5 rounded-lg border" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
-            <div class="text-[10px]" style="color: var(--text-faint);">远端提交 (origin)</div>
+            <div class="text-[11px]" style="color: var(--text-faint);">远端提交 (origin)</div>
             <div class="text-xs font-bold mt-0.5" style="color: var(--text-main);">{{ about.update?.remote || '待检查' }}</div>
           </div>
           <div class="p-2.5 rounded-lg border" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
-            <div class="text-[10px]" style="color: var(--text-faint);">待同步差额</div>
+            <div class="text-[11px]" style="color: var(--text-faint);">待同步差额</div>
             <div class="text-xs font-bold mt-0.5" :class="(about.update?.behind || 0) > 0 ? 'text-amber-400' : 'text-emerald-400'">
               {{ (about.update?.behind || 0) > 0 ? `落后 ${about.update?.behind} 提交` : '已最新' }}
-              <span v-if="about.update?.ahead" class="text-[10px] text-gray-400 font-normal"> (领先 {{ about.update.ahead }})</span>
+              <span v-if="about.update?.ahead" class="text-[11px] text-gray-400 font-normal"> (领先 {{ about.update.ahead }})</span>
             </div>
           </div>
         </div>
@@ -179,7 +179,7 @@ onMounted(() => {
             @click="openUpdateModal"
             :disabled="updateChecking || updateRunning"
             class="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold transition-all cursor-pointer shadow-xs text-white"
-            style="background-color: #2563EB; border-color: #3B82F6;"
+            style="background-color: var(--color-info); border-color: var(--color-info);"
           >
             <Download class="w-3.5 h-3.5" />
             <span>执行安全更新</span>
@@ -205,7 +205,7 @@ onMounted(() => {
           </div>
 
           <div v-if="updateResult.git_output" class="p-3 rounded-lg border bg-black/40 text-[11px] font-mono text-gray-300 space-y-1">
-            <div class="flex items-center space-x-1 text-gray-400 text-[10px]">
+            <div class="flex items-center space-x-1 text-gray-400 text-[11px]">
               <Terminal class="w-3 h-3" />
               <span>Git 执行输出：</span>
             </div>
@@ -213,7 +213,7 @@ onMounted(() => {
           </div>
         </div>
 
-        <p class="mt-3 text-[10px] leading-relaxed" style="color: var(--text-faint);">
+        <p class="mt-3 text-[11px] leading-relaxed" style="color: var(--text-faint);">
           安全保护机制：执行更新时仅允许 Fast-Forward 快进合并；如果工作区有未提交的追踪代码冲突、远端不可达或无法快进，后台将自动拒绝更新以保护系统稳定性。
         </p>
       </div>
@@ -262,7 +262,7 @@ onMounted(() => {
             @click="executeUpdate"
             :disabled="confirmPhrase.trim().toUpperCase() !== 'UPDATE R20' || updateRunning"
             class="flex items-center space-x-1.5 px-4 py-1.5 rounded-lg text-xs font-bold text-white transition-all cursor-pointer shadow-xs disabled:opacity-40 disabled:cursor-not-allowed"
-            style="background-color: #2563EB; border-color: #3B82F6;"
+            style="background-color: var(--color-info); border-color: var(--color-info);"
           >
             <RefreshCw v-if="updateRunning" class="w-3.5 h-3.5 animate-spin" />
             <span>{{ updateRunning ? '正在更新中...' : '立即确认更新' }}</span>

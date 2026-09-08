@@ -91,7 +91,7 @@ onUnmounted(() => {
             {{ APP_NAME }}
           </span>
           <span
-            class="px-1.5 sm:px-2 py-0.2 rounded text-[10px] font-mono border font-bold shrink-0 whitespace-nowrap"
+            class="px-1.5 sm:px-2 py-0.2 rounded text-[11px] font-mono border font-bold shrink-0 whitespace-nowrap"
             style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);"
           >
             <span class="hidden md:inline">{{ APP_VERSION }} 官方开发与使用指南</span>
@@ -197,12 +197,12 @@ onUnmounted(() => {
           class="mt-6 p-3.5 rounded-xl border text-xs font-mono space-y-2 shadow-xs"
           style="background-color: var(--bg-card); border-color: var(--border-subtle);"
         >
-          <div class="text-[10px] uppercase font-bold" style="color: var(--text-faint);">社区交流与极客讨论</div>
+          <div class="text-[11px] uppercase font-bold" style="color: var(--text-faint);">社区交流与极客讨论</div>
           <div class="font-bold flex items-center justify-between" style="color: var(--text-main);">
             <span>QQ 官方群</span>
             <span class="font-mono text-xs px-1.5 py-0.2 rounded border" style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);">655973677</span>
           </div>
-          <p class="text-[10px] leading-relaxed" style="color: var(--text-muted);">
+          <p class="text-[11px] leading-relaxed" style="color: var(--text-muted);">
             欢迎量化极客、提示词工程师、深度求索 R1 用户共同交流探索。
           </p>
         </div>
@@ -489,7 +489,7 @@ onUnmounted(() => {
             <div class="p-3.5 rounded-xl border space-y-1.5 shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
               <div class="flex items-center justify-between">
                 <span class="font-bold text-xs font-mono" style="color: var(--text-main);">01_macro_trend_filter.py</span>
-                <span class="px-2 py-0.2 rounded text-[9px] font-bold border" style="background-color: var(--color-up-bg); color: var(--color-up); border-color: var(--color-up-border);">顺势铁律</span>
+                <span class="px-2 py-0.2 rounded text-[11px] font-bold border" style="background-color: var(--color-up-bg); color: var(--color-up); border-color: var(--color-up-border);">顺势铁律</span>
               </div>
               <p class="text-[11px]" style="color: var(--text-muted);">4H 宏观多头通道严禁摸顶开空；4H 空头通道严禁接飞刀做多。</p>
             </div>
@@ -497,7 +497,7 @@ onUnmounted(() => {
             <div class="p-3.5 rounded-xl border space-y-1.5 shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
               <div class="flex items-center justify-between">
                 <span class="font-bold text-xs font-mono" style="color: var(--text-main);">02_confidence_gatekeeper.py</span>
-                <span class="px-2 py-0.2 rounded text-[9px] font-bold border" style="background-color: var(--color-up-bg); color: var(--color-up); border-color: var(--color-up-border);">胜率第一</span>
+                <span class="px-2 py-0.2 rounded text-[11px] font-bold border" style="background-color: var(--color-up-bg); color: var(--color-up); border-color: var(--color-up-border);">胜率第一</span>
               </div>
               <p class="text-[11px]" style="color: var(--text-muted);">模型综合置信度低于 80% 一律强制拦截为 WAIT；Meme 币种提至 85%。</p>
             </div>
@@ -505,7 +505,7 @@ onUnmounted(() => {
             <div class="p-3.5 rounded-xl border space-y-1.5 shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
               <div class="flex items-center justify-between">
                 <span class="font-bold text-xs font-mono" style="color: var(--text-main);">03_adx_volatility_filter.py</span>
-                <span class="px-2 py-0.2 rounded text-[9px] font-bold border" style="background-color: var(--color-up-bg); color: var(--color-up); border-color: var(--color-up-border);">猴市过滤</span>
+                <span class="px-2 py-0.2 rounded text-[11px] font-bold border" style="background-color: var(--color-up-bg); color: var(--color-up); border-color: var(--color-up-border);">猴市过滤</span>
               </div>
               <p class="text-[11px]" style="color: var(--text-muted);">1H ADX 趋势强度 &lt; 18 判定为低流动性无序猴市，严禁开仓频繁磨损费率。</p>
             </div>
@@ -513,7 +513,7 @@ onUnmounted(() => {
             <div class="p-3.5 rounded-xl border space-y-1.5 shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
               <div class="flex items-center justify-between">
                 <span class="font-bold text-xs font-mono" style="color: var(--text-main);">04_risk_reward_gatekeeper.py</span>
-                <span class="px-2 py-0.2 rounded text-[9px] font-bold border" style="background-color: var(--color-up-bg); color: var(--color-up); border-color: var(--color-up-border);">真实 2.0R</span>
+                <span class="px-2 py-0.2 rounded text-[11px] font-bold border" style="background-color: var(--color-up-bg); color: var(--color-up); border-color: var(--color-up-border);">真实 2.0R</span>
               </div>
               <p class="text-[11px]" style="color: var(--text-muted);">根据入场价、止盈目标与云端止损线严密验算盈亏比，拒绝低于 2.0R 的劣质赔率。</p>
             </div>
@@ -549,28 +549,28 @@ onUnmounted(() => {
             <div class="p-3.5 rounded-xl border space-y-1.5 shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
               <div class="flex items-center justify-between">
                 <span class="font-bold text-xs font-mono" style="color: var(--text-main);">仓位与敞口</span>
-                <span class="px-2 py-0.2 rounded text-[9px] font-bold border" style="background-color: var(--color-up-bg); color: var(--color-up); border-color: var(--color-up-border);">6 项</span>
+                <span class="px-2 py-0.2 rounded text-[11px] font-bold border" style="background-color: var(--color-up-bg); color: var(--color-up); border-color: var(--color-up-border);">6 项</span>
               </div>
               <p class="text-[11px]" style="color: var(--text-muted);">最高持仓数（0=自动跟随标的池）、同向持仓上限、单笔保证金占比硬顶、单标的累计保证金占比与绝对封顶、单笔杠杆上限。</p>
             </div>
             <div class="p-3.5 rounded-xl border space-y-1.5 shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
               <div class="flex items-center justify-between">
                 <span class="font-bold text-xs font-mono" style="color: var(--text-main);">单笔风险门禁</span>
-                <span class="px-2 py-0.2 rounded text-[9px] font-bold border" style="background-color: var(--color-up-bg); color: var(--color-up); border-color: var(--color-up-border);">3 项</span>
+                <span class="px-2 py-0.2 rounded text-[11px] font-bold border" style="background-color: var(--color-up-bg); color: var(--color-up); border-color: var(--color-up-border);">3 项</span>
               </div>
               <p class="text-[11px]" style="color: var(--text-muted);">单笔 1R 风险额占比、最小盈亏比 R:R 硬底线（Fail-Closed 物理拦截）、新开仓最低 AI 置信度门禁。</p>
             </div>
             <div class="p-3.5 rounded-xl border space-y-1.5 shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
               <div class="flex items-center justify-between">
                 <span class="font-bold text-xs font-mono" style="color: var(--text-main);">止损与熔断</span>
-                <span class="px-2 py-0.2 rounded text-[9px] font-bold border" style="background-color: var(--color-up-bg); color: var(--color-up); border-color: var(--color-up-border);">5 项</span>
+                <span class="px-2 py-0.2 rounded text-[11px] font-bold border" style="background-color: var(--color-up-bg); color: var(--color-up); border-color: var(--color-up-border);">5 项</span>
               </div>
               <p class="text-[11px]" style="color: var(--text-muted);">日亏熔断（余额比例+绝对金额双封顶取小）、最长持仓时间（时间止损）、横盘判定带宽（×ATR）、止损后同标的冷静期。</p>
             </div>
             <div class="p-3.5 rounded-xl border space-y-1.5 shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
               <div class="flex items-center justify-between">
                 <span class="font-bold text-xs font-mono" style="color: var(--text-main);">金字塔加仓门禁</span>
-                <span class="px-2 py-0.2 rounded text-[9px] font-bold border" style="background-color: var(--color-up-bg); color: var(--color-up); border-color: var(--color-up-border);">3 项</span>
+                <span class="px-2 py-0.2 rounded text-[11px] font-bold border" style="background-color: var(--color-up-bg); color: var(--color-up); border-color: var(--color-up-border);">3 项</span>
               </div>
               <p class="text-[11px]" style="color: var(--text-muted);">单标的最大加仓次数（0=彻底禁止）、加仓最小底仓浮盈率、加仓最低 AI 置信度。三重门禁缺一不可。</p>
             </div>

@@ -435,7 +435,7 @@ onMounted(loadData)
           <div class="flex items-center justify-between mb-1">
             <span class="text-xs font-bold font-mono" style="color: var(--text-main);">{{ mode.name }}</span>
             <span
-              class="text-[9px] px-1.5 py-0.5 rounded-[3px] font-mono border font-bold"
+              class="text-[11px] px-1.5 py-0.5 rounded-[3px] font-mono border font-bold"
               :style="councilConfig.consensus_mode === mode.id
                 ? { backgroundColor: 'var(--bg-card)', color: 'var(--text-main)', borderColor: 'var(--border-medium)' }
                 : { backgroundColor: 'var(--bg-card)', color: 'var(--text-muted)', borderColor: 'var(--border-subtle)' }"
@@ -463,7 +463,7 @@ onMounted(loadData)
             style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);"
             :disabled="!auth.isSuperadmin"
           />
-          <span class="text-[11px] font-mono text-[#8A99AD]">秒 (超时自动降级为单模型决策)</span>
+          <span class="text-[11px] font-mono text-[var(--text-muted)]">秒 (超时自动降级为单模型决策)</span>
         </div>
 
         <div class="flex items-center space-x-2">
@@ -521,20 +521,20 @@ onMounted(loadData)
                   placeholder="角色名称"
                 />
                 <span
-                  class="rounded px-2 py-0.5 text-[10px] font-mono border"
+                  class="rounded px-2 py-0.5 text-[11px] font-mono border"
                   style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-muted);"
                 >
                   {{ role.role_title || (role.is_arbitrator ? 'CIO / 终审' : 'Senior Trader') }}
                 </span>
                 <span
                   v-if="role.is_arbitrator || roleId === 'cio'"
-                  class="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded border shrink-0 text-purple-400 border-purple-500/30 bg-purple-500/10"
+                  class="text-[11px] font-mono font-bold px-1.5 py-0.2 rounded border shrink-0 text-purple-400 border-purple-500/30 bg-purple-500/10"
                 >
                   ⚖️ 终审发单席位
                 </span>
                 <span
                   v-else
-                  class="text-[9px] font-mono px-1.5 py-0.2 rounded border shrink-0"
+                  class="text-[11px] font-mono px-1.5 py-0.2 rounded border shrink-0"
                   :style="role.enabled !== false ? { backgroundColor: 'var(--color-up-bg)', color: 'var(--color-up)', borderColor: 'var(--color-up-border)' } : { backgroundColor: 'var(--bg-badge)', color: 'var(--text-faint)', borderColor: 'var(--border-subtle)' }"
                 >
                   {{ role.enabled !== false ? '活跃参与' : '已静音' }}
@@ -550,7 +550,7 @@ onMounted(loadData)
           <div class="flex flex-wrap items-center justify-end gap-2 shrink-0">
             <!-- Bound Model -->
             <div class="flex items-center space-x-1">
-              <span class="text-[10px] font-mono text-[#8A99AD]">模型:</span>
+              <span class="text-[11px] font-mono text-[var(--text-muted)]">模型:</span>
               <select
                 v-model="role.model_id"
                 class="rounded-xl px-2 py-1 text-xs font-mono outline-none border cursor-pointer max-w-[150px]"
@@ -566,7 +566,7 @@ onMounted(loadData)
 
             <!-- Weight (For traders only) -->
             <div v-if="!role.is_arbitrator && roleId !== 'cio'" class="flex items-center space-x-1">
-              <span class="text-[10px] font-mono text-[#8A99AD]">权重:</span>
+              <span class="text-[11px] font-mono text-[var(--text-muted)]">权重:</span>
               <input
                 v-model="role.weight"
                 type="number"
@@ -631,12 +631,12 @@ onMounted(loadData)
                 style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);"
                 :disabled="!auth.isSuperadmin"
               />
-              <span class="text-[10px] text-[#8A99AD]">(0.1~0.2 严格理性 / 0.3+ 进取)</span>
+              <span class="text-[11px] text-[var(--text-muted)]">(0.1~0.2 严格理性 / 0.3+ 进取)</span>
             </div>
 
             <!-- Quick Data Slots Inserter -->
-            <div class="flex flex-wrap items-center gap-1 text-[9px] font-mono">
-              <span class="text-[#8A99AD]">插入插槽:</span>
+            <div class="flex flex-wrap items-center gap-1 text-[11px] font-mono">
+              <span class="text-[var(--text-muted)]">插入插槽:</span>
               <button
                 v-for="slot in [
                   { k: 'macro_4h', label: '4H宏观' },
@@ -658,7 +658,7 @@ onMounted(loadData)
               <button
                 @click="resetRole(String(roleId))"
                 :disabled="!auth.isSuperadmin"
-                class="ml-2 flex items-center space-x-1 text-[10px] text-purple-400 hover:underline cursor-pointer"
+                class="ml-2 flex items-center space-x-1 text-[11px] text-purple-400 hover:underline cursor-pointer"
               >
                 <RotateCcw class="w-3 h-3" />
                 <span>恢复预设提示词</span>
@@ -685,10 +685,10 @@ onMounted(loadData)
         <div class="flex flex-wrap items-center gap-2">
           <CheckCircle2 class="w-4 h-4 text-emerald-400" />
           <h3 class="text-sm font-bold font-mono" style="color: var(--text-main);">投委会现场辩论与 CIO 裁定实录</h3>
-          <span class="text-[10px] font-mono px-2 py-0.5 rounded border border-purple-500/30 bg-purple-500/10 text-purple-400">
+          <span class="text-[11px] font-mono px-2 py-0.5 rounded border border-purple-500/30 bg-purple-500/10 text-purple-400">
             共识机制: {{ testResult.transcript?.consensus_mode }}
           </span>
-          <span class="text-[10px] font-mono px-2 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-400">
+          <span class="text-[11px] font-mono px-2 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-400">
             全流程耗时 {{ testResult.transcript?.total_duration_ms }}ms
           </span>
         </div>
@@ -714,11 +714,11 @@ onMounted(loadData)
             <div class="space-y-1">
               <div class="flex items-center justify-between text-xs font-mono font-bold">
                 <span style="color: var(--text-main);">{{ adv.role_name }}</span>
-                <span class="text-[10px] text-purple-400 truncate max-w-[120px]">{{ adv.model_used }}</span>
+                <span class="text-[11px] text-purple-400 truncate max-w-[120px]">{{ adv.model_used }}</span>
               </div>
-              <div class="flex items-center justify-between text-[10px] font-mono text-[#8A99AD]">
+              <div class="flex items-center justify-between text-[11px] font-mono text-[var(--text-muted)]">
                 <span>响应: {{ adv.latency_ms }}ms</span>
-                <span v-if="adv.proposal_id" class="text-zinc-500 font-mono text-[9px]">ID: {{ adv.proposal_id }}</span>
+                <span v-if="adv.proposal_id" class="text-zinc-500 font-mono text-[11px]">ID: {{ adv.proposal_id }}</span>
               </div>
               <p class="text-xs font-mono whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto pr-1 select-text" style="color: var(--text-muted);">
                 {{ adv.content }}
@@ -728,13 +728,13 @@ onMounted(loadData)
             <div v-if="adv.reasoning" class="pt-2 border-t" style="border-color: var(--border-subtle);">
               <button
                 @click="expandedReasoning[String(key)] = !expandedReasoning[String(key)]"
-                class="text-[10px] font-mono text-purple-400 cursor-pointer"
+                class="text-[11px] font-mono text-purple-400 cursor-pointer"
               >
                 <span>{{ expandedReasoning[String(key)] ? '收起思考链' : '展开思考链 (Reasoning)' }}</span>
               </button>
               <div
                 v-if="expandedReasoning[String(key)]"
-                class="mt-1.5 p-2 rounded text-[10px] font-mono whitespace-pre-wrap max-h-36 overflow-y-auto select-text border"
+                class="mt-1.5 p-2 rounded text-[11px] font-mono whitespace-pre-wrap max-h-36 overflow-y-auto select-text border"
                 style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-muted);"
               >
                 {{ adv.reasoning }}
@@ -758,7 +758,7 @@ onMounted(loadData)
           >
             <div class="flex items-center justify-between text-xs font-mono font-bold">
               <span style="color: var(--text-main);">{{ crit.role_name || cKey }} 的质询</span>
-              <span class="text-[10px]" :class="crit.status === 'ok' ? 'text-amber-400' : 'text-zinc-500'">
+              <span class="text-[11px]" :class="crit.status === 'ok' ? 'text-amber-400' : 'text-zinc-500'">
                 {{ crit.status === 'ok' ? `${crit.latency_ms}ms` : (crit.status === 'skipped' ? '安全跳过' : '异常') }}
               </span>
             </div>
@@ -774,9 +774,9 @@ onMounted(loadData)
         <div class="flex items-center justify-between">
           <div class="flex items-center space-x-2">
             <span class="text-xs font-bold font-mono text-purple-400">【首席投资官 (CIO) 终审批复】</span>
-            <span class="text-[10px] font-mono text-[#8A99AD]">{{ testResult.transcript?.arbitrator?.model_used }} · 审阅耗时 {{ testResult.transcript?.arbitrator?.latency_ms }}ms</span>
+            <span class="text-[11px] font-mono text-[var(--text-muted)]">{{ testResult.transcript?.arbitrator?.model_used }} · 审阅耗时 {{ testResult.transcript?.arbitrator?.latency_ms }}ms</span>
           </div>
-          <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+          <span class="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
             方案采纳与点位落地
           </span>
         </div>
@@ -800,13 +800,13 @@ onMounted(loadData)
                 <div class="flex items-center gap-1">
                   <span
                     v-if="dec.adopted_role"
-                    class="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold border"
+                    class="px-1.5 py-0.5 rounded text-[11px] font-mono font-bold border"
                     :class="dec.adopted_role === 'REJECT_ALL' ? 'text-zinc-400 border-zinc-700 bg-zinc-800/40' : 'text-purple-300 border-purple-500/30 bg-purple-500/10'"
                   >
                     {{ dec.adopted_role === 'REJECT_ALL' ? '全员驳回' : `采纳: ${councilConfig.roles[dec.adopted_role]?.name || dec.adopted_role}` }}
                   </span>
                   <span
-                    class="px-2 py-0.5 rounded text-[10px] font-bold border"
+                    class="px-2 py-0.5 rounded text-[11px] font-bold border"
                     :style="{
                       backgroundColor: dec.action?.includes('BUY') ? 'var(--color-up-bg)' : dec.action?.includes('SELL') ? 'var(--color-down-bg)' : 'var(--bg-badge)',
                       borderColor: dec.action?.includes('BUY') ? 'var(--color-up-border)' : dec.action?.includes('SELL') ? 'var(--color-down-border)' : 'var(--border-subtle)',
@@ -819,7 +819,7 @@ onMounted(loadData)
               </div>
 
               <!-- Price & Risk Metrics -->
-              <div v-if="dec.action !== 'WAIT'" class="grid grid-cols-3 gap-1.5 p-2 rounded-lg bg-black/20 text-[10px] text-center">
+              <div v-if="dec.action !== 'WAIT'" class="grid grid-cols-3 gap-1.5 p-2 rounded-lg bg-black/20 text-[11px] text-center">
                 <div>
                   <div class="text-zinc-400">入场限价</div>
                   <div class="font-bold text-white mt-0.5">${{ dec.limit_price || dec.entry_price || '--' }}</div>
@@ -833,7 +833,7 @@ onMounted(loadData)
                   <div class="font-bold text-emerald-400 mt-0.5">${{ dec.take_profit || '--' }}</div>
                 </div>
               </div>
-              <div v-else class="p-2 rounded-lg bg-black/10 text-[10px] text-zinc-500 italic">
+              <div v-else class="p-2 rounded-lg bg-black/10 text-[11px] text-zinc-500 italic">
                 保持空仓防守，未达顺势回踩或微积分爆发要求。
               </div>
 

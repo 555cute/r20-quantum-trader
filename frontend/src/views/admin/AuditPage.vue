@@ -41,7 +41,7 @@ onMounted(load)
     <div class="flex items-center justify-between">
       <p class="text-xs font-mono" style="color: var(--text-muted);">只追加的操作审计流水；登录、配置变更、交易动作全部留痕。</p>
       <span
-        class="text-[10px] font-mono px-2 py-1 rounded border font-bold"
+        class="text-[11px] font-mono px-2 py-1 rounded border font-bold"
         style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);"
       >
         治理 · 1/3

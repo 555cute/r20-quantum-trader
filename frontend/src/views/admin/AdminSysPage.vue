@@ -107,8 +107,8 @@ onMounted(load)
 <template>
   <div class="space-y-4">
     <div class="flex items-center justify-between">
-      <p class="text-xs text-[#707E94] font-mono">PBKDF2-SHA256 加盐哈希 · 连续失败 5 次锁定 15 分钟 · 会话 12 小时。</p>
-      <span class="text-[10px] font-mono text-blue-400 bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20">治理 · 2/3</span>
+      <p class="text-xs text-[var(--text-faint)] font-mono">PBKDF2-SHA256 加盐哈希 · 连续失败 5 次锁定 15 分钟 · 会话 12 小时。</p>
+      <span class="text-[11px] font-mono text-blue-400 bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20">治理 · 2/3</span>
     </div>
 
     <div v-if="bannerMsg" class="p-3 rounded-lg text-xs font-mono border" :class="bannerMsg.type === 'ok' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-rose-500/10 border-rose-500/20 text-rose-400'">
@@ -120,7 +120,7 @@ onMounted(load)
       <div class="flex items-center space-x-2 mb-4 pb-3 border-b" style="border-color: var(--border-subtle);">
         <KeyRound class="w-4 h-4 text-amber-500" />
         <h2 class="text-sm font-bold font-mono" style="color: var(--text-main);">修改密码</h2>
-        <span class="text-[10px] font-mono ml-2" style="color: var(--text-faint);">当前账号：{{ auth.user?.username }}（修改后需重新登录）</span>
+        <span class="text-[11px] font-mono ml-2" style="color: var(--text-faint);">当前账号：{{ auth.user?.username }}（修改后需重新登录）</span>
       </div>
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div>
@@ -137,7 +137,7 @@ onMounted(load)
           </button>
         </div>
       </div>
-      <p class="mt-2 text-[10px] font-mono" style="color: var(--text-faint);">超级管理员可在下方用户列表为其他账号重置密码（无需旧密码）。</p>
+      <p class="mt-2 text-[11px] font-mono" style="color: var(--text-faint);">超级管理员可在下方用户列表为其他账号重置密码（无需旧密码）。</p>
     </div>
 
     <!-- Users List -->
@@ -174,10 +174,10 @@ onMounted(load)
               <td class="py-2.5 px-4 num-tabular" style="color: var(--text-faint);">{{ u.id }}</td>
               <td class="py-2.5 px-3 font-bold" style="color: var(--text-main);">
                 {{ u.username }}
-                <span v-if="u.id === currentUserId" class="px-1 py-0.2 rounded text-[9px] font-bold border ml-1" style="background-color: var(--color-brand-bg); border-color: var(--color-brand-border); color: var(--color-brand);">(当前会话)</span>
+                <span v-if="u.id === currentUserId" class="px-1 py-0.2 rounded text-[11px] font-bold border ml-1" style="background-color: var(--color-brand-bg); border-color: var(--color-brand-border); color: var(--color-brand);">(当前会话)</span>
               </td>
               <td class="py-2.5 px-3">
-                <span class="px-2 py-0.5 rounded text-[10px] font-bold border" :style="u.role === 'superadmin' ? { backgroundColor: 'var(--color-brand-bg)', borderColor: 'var(--color-brand-border)', color: 'var(--color-brand)' } : { backgroundColor: 'var(--bg-badge)', borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }">
+                <span class="px-2 py-0.5 rounded text-[11px] font-bold border" :style="u.role === 'superadmin' ? { backgroundColor: 'var(--color-brand-bg)', borderColor: 'var(--color-brand-border)', color: 'var(--color-brand)' } : { backgroundColor: 'var(--bg-badge)', borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }">
                   {{ u.role === 'superadmin' ? '超级管理员' : '普通管理员' }}
                 </span>
               </td>

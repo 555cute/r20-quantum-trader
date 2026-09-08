@@ -1077,7 +1077,7 @@ onUnmounted(() => {
             <span>{{ isEn ? 'Indicators' : '指标' }}</span>
             <span
               v-if="activeIndicatorCount > 0"
-              class="w-4 h-4 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] flex items-center justify-center font-bold"
+              class="w-4 h-4 rounded-full bg-emerald-500/20 text-emerald-400 text-[11px] flex items-center justify-center font-bold"
             >
               {{ activeIndicatorCount }}
             </span>
@@ -1096,7 +1096,7 @@ onUnmounted(() => {
                 <span class="text-[11px] font-bold uppercase tracking-wider text-amber-400 flex items-center space-x-1">
                   <span>{{ isEn ? 'Main Chart Overlays' : '主图叠加指标' }}</span>
                 </span>
-                <span class="text-[9px]" style="color: var(--text-faint);">{{ isEn ? 'On Candlestick' : '主蜡烛同屏' }}</span>
+                <span class="text-[11px]" style="color: var(--text-faint);">{{ isEn ? 'On Candlestick' : '主蜡烛同屏' }}</span>
               </div>
               <div class="grid grid-cols-2 gap-1.5">
                 <button
@@ -1123,7 +1123,7 @@ onUnmounted(() => {
                 <span class="text-[11px] font-bold uppercase tracking-wider text-emerald-400 flex items-center space-x-1">
                   <span>{{ isEn ? 'Sub-Window Panes' : '副图震荡指标' }}</span>
                 </span>
-                <span class="text-[9px]" style="color: var(--text-faint);">{{ isEn ? 'Independent Panes' : '独立高宽窗口' }}</span>
+                <span class="text-[11px]" style="color: var(--text-faint);">{{ isEn ? 'Independent Panes' : '独立高宽窗口' }}</span>
               </div>
               <div class="grid grid-cols-2 gap-1.5">
                 <button
@@ -1180,17 +1180,17 @@ onUnmounted(() => {
         <span class="font-black text-xs sm:text-sm num-tabular" style="color: var(--text-main);">
           ${{ currentPrice >= 100 ? currentPrice.toFixed(1) : currentPrice.toFixed(4) }}
         </span>
-        <span :class="liveChangePct >= 0 ? 'text-emerald-400' : 'text-rose-400'" class="text-[10px] font-bold">
+        <span :class="liveChangePct >= 0 ? 'text-emerald-400' : 'text-rose-400'" class="text-[11px] font-bold">
           {{ liveChangePct >= 0 ? '+' : '' }}{{ liveChangePct.toFixed(2) }}%
         </span>
         <span class="flex items-center space-x-1 pl-1">
           <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-          <span class="text-[9px] text-emerald-400 font-bold">{{ t('chart.liveStatus', '实时') }} 3s</span>
+          <span class="text-[11px] text-emerald-400 font-bold">{{ t('chart.liveStatus', '实时') }} 3s</span>
         </span>
-        <span class="text-[10px]" style="color: var(--text-faint);">1H ATR: ${{ currentAtr.toFixed(1) }}</span>
+        <span class="text-[11px]" style="color: var(--text-faint);">1H ATR: ${{ currentAtr.toFixed(1) }}</span>
       </div>
 
-      <div class="flex items-center space-x-2 text-[10px] font-mono" style="color: var(--text-muted);">
+      <div class="flex items-center space-x-2 text-[11px] font-mono" style="color: var(--text-muted);">
         <span>{{ t('chart.countdownLabel', 'K线结线倒计时') }}:</span>
         <span class="font-bold text-amber-400 num-tabular">{{ candleCountdown }}</span>
       </div>
@@ -1216,7 +1216,7 @@ onUnmounted(() => {
             {{ t('chart.simulateTitle', '科学预期盈亏比测算控制台') }}
           </span>
           <span
-            class="text-[10px] px-2 py-0.5 rounded border font-bold"
+            class="text-[11px] px-2 py-0.5 rounded border font-bold"
             :class="riskRewardMetrics.hasRealPosition ? 'text-indigo-400 bg-indigo-500/10 border-indigo-500/30' : 'text-slate-400 bg-slate-500/10 border-slate-500/30'"
           >
             {{ riskRewardMetrics.hasRealPosition ? t('chart.holdingModeNotice', '实盘持仓联动模式') : t('chart.speculativeNotice', '标准观望测算模式') }}
@@ -1233,14 +1233,14 @@ onUnmounted(() => {
             borderColor: riskRewardMetrics.isRrCompliant ? 'var(--color-up-border)' : 'var(--color-warn-border)',
           }"
         >
-          <span class="text-[10px] uppercase font-bold" :style="{ color: riskRewardMetrics.isRrCompliant ? 'var(--color-up)' : 'var(--color-warn)' }">
+          <span class="text-[11px] uppercase font-bold" :style="{ color: riskRewardMetrics.isRrCompliant ? 'var(--color-up)' : 'var(--color-warn)' }">
             {{ riskRewardMetrics.isRrCompliant ? (isEn ? '✅ Expected R:R' : '✅ 期望盈亏比 (R:R)') : (isEn ? '⚠️ Low R:R (<2.0)' : '⚠️ 盈亏比不足 2.0') }}
           </span>
           <div class="flex items-baseline space-x-1 mt-0.5">
             <span class="text-base sm:text-lg font-black num-tabular" :style="{ color: riskRewardMetrics.isRrCompliant ? 'var(--color-up)' : 'var(--color-warn)' }">
               {{ riskRewardMetrics.rrRatio.toFixed(2) }} : 1
             </span>
-            <span class="text-[9px] opacity-70" :style="{ color: riskRewardMetrics.isRrCompliant ? 'var(--color-up)' : 'var(--color-warn)' }">
+            <span class="text-[11px] opacity-70" :style="{ color: riskRewardMetrics.isRrCompliant ? 'var(--color-up)' : 'var(--color-warn)' }">
               {{ isEn ? 'Min 2.0' : '底线 2.0' }}
             </span>
           </div>
@@ -1250,7 +1250,7 @@ onUnmounted(() => {
           class="p-2.5 rounded-lg border font-mono flex flex-col justify-between"
           style="background-color: var(--bg-card); border-color: var(--border-subtle);"
         >
-          <span class="text-[10px] uppercase font-bold" style="color: var(--text-muted);">
+          <span class="text-[11px] uppercase font-bold" style="color: var(--text-muted);">
             {{ isEn ? 'SL Buffer (ATR)' : '止损呼吸空间 (ATR)' }}
           </span>
           <div class="flex items-baseline space-x-1 mt-0.5">
@@ -1260,7 +1260,7 @@ onUnmounted(() => {
             >
               {{ riskRewardMetrics.atrMultiple.toFixed(2) }}x
             </span>
-            <span class="text-[9px] font-bold" :style="{ color: riskRewardMetrics.isAtrOptimal ? 'var(--color-brand)' : 'var(--color-warn)' }">
+            <span class="text-[11px] font-bold" :style="{ color: riskRewardMetrics.isAtrOptimal ? 'var(--color-brand)' : 'var(--color-warn)' }">
               {{ riskRewardMetrics.isAtrOptimal ? (isEn ? 'Noise Buffer' : '防插针区间') : (isEn ? 'Deviates 1.8~2.2' : '偏离1.8~2.2') }}
             </span>
           </div>
@@ -1270,14 +1270,14 @@ onUnmounted(() => {
           class="p-2.5 rounded-lg border font-mono flex flex-col justify-between"
           style="background-color: var(--bg-card); border-color: var(--border-subtle);"
         >
-          <span class="text-[10px] uppercase font-bold text-emerald-500">
+          <span class="text-[11px] uppercase font-bold text-emerald-500">
             {{ isEn ? 'Target Profit (TP)' : '预期收益目标 (TP)' }}
           </span>
           <div class="flex items-baseline space-x-1 mt-0.5">
             <span class="text-base sm:text-lg font-black text-emerald-400 num-tabular">
               +${{ riskRewardMetrics.estProfitUsd.toFixed(2) }}
             </span>
-            <span class="text-[9px] text-emerald-400 font-bold">
+            <span class="text-[11px] text-emerald-400 font-bold">
               ({{ riskRewardMetrics.rewardPct.toFixed(1) }}%)
             </span>
           </div>
@@ -1287,14 +1287,14 @@ onUnmounted(() => {
           class="p-2.5 rounded-lg border font-mono flex flex-col justify-between"
           style="background-color: var(--bg-card); border-color: var(--border-subtle);"
         >
-          <span class="text-[10px] uppercase font-bold text-rose-500">
+          <span class="text-[11px] uppercase font-bold text-rose-500">
             {{ isEn ? 'Max Risk (SL)' : '最大硬风控风险 (SL)' }}
           </span>
           <div class="flex items-baseline space-x-1 mt-0.5">
             <span class="text-base sm:text-lg font-black text-rose-400 num-tabular">
               -${{ riskRewardMetrics.estRiskUsd.toFixed(2) }}
             </span>
-            <span class="text-[9px] text-rose-400 font-bold">
+            <span class="text-[11px] text-rose-400 font-bold">
               ({{ riskRewardMetrics.riskPct.toFixed(1) }}%)
             </span>
           </div>

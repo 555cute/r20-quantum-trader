@@ -49,13 +49,13 @@ function copyPrompt() {
                 {{ instrument?.name }} 深度认知推演全景
               </h3>
               <span
-                class="text-[10px] font-mono px-1.5 py-0.2 rounded border"
+                class="text-[11px] font-mono px-1.5 py-0.2 rounded border"
                 style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--text-muted);"
               >
                 {{ instrument?.instId }}
               </span>
             </div>
-            <div class="text-[10px] font-mono mt-0.5" style="color: var(--text-faint);">
+            <div class="text-[11px] font-mono mt-0.5" style="color: var(--text-faint);">
               100% 审计溯源 · 微积分物理定积分证明 · 链上聪明钱博弈
             </div>
           </div>
@@ -172,14 +172,14 @@ function copyPrompt() {
                 class="p-2 rounded border"
                 style="background-color: var(--bg-card); border-color: var(--border-subtle);"
               >
-                <span class="text-[10px] block" style="color: var(--text-faint);">周期共振结构：</span>
+                <span class="text-[11px] block" style="color: var(--text-faint);">周期共振结构：</span>
                 <span style="color: var(--text-main);">{{ instrument?.thought_process?.market_structure || '--' }}</span>
               </div>
               <div
                 class="p-2 rounded border"
                 style="background-color: var(--bg-card); border-color: var(--border-subtle);"
               >
-                <span class="text-[10px] block" style="color: var(--text-faint);">持仓与量能异动：</span>
+                <span class="text-[11px] block" style="color: var(--text-faint);">持仓与量能异动：</span>
                 <span style="color: var(--text-main);">{{ instrument?.thought_process?.volume_and_oi || '--' }}</span>
               </div>
             </div>
