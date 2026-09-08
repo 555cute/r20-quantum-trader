@@ -99,7 +99,8 @@ class PersistedEnvFileTests(unittest.TestCase):
             env_path = Path(tmp) / ".env"
             env_path.write_text("R20_ENV_FILE=/hijack/.env\nLLM_MODEL=from-file\n", encoding="utf-8")
             with patch.dict(os.environ, {"R20_ENV_FILE": "/captured/.env", "LLM_MODEL": "old"}, clear=False):
-                self.backend_config.load_dotenv(env_path)
+                self.backend_config._ORIGINAL_LOAD_DOTENV(env_path)
+
                 self.assertEqual(os.environ["R20_ENV_FILE"], "/captured/.env")
                 self.assertEqual(os.environ["LLM_MODEL"], "from-file")
 

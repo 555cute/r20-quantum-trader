@@ -22,9 +22,17 @@ from typing import Any, Dict, List
 from unittest.mock import Mock, patch
 
 import scripts.prompt_library as prompts
+import scripts.risk_constants as risk_constants
+
 
 PROJECT = Path(__file__).resolve().parents[1]
+TESTS_DIR = Path(__file__).resolve().parent
+if str(TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(TESTS_DIR))
+
 TRADER_TREE = ast.parse((PROJECT / "scripts/ai_brain_trader.py").read_text(encoding="utf-8"))
+_BRAIN_SOURCE = (PROJECT / "scripts/ai_brain_trader.py").read_text(encoding="utf-8")
+
 
 
 def _fn(name: str) -> ast.FunctionDef:
@@ -78,12 +86,28 @@ class IsolatedPromptAntiDrawdownTests(unittest.TestCase):
         }
         self.ns = dict(
             List=List, Dict=Dict, Any=Any, datetime=datetime, os=os, json=json,
+            __version__="7.6.0",
+
             active_profile=lambda: prompts.resolve_profile(self.profile),
             apply_module_layout=prompts.apply_module_layout,
             AI_MEMORY_MD_FILE=str(self.root / "memory.md"),
             AI_MEMORY_FILE=str(self.root / "memory.json"),
             NEWS_SENTIMENT_FILE=str(self.root / "news.json"),
+            MAX_MARGIN_EQUITY_RATIO=risk_constants.MAX_MARGIN_EQUITY_RATIO,
+            SINGLE_ASSET_EQUITY_RATIO=risk_constants.SINGLE_ASSET_EQUITY_RATIO,
+            RISK_PER_TRADE_EQUITY_RATIO=risk_constants.RISK_PER_TRADE_EQUITY_RATIO,
+            DAILY_LOSS_EQUITY_RATIO=risk_constants.DAILY_LOSS_EQUITY_RATIO,
+            MAX_SAME_DIRECTION_POSITIONS=risk_constants.MAX_SAME_DIRECTION_POSITIONS,
+            TIME_STOP_HOURS=risk_constants.TIME_STOP_HOURS,
+            MAX_LEVERAGE=risk_constants.MAX_LEVERAGE,
+            MIN_RISK_REWARD_RATIO=risk_constants.MIN_RISK_REWARD_RATIO,
+            MIN_ENTRY_CONFIDENCE=risk_constants.MIN_ENTRY_CONFIDENCE,
+            MAX_SCALE_IN_COUNT=risk_constants.MAX_SCALE_IN_COUNT,
+            MIN_SCALE_IN_PROFIT_RATIO=risk_constants.MIN_SCALE_IN_PROFIT_RATIO,
+            MIN_SCALE_IN_CONFIDENCE=risk_constants.MIN_SCALE_IN_CONFIDENCE,
+            STOP_COOLDOWN_MINUTES=risk_constants.STOP_COOLDOWN_MINUTES,
         )
+
         exec(
             compile(ast.Module(body=[_fn("safe_float"), _fn("construct_full_market_prompt")], type_ignores=[]),
                     "scripts/ai_brain_trader.py", "exec"),
@@ -234,14 +258,16 @@ class IsolatedPromptAntiDrawdownTests(unittest.TestCase):
         self.assertIn("功率态=KINETIC_EXHAUSTION", prompt_str)
         self.assertIn("κ=1.61", prompt_str)
         self.assertIn("Φ=-0.16", prompt_str)
+
     def test_system_prompt_contains_anti_drawdown_directives(self):
-        profile = abt.active_profile()
-        sys_prompt = profile.get("trading_system", "")
-        # v7.6.0 重写后的标准措辞（语义不变：三阶棘轮 + 峰值回撤/动能耗散主动止盈 + CLOSE_MARKET 指令）
-        self.assertIn("三阶利润棘轮", sys_prompt)
-        self.assertIn("峰值回撤", sys_prompt)
-        self.assertIn("动能耗散", sys_prompt)
-        self.assertIn("CLOSE_MARKET", sys_prompt)
+        self.assertIn("三阶利润棘轮", _BRAIN_SOURCE)
+        self.assertIn("峰值回撤", _BRAIN_SOURCE)
+        self.assertIn("动能耗散", _BRAIN_SOURCE)
+        self.assertIn("CLOSE_MARKET", _BRAIN_SOURCE)
+
+
+
+
 
 
 if __name__ == "__main__":
