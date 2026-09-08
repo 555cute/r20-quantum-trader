@@ -12,6 +12,8 @@ export const useDashboardStore = defineStore('dashboard', () => {
   const isConnected = ref<boolean>(true)
   const pollingTimer = ref<any>(null)
   const showAboutModal = ref<boolean>(false)
+  // Per-store, non-reactive: overlapping fetchDashboard calls skip while request/JSON parse is in flight.
+  let fetchInFlight = false
 
   // Getters
   const account = computed(() => data.value?.account || null)
@@ -89,6 +91,8 @@ export const useDashboardStore = defineStore('dashboard', () => {
 
   // Actions
   async function fetchDashboard(silent = false) {
+    if (fetchInFlight) return
+    fetchInFlight = true
     if (!silent && data.value == null) {
       loading.value = true
     } else if (!silent) {
@@ -119,6 +123,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
           isRefreshing.value = false
         }, 300)
       }
+      fetchInFlight = false
     }
   }
 
