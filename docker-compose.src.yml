@@ -1,0 +1,8 @@
+# Isolated local-source instance. Never reuse default container_name or host 8080.
+# Start/update only this instance:
+#   docker compose -p r20-src -f docker-compose.yml -f docker-compose.build.yml -f docker-compose.src.yml up -d --build
+services:
+  r20-quantum-trader:
+    container_name: r20-quantum-trader-src
+    ports: !override
+      - "18080:8080"
