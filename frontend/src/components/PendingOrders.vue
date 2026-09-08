@@ -92,7 +92,7 @@ const store = useDashboardStore()
               ${{ ord.px }}
             </td>
             <td class="py-2.5 px-3.5 font-bold num-tabular" style="color: var(--text-main);">
-              {{ ord.sz }} 张
+              {{ ord.sz }} base
             </td>
             <td class="py-2.5 px-3.5 num-tabular" style="color: var(--text-muted);">
               {{ ord.time || (ord.cTime ? new Date(parseInt(ord.cTime)).toLocaleTimeString() : '--') }}

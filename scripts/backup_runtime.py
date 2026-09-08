@@ -19,6 +19,42 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
+from r20_backend.config_path import env_file_path
+
+NESTED_ENV_FILE = "data/config/.env"
+MANDATORY_EXCLUDES = (
+    ".git/**", ".env", NESTED_ENV_FILE, ".okx/**", ".bypy/**", "backups/**", "logs/**",
+    "data/r20_admin.db*", "data/*.enc", "data/.*_key", "data/credentials/**",
+    "data/*.db-wal", "data/*.db-shm", "**/__pycache__/**", "*.pyc",
+)
+
+
+def _posix_rel_under_root(root: Path, path: Path) -> str | None:
+    """Return a posix relative path when `path` is inside `root`. No I/O."""
+    root = Path(os.path.normpath(root))
+    candidate = Path(os.path.normpath(path if path.is_absolute() else root / path))
+    try:
+        rel = candidate.relative_to(root)
+    except ValueError:
+        return None
+    parts = rel.parts
+    if not parts or parts[0] == "..":
+        return None
+    return rel.as_posix()
+
+
+def secret_env_exclude_patterns(root: Path) -> tuple[str, ...]:
+    """Mandatory env-file excludes for packable data archives."""
+    patterns = [NESTED_ENV_FILE]
+    rel = _posix_rel_under_root(root, env_file_path(root))
+    if rel and rel not in patterns:
+        patterns.append(rel)
+    return tuple(patterns)
+
+
+def _relative_to_root(path: Path) -> str:
+    return str(Path(os.path.realpath(path)).relative_to(Path(os.path.realpath(ROOT))))
+
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKUPS = ROOT / "backups"
@@ -27,21 +63,16 @@ SQLITE_DIR = BACKUPS / "sqlite"
 MANIFEST_DIR = BACKUPS / "manifests"
 BJ_TZ = timezone(timedelta(hours=8))
 MAGIC = b"R20GCM2\x00"
-MANDATORY_EXCLUDES = (
-    ".git/**", ".env", ".okx/**", ".bypy/**", "backups/**", "logs/**",
-    "data/r20_admin.db*", "data/*.enc", "data/.*_key", "data/credentials/**",
-    "data/*.db-wal", "data/*.db-shm", "**/__pycache__/**", "*.pyc",
-)
 SCOPE_PATHS = {
     "data": ("data",),
     "scripts": ("scripts",),
     "dashboard": ("dashboard",),
-    "r20_backend": ("r20_backend",),
+    "r20_backend": ("r20_backend", "r20_exchange"),
     "r20_gateway": ("r20_gateway",),
     "tests": ("tests",),
     "recovery_guide": ("RECOVERY_GUIDE.md",),
     "agent_profile": ("SOUL.md", "PROFILE.md", "AGENTS.md", "MEMORY.md"),
-    "root_configs": ("README.md", "requirements.txt", "pyproject.toml", "docker-compose.yml", "Dockerfile", ".gitignore"),
+    "root_configs": ("README.md", "requirements.txt", "pyproject.toml", "docker-compose.yml", "docker-compose.build.yml", "Dockerfile", ".gitignore"),
 }
 
 
@@ -102,17 +133,17 @@ def sqlite_hot_backups(timestamp: str, retention: int, destination_dir: Path | N
     if not data_dir.exists():
         return created
 
-    for source in data_dir.glob("*.db"):
+    for source in data_dir.rglob("*.db"):
         if source.name == "r20_admin.db":
             continue
         if source.name.endswith("-wal") or source.name.endswith("-shm"):
             continue
-        destination = destination_dir / f"{source.stem}_{timestamp}.db"
+        if not source.resolve().is_relative_to(data_dir.resolve()):
+            raise RuntimeError("SQLite 备份源必须位于 data/ 目录内")
+        destination = destination_dir / source.relative_to(data_dir).parent / f"{source.stem}_{timestamp}.db"
+        destination.parent.mkdir(parents=True, exist_ok=True)
         try:
-            try:
-                source_conn = sqlite3.connect(f"file:{source.resolve()}?mode=ro", uri=True, timeout=30.0)
-            except Exception:
-                source_conn = sqlite3.connect(str(source), timeout=30.0)
+            source_conn = sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True, timeout=30.0)
             try:
                 target_conn = sqlite3.connect(str(destination), timeout=30.0)
                 try:
@@ -123,10 +154,10 @@ def sqlite_hot_backups(timestamp: str, retention: int, destination_dir: Path | N
                 source_conn.close()
             os.chmod(destination, 0o600)
             created.append(destination)
+            prune((p for p in destination.parent.glob(f"{source.stem}_*.db") if p.is_file()), retention)
         except Exception as exc:
             destination.unlink(missing_ok=True)
             raise RuntimeError(f"SQLite 数据库 {source.name} 热备份失败：{exc}") from exc
-    prune((p for p in destination_dir.glob("*.db") if p.is_file()), retention)
     return created
 
 
@@ -141,8 +172,12 @@ def calculate_sha256(path: Path) -> str:
 
 
 def _excluded(relative: str, patterns: list[str]) -> bool:
-    rel = relative.replace(os.sep, "/").lstrip("./")
-    return any(fnmatch.fnmatch(rel, pattern) or fnmatch.fnmatch(f"{rel}/", pattern) for pattern in [*MANDATORY_EXCLUDES, *patterns])
+    rel = relative.replace(os.sep, "/")
+    while rel.startswith("./"):
+        rel = rel[2:]
+    rel = rel.lstrip("/")
+    extra = secret_env_exclude_patterns(ROOT)
+    return any(fnmatch.fnmatch(rel, pattern) or fnmatch.fnmatch(f"{rel}/", pattern) for pattern in [*MANDATORY_EXCLUDES, *extra, *patterns])
 
 
 def _tar_filter(patterns: list[str]):
@@ -515,7 +550,8 @@ def deliver_target(source: Path, target: dict[str, Any]) -> dict[str, Any]:
         return {
             "success": True,
             "attempts": 1,
-            "destination": str(retain_local_archive(source, int(target.get("retention", 3)), destination).relative_to(ROOT)),
+            "destination": str(_relative_to_root(retain_local_archive(source, int(target.get("retention", 3)), destination))),
+
         }
     upload = upload_s3 if target_type == "s3" else upload_oss if target_type == "oss" else upload_webdav if target_type in {"webdav", "aliyundrive", "quark"} else None
     if not upload:
@@ -580,7 +616,8 @@ def run_backup_job(job: dict[str, Any]) -> dict[str, Any]:
                 result["targets"].append({"id": target.get("id", "target"), "type": target.get("type", "unknown"), **target_result})
         if job.get("sqlite", {}).get("enabled"):
             sqlite_dir = SQLITE_DIR / safe_id
-            result["sqlite"] = [str(x.relative_to(ROOT)) for x in sqlite_hot_backups(stamp, int(job["sqlite"].get("retention", 7)), sqlite_dir)]
+            result["sqlite"] = [_relative_to_root(x) for x in sqlite_hot_backups(stamp, int(job["sqlite"].get("retention", 7)), sqlite_dir)]
+
         target_success = [x for x in result["targets"] if x.get("success")]
         target_failure = [x for x in result["targets"] if not x.get("success")]
         any_success = bool(target_success or result["sqlite"])
@@ -601,5 +638,6 @@ def run_backup_job(job: dict[str, Any]) -> dict[str, Any]:
     manifest = MANIFEST_DIR / f"{safe_id}_{stamp}.json"
     manifest.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     os.chmod(manifest, 0o600)
-    result["manifest"] = str(manifest.relative_to(ROOT))
+    result["manifest"] = _relative_to_root(manifest)
+
     return result

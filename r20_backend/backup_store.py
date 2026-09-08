@@ -10,6 +10,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from r20_backend.config_path import env_file_path
+
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_FILE = ROOT / "data" / "backup_methods.json"
 BJ_TZ = timezone(timedelta(hours=8))
@@ -22,7 +24,7 @@ DEFAULT_CONFIG = {
     "sqlite": {"enabled": False, "label": "SQLite 热备快照", "retention": 7},
 }
 DEFAULT_EXCLUDES = [
-    ".git/**", ".env", ".okx/**", ".bypy/**", "backups/**", "logs/**",
+    ".git/**", ".env", "data/config/.env", ".okx/**", ".bypy/**", "backups/**", "logs/**",
     "**/__pycache__/**", "*.pyc", "data/r20_admin.db*", "data/*.enc",
     "data/.*_key", "data/credentials/**", "data/*.db-wal", "data/*.db-shm",
 ]
@@ -34,7 +36,28 @@ def _now() -> str:
     return datetime.now(BJ_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _secret_env_excludes(root: Path | None = None) -> list[str]:
+    base = Path(os.path.normpath(root if root is not None else ROOT))
+    patterns = ["data/config/.env"]
+    path = env_file_path(base)
+    candidate = Path(os.path.normpath(path if path.is_absolute() else base / path))
+    try:
+        rel = candidate.relative_to(base)
+    except ValueError:
+        return patterns
+    if not rel.parts or rel.parts[0] == "..":
+        return patterns
+    rel_s = rel.as_posix()
+    if rel_s not in patterns:
+        patterns.append(rel_s)
+    return patterns
+
+
 def _default_job() -> dict[str, Any]:
+    exclude = list(DEFAULT_EXCLUDES)
+    for rel in _secret_env_excludes():
+        if rel not in exclude:
+            exclude.append(rel)
     return {
         "id": "nightly-default",
         "name": "每日全系统灾备",
@@ -43,7 +66,7 @@ def _default_job() -> dict[str, Any]:
         "schedule_times": ["02:00"],
         "timezone": "Asia/Shanghai",
         "scope": ["data", "scripts", "dashboard", "r20_backend", "r20_gateway", "recovery_guide", "agent_profile"],
-        "exclude": list(DEFAULT_EXCLUDES),
+        "exclude": exclude,
         "pre_backup_sync": True,
         "compression_level": 6,
         "checksum": "sha256",

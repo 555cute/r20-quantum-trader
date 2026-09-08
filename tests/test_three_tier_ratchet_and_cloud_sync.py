@@ -1,16 +1,16 @@
-"""Offline isolated test suite for Three-Tier Profit Ratchet & Cloud OCO Sync.
+"""Offline isolated test suite for Three-Tier Profit Ratchet & Cloud protection sync.
 Validates:
 1. Symmetric Long/Short Tier 1 Breakeven Lock (+1.5x ATR).
 2. Symmetric Long/Short Tier 2 Wave Profit Lock (+2.2x ATR).
 3. Symmetric Long/Short Kinetic Momentum Pullback Take-Profit (>= 2.0x ATR peak with 0.75x ATR pullback).
-4. Cloud OCO algo stop synchronization (sync_cloud_algo_stop).
+4. Cloud stop sync via exchange.protection_orders / amend_stop (no OKX CLI).
 """
 from __future__ import annotations
 
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 scripts_dir = str(Path(__file__).resolve().parent.parent / "scripts")
 if scripts_dir not in sys.path:
@@ -19,30 +19,52 @@ if scripts_dir not in sys.path:
 import scripts.ai_factor_trader as aft
 
 
+class _LiveExchange:
+    def __init__(self, orders):
+        self.calls = []
+        self.orders = [dict(row) for row in orders]
+
+    def protection_orders(self, inst_id):
+        self.calls.append(("protection_orders", inst_id))
+        return [dict(row) for row in self.orders]
+
+    def amend_stop(self, inst_id, algo_id, new_sl):
+        self.calls.append(("amend_stop", inst_id, algo_id, new_sl))
+        for row in self.orders:
+            if str(row.get("algoId")) == str(algo_id):
+                row["slTriggerPx"] = str(new_sl)
+        return {"algoId": algo_id, "slTriggerPx": str(new_sl)}
+
+
 class ThreeTierRatchetAndCloudSyncTests(unittest.TestCase):
     def setUp(self):
-        aft.SIMULATED_TRADING = False
+        prot = patch.object(aft, "ensure_cloud_position_protection", return_value=(True, "verified"))
+        prot.start()
+        self.addCleanup(prot.stop)
 
     def test_sync_cloud_algo_stop_success_and_idempotence(self):
-        with patch("scripts.ai_factor_trader.run_json_cmd") as mock_cmd:
-            # 1. When existing algo already matches new_sl, do not issue redundant amend
-            mock_cmd.return_value = [
-                {"state": "live", "posSide": "long", "algoId": "algo_101", "slTriggerPx": "2500.0"}
-            ]
+        live = {
+            "state": "live",
+            "posSide": "long",
+            "ordType": "oco",
+            "algoId": "algo_101",
+            "tpTriggerPx": "2600.0",
+            "slTriggerPx": "2500.0",
+            "sz": "2",
+        }
+        exchange = _LiveExchange([live])
+        with patch.object(aft, "get_exchange", return_value=exchange):
             res = aft.sync_cloud_algo_stop("ETH-USDT-SWAP", "long", 2500.0)
-            self.assertTrue(res)
-            # Only 1 call to fetch orders, no amend call
-            self.assertEqual(mock_cmd.call_count, 1)
+        self.assertTrue(res)
+        self.assertEqual([c[0] for c in exchange.calls], ["protection_orders"])
 
-            # 2. When existing algo has different slTriggerPx, issue amend
-            mock_cmd.reset_mock()
-            mock_cmd.side_effect = [
-                [{"state": "live", "posSide": "long", "algoId": "algo_101", "slTriggerPx": "2400.0"}],
-                {"code": "0", "msg": "amend success"}
-            ]
+        exchange.calls.clear()
+        exchange.orders[0]["slTriggerPx"] = "2400.0"
+        with patch.object(aft, "get_exchange", return_value=exchange):
             res = aft.sync_cloud_algo_stop("ETH-USDT-SWAP", "long", 2500.0)
-            self.assertTrue(res)
-            self.assertEqual(mock_cmd.call_count, 2)
+        self.assertTrue(res)
+        self.assertEqual([c[0] for c in exchange.calls], ["protection_orders", "amend_stop", "protection_orders"])
+        self.assertEqual(exchange.calls[1][1:], ("ETH-USDT-SWAP", "algo_101", 2500.0))
 
     def test_long_three_tier_ratchet_progression(self):
         f = {

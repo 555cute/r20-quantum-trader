@@ -161,7 +161,7 @@ function clean(v: any, fallback = '--'): string {
                 <div class="flex items-center space-x-1.5">
                   <span class="font-bold text-sm 2xl:text-base" style="color: var(--text-main);">{{ t.inst }}</span>
                   <span :class="t.side === '多' ? 'capsule-direction-long' : 'capsule-direction-short'">
-                    {{ t.side }} {{ t.lever || '3x' }}
+                    {{ t.side }} {{ t.lever || '--' }}
                   </span>
                 </div>
               </td>
@@ -202,11 +202,13 @@ function clean(v: any, fallback = '--'): string {
                   {{ getPnl(t) >= 0 ? '+' : '' }}{{ getPnl(t).toFixed(2) }} U
                 </span>
                 <span
+                  v-if="t.roi_pct != null || t.roi != null"
                   class="text-[10px] 2xl:text-xs ml-1 num-tabular"
                   :style="{ color: getRoi(t) >= 0 ? 'var(--color-up)' : 'var(--color-down)' }"
                 >
                   ({{ getRoi(t) >= 0 ? '+' : '' }}{{ getRoi(t).toFixed(1) }}%)
                 </span>
+                <span v-else class="text-[10px] ml-1 num-tabular" style="color: var(--text-muted);">(--)</span>
               </td>
               <td class="py-3 px-3 2xl:px-5 2xl:py-3.5 text-center num-tabular" style="color: var(--text-muted);">
                 {{ clean(t.hold_duration, '--') }}

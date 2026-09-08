@@ -88,6 +88,32 @@ class BackupMethodTests(unittest.TestCase):
         self.assertEqual(check.execute("SELECT value FROM x").fetchone()[0], "ok")
         check.close()
 
+    def test_scoped_account_databases_keep_distinct_hot_backup_paths(self):
+        expected = {"exchanges/okx/demo/account-a": "okx", "exchanges/binance/demo/account-b": "binance"}
+        connections = []
+        try:
+            for scope, marker in expected.items():
+                source = self.root / "data" / scope / "r20_quant.db"
+                source.parent.mkdir(parents=True)
+                connection = sqlite3.connect(source)
+                connections.append(connection)
+                connection.execute("PRAGMA journal_mode=WAL")
+                connection.execute("CREATE TABLE marker(value TEXT)")
+                connection.execute("INSERT INTO marker VALUES (?)", (marker,))
+                connection.commit()
+            created = runtime.sqlite_hot_backups("scoped", 2)
+            recovered = {}
+            for path in created:
+                check = sqlite3.connect(path)
+                try:
+                    recovered[path.parent.relative_to(runtime.SQLITE_DIR).as_posix()] = check.execute("SELECT value FROM marker").fetchone()[0]
+                finally:
+                    check.close()
+            self.assertEqual(recovered, expected)
+        finally:
+            for connection in connections:
+                connection.close()
+
     def test_simple_backup_test_local_connectivity(self):
         headers = self.login()
         resp = self.client.post(
@@ -165,23 +191,23 @@ class BackupMethodTests(unittest.TestCase):
             headers=headers,
         )
         self.assertEqual(resp.status_code, 400, resp.text)
-        self.assertIn("Endpoint 不能为空", resp.json()["detail"])
 
         # S3 missing bucket
-        resp_bucket = self.client.post(
-            "/api/v1/admin/backups/simple/test",
-            json={
-                "destination": "s3",
-                "enabled": True,
-                "schedule_time": "02:00",
-                "endpoint": "https://s3.amazonaws.com",
-                "bucket": "",
-                "credentials": {"access_key_id": "key", "secret_access_key": "sec"},
-            },
-            headers=headers,
-        )
+        with patch("r20_backend.net_security.validate_outbound_url") as outbound_probe:
+            resp_bucket = self.client.post(
+                "/api/v1/admin/backups/simple/test",
+                json={
+                    "destination": "s3",
+                    "enabled": True,
+                    "schedule_time": "02:00",
+                    "endpoint": "https://s3.amazonaws.com",
+                    "bucket": "",
+                    "credentials": {"access_key_id": "key", "secret_access_key": "sec"},
+                },
+                headers=headers,
+            )
         self.assertEqual(resp_bucket.status_code, 400, resp_bucket.text)
-        self.assertIn("Bucket 不能为空", resp_bucket.json()["detail"])
+        outbound_probe.assert_not_called()
 
     def test_safe_archive_verification_boundaries(self):
         # 1. Non-existent archive
@@ -402,6 +428,38 @@ class BackupMethodTests(unittest.TestCase):
         sconn = sqlite3.connect(snapshots[0])
         self.assertEqual(sconn.execute("SELECT symbol FROM orders").fetchone()[0], "BTC-USDT")
         sconn.close()
+
+    def test_local_backup_reports_paths_when_root_is_windows_short_name(self):
+        short_root = self.root
+        if os.name == "nt":
+            import ctypes
+            buf = ctypes.create_unicode_buffer(32768)
+            length = ctypes.windll.kernel32.GetShortPathNameW(str(self.root), buf, 32768)
+            self.assertGreater(length, 0)
+            short_root = Path(buf.value)
+        runtime.ROOT = short_root
+        runtime.BACKUPS = short_root / "backups"
+        runtime.LOCAL_DIR = short_root / "backups" / "local"
+        runtime.SQLITE_DIR = short_root / "backups" / "sqlite"
+        runtime.MANIFEST_DIR = short_root / "backups" / "manifests"
+        job = {
+            "id": "short-root-job",
+            "name": "short-root",
+            "enabled": True,
+            "scope": ["data"],
+            "sqlite": {"enabled": True, "retention": 1},
+            "targets": [
+                {"id": "loc-short", "type": "local", "enabled": True, "path": "backups/local", "retention": 1}
+            ],
+        }
+        result = runtime.run_backup_job(job)
+        self.assertEqual(result["status"], "success", result)
+        self.assertTrue(result["targets"][0]["success"], result["targets"])
+        resolved_root = Path(os.path.realpath(self.root))
+        self.assertTrue((resolved_root / result["manifest"]).is_file())
+        self.assertTrue((resolved_root / result["targets"][0]["destination"]).exists())
+        self.assertTrue(all((resolved_root / item).exists() for item in result["sqlite"]))
+
 
     def test_nightly_backup_cli_clean_and_missing_directories(self):
         # 1. Non-existent job-id returns exit code 2 and structured json

@@ -182,22 +182,36 @@ class FactorLibraryIntegrationTest(unittest.TestCase):
     """Test Pillar 6 integration in factor_library.py."""
 
     def test_factor_library_structure_contains_math_prob_foundations(self):
+        from contextlib import ExitStack
+
         item = {"instId": "BTC-USDT-SWAP", "name": "BTC", "type": "crypto", "precision": 1}
-        factors = factor_library.compute_instrument_factors(item, {})
-        self.assertIn("calculus_dynamics", factors)
-        self.assertIn("curvature", factors["calculus_dynamics"])
-        self.assertIn("power", factors["calculus_dynamics"])
-        self.assertIn("power_regime", factors["calculus_dynamics"])
-        self.assertIn("definite_integrals", factors)
-        self.assertIn("probability_theory", factors)
-        
-        d_int = factors["definite_integrals"]
-        self.assertIn("energy_integral", d_int)
-        self.assertIn("deviation_area_integral", d_int)
-        
-        p_th = factors["probability_theory"]
-        self.assertIn("continuation_prob_pct", p_th)
-        self.assertIn("var_95_pct", p_th)
+        prices = [100.0 * (1.0005 ** (i * i)) for i in range(60)]
+        candles = [
+            [str(i * 900000), str(price - 0.1), str(price + 0.5), str(price - 0.5),
+             str(price), "1000", str(price * 1000), str(price * 1000), "1"]
+            for i, price in enumerate(prices)
+        ][::-1]
+        market = {
+            "fetch_ticker": {"last": str(prices[-1]), "bidPx": str(prices[-1] - 0.1), "askPx": str(prices[-1] + 0.1)},
+            "fetch_orderbook_depth": {"bids": [[str(prices[-1] - 0.1), "100"]], "asks": [[str(prices[-1] + 0.1), "100"]]},
+            "fetch_candles": candles,
+            "fetch_indicators_batch": {},
+            "fetch_funding_rate": 0.0,
+            "fetch_open_interest": {"oi": "100", "oiUsd": "1000000"},
+            "fetch_long_short_ratio": 1.0,
+            "fetch_taker_volume": {"buyVol": "100", "sellVol": "50"},
+        }
+        with ExitStack() as stack:
+            for name, result in market.items():
+                stack.enter_context(patch.object(factor_library, name, return_value=result))
+            factors = factor_library.compute_instrument_factors(item, {})
+        dynamics = factors["calculus_dynamics"]
+        self.assertGreater(dynamics["velocity"], 0)
+        self.assertGreater(dynamics["power"], 0)
+        self.assertGreaterEqual(dynamics["curvature"], 0)
+        self.assertIn(dynamics["power_regime"], {"KINETIC_ACCELERATING", "HIGH_CURVATURE_INFLECTION", "STEADY_FLUX"})
+        self.assertIn("energy_integral", factors["definite_integrals"])
+        self.assertIn("continuation_prob_pct", factors["probability_theory"])
 
 
 class AiFactorTraderMathProbTest(unittest.TestCase):
@@ -285,29 +299,51 @@ class AiFactorTraderPositionProtectionTest(unittest.TestCase):
         self.assertFalse(closed); self.assertEqual(reason,"持仓监控中"); close.assert_not_called()
 
     def test_cloud_oco_gap_is_repaired_and_verified(self):
-        responses=[
-            {"ok":True,"data":[],"stderr":"","stdout":"[]"},
-            {"ok":True,"data":{"algoId":"88"},"stderr":"","stdout":"{}"},
-            {"ok":True,"data":[{"state":"live","posSide":"long","side":"sell","reduceOnly":"true","sz":"4","tpTriggerPx":"106","slTriggerPx":"101"}],"stderr":"","stdout":"[]"},
-        ]
-        with patch.object(ai_factor_trader,"run_cmd_result",side_effect=responses) as run, patch.object(ai_factor_trader.time,"sleep"):
-            ok,detail=ai_factor_trader.ensure_cloud_position_protection("SOL-USDT-SWAP","long",4,106,101)
-        self.assertTrue(ok); self.assertIn("repaired and verified",detail)
-        self.assertIn("--ordType oco",run.call_args_list[1].args[0])
-        self.assertIn("--reduceOnly",run.call_args_list[1].args[0])
+        class _Ex:
+            def __init__(self):
+                self.calls = []
+                self.seq = [
+                    [],
+                    [{"state": "live", "posSide": "long", "ordType": "oco", "sz": "4", "tpTriggerPx": "106", "slTriggerPx": "101"}],
+                ]
+            def protection_orders(self, inst_id):
+                self.calls.append(("protection_orders", inst_id))
+                return self.seq.pop(0)
+            def place_protection(self, inst_id, pos_side, size, tp_px, sl_px):
+                self.calls.append(("place_protection", inst_id, pos_side, size, tp_px, sl_px))
+                return {"algoId": "88"}
+        ex = _Ex()
+        with patch.object(ai_factor_trader, "get_exchange", return_value=ex), patch.object(ai_factor_trader.time, "sleep"):
+            ok, detail = ai_factor_trader.ensure_cloud_position_protection("SOL-USDT-SWAP", "long", 4, 106, 101)
+        self.assertTrue(ok)
+        self.assertIn("repaired and verified", detail)
+        self.assertEqual(ex.calls[1][0], "place_protection")
+        self.assertEqual(ex.calls[1][1], "SOL-USDT-SWAP")
 
     def test_stale_order_query_failure_aborts_cleanup(self):
-        with patch.object(ai_factor_trader,"run_cmd_result",return_value={"ok":False,"data":None,"stderr":"timeout","stdout":""}):
-            ok,detail=ai_factor_trader.clean_stale_open_orders()
-        self.assertFalse(ok); self.assertIn("timeout",detail)
+        class _Ex:
+            def open_orders(self, inst_id=None):
+                raise RuntimeError("timeout")
+        with patch.object(ai_factor_trader, "get_exchange", return_value=_Ex()):
+            ok, detail = ai_factor_trader.clean_stale_open_orders()
+        self.assertFalse(ok)
+        self.assertIn("timeout", detail)
 
     def test_stale_order_cancel_uses_valid_cli_and_fail_closed(self):
-        order={"instId":"SOL-USDT-SWAP","ordId":"11","state":"live","cTime":"1"}
-        responses=[{"ok":True,"data":[order],"stderr":"","stdout":"[]"},{"ok":False,"data":None,"stderr":"rejected","stdout":""}]
-        with patch.object(ai_factor_trader,"run_cmd_result",side_effect=responses) as run, patch.object(ai_factor_trader.time,"time",return_value=1000):
-            ok,detail=ai_factor_trader.clean_stale_open_orders()
-        self.assertFalse(ok); self.assertIn("rejected",detail)
-        self.assertIn("swap cancel SOL-USDT-SWAP --ordId 11",run.call_args_list[1].args[0])
+        class _Ex:
+            def __init__(self):
+                self.calls = []
+            def open_orders(self, inst_id=None):
+                return [{"instId": "SOL-USDT-SWAP", "ordId": "11", "state": "live", "cTime": "1"}]
+            def cancel_order(self, inst_id, order_id):
+                self.calls.append((inst_id, order_id))
+                raise RuntimeError("rejected")
+        ex = _Ex()
+        with patch.object(ai_factor_trader, "get_exchange", return_value=ex), patch.object(ai_factor_trader.time, "time", return_value=1000):
+            ok, detail = ai_factor_trader.clean_stale_open_orders()
+        self.assertFalse(ok)
+        self.assertIn("rejected", detail)
+        self.assertEqual(ex.calls, [("SOL-USDT-SWAP", "11")])
 
     def test_cloud_oco_failure_closes_position_fail_closed(self):
         position={"pos":4.0,"side":"long","avgPx":103.55,"upl":-4.0}

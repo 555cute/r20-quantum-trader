@@ -18,7 +18,9 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688.svg?style=flat-square)](https://fastapi.tiangolo.com/)
 [![Vue 3](https://img.shields.io/badge/Vue-3.5%2B-4FC08D.svg?style=flat-square)](https://vuejs.org/)
 [![Chart](https://img.shields.io/badge/Chart-KLineChart%20v10%20Native-blue.svg?style=flat-square)](https://klinecharts.com/)
-[![Tests](https://img.shields.io/badge/tests-390%20passed-brightgreen.svg?style=flat-square)](tests/)
+[![CI](https://github.com/cnlimiter/r20-quantum-trader/actions/workflows/ci.yml/badge.svg)](https://github.com/cnlimiter/r20-quantum-trader/actions/workflows/ci.yml)
+
+[![GHCR](https://img.shields.io/badge/GHCR-ghcr.io%2Fcnlimiter%2Fr20--quantum--trader-blue.svg?style=flat-square&logo=github)](https://github.com/cnlimiter/r20-quantum-trader/pkgs/container/r20-quantum-trader)
 
 **新一代机构级加密货币波段量化决策与执行系统 · AI 投委会大模型驱动**  
 🔥 **核心亮点：全栈策略全要素 100% 深度可自定义 · 17 项执行层硬风控后台可视化 · 三套优质风控预设一键应用 · 0.5s 策略快照原子回滚**  
@@ -236,9 +238,22 @@ v7.6.0 起，全部执行层硬风控参数从 py 源码中彻底剥离，收敛
 
 ---
 
+## Binance USD-M 接入
+
+在 `/admin/security` 的“交易所”中选择 **Binance USD-M USDT 永续**，默认使用 DEMO。分别配置 Binance DEMO / LIVE API Key 与 Secret；空白字段不覆盖已有密钥，密钥以加密方式保存，不回显明文。
+
+- 行情、账户、挂单、限价下单、杠杆、保护单、平仓和台账统一走所选交易所适配器；内部数量统一为币数量，只有 OKX 适配层转换为合约张数。
+- 切换需输入具体目标短语，例如 `SWITCH BINANCE DEMO`。页面加载不自动测试凭证或刷新私有账户；交易任务另有目标环境确认。
+- Binance 保护为两条配对条件单，**不是原子 OCO**。未知提交、第二条保护失败、部分成交及保护更新均有独立处理。
+- 账户状态按交易所、环境和凭证指纹隔离；历史范围或费用换算不能证实时标记不完整，不伪造完整台账或历史杠杆。
+
+部署参数、保护机制差异及历史数据边界见 [STANDALONE.md](STANDALONE.md)。
+
 ## 🚀 极速部署指南
 
-### 方式 A：源码直接部署 (Python 3.10+ / Node.js 18+)
+完整进程所有权与恢复说明见 [STANDALONE.md](STANDALONE.md) 和 [RECOVERY_GUIDE.md](RECOVERY_GUIDE.md)。控制面包含会执行交易的管理接口，不是只读服务。模型输出仍须通过基础风控和执行层检查；可配置插件不等于所有规则都不可关闭。交易所受理订单不等于成交，保护委托不能保证零损失。
+
+### 方式 A：源码直接部署 (Python 3.11/3.12 / Node.js 22.12+)
 
 #### 1. 克隆代码与配置环境变量
 ```bash
@@ -252,32 +267,63 @@ vim .env  # 填写您的 OKX API 与大模型凭据 (例如 OpenAI / Gemini / De
 #### 2. 安装依赖并启动
 ```bash
 # 1. 安装后端 Python 依赖
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
+npm install -g @okx_ai/okx-trade-cli@^1.4.4
 
 # 2. 编译打包现代化 Vue 3 前端操盘终端 (基于原生高性能 KLineChart v10)
 cd frontend
-npm install
+npm ci
 npm run build
 cd ..
 
-# 3. 一键启动后端控制面与交易主脑
-python -m uvicorn r20_backend.app:app --host 0.0.0.0 --port 8080
-# 或者直接运行一键启动脚本: ./start.sh
+# 3. 首次仅启动控制面，不自动交易或轮询账户
+R20_GATEWAY_WORKER_ENABLED=0 R20_DASHBOARD_WORKER_ENABLED=0 \
+  python -m uvicorn r20_backend.app:app --host 127.0.0.1 --port 8080
 ```
+
+PowerShell 使用 `$env:R20_GATEWAY_WORKER_ENABLED="0"` 和 `$env:R20_DASHBOARD_WORKER_ENABLED="0"` 设置开关，再启动 Python。默认启用 worker 时，后端会拉起 Gateway 调度交易。仅选一个管理方：后端托管，或配套 systemd 的独立 Gateway；不得同时运行旧 scheduler、QwenPaw cron、独立 dashboard。行情 REST 主路径仍有 CLI 依赖，不能视为完全零子进程。
 
 ---
 
 ### 方式 B：Docker / Docker-Compose 容器化一键启动 (推荐)
 
-无需在宿主机配置复杂的 Python 和 Node.js 环境，秒级交付：
+默认 `docker-compose.yml` **只拉取** GitHub Container Registry 镜像，不含本地 `build`，避免 `docker compose up` 误跑源码构建或混用远端旧 `latest`。镜像：[`ghcr.io/cnlimiter/r20-quantum-trader`](https://github.com/cnlimiter/r20-quantum-trader/pkgs/container/r20-quantum-trader)。`main` 推送和 `v*` 标签发布；`latest` 仅默认分支。首次发布默认为 private，公开仓库可在 Packages 页改为 public 后匿名拉取。私有包需 classic PAT（`read:packages`）：
 
 ```bash
-# 1. 配置环境变量
-cp env.example .env
-
-# 2. 一键构建并启动多阶段容器
-docker compose up -d --build
+echo "$CR_PAT" | docker login ghcr.io -u USERNAME --password-stdin
 ```
+
+默认启动（宿主机 `.env` 仅作启动注入，`pull_policy: always`）：
+
+```bash
+cp env.example .env
+docker compose up -d
+```
+
+未设置 `R20_SETUP_TOKEN` / `R20_ADMIN_TOKEN`（或仍是示例占位符）时，首次启动会各生成一次并打印到容器日志：`R20_SETUP_TOKEN` 是 `admin` 初始登录密码（不写盘，建号成功后从进程环境清除）；`R20_ADMIN_TOKEN` 是 `X-R20-Admin-Token` 管理头，写入 `./data/config/.env`。该头可在已有账号后调用 overview 等管理 API，不能登录控制台、不能当登录密码、不能做用户管理或 `require_superadmin` 操作。已有值后不会再生成或打印。显式配置的 setup token 不会被改写。
+
+
+
+
+指定版本：`R20_IMAGE=ghcr.io/cnlimiter/r20-quantum-trader:latest docker compose up -d`。离线复用已拉取镜像：`R20_PULL_POLICY=missing docker compose up -d`。
+
+
+
+从当前源码构建（独立 overlay，镜像名为 `r20-quantum-trader:local`，不拉 GHCR）：
+
+```bash
+cp env.example .env
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+```
+
+宿主机 `.env` 通过 compose `env_file` 注入初始值（含 worker 开关）。后台写入的配置落在已挂载的 `./data/config/.env`（容器内 `/app/data/config/.env`，由 `R20_ENV_FILE` 指定），并覆盖这些初始值。不要把单个 `.env` 文件 bind-mount 进容器。源码部署默认仍是项目根目录 `.env`，不要为原生安装设置 `R20_ENV_FILE`。
+
+- `docker compose stop` / `start`：复用同一容器，数据卷与后台配置都还在。
+- `docker compose up -d --force-recreate` 或 `down` 后 `up`：容器层被替换，但 `./data` 卷保留，后台保存的交易所选择等设置仍在。旧镜像把后台配置写在容器内 `/app/.env`，重建会丢失。
+- 已在运行的旧容器若改过后台配置，升级或重建前请自行把容器内 `/app/.env` 安全导出到数据卷的 `data/config/.env`。不要把明文凭证写入归档或提交到版本库。
+- 打包的 data 备份会排除该配置文件，须单独安全保管。
 
 ---
 
@@ -294,13 +340,14 @@ docker compose up -d --build
 系统配备了涵盖物理风控几何拦截、策略版本快照、多模型仲裁、OKX 鉴权与前后端 API 契约的完整自动化测试套件：
 
 ```bash
-python3 -m unittest discover -s tests -t . -p "test_*.py"
+R20_GATEWAY_WORKER_ENABLED=0 R20_DASHBOARD_WORKER_ENABLED=0 R20_TESTING=1 \
+  python3 -m unittest discover -s tests -t . -p "test_*.py"
 ```
 
 > `-t .` 使 `tests` 作为包导入，触发 `tests/__init__.py` 的环境隔离——
 > 即使生产 `.env` 已应用自定义风控套件，测试仍以代码默认基线断言。
 
-*当前自动化单测覆盖：390 项用例 100% 全部通过（含风控管理页 API 契约、套件校验与提示词-常量-布局三重零漂移守卫）。*
+测试结果以当前命令输出为准，静态数量不代表通过。测试需要隔离数据和外部请求；关闭 worker 不会拦截显式调用的网络方法。回测使用独立 MA 参考策略，并非 LLM/投委会实盘回放；缺失行情返回 incomplete/非零退出，不生成合成行情或覆盖成功报告。图表行情失败也不生成模拟蜡烛，已有真实缓存可明确标记为 stale。
 
 ---
 

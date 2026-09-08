@@ -1,64 +1,273 @@
-"""Offline isolated test for Prompt Anti-Drawdown TP & Position Data Feed Enrichment.
-Validates:
-1. High Water Mark, peak profit gain, and retracement drawdown percentage are properly injected into account_positions.
-2. System prompt and active profile enforce anti-drawdown take-profit and CLOSE_MARKET directives.
+"""Offline isolated tests for peak-drawdown position feed and calculus power fields.
+
+Does not import trader/app modules, fake fcntl, or read real config/.env.
 """
 from __future__ import annotations
 
+import ast
+import builtins
+import datetime
+import io
+import json
+import os
+import socket
+import subprocess
 import sys
+import tempfile
+import types
 import unittest
+from contextlib import ExitStack
 from pathlib import Path
+from typing import Any, Dict, List
+from unittest.mock import Mock, patch
 
-scripts_dir = str(Path(__file__).resolve().parent.parent / "scripts")
-if scripts_dir not in sys.path:
-    sys.path.insert(0, scripts_dir)
-
-import scripts.ai_brain_trader as abt
+import scripts.prompt_library as prompts
+import scripts.risk_constants as risk_constants
+from r20_backend import news_config
 
 
-class PromptAntiDrawdownTakeProfitTests(unittest.TestCase):
-    def test_position_feed_enriches_peak_and_drawdown(self):
-        active_positions = [
-            {
-                "instId": "ETH-USDT-SWAP",
-                "name": "ETH",
-                "side": "long",
-                "lever": "3",
-                "avgPx": "2500.0",
-                "markPx": "2520.0",
-                "pos": "2.0",
-                "upl": "4.0",
-                "uplRatio": "0.016",
-                "highWaterMark": 2560.0,
-                "lowWaterMark": 2495.0,
-                "trailingStopPx": 2505.0,
-                "takeProfitPx": 2600.0,
-                "stage_desc": "已推保本无风险",
-            }
-        ]
+PROJECT = Path(__file__).resolve().parents[1]
+TESTS_DIR = Path(__file__).resolve().parent
+if str(TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(TESTS_DIR))
 
-        prompt_str = abt.construct_full_market_prompt(
-            packages=[],
-            pos_summary="1多0空",
-            active_positions_detail=active_positions,
-            current_time_str="2026-09-07 15:00:00"
+TRADER_TREE = ast.parse((PROJECT / "scripts/ai_brain_trader.py").read_text(encoding="utf-8"))
+
+
+
+def _fn(name: str) -> ast.FunctionDef:
+    return next(n for n in TRADER_TREE.body if isinstance(n, ast.FunctionDef) and n.name == name)
+
+
+class IsolatedPromptAntiDrawdownTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.stack = ExitStack()
+        self.addCleanup(self.stack.close)
+        self.stack.enter_context(patch.object(prompts, "ROOT", self.root))
+        self.stack.enter_context(patch.object(prompts, "LIBRARY_FILE", self.root / "library.json"))
+        self.stack.enter_context(patch.object(news_config, "ENV_FILE", self.root / ".env"))
+        self.stack.enter_context(patch.dict(os.environ, {"R20_NEWS_SOURCES": "okx"}))
+        original_open, original_io_open, original_os_open = builtins.open, io.open, os.open
+        from path_guard import contained
+
+
+        def check(path):
+            if isinstance(path, int):
+                return
+            if not contained(path, self.root):
+                raise AssertionError(f"Non-sandbox file access blocked: {Path(path).resolve()}")
+
+
+        def guarded(fn):
+            def call(path, *args, **kwargs):
+                check(path)
+                return fn(path, *args, **kwargs)
+            return call
+
+        for obj, name, original in ((builtins, "open", original_open), (io, "open", original_io_open), (os, "open", original_os_open)):
+            self.stack.enter_context(patch.object(obj, name, guarded(original)))
+        for obj, name in ((socket, "socket"), (socket, "create_connection"), (subprocess, "Popen"), (os, "system")):
+            self.stack.enter_context(patch.object(obj, name, side_effect=AssertionError("Network/process blocked")))
+        shield = types.ModuleType("scripts.evolution_shield")
+        shield.render_trading_memory = Mock(return_value="隔离心法")
+        self.stack.enter_context(patch.dict(sys.modules, {"scripts.evolution_shield": shield}))
+        self.profile = {
+            "name": "隔离策略",
+            "pipelines": {
+                "trading_user": [{
+                    "id": "u",
+                    "title": "自定义",
+                    "source": "custom",
+                    "enabled": True,
+                    "content": "{{account_positions}}\n{{market_matrix}}",
+                }]
+            },
+        }
+        self.ns = dict(
+            List=List, Dict=Dict, Any=Any, datetime=datetime, os=os, json=json,
+            __version__="7.6.0",
+
+            active_profile=lambda: prompts.resolve_profile(self.profile),
+            apply_module_layout=prompts.apply_module_layout,
+            AI_MEMORY_MD_FILE=str(self.root / "memory.md"),
+            AI_MEMORY_FILE=str(self.root / "memory.json"),
+            NEWS_SENTIMENT_FILE=str(self.root / "news.json"),
+            MAX_MARGIN_EQUITY_RATIO=risk_constants.MAX_MARGIN_EQUITY_RATIO,
+            SINGLE_ASSET_EQUITY_RATIO=risk_constants.SINGLE_ASSET_EQUITY_RATIO,
+            RISK_PER_TRADE_EQUITY_RATIO=risk_constants.RISK_PER_TRADE_EQUITY_RATIO,
+            DAILY_LOSS_EQUITY_RATIO=risk_constants.DAILY_LOSS_EQUITY_RATIO,
+            MAX_SINGLE_ASSET_MARGIN=risk_constants.MAX_SINGLE_ASSET_MARGIN,
+            MAX_DAILY_LOSS_USDT=risk_constants.MAX_DAILY_LOSS_USDT,
+            MAX_SAME_DIRECTION_POSITIONS=risk_constants.MAX_SAME_DIRECTION_POSITIONS,
+            TIME_STOP_HOURS=risk_constants.TIME_STOP_HOURS,
+            MAX_LEVERAGE=risk_constants.MAX_LEVERAGE,
+            MIN_RISK_REWARD_RATIO=risk_constants.MIN_RISK_REWARD_RATIO,
+            MIN_ENTRY_CONFIDENCE=risk_constants.MIN_ENTRY_CONFIDENCE,
+            MAX_SCALE_IN_COUNT=risk_constants.MAX_SCALE_IN_COUNT,
+            MIN_SCALE_IN_PROFIT_RATIO=risk_constants.MIN_SCALE_IN_PROFIT_RATIO,
+            MIN_SCALE_IN_CONFIDENCE=risk_constants.MIN_SCALE_IN_CONFIDENCE,
+            STOP_COOLDOWN_MINUTES=risk_constants.STOP_COOLDOWN_MINUTES,
         )
 
+        exec(
+            compile(ast.Module(body=[_fn("safe_float"), _fn("construct_full_market_prompt")], type_ignores=[]),
+                    "scripts/ai_brain_trader.py", "exec"),
+            self.ns,
+        )
+        self.construct = self.ns["construct_full_market_prompt"]
+
+    def _long_pos(self, **overrides):
+        pos = {
+            "instId": "ETH-USDT-SWAP",
+            "name": "ETH",
+            "side": "long",
+            "lever": "3",
+            "avgPx": "2500.0",
+            "markPx": "2520.0",
+            "pos": "2.0",
+            "upl": "4.0",
+            "uplRatio": "0.016",
+            "highWaterMark": 2560.0,
+            "lowWaterMark": 2495.0,
+            "trailingStopPx": 2505.0,
+            "takeProfitPx": 2600.0,
+            "stage_desc": "已推保本无风险",
+        }
+        pos.update(overrides)
+        return pos
+
+    def test_long_feed_enriches_peak_and_drawdown(self):
+        prompt_str = self.construct(
+            packages=[],
+            pos_summary="1多0空",
+            active_positions_detail=[self._long_pos()],
+            current_time_str="2026-09-07 15:00:00",
+        )
         self.assertIn("曾最高到: 2560.0", prompt_str)
         self.assertIn("极值浮盈 +2.4%", prompt_str)
-        # Drawdown from peak: (2560 - 2520) / (2560 - 2500) = 40 / 60 = 66.7%
         self.assertIn("回撤 66.7%", prompt_str)
+        self.assertIn("当前价: 2520.0", prompt_str)
+        self.assertIn("持仓量: 2.0 (BASE)", prompt_str)
         self.assertIn("动态止损线: 2505.0", prompt_str)
         self.assertIn("目标止盈: 2600.0", prompt_str)
+        self.assertNotIn("曾最低到", prompt_str)
+        self.assertNotIn("liab", prompt_str)
+        self.assertNotIn("notionalUsd", prompt_str)
 
-    def test_system_prompt_contains_anti_drawdown_directives(self):
-        profile = abt.active_profile()
-        sys_prompt = profile.get("trading_system", "")
-        # v7.6.0 重写后的标准措辞（语义不变：三阶棘轮 + 峰值回撤/动能耗散主动止盈 + CLOSE_MARKET 指令）
-        self.assertIn("三阶利润棘轮", sys_prompt)
-        self.assertIn("峰值回撤", sys_prompt)
-        self.assertIn("动能耗散", sys_prompt)
-        self.assertIn("CLOSE_MARKET", sys_prompt)
+    def test_short_feed_uses_low_water_mark(self):
+        prompt_str = self.construct(
+            packages=[],
+            pos_summary="0多1空",
+            active_positions_detail=[self._long_pos(
+                side="short",
+                pos="-2.0",
+                markPx="2440.0",
+                upl="12.0",
+                uplRatio="0.024",
+                highWaterMark=2510.0,
+                lowWaterMark=2400.0,
+            )],
+        )
+        self.assertIn("曾最低到: 2400.0", prompt_str)
+        self.assertIn("极值浮盈 +4.0%", prompt_str)
+        self.assertIn("回撤 40.0%", prompt_str)
+        self.assertNotIn("曾最高到", prompt_str)
+
+    def test_net_positive_pos_is_long_not_short(self):
+        prompt_str = self.construct(
+            packages=[],
+            pos_summary="1多0空",
+            active_positions_detail=[self._long_pos(side="net", posSide="net", pos="2.0")],
+        )
+        self.assertIn("方向: net", prompt_str)
+        self.assertIn("曾最高到: 2560.0", prompt_str)
+        self.assertNotIn("曾最低到", prompt_str)
+
+    def test_net_negative_pos_is_short(self):
+        prompt_str = self.construct(
+            packages=[],
+            pos_summary="0多1空",
+            active_positions_detail=[self._long_pos(
+                side="net",
+                posSide="net",
+                pos="-2.0",
+                markPx="2440.0",
+                highWaterMark=2510.0,
+                lowWaterMark=2400.0,
+            )],
+        )
+        self.assertIn("曾最低到: 2400.0", prompt_str)
+        self.assertNotIn("曾最高到", prompt_str)
+
+    def test_missing_watermarks_are_not_invented(self):
+        prompt_str = self.construct(
+            packages=[],
+            pos_summary="1多0空",
+            active_positions_detail=[self._long_pos(highWaterMark=0, lowWaterMark=0)],
+        )
+        self.assertNotIn("曾最高到", prompt_str)
+        self.assertNotIn("曾最低到", prompt_str)
+        self.assertNotIn("极值浮盈", prompt_str)
+        self.assertIn("持仓量: 2.0 (BASE)", prompt_str)
+
+    def test_curvature_power_flow_into_brain_context(self):
+        pkg = {
+            "name": "ETH",
+            "instId": "ETH-USDT-SWAP",
+            "price": 2500,
+            "chg24h": 1.0,
+            "bidPx": 2499,
+            "askPx": 2501,
+            "fundingRate": None,
+            "oiUsd": "UNAVAILABLE",
+            "lsRatio": "UNAVAILABLE",
+            "takerNetUsd": "UNAVAILABLE",
+            "data_quality": "valid",
+            "smart_money": {"available": False},
+            "calculus": {
+                "valid": True,
+                "regime": "BULL_DECELERATING",
+                "velocity": 0.2,
+                "acceleration": -0.3,
+                "impulse": 0.1,
+                "max_abs_jerk": 0.4,
+                "curvature": 1.6,
+                "power": -0.15,
+                "power_regime": "KINETIC_EXHAUSTION",
+                "quality": 0.8,
+                "timeframes": {
+                    "1H": {
+                        "velocity": 0.21,
+                        "acceleration": -0.31,
+                        "jerk": 0.4,
+                        "impulse": 0.1,
+                        "curvature": 1.61,
+                        "power": -0.16,
+                        "power_regime": "KINETIC_EXHAUSTION",
+                        "regime": "BULL_DECELERATING",
+                        "definite_integrals": {},
+                        "probability_theory": {},
+                    }
+                },
+                "definite_integrals": {},
+                "probability_theory": {},
+            },
+        }
+        prompt_str = self.construct(packages=[pkg], pos_summary="0多0空", active_positions_detail=[])
+        self.assertIn("曲率κ=1.6", prompt_str)
+        self.assertIn("功率Φ=-0.15", prompt_str)
+        self.assertIn("功率态=KINETIC_EXHAUSTION", prompt_str)
+        self.assertIn("κ=1.61", prompt_str)
+        self.assertIn("Φ=-0.16", prompt_str)
+
+
+
+
+
+
 
 
 if __name__ == "__main__":

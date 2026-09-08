@@ -7,6 +7,8 @@ import re
 import secrets
 import sqlite3
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -64,6 +66,49 @@ def _password_valid(password: str) -> bool:
     return len(password) >= 12 and len(password) <= 128 and any(c.isalpha() for c in password) and any(c.isdigit() for c in password)
 
 
+PLACEHOLDER_SETUP_TOKEN = "replace_with_a_long_random_setup_token"
+
+
+def token_is_unset(value: str, *, placeholders: tuple[str, ...] = ()) -> bool:
+    text = (value or "").strip()
+    return (not text) or text in placeholders
+
+
+def generate_auth_secret() -> str:
+    for _ in range(32):
+        token = secrets.token_urlsafe(32)
+        if _password_valid(token):
+            return token
+    return secrets.token_urlsafe(24) + "Aa1"
+
+
+def resolve_bootstrap_tokens(
+    setup_token: str,
+    admin_token: str,
+    *,
+    has_users: bool,
+    generate=generate_auth_secret,
+) -> tuple[str, str, dict[str, str]]:
+    """Mint missing first-boot secrets. Admin token is never the login password."""
+    generated: dict[str, str] = {}
+    setup = (setup_token or "").strip()
+    admin = (admin_token or "").strip()
+    if token_is_unset(setup, placeholders=(PLACEHOLDER_SETUP_TOKEN,)):
+        if has_users:
+            setup = ""
+        else:
+            setup = generate()
+            generated["R20_SETUP_TOKEN"] = setup
+    if token_is_unset(admin):
+        admin = generate()
+        generated["R20_ADMIN_TOKEN"] = admin
+    return setup, admin, generated
+
+
+
+
+
+
 class AdminAuthStore:
     def __init__(self, path: Path = DB_PATH):
         self.path = path
@@ -72,11 +117,16 @@ class AdminAuthStore:
             connection.executescript(SCHEMA)
         os.chmod(self.path, 0o600)
 
-    def connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self.path, timeout=10)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys=ON")
-        return connection
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys=ON")
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def has_users(self) -> bool:
         with self.connect() as connection:
@@ -226,3 +276,5 @@ class AdminAuthStore:
             connection.execute("UPDATE admin_users SET enabled=?,updated_at=? WHERE id=?", (1 if enabled else 0, _now_text(), user_id))
             if not enabled:
                 connection.execute("DELETE FROM admin_sessions WHERE user_id=?", (user_id,))
+
+

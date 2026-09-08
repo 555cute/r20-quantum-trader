@@ -32,19 +32,18 @@ from contextvars import ContextVar
 from pydantic import BaseModel, Field, field_validator
 from r20_backend.config import refresh_settings, settings
 from r20_backend.version import __version__, APP_NAME, APP_VERSION
-from r20_backend.okx_client import OKXClient
-from r20_backend.okx_trade_service import account_snapshot as okx_account_snapshot, fast_close_confirmed
 from r20_backend.okx_setup import diagnose_okx_runtime, install_okx_cli, check_node_npm, start_oauth_device_login, oauth_status, oauth_logout
 from r20_backend.account_baseline import load_account_baseline, update_initial_capital
+from r20_exchange.runtime import get_exchange, selected_environment, state_path
 from r20_backend.backup_secrets import credential_status as backup_credential_status, save_credentials as save_backup_credentials
 from r20_backend.prompt_views import EVOLUTION_USER_TEMPLATE, TRADING_USER_TEMPLATE, rendered_snapshots
 from r20_backend.settings_store import mask, remove_env, update_env
-from r20_backend import risk_config
+from r20_backend import risk_config, news_config
 from r20_backend.notifications import _env as notification_env, diagnose_channel, test_channel
 from r20_backend.audit import recent as recent_audit, record as audit_record
 from r20_backend.client_ip import client_ip as resolve_client_ip, user_agent as resolve_user_agent
 from r20_backend import login_guard
-from r20_backend.admin_auth import AdminAuthStore
+from r20_backend.admin_auth import AdminAuthStore, resolve_bootstrap_tokens
 from r20_backend.backup_store import (
     create_job as create_backup_job, delete_job as delete_backup_job, export_job as export_backup_job,
     get_job as get_backup_job, import_job as import_backup_job, list_jobs as list_backup_jobs,
@@ -90,20 +89,45 @@ REQUEST_SESSION: ContextVar[str] = ContextVar("r20_admin_session", default="")
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     refresh_settings()
-    admin_auth.initialize_from_legacy(settings.admin_token or settings.setup_token)
-    start_gateway_supervisor()
+    setup, admin, generated_tokens = resolve_bootstrap_tokens(
+        settings.setup_token,
+        settings.admin_token,
+        has_users=admin_auth.has_users(),
+    )
+    settings.setup_token = setup
+    settings.admin_token = admin
+    if generated_tokens.get("R20_SETUP_TOKEN"):
+        os.environ["R20_SETUP_TOKEN"] = setup
+        print(f"[R20] generated R20_SETUP_TOKEN (initial admin password): {setup}", flush=True)
+    if generated_tokens.get("R20_ADMIN_TOKEN"):
+        os.environ["R20_ADMIN_TOKEN"] = admin
+        print(f"[R20] generated R20_ADMIN_TOKEN (X-R20-Admin-Token): {admin}", flush=True)
+        if os.getenv("R20_TESTING", "").lower() not in {"1", "true", "yes"}:
+            update_env({"R20_ADMIN_TOKEN": admin})
+    if admin_auth.initialize_from_legacy(settings.setup_token) and generated_tokens.get("R20_SETUP_TOKEN"):
+        os.environ.pop("R20_SETUP_TOKEN", None)
+        settings.setup_token = ""
+
+
+
+
+    gateway_enabled = os.getenv("R20_GATEWAY_WORKER_ENABLED", "1").lower() in {"1", "true", "yes"}
+    dashboard_enabled = os.getenv("R20_DASHBOARD_WORKER_ENABLED", "1").lower() in {"1", "true", "yes"}
+    if gateway_enabled:
+        start_gateway_supervisor()
     try:
-        from dashboard.app import start_dashboard_background_worker
-        start_dashboard_background_worker()
-    except Exception:
-        pass
-    yield
-    try:
-        from dashboard.app import stop_dashboard_background_worker
-        stop_dashboard_background_worker()
-    except Exception:
-        pass
-    stop_gateway_supervisor()
+        if dashboard_enabled:
+            from dashboard.app import start_dashboard_background_worker
+            start_dashboard_background_worker()
+        yield
+    finally:
+        try:
+            if dashboard_enabled:
+                from dashboard.app import stop_dashboard_background_worker
+                stop_dashboard_background_worker()
+        finally:
+            if gateway_enabled:
+                stop_gateway_supervisor()
 
 
 from fastapi.middleware.gzip import GZipMiddleware
@@ -125,7 +149,6 @@ async def admin_session_context(request: Request, call_next):
         REQUEST_SESSION.reset(token)
 
 
-okx = OKXClient()
 admin_auth = AdminAuthStore()
 VUE_DIST = ROOT / "frontend" / "dist"
 
@@ -164,6 +187,7 @@ class OkxOAuthStartRequest(BaseModel):
 
 
 class AdminConfigUpdate(BaseModel):
+    exchange: str | None = Field(default=None, pattern=r"^(okx|binance)$")
     okx_environment: str | None = Field(default=None, pattern=r"^(demo|live)$")
     okx_live_api_key: str | None = None
     okx_live_secret_key: str | None = None
@@ -175,6 +199,12 @@ class AdminConfigUpdate(BaseModel):
     okx_secret_key: str | None = None
     okx_passphrase: str | None = None
     okx_simulated: bool | None = None
+    binance_environment: str | None = Field(default=None, pattern=r"^(demo|live)$")
+    binance_live_api_key: str | None = None
+    binance_live_secret_key: str | None = None
+    binance_demo_api_key: str | None = None
+    binance_demo_secret_key: str | None = None
+    confirmation: str | None = None
     llm_base_url: str | None = None
     llm_api_key: str | None = None
     llm_model: str | None = None
@@ -481,9 +511,9 @@ class MemoryUpdateAllRequest(BaseModel):
 
 
 def require_admin_token(token: str) -> None:
-    expected = settings.admin_token or settings.setup_token
+    expected = (settings.admin_token or "").strip()
     if not expected:
-        raise HTTPException(status_code=503, detail="后台尚未设置 R20_SETUP_TOKEN 或 R20_ADMIN_TOKEN")
+        raise HTTPException(status_code=503, detail="后台尚未设置 R20_ADMIN_TOKEN")
     if not hmac.compare_digest(token, expected):
         raise HTTPException(status_code=403, detail="管理员令牌无效")
 
@@ -492,9 +522,9 @@ def current_admin(x_r20_session: str | None = None, x_r20_admin_token: str | Non
     user = admin_auth.validate_session(x_r20_session or "")
     if user:
         return user
-    if x_r20_admin_token and not admin_auth.has_users():
+    if x_r20_admin_token:
         require_admin_token(x_r20_admin_token)
-        return {"id": 0, "username": "legacy-token", "role": "legacy", "enabled": 1}
+        return {"id": 0, "username": "admin-token", "role": "token", "enabled": 1}
     raise HTTPException(status_code=401, detail="管理员会话已失效，请重新登录")
 
 
@@ -513,9 +543,117 @@ def require_superadmin(x_r20_session: Any = None) -> dict[str, Any]:
         raise HTTPException(status_code=403, detail="仅超级管理员可以执行此操作")
     return user
 
+_EXCHANGE_CONFIG_KEYS = {
+    "exchange", "okx_environment", "binance_environment", "okx_simulated",
+    "okx_live_api_key", "okx_live_secret_key", "okx_live_passphrase",
+    "okx_demo_api_key", "okx_demo_secret_key", "okx_demo_passphrase",
+    "okx_api_key", "okx_secret_key", "okx_passphrase",
+    "binance_live_api_key", "binance_live_secret_key",
+    "binance_demo_api_key", "binance_demo_secret_key",
+}
+_SECRET_CONFIG_KEYS = {
+    "okx_live_api_key", "okx_live_secret_key", "okx_live_passphrase",
+    "okx_demo_api_key", "okx_demo_secret_key", "okx_demo_passphrase",
+    "okx_api_key", "okx_secret_key", "okx_passphrase",
+    "binance_live_api_key", "binance_live_secret_key",
+    "binance_demo_api_key", "binance_demo_secret_key",
+    "llm_api_key",
+}
+_ACCOUNT_STATE_FILES = {
+    "trading_ledger.json",
+    "position_trackers.json",
+    "ai_brain_decisions.json",
+    "ai_brain_history.json",
+    "ai_position_management.json",
+    "dashboard_last_good.json",
+}
+
+
+def _local_exchange_runtime() -> dict[str, Any]:
+    env = selected_environment()
+    configured = bool(env.configured)
+    notes = [] if configured else ["当前账户未配置凭证；不会发起外部请求"]
+    return {
+        "exchange": env.exchange,
+        "environment": env.mode,
+        "configured": configured,
+        "status": "configured" if configured else "unconfigured",
+        "notes": notes,
+    }
+
+
+def _acquire_trader_cycle_lock():
+    from r20_backend.file_lock import acquire, release
+    lock_path = DATA_DIR / ".ai_factor_trader.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = lock_path.open("a+", encoding="utf-8")
+    try:
+        acquire(handle, blocking=False)
+    except BlockingIOError:
+        handle.close()
+        raise HTTPException(status_code=409, detail="交易周期正在执行，交易所环境已冻结；请等待本周期结束后再切换") from None
+    handle._r20_release = release  # type: ignore[attr-defined]
+    return handle
+
+
+def _release_trader_cycle_lock(handle) -> None:
+    if handle is None:
+        return
+    release = getattr(handle, "_r20_release", None)
+    try:
+        if release is not None:
+            release(handle)
+    except OSError:
+        pass
+    finally:
+        handle.close()
+
+
+def _editable_exchange_config() -> dict[str, Any]:
+    return {
+        "exchange": settings.exchange,
+        "okx_environment": settings.okx_environment,
+        "okx_live_configured": settings.okx_live_configured,
+        "okx_demo_configured": settings.okx_demo_configured,
+        "okx_simulated": settings.okx_simulated,
+        "binance_environment": settings.binance_environment,
+        "binance_live_configured": settings.binance_live_configured,
+        "binance_demo_configured": settings.binance_demo_configured,
+    }
+
+
+def _target_switch_confirmation(data: dict[str, Any]) -> str:
+    exchange = str(data.get("exchange") or settings.exchange or "okx").strip().lower()
+    if exchange not in {"okx", "binance"}:
+        raise HTTPException(status_code=400, detail="交易所必须是 okx 或 binance")
+    if exchange == "binance":
+        mode = str(data.get("binance_environment") or settings.binance_environment or "demo").strip().lower()
+    else:
+        mode = data.get("okx_environment")
+        if not mode:
+            if "okx_simulated" in data:
+                mode = "demo" if data.get("okx_simulated") else "live"
+            else:
+                mode = settings.okx_environment or "demo"
+        mode = str(mode).strip().lower()
+    if mode not in {"demo", "live"}:
+        raise HTTPException(status_code=400, detail="环境必须是 demo 或 live")
+    return f"SWITCH {exchange.upper()} {mode.upper()}"
+
+
+
+def _resolve_data_file(filename: str) -> Path:
+    if filename in _ACCOUNT_STATE_FILES:
+        try:
+            return state_path(filename)
+        except ValueError:
+            pass
+    return DATA_DIR / filename
+
+
 
 def read_json(filename: str, default: Any) -> Any:
-    path = DATA_DIR / filename
+    path = _resolve_data_file(filename)
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -528,7 +666,7 @@ def script_state(script_name: str) -> dict[str, Any]:
 
 
 def file_health(filename: str, expected_interval: int) -> dict[str, Any]:
-    path = DATA_DIR / filename
+    path = _resolve_data_file(filename)
     if not path.exists():
         return {"name": filename, "exists": False, "age_seconds": None, "fresh": False}
     age = max(0, int(time.time() - path.stat().st_mtime))
@@ -570,14 +708,17 @@ def get_admin_configuration() -> dict[str, str]:
     has_notify = bool(settings.notification_webhook or getattr(settings, "qq_bot_app_id", None) or getattr(settings, "tg_bot_token", None) or getattr(settings, "wechat_webhook", None))
 
     return {
-        "OKX 当前环境": "模拟盘 DEMO" if settings.okx_simulated else "实盘 LIVE",
+        "当前交易所": "Binance USD-M" if settings.exchange == "binance" else "OKX",
+        "当前环境": "模拟盘 DEMO" if settings.okx_simulated else "实盘 LIVE",
         "OKX 实盘凭证": "已完整配置" if settings.okx_live_configured else "未配置",
         "OKX 模拟盘凭证": "已配置" if settings.okx_demo_configured else "未配置",
+        "Binance 实盘凭证": "已配置" if settings.binance_live_configured else "未配置",
+        "Binance 模拟盘凭证": "已配置" if settings.binance_demo_configured else "未配置",
         "LLM 决策主脑": model_name,
         "LLM 思考强度": effort,
         "模型委员会": "加权共识机制 (ACTIVE)",
         "物理拦截管线": "5大物理拦截器 (FAIL-CLOSED)",
-        "云端 OCO 覆盖": "100% 交易所云端挂载",
+        "云端保护": "按交易所机制挂载（OKX OCO / Binance 配对条件单）",
         "初始本金基准": f"{baseline.get('initial_capital', 4061.04):,.2f} USDT",
         "管理员系统": "账号密码 + 服务端会话" if admin_auth.has_users() else "尚未初始化",
         "通知告警通道": "已配置多通道" if has_notify else "未配置",
@@ -600,7 +741,16 @@ def runtime_overview() -> dict[str, Any]:
     positions_payload = read_json("position_trackers.json", {})
     return {
         "service": {"version": __version__, "pid": os.getpid(), "uptime_seconds": int(time.time() - STARTED_AT)},
-        "credentials": {"okx": bool(settings.okx_api_key and settings.okx_secret_key and settings.okx_passphrase), "llm": bool(settings.llm_api_key)},
+        "credentials": {
+            "exchange": settings.exchange,
+            "environment": settings.binance_environment if settings.exchange == "binance" else settings.okx_environment,
+            "configured": bool(_local_exchange_runtime()["configured"]),
+            "okx": bool(settings.okx_api_key and settings.okx_secret_key and settings.okx_passphrase),
+            "okx_configured": bool(settings.okx_live_configured or settings.okx_demo_configured or (settings.okx_api_key and settings.okx_secret_key and settings.okx_passphrase)),
+            "binance_configured": bool(settings.binance_live_configured or settings.binance_demo_configured),
+            "llm": bool(settings.llm_api_key),
+            "simulated_trading": settings.okx_simulated,
+        },
         "configuration": get_admin_configuration(),
         "data_health": health_payload,
         "decisions": decision_summary(),
@@ -619,6 +769,8 @@ def git(command: list[str]) -> str:
         result = subprocess.run(["git", *command], cwd=ROOT, text=True, capture_output=True, timeout=30)
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError(f"git command timed out after {exc.timeout}s") from exc
+    except OSError as exc:
+        raise RuntimeError("Git is unavailable in this deployment") from exc
     if result.returncode:
         raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "git command failed")
     return result.stdout.strip()
@@ -762,8 +914,9 @@ def admin_logout(request: Request, x_r20_session: str | None = Header(default=No
 @app.get("/api/v1/admin/auth/me")
 def admin_me(x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
     user = current_admin(x_r20_session, None)
-    if user.get("role") == "legacy":
+    if user.get("role") in {"legacy", "token"}:
         raise HTTPException(status_code=401, detail="请使用管理员账号密码登录")
+
     return {"user": user}
 
 
@@ -923,6 +1076,13 @@ def run_gateway_job(
 ) -> dict[str, Any]:
     refresh_settings()
     actor = require_admin_header(x_r20_admin_token, x_r20_session)
+    if job_id == "trader":
+        actor = require_superadmin(x_r20_session)
+        env = selected_environment()
+        expected = f"RUN {env.exchange.upper()} {env.mode.upper()} TRADER"
+        confirmation = str((payload or {}).get("confirmation") or "").strip().upper()
+        if confirmation != expected:
+            raise HTTPException(status_code=400, detail=f"确认短语必须精确为：{expected}")
     allowed_jobs = {
         "self_improvement": {
             "script": "self_improvement_engine.py",
@@ -1037,10 +1197,7 @@ def admin_config(x_r20_admin_token: str | None = Header(default=None)) -> dict[s
         "authentication_mode": "account-password",
         "configuration": get_admin_configuration(),
         "editable": {
-            "okx_environment": settings.okx_environment,
-            "okx_live_configured": settings.okx_live_configured,
-            "okx_demo_configured": settings.okx_demo_configured,
-            "okx_simulated": settings.okx_simulated,
+            **_editable_exchange_config(),
             "llm_base_url": settings.llm_base_url,
             "llm_model": settings.llm_model,
             "llm_reasoning_effort": settings.llm_reasoning_effort,
@@ -1083,7 +1240,48 @@ def admin_update_account_baseline(payload: InitialCapitalUpdate, x_r20_session: 
 _OKX_RUNTIME_CACHE: dict[str, Any] = {"at": 0.0, "mode": "", "payload": None}
 
 
-# ── 风控管理页：执行层硬风控参数的可视化配置 ──────────────────────
+@app.get("/api/v1/admin/exchange/runtime")
+def admin_exchange_runtime(x_r20_session: str | None = Header(default=None, alias="X-R20-Session"), x_r20_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
+    refresh_settings()
+    require_admin_header(x_r20_admin_token, x_r20_session)
+    return _local_exchange_runtime()
+
+
+class NewsConfigUpdate(BaseModel):
+    sources: list[str]
+
+
+def _news_config_view() -> dict[str, Any]:
+    try:
+        sources = news_config.selected_sources()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "sources": list(sources),
+        "available_sources": news_config.SOURCE_OPTIONS,
+        "feed": news_config.load_news_snapshot(DATA_DIR / "news_sentiment.json", sources),
+        "effect": "来源选择已生效；已关闭来源的旧缓存不会再进入策略。下一次新闻任务按选择采集，也可手动采集。保存本身不联网。",
+    }
+
+
+@app.get("/api/v1/admin/news/config")
+def admin_news_config(x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
+    require_admin_header(x_r20_session=x_r20_session)
+    return _news_config_view()
+
+
+@app.put("/api/v1/admin/news/config")
+def update_news_config(payload: NewsConfigUpdate, x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
+    actor = require_superadmin(x_r20_session)
+    try:
+        sources = news_config.normalize_sources(payload.sources)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    update_env({"R20_NEWS_SOURCES": ",".join(sources)})
+    audit_record("news.config.update", "success", {"actor": actor["username"], "sources": list(sources)})
+    return {"updated": True, **_news_config_view()}
+
+
 class RiskConfigUpdate(BaseModel):
     values: dict[str, Any] = Field(default_factory=dict)
     suite_id: str = ""
@@ -1225,41 +1423,52 @@ def admin_okx_install_cli(payload: OkxCliInstallRequest, x_r20_session: str | No
 def update_admin_config(payload: AdminConfigUpdate, x_r20_admin_token: str | None = Header(default=None), x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
     refresh_settings()
     data = payload.model_dump(exclude_none=True)
-    sensitive = any(key.startswith("okx_") or key == "manual_close_enabled" for key in data)
-    if sensitive: require_superadmin(x_r20_session)
-    else: require_admin_header(x_r20_admin_token)
+    confirmation = str(data.pop("confirmation", "") or "")
+    sensitive = any(key.startswith("okx_") or key.startswith("binance_") or key in {"exchange", "manual_close_enabled"} for key in data)
+    if sensitive:
+        require_superadmin(x_r20_session)
+    else:
+        require_admin_header(x_r20_admin_token)
     if "llm_base_url" in data and data["llm_base_url"] and not data["llm_base_url"].startswith(("https://", "http://")):
         raise HTTPException(status_code=400, detail="LLM Base URL 必须以 http:// 或 https:// 开头")
     if "notification_webhook" in data and data["notification_webhook"] and not data["notification_webhook"].startswith(("https://", "http://")):
         raise HTTPException(status_code=400, detail="Webhook 必须以 http:// 或 https:// 开头")
-    selected_mode = data.get("okx_environment") or ("demo" if data.get("okx_simulated") else "live" if "okx_simulated" in data else None)
-    if selected_mode and selected_mode != settings.okx_environment:
-        import fcntl
-        lock_path = DATA_DIR / ".ai_factor_trader.lock"; lock_path.parent.mkdir(parents=True, exist_ok=True)
-        with lock_path.open("a+", encoding="utf-8") as lock_handle:
-            try: fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError: raise HTTPException(status_code=409, detail="交易周期正在执行，OKX 环境已冻结；请等待本周期结束后再切换")
-            finally:
-                try: fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
-                except OSError: pass
-    secret_values = {
-        "OKX_LIVE_API_KEY": data.get("okx_live_api_key"), "OKX_LIVE_SECRET_KEY": data.get("okx_live_secret_key"), "OKX_LIVE_PASSPHRASE": data.get("okx_live_passphrase"),
-        "OKX_DEMO_API_KEY": data.get("okx_demo_api_key"), "OKX_DEMO_SECRET_KEY": data.get("okx_demo_secret_key"), "OKX_DEMO_PASSPHRASE": data.get("okx_demo_passphrase"),
-        "OKX_API_KEY": data.get("okx_api_key"), "OKX_SECRET_KEY": data.get("okx_secret_key"), "OKX_PASSPHRASE": data.get("okx_passphrase"),
-        "LLM_API_KEY": data.get("llm_api_key"),
-    }
-    save_secrets({key: value for key, value in secret_values.items() if value})
-    env_values = {
-        "R20_OKX_ENV": selected_mode,
-        "OKX_IS_SIMULATED": "1" if selected_mode == "demo" else "0" if selected_mode else None,
-        "LLM_BASE_URL": data.get("llm_base_url"),
-        "LLM_MODEL": data.get("llm_model"),
-        "LLM_REASONING_EFFORT": data.get("llm_reasoning_effort"),
-        "R20_NOTIFICATION_WEBHOOK": data.get("notification_webhook"),
-        "R20_MANUAL_CLOSE_ENABLED": "1" if data.get("manual_close_enabled") else "0" if "manual_close_enabled" in data else None,
-    }
-    update_env(env_values)
-    refresh_settings()
+    exchange_write = any(key in _EXCHANGE_CONFIG_KEYS for key in data)
+    okx_mode = data.get("okx_environment") or ("demo" if data.get("okx_simulated") else "live" if "okx_simulated" in data else None)
+    binance_mode = data.get("binance_environment")
+    selected_exchange = data.get("exchange")
+    if exchange_write:
+        expected = _target_switch_confirmation(data)
+        if confirmation.strip().upper() != expected:
+            raise HTTPException(status_code=400, detail=f"确认短语必须精确为：{expected}")
+    lock_handle = None
+    try:
+        if exchange_write:
+            lock_handle = _acquire_trader_cycle_lock()
+        secret_values = {
+            "OKX_LIVE_API_KEY": data.get("okx_live_api_key"), "OKX_LIVE_SECRET_KEY": data.get("okx_live_secret_key"), "OKX_LIVE_PASSPHRASE": data.get("okx_live_passphrase"),
+            "OKX_DEMO_API_KEY": data.get("okx_demo_api_key"), "OKX_DEMO_SECRET_KEY": data.get("okx_demo_secret_key"), "OKX_DEMO_PASSPHRASE": data.get("okx_demo_passphrase"),
+            "OKX_API_KEY": data.get("okx_api_key"), "OKX_SECRET_KEY": data.get("okx_secret_key"), "OKX_PASSPHRASE": data.get("okx_passphrase"),
+            "BINANCE_LIVE_API_KEY": data.get("binance_live_api_key"), "BINANCE_LIVE_SECRET_KEY": data.get("binance_live_secret_key"),
+            "BINANCE_DEMO_API_KEY": data.get("binance_demo_api_key"), "BINANCE_DEMO_SECRET_KEY": data.get("binance_demo_secret_key"),
+            "LLM_API_KEY": data.get("llm_api_key"),
+        }
+        save_secrets({key: value for key, value in secret_values.items() if value})
+        env_values = {
+            "R20_EXCHANGE": selected_exchange,
+            "R20_OKX_ENV": okx_mode,
+            "R20_BINANCE_ENV": binance_mode,
+            "OKX_IS_SIMULATED": "1" if okx_mode == "demo" else "0" if okx_mode else None,
+            "LLM_BASE_URL": data.get("llm_base_url"),
+            "LLM_MODEL": data.get("llm_model"),
+            "LLM_REASONING_EFFORT": data.get("llm_reasoning_effort"),
+            "R20_NOTIFICATION_WEBHOOK": data.get("notification_webhook"),
+            "R20_MANUAL_CLOSE_ENABLED": "1" if data.get("manual_close_enabled") else "0" if "manual_close_enabled" in data else None,
+        }
+        update_env(env_values)
+        refresh_settings()
+    finally:
+        _release_trader_cycle_lock(lock_handle)
     if any(k.startswith("llm_") for k in data):
         try:
             cfg = init_llm_providers()
@@ -1295,11 +1504,13 @@ def update_admin_config(payload: AdminConfigUpdate, x_r20_admin_token: str | Non
                 save_llm_config(cfg)
         except Exception:
             pass
-    audit_record("config.update", "success", {"fields": sorted(data.keys())})
+    audit_fields = sorted(k for k in data.keys() if k not in _SECRET_CONFIG_KEYS)
+    audit_record("config.update", "success", {"fields": audit_fields, "exchange": settings.exchange, "environment": settings.binance_environment if settings.exchange == "binance" else settings.okx_environment})
     return {
         "updated": True,
         "restart_note": "Long-running strategy processes read updated .env on their next execution cycle.",
         "manual_close_enabled": settings.manual_close_enabled,
+        **_editable_exchange_config(),
     }
 
 
@@ -1814,11 +2025,36 @@ def admin_delete_policy_archive(
 
 
 
+@app.get("/api/v1/admin/account-snapshot")
 @app.get("/api/v1/admin/okx/account-snapshot")
-def admin_okx_account_snapshot(x_r20_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
+def admin_account_snapshot(x_r20_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
     require_admin_header(x_r20_admin_token)
-    try: return okx_account_snapshot()
-    except Exception as exc: raise HTTPException(status_code=502, detail=f"获取 OKX 当前订单失败：{exc}") from exc
+    env = selected_environment()
+    if not env.configured:
+        raise HTTPException(status_code=503, detail="当前交易所账户未配置凭证")
+    try:
+        from r20_backend.trade_service import account_snapshot
+        return account_snapshot()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"获取当前账户失败：{exc}") from exc
+
+
+@app.post("/api/v1/admin/account/refresh")
+def admin_account_refresh(x_r20_admin_token: str | None = Header(default=None), x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
+    require_admin_header(x_r20_admin_token, x_r20_session)
+    refresh_settings()
+    from dashboard.app import refresh_account_snapshot
+    refresh_account_snapshot()
+    env = selected_environment()
+    return {
+        "ok": True,
+        "exchange": env.exchange,
+        "environment": env.mode,
+        "configured": bool(env.configured),
+        "status": "configured" if env.configured else "unconfigured",
+        "notes": [] if env.configured else ["当前账户未配置凭证；刷新未发起外部请求"],
+    }
+
 
 
 @app.post("/api/v1/admin/positions/close")
@@ -1827,24 +2063,25 @@ def manual_close_position(payload: ManualCloseRequest) -> dict[str, Any]:
     refresh_settings()
     if not settings.manual_close_enabled:
         raise HTTPException(status_code=403, detail="后台手动平仓功能未启用")
-    import fcntl
+    from r20_backend.file_lock import acquire, release
     lock_path = DATA_DIR / ".ai_factor_trader.lock"; lock_path.parent.mkdir(parents=True, exist_ok=True)
     if actor.get("role") == "legacy" or not admin_auth.verify_password(int(actor["id"]), payload.admin_password):
         raise HTTPException(status_code=403, detail="管理员密码验证失败")
     with lock_path.open("a+", encoding="utf-8") as lock_handle:
-        try: fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try: acquire(lock_handle, blocking=False)
         except BlockingIOError: raise HTTPException(status_code=409, detail="交易主循环正在执行，暂不允许后台快速平仓；请等待本周期结束")
         try:
+            from r20_backend.trade_service import fast_close_confirmed
             result = fast_close_confirmed(payload.close_token, payload.confirmation)
-            audit_record("position.close", "confirmed_closed", {"instId": result.get("instId"), "side": result.get("posSide"), "environment": result.get("environment"), "size": result.get("closed_size")})
+            audit_record("position.close", "confirmed_closed", {"instId": result.get("instId"), "side": result.get("posSide"), "exchange": result.get("exchange"), "environment": result.get("environment"), "size": result.get("closed_size")})
             return result
         except ValueError as exc:
             audit_record("position.close", "rejected", {"error": str(exc)[:300]})
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except Exception as exc:
             audit_record("position.close", "verification_failed", {"error": str(exc)[:300]})
-            raise HTTPException(status_code=502, detail=f"OKX 快速平仓未完成确认：{exc}") from exc
-        finally: fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+            raise HTTPException(status_code=502, detail=f"快速平仓未完成确认：{exc}") from exc
+        finally: release(lock_handle)
 
 
 @app.get("/api/v1/admin/instruments")
@@ -1870,13 +2107,15 @@ def add_admin_instrument(payload: InstrumentAddRequest, x_r20_admin_token: str |
     if len(current) >= MAX_POOL_SIZE:
         raise HTTPException(status_code=409, detail=f"交易池最多允许 {MAX_POOL_SIZE} 个币种；请先删除一个无持仓币种，或调整环境变量 R20_MAX_POOL_SIZE")
     try:
-        matches = okx.instruments("SWAP", inst_id)
+        matches = get_exchange().instruments(inst_id)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"OKX 合约校验失败：{exc}") from exc
+        raise HTTPException(status_code=502, detail=f"合约校验失败：{exc}") from exc
     raw = matches[0] if matches else {}
     if raw.get("instId") != inst_id or raw.get("settleCcy") != "USDT" or raw.get("state") != "live":
-        raise HTTPException(status_code=400, detail="仅允许添加 OKX 在线可交易的 USDT 永续合约")
+        raise HTTPException(status_code=400, detail="仅允许添加在线可交易的 USDT 永续合约")
     item = from_okx_instrument(raw)
+    item["quantity_unit"] = "base"
+    item["ctVal"] = float(raw.get("ctVal") or item.get("ctVal") or 1.0)
     save_instruments([*current, item])
     audit_record("instrument.add", "success", {"instId": inst_id})
     return {"added": item, "count": len(current) + 1, "effective": "immediate", "message": f"{item['name']} 已成功加入交易池并实时同步全网大屏与因果雷达"}
@@ -1914,6 +2153,11 @@ def admin_about(
     require_admin_header(x_r20_admin_token, x_r20_session)
     import platform
     store = GatewayStore(GATEWAY_DB_PATH)
+    repository: dict[str, Any] = {"url": "https://github.com/555cute/r20-quantum-trader", "branch": "", "commit": "", "available": False}
+    try:
+        repository.update(branch=git(["branch", "--show-current"]), commit=git(["rev-parse", "--short", "HEAD"]), available=True)
+    except RuntimeError as exc:
+        repository["error"] = str(exc)
     return {
         "product": {"name": APP_NAME, "version": __version__, "control_plane": "R20 Gateway Runtime", "gateway_version": GATEWAY_VERSION},
         "runtime": {"python": platform.python_version(), "platform": platform.platform(), "backend_pid": os.getpid(), "gateway": gateway_status(x_r20_admin_token)},
@@ -1922,7 +2166,7 @@ def admin_about(
             {"name": "Gateway Event Runtime", "version": GATEWAY_VERSION},
             {"name": "SQLite", "version": __import__("sqlite3").sqlite_version},
         ],
-        "repository": {"url": "https://github.com/555cute/r20-quantum-trader", "branch": git(["branch", "--show-current"]), "commit": git(["rev-parse", "--short", "HEAD"])},
+        "repository": repository,
         "update": update_status(),
         "security": {"authentication": "PBKDF2-SHA256 + server-side sessions", "session_hours": 12, "plugin_policy": "builtin-only", "prompt_transport": "python-direct"},
     }
@@ -2681,6 +2925,8 @@ def test_simple_backup(payload: SimpleBackupUpdateRequest, x_r20_session: str | 
     if missing:
         raise HTTPException(status_code=400, detail=f"连接信息不完整：{', '.join(missing)}")
 
+    if wanted_type in {"s3", "oss"} and not target["bucket"]:
+        raise HTTPException(status_code=400, detail=f"{wanted_type.upper()} Bucket 不能为空")
     if wanted_type in {"s3", "oss", "webdav"}:
         if not target["endpoint"]:
             raise HTTPException(status_code=400, detail=f"{wanted_type.upper()} Endpoint 不能为空")
@@ -2690,8 +2936,6 @@ def test_simple_backup(payload: SimpleBackupUpdateRequest, x_r20_session: str | 
         except (ValueError, Exception) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    if wanted_type in {"s3", "oss"} and not target["bucket"]:
-        raise HTTPException(status_code=400, detail=f"{wanted_type.upper()} Bucket 不能为空")
 
     return {"status": "ready", "sent": False, "detail": "配置格式与目标地址校验通过；未上传任何文件", "destination": payload.destination}
 
@@ -3102,7 +3346,11 @@ def health() -> dict[str, Any]:
         "status": "ok",
         "timestamp": int(time.time()),
         "credentials": {
+            "exchange": settings.exchange,
+            "environment": settings.binance_environment if settings.exchange == "binance" else settings.okx_environment,
+            "configured": bool(selected_environment().configured),
             "okx_configured": bool(settings.okx_api_key and settings.okx_secret_key and settings.okx_passphrase),
+            "binance_configured": bool(settings.binance_live_configured or settings.binance_demo_configured),
             "llm_configured": bool(settings.llm_api_key),
             "simulated_trading": settings.okx_simulated,
         },
@@ -3142,9 +3390,10 @@ def cache(resource: str, x_r20_admin_token: str | None = Header(default=None), x
     filename = allowed.get(resource)
     if not filename:
         raise HTTPException(status_code=404, detail="unknown cache resource")
-    # Private ledger contains historical financial profit/loss records; require admin auth
     if resource == "ledger":
         require_admin_header(x_r20_admin_token, x_r20_session)
+    if resource == "sentiment":
+        return JSONResponse(news_config.load_news_snapshot(DATA_DIR / filename))
     return JSONResponse(read_json(filename, {} if resource != "ledger" else []))
 
 
@@ -3153,10 +3402,13 @@ def market(inst_id: str) -> dict[str, Any]:
     if not inst_id.endswith("-SWAP"):
         raise HTTPException(status_code=400, detail="only SWAP instrument ids are accepted")
     try:
-        ticker = okx.ticker(inst_id)
-        return {"instId": inst_id, "ticker": ticker[0] if ticker else {}, "source": "OKX REST"}
+        env = selected_environment()
+        ticker = get_exchange(env).ticker(inst_id)
+        if isinstance(ticker, list):
+            ticker = ticker[0] if ticker else {}
+        return {"instId": inst_id, "ticker": ticker or {}, "source": env.exchange, "environment": env.mode}
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"OKX market request failed: {exc}") from exc
+        raise HTTPException(status_code=502, detail=f"market request failed: {exc}") from exc
 
 
 _CANDLES_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
@@ -3180,62 +3432,27 @@ def market_candles(inst_id: str, bar: str = "1H", limit: int = 150, response: Re
     if cached and (now_ts - cached[0] < 1.0):
         return {"instId": inst_id, "bar": bar, "candles": cached[1], "source": "cache"}
     try:
-        url = f"https://www.okx.com/api/v5/market/candles?instId={inst_id}&bar={bar}&limit={limit}"
-        req = urllib.request.Request(
-            url,
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        )
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            raw = data.get("data") or []
-            candles = []
-            for item in reversed(raw):
-                try:
-                    candles.append({
-                        "ts": int(item[0]),
-                        "open": float(item[1]),
-                        "high": float(item[2]),
-                        "low": float(item[3]),
-                        "close": float(item[4]),
-                        "vol": float(item[5]),
-                    })
-                except (ValueError, IndexError):
-                    continue
-            if candles:
-                _CANDLES_CACHE[cache_key] = (now_ts, candles)
-                return {"instId": inst_id, "bar": bar, "candles": candles, "source": "OKX REST"}
+        env = selected_environment()
+        raw = get_exchange(env).candles(inst_id, bar=bar, limit=limit)
+        candles = []
+        for item in reversed(raw or []):
+            try:
+                candles.append({
+                    "ts": int(item[0]),
+                    "open": float(item[1]),
+                    "high": float(item[2]),
+                    "low": float(item[3]),
+                    "close": float(item[4]),
+                    "vol": float(item[5]),
+                })
+            except (ValueError, IndexError, TypeError):
+                continue
+        if candles:
+            _CANDLES_CACHE[cache_key] = (now_ts, candles)
+            return {"instId": inst_id, "bar": bar, "candles": candles, "source": env.exchange}
     except Exception as exc:
         if cached:
             return {"instId": inst_id, "bar": bar, "candles": cached[1], "source": "stale_cache", "warn": str(exc)}
-        factor_file = ROOT / "data" / "factor_library_snapshot.json"
-        if factor_file.exists():
-            try:
-                snap = json.loads(factor_file.read_text(encoding="utf-8"))
-                instruments = snap.get("instruments") or {}
-                sym = inst_id.split("-")[0]
-                inst_data = instruments.get(sym) or instruments.get(inst_id) or {}
-                px = float(inst_data.get("price") or 100.0)
-                if px > 0:
-                    candles = []
-                    step_sec = 3600 if "H" in bar else 900
-                    for i in range(limit):
-                        ts = int((now_ts - (limit - i) * step_sec) * 1000)
-                        # Slight organic variation around px
-                        c_open = round(px * (1.0 + (i - limit/2) * 0.0003), 4)
-                        c_close = round(px * (1.0 + (i - limit/2 + 0.3) * 0.0003), 4)
-                        c_high = round(max(c_open, c_close) * 1.0015, 4)
-                        c_low = round(min(c_open, c_close) * 0.9985, 4)
-                        candles.append({
-                            "ts": ts,
-                            "open": c_open,
-                            "high": c_high,
-                            "low": c_low,
-                            "close": c_close,
-                            "vol": 120.0 + (i % 5) * 20.0
-                        })
-                    return {"instId": inst_id, "bar": bar, "candles": candles, "source": "fallback_snapshot"}
-            except Exception:
-                pass
         raise HTTPException(status_code=502, detail=f"Failed to fetch market candles: {exc}") from exc
     raise HTTPException(status_code=502, detail="No candles data returned from upstream")
 
@@ -3243,12 +3460,14 @@ def market_candles(inst_id: str, bar: str = "1H", limit: int = 150, response: Re
 @app.get("/api/v1/account/positions")
 def positions(x_r20_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
     require_admin_header(x_r20_admin_token)
-    if not settings.okx_api_key:
-        raise HTTPException(status_code=503, detail="OKX credentials are not configured in .env")
+    env = selected_environment()
+    if not env.configured:
+        raise HTTPException(status_code=503, detail="当前交易所账户未配置凭证")
     try:
-        return {"positions": okx.positions(), "source": "OKX REST"}
+        return {"positions": get_exchange(env).positions(), "source": env.exchange, "environment": env.mode, "quantity_unit": "base"}
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"OKX account request failed: {exc}") from exc
+        raise HTTPException(status_code=502, detail=f"account request failed: {exc}") from exc
+
 
 
 # Preserve the existing public dashboard and its relative-path API contract at /.

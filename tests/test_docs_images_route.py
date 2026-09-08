@@ -22,20 +22,14 @@ class DocsImagesRouteTests(unittest.TestCase):
         self.assertEqual(resp.content[:8], b"\x89PNG\r\n\x1a\n", "返回的不是合法 PNG 头")
         self.assertIn("max-age", resp.headers.get("cache-control", ""))
 
-    def test_docs_page_still_serves_spa_html(self):
-        # 图片路由不得抢走 /docs SPA 页面
-        resp = self.client.get("/docs")
-        self.assertEqual(resp.status_code, 200)
-        self.assertIn("text/html", resp.headers["content-type"])
+    def test_public_pages_serve_spa_without_image_query_parameters(self):
+        for path in ("/docs", "/trading", "/factors", "/news", "/lab", "/history"):
+            for method in ("GET", "HEAD"):
+                with self.subTest(path=path, method=method):
+                    resp = self.client.request(method, path)
+                    self.assertEqual(resp.status_code, 200)
+                    self.assertIn("text/html", resp.headers["content-type"])
 
-    def test_spa_subpages_never_require_img_name_query(self):
-        # v7.6.1 回归：/trading 等页面路由曾被堆叠装饰到 docs_image 上，
-        # 刷新非主页时 FastAPI 把 img_name 当必填 query 参数返回 422。
-        for path in ("/trading", "/factors", "/news", "/lab", "/history", "/docs"):
-            resp = self.client.get(path)
-            self.assertEqual(resp.status_code, 200, f"{path}: {resp.text[:200]}")
-            self.assertIn("text/html", resp.headers["content-type"], path)
-            self.assertNotIn("img_name", resp.text[:500], path)
 
     def test_path_traversal_and_non_png_never_leak_files(self):
         for bad in ("/docs/images/..%2f..%2f.env", "/docs/images/../../.env",

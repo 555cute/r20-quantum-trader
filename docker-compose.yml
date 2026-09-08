@@ -1,22 +1,25 @@
+# Default: pull the published GitHub Container Registry image.
+# Local source build: docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 services:
   r20-quantum-trader:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${R20_IMAGE:-ghcr.io/cnlimiter/r20-quantum-trader:latest}
+    pull_policy: ${R20_PULL_POLICY:-always}
     container_name: r20-quantum-trader
     restart: unless-stopped
     ports:
       - "8080:8080"
-    # 凭证与个性化配置统一走 .env（先 cp env.example .env 再填值）。
-    # 后端 lifespan 会自动拉起并守护 r20_gateway.worker 调度子进程
-    # （15 分钟交易循环 / 60 秒因子 / 10 分钟快讯 / 晨报晚报 / 20:00 自进化 / 02:00 灾备），
-    # 无需额外跑调度容器。
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
-      - PORT=8080
-      # OKX 环境总开关：demo=模拟盘（默认，安全）。改实盘前务必确认凭证与风险。
-      - R20_OKX_ENV=demo
+      DASHBOARD_HOST: "0.0.0.0"
+      DASHBOARD_PORT: "8080"
+      R20_OKX_ENV: ${R20_OKX_ENV:-demo}
+      R20_GATEWAY_WORKER_ENABLED: ${R20_GATEWAY_WORKER_ENABLED:-1}
+      R20_DASHBOARD_WORKER_ENABLED: ${R20_DASHBOARD_WORKER_ENABLED:-1}
+      R20_MANUAL_CLOSE_ENABLED: ${R20_MANUAL_CLOSE_ENABLED:-0}
+      # Host .env is bootstrap only; persist admin-saved settings on the data volume.
+      R20_ENV_FILE: /app/data/config/.env
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs

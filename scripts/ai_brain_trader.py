@@ -17,14 +17,16 @@ if PROJECT_ROOT not in sys.path:
 if SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, SCRIPTS_DIR)
 
-from okx_runtime import replace_cli_prefix as okx_private_command
+from r20_exchange.runtime import get_exchange, state_path
 # 风控提示词与执行层共用单一事实源，防止「提示词口径 vs 代码口径」漂移
 from risk_constants import (
     DAILY_LOSS_EQUITY_RATIO,
+    MAX_DAILY_LOSS_USDT,
     MAX_LEVERAGE,
     MAX_MARGIN_EQUITY_RATIO,
     MAX_SAME_DIRECTION_POSITIONS,
     MAX_SCALE_IN_COUNT,
+    MAX_SINGLE_ASSET_MARGIN,
     MIN_ENTRY_CONFIDENCE,
     MIN_RISK_REWARD_RATIO,
     MIN_SCALE_IN_CONFIDENCE,
@@ -40,7 +42,7 @@ import datetime
 import urllib.request
 import subprocess
 import tempfile
-import fcntl
+from r20_backend.file_lock import acquire, release
 from typing import Dict, Any, List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor
 
@@ -60,7 +62,16 @@ def _get_system_version_tag() -> str:
 
 WORKSPACE_DIR = PROJECT_ROOT
 DATA_DIR = os.path.join(WORKSPACE_DIR, "data")
-from market_data_service import fetch_single_indicator, fetch_ticker
+from market_data_service import (
+    fetch_single_indicator,
+    fetch_ticker,
+    fetch_candles,
+    fetch_funding_rate,
+    fetch_open_interest,
+    fetch_long_short_ratio,
+    fetch_taker_volume,
+    format_oi_usd,
+)
 AI_DECISION_CACHE_FILE = os.path.join(DATA_DIR, "ai_brain_decisions.json")
 AI_DECISION_HISTORY_FILE = os.path.join(DATA_DIR, "ai_brain_history.json")
 AI_POSITION_MANAGEMENT_FILE = os.path.join(DATA_DIR, "ai_position_management.json")
@@ -80,6 +91,33 @@ from prompt_library import active_profile, append_layer, apply_module_layout
 from r20_gateway.telemetry import ModelCallTelemetry
 
 TARGET_INSTRUMENTS = load_instruments()
+
+def _account_state_file(name: str) -> str:
+    """Account-bound cache under data/exchanges/<exchange>/<mode>/<fingerprint>.
+
+    Shared strategy files stay in data/. Legacy data/ account files are never
+    copied into a different exchange/account.
+    """
+    path = state_path(name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return str(path)
+
+
+def ai_decision_cache_file() -> str:
+    return _account_state_file("ai_brain_decisions.json")
+
+
+def ai_decision_history_file() -> str:
+    return _account_state_file("ai_brain_history.json")
+
+
+def ai_position_management_file() -> str:
+    return _account_state_file("ai_position_management.json")
+
+
+def ai_last_prompt_file() -> str:
+    return _account_state_file("ai_brain_last_prompt.txt")
+
 
 def atomic_write_json(path: str, payload: Any) -> None:
     """Replace JSON atomically so readers never observe a partial cache."""
@@ -102,7 +140,7 @@ def single_brain_cycle(func):
         os.makedirs(DATA_DIR, exist_ok=True)
         lock_handle = open(AI_BRAIN_LOCK_FILE, "a+", encoding="utf-8")
         try:
-            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            acquire(lock_handle, blocking=False)
         except BlockingIOError:
             lock_handle.close()
             print("[AI Brain Batch] Skip: another inference cycle is still running")
@@ -114,7 +152,10 @@ def single_brain_cycle(func):
             lock_handle.flush()
             return func(*args, **kwargs)
         finally:
-            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+            try:
+                release(lock_handle)
+            except OSError:
+                pass
             lock_handle.close()
     return wrapped
 
@@ -165,8 +206,6 @@ def get_effective_system_prompt() -> str:
 def fetch_single_instrument_package(item: Dict[str, Any]) -> Dict[str, Any]:
     inst_id = item["instId"]
     name = item["name"]
-    ccy = item.get("ccy", "")
-    headers = {"User-Agent": "Mozilla/5.0"}
 
     pkg = {
         "instId": inst_id,
@@ -177,10 +216,10 @@ def fetch_single_instrument_package(item: Dict[str, Any]) -> Dict[str, Any]:
         "chg24h": 0.0,
         "bidPx": 0.0,
         "askPx": 0.0,
-        "fundingRate": 0.0,
-        "oiUsd": "N/A",
-        "lsRatio": "N/A",
-        "takerNetUsd": "N/A",
+        "fundingRate": None,
+        "oiUsd": "UNAVAILABLE",
+        "lsRatio": "UNAVAILABLE",
+        "takerNetUsd": "UNAVAILABLE",
         "atr": 0.0,
         "rsi": 50.0,
         "vwap_bias": 0.0,
@@ -188,13 +227,14 @@ def fetch_single_instrument_package(item: Dict[str, Any]) -> Dict[str, Any]:
         "macd_accel": 0.0,
         "vol_ratio": 1.0,
         "obv_flow": "NEUTRAL",
-        "adx_1h": 0.0,
+        "adx_1h": None,
         "smart_money": {
-            "weighted_long_pct": 50.0,
-            "net_flow_usdt": "0 U",
+            "weighted_long_pct": None,
+            "net_flow_usdt": "UNAVAILABLE",
             "avg_long_entry": "--",
             "avg_short_entry": "--",
-            "top_win_rate": "--"
+            "top_win_rate": "--",
+            "available": False,
         },
         "recent_15m": [],
         "recent_1h": [],
@@ -203,193 +243,157 @@ def fetch_single_instrument_package(item: Dict[str, Any]) -> Dict[str, Any]:
         "data_quality": "invalid"
     }
 
-    # 1. Ticker
     try:
-        req = urllib.request.Request(f"https://www.okx.com/api/v5/market/ticker?instId={inst_id}", headers=headers)
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            d = json.loads(resp.read().decode("utf-8"))
-            if d.get("code") == "0" and d.get("data"):
-                t = d["data"][0]
-                pkg["price"] = float(t.get("last", 0))
-                pkg["bidPx"] = float(t.get("bidPx", pkg["price"]) or pkg["price"])
-                pkg["askPx"] = float(t.get("askPx", pkg["price"]) or pkg["price"])
-                op = float(t.get("open24h", 0) or 0)
-                pkg["chg24h"] = round(((pkg["price"] - op) / op * 100) if op > 0 else 0, 2)
+        t = fetch_ticker(inst_id)
+        if t:
+            pkg["price"] = float(t.get("last", 0) or 0)
+            pkg["bidPx"] = float(t.get("bidPx", pkg["price"]) or pkg["price"])
+            pkg["askPx"] = float(t.get("askPx", pkg["price"]) or pkg["price"])
+            op = float(t.get("open24h", 0) or 0)
+            pkg["chg24h"] = round(((pkg["price"] - op) / op * 100) if op > 0 else 0, 2)
     except Exception:
         pass
 
-    # 2. 15M Candles (recent 24, about 6 hours) & Technical Indicators Calculation
     try:
-        req = urllib.request.Request(f"https://www.okx.com/api/v5/market/candles?instId={inst_id}&bar=15m&limit=24", headers=headers)
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            d = json.loads(resp.read().decode("utf-8"))
-            if d.get("code") == "0" and d.get("data"):
-                raw_candles = d["data"]
-                pkg["recent_15m"] = [[float(c[1]), float(c[2]), float(c[3]), float(c[4]), round(float(c[5]), 1)] for c in raw_candles[:12]]
+        raw_candles = fetch_candles(inst_id, bar="15m", limit=24)
+        if raw_candles:
+            pkg["recent_15m"] = [[float(c[1]), float(c[2]), float(c[3]), float(c[4]), round(float(c[5]), 1)] for c in raw_candles[:12]]
+            if len(raw_candles) >= 15:
+                closes = [float(c[4]) for c in reversed(raw_candles)]
+                highs = [float(c[2]) for c in reversed(raw_candles)]
+                lows = [float(c[3]) for c in reversed(raw_candles)]
+                vols = [float(c[5]) for c in reversed(raw_candles)]
 
-                # Calculate 15M indicators
-                if len(raw_candles) >= 15:
-                    closes = [float(c[4]) for c in reversed(raw_candles)]
-                    highs = [float(c[2]) for c in reversed(raw_candles)]
-                    lows = [float(c[3]) for c in reversed(raw_candles)]
-                    vols = [float(c[5]) for c in reversed(raw_candles)]
+                tr_list = []
+                for i in range(1, len(closes)):
+                    tr = max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1]))
+                    tr_list.append(tr)
+                if len(tr_list) >= 14:
+                    pkg["atr_15m"] = round(sum(tr_list[-14:]) / 14, 4)
+                    pkg["atr"] = pkg["atr_15m"]
 
-                    # ATR 15M
-                    tr_list = []
-                    for i in range(1, len(closes)):
-                        tr = max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1]))
-                        tr_list.append(tr)
-                    if len(tr_list) >= 14:
-                        pkg["atr_15m"] = round(sum(tr_list[-14:]) / 14, 4)
-                        pkg["atr"] = pkg["atr_15m"]
+                diffs = [closes[i] - closes[i-1] for i in range(1, len(closes))]
+                gains = [d if d > 0 else 0 for d in diffs]
+                losses = [-d if d < 0 else 0 for d in diffs]
+                if len(gains) >= 14:
+                    avg_g = sum(gains[-14:]) / 14
+                    avg_l = sum(losses[-14:]) / 14
+                    rs = (avg_g / avg_l) if avg_l > 0 else 100.0
+                    pkg["rsi"] = round(100.0 - (100.0 / (1.0 + rs)), 1)
+                    pkg["rsi_15m"] = pkg["rsi"]
 
-                    # RSI 15M
-                    diffs = [closes[i] - closes[i-1] for i in range(1, len(closes))]
-                    gains = [d if d > 0 else 0 for d in diffs]
-                    losses = [-d if d < 0 else 0 for d in diffs]
-                    if len(gains) >= 14:
-                        avg_g = sum(gains[-14:]) / 14
-                        avg_l = sum(losses[-14:]) / 14
-                        rs = (avg_g / avg_l) if avg_l > 0 else 100.0
-                        pkg["rsi"] = round(100.0 - (100.0 / (1.0 + rs)), 1)
-                        pkg["rsi_15m"] = pkg["rsi"]
+                pv_sum = sum(closes[i] * vols[i] for i in range(len(closes)))
+                v_sum = sum(vols)
+                if v_sum > 0:
+                    vwap = pv_sum / v_sum
+                    pkg["vwap_bias"] = round((pkg["price"] - vwap) / vwap * 100, 2)
 
-                    # VWAP Bias
-                    pv_sum = sum(closes[i] * vols[i] for i in range(len(closes)))
-                    v_sum = sum(vols)
-                    if v_sum > 0:
-                        vwap = pv_sum / v_sum
-                        pkg["vwap_bias"] = round((pkg["price"] - vwap) / vwap * 100, 2)
+                if len(vols) >= 6:
+                    avg_v5 = sum(vols[-6:-1]) / 5
+                    if avg_v5 > 0:
+                        pkg["vol_ratio"] = round(vols[-1] / avg_v5, 2)
 
-                    # Volume Ratio (Last vs MA5)
-                    if len(vols) >= 6:
-                        avg_v5 = sum(vols[-6:-1]) / 5
-                        if avg_v5 > 0:
-                            pkg["vol_ratio"] = round(vols[-1] / avg_v5, 2)
-
-                    # OBV Flow
-                    obv = 0
-                    for i in range(1, len(closes)):
-                        if closes[i] > closes[i-1]:
-                            obv += vols[i]
-                        elif closes[i] < closes[i-1]:
-                            obv -= vols[i]
-                    pkg["obv_flow"] = "BULL_FLOW" if obv > 0 else ("BEAR_FLOW" if obv < 0 else "NEUTRAL")
+                obv = 0
+                for i in range(1, len(closes)):
+                    if closes[i] > closes[i-1]:
+                        obv += vols[i]
+                    elif closes[i] < closes[i-1]:
+                        obv -= vols[i]
+                pkg["obv_flow"] = "BULL_FLOW" if obv > 0 else ("BEAR_FLOW" if obv < 0 else "NEUTRAL")
     except Exception:
         pass
 
-    # 3. 1H Candles (recent 24, about 24 hours) & 1H ATR / 1H RSI
     try:
-        req = urllib.request.Request(f"https://www.okx.com/api/v5/market/candles?instId={inst_id}&bar=1H&limit=24", headers=headers)
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            d = json.loads(resp.read().decode("utf-8"))
-            if d.get("code") == "0" and d.get("data"):
-                raw_1h = d["data"]
-                pkg["recent_1h"] = [[float(c[1]), float(c[2]), float(c[3]), float(c[4]), round(float(c[5]), 1)] for c in raw_1h[:12]]
-                if len(raw_1h) >= 15:
-                    closes_1h = [float(c[4]) for c in reversed(raw_1h)]
-                    highs_1h = [float(c[2]) for c in reversed(raw_1h)]
-                    lows_1h = [float(c[3]) for c in reversed(raw_1h)]
+        raw_1h = fetch_candles(inst_id, bar="1H", limit=24)
+        if raw_1h:
+            pkg["recent_1h"] = [[float(c[1]), float(c[2]), float(c[3]), float(c[4]), round(float(c[5]), 1)] for c in raw_1h[:12]]
+            if len(raw_1h) >= 15:
+                closes_1h = [float(c[4]) for c in reversed(raw_1h)]
+                highs_1h = [float(c[2]) for c in reversed(raw_1h)]
+                lows_1h = [float(c[3]) for c in reversed(raw_1h)]
 
-                    tr_list_1h = []
-                    for i in range(1, len(closes_1h)):
-                        tr = max(highs_1h[i] - lows_1h[i], abs(highs_1h[i] - closes_1h[i-1]), abs(lows_1h[i] - closes_1h[i-1]))
-                        tr_list_1h.append(tr)
-                    if len(tr_list_1h) >= 14:
-                        pkg["atr_1h"] = round(sum(tr_list_1h[-14:]) / 14, 4)
-                        pkg["atr"] = pkg["atr_1h"]  # Elevate primary ATR to 1H
+                tr_list_1h = []
+                for i in range(1, len(closes_1h)):
+                    tr = max(highs_1h[i] - lows_1h[i], abs(highs_1h[i] - closes_1h[i-1]), abs(lows_1h[i] - closes_1h[i-1]))
+                    tr_list_1h.append(tr)
+                if len(tr_list_1h) >= 14:
+                    pkg["atr_1h"] = round(sum(tr_list_1h[-14:]) / 14, 4)
+                    pkg["atr"] = pkg["atr_1h"]
 
-                    diffs_1h = [closes_1h[i] - closes_1h[i-1] for i in range(1, len(closes_1h))]
-                    gains_1h = [d if d > 0 else 0 for d in diffs_1h]
-                    losses_1h = [-d if d < 0 else 0 for d in diffs_1h]
-                    if len(gains_1h) >= 14:
-                        avg_g_1h = sum(gains_1h[-14:]) / 14
-                        avg_l_1h = sum(losses_1h[-14:]) / 14
-                        rs_1h = (avg_g_1h / avg_l_1h) if avg_l_1h > 0 else 100.0
-                        pkg["rsi_1h"] = round(100.0 - (100.0 / (1.0 + rs_1h)), 1)
+                diffs_1h = [closes_1h[i] - closes_1h[i-1] for i in range(1, len(closes_1h))]
+                gains_1h = [d if d > 0 else 0 for d in diffs_1h]
+                losses_1h = [-d if d < 0 else 0 for d in diffs_1h]
+                if len(gains_1h) >= 14:
+                    avg_g_1h = sum(gains_1h[-14:]) / 14
+                    avg_l_1h = sum(losses_1h[-14:]) / 14
+                    rs_1h = (avg_g_1h / avg_l_1h) if avg_l_1h > 0 else 100.0
+                    pkg["rsi_1h"] = round(100.0 - (100.0 / (1.0 + rs_1h)), 1)
 
-                    # 1H Swing Structure
-                    if len(closes_1h) >= 10:
-                        ma7_1h = sum(closes_1h[-7:]) / 7
-                        ma20_1h = sum(closes_1h[-20:]) / min(len(closes_1h), 20)
-                        if closes_1h[-1] > ma7_1h > ma20_1h:
-                            pkg["structure_1h"] = "1H_SWING_BULL"
-                        elif closes_1h[-1] < ma7_1h < ma20_1h:
-                            pkg["structure_1h"] = "1H_SWING_BEAR"
-                        else:
-                            pkg["structure_1h"] = "1H_SWING_CHOP"
-    except Exception:
-        pass
-
-    # 4. 4H Candles (recent 16, about 64 hours) & 4H Macro Structure
-    try:
-        req = urllib.request.Request(f"https://www.okx.com/api/v5/market/candles?instId={inst_id}&bar=4H&limit=16", headers=headers)
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            d = json.loads(resp.read().decode("utf-8"))
-            if d.get("code") == "0" and d.get("data"):
-                raw_4h = d["data"]
-                pkg["recent_4h"] = [[float(c[1]), float(c[2]), float(c[3]), float(c[4]), round(float(c[5]), 1)] for c in raw_4h[:8]]
-                if len(raw_4h) >= 8:
-                    closes_4h = [float(c[4]) for c in reversed(raw_4h)]
-                    ma5_4h = sum(closes_4h[-5:]) / 5
-                    ma12_4h = sum(closes_4h[-12:]) / min(len(closes_4h), 12)
-                    if closes_4h[-1] > ma5_4h > ma12_4h:
-                        pkg["macro_4h"] = "4H_MACRO_BULL (大级别多头通道)"
-                    elif closes_4h[-1] < ma5_4h < ma12_4h:
-                        pkg["macro_4h"] = "4H_MACRO_BEAR (大级别空头承压)"
+                if len(closes_1h) >= 10:
+                    ma7_1h = sum(closes_1h[-7:]) / 7
+                    ma20_1h = sum(closes_1h[-20:]) / min(len(closes_1h), 20)
+                    if closes_1h[-1] > ma7_1h > ma20_1h:
+                        pkg["structure_1h"] = "1H_SWING_BULL"
+                    elif closes_1h[-1] < ma7_1h < ma20_1h:
+                        pkg["structure_1h"] = "1H_SWING_BEAR"
                     else:
-                        pkg["macro_4h"] = "4H_MACRO_RANGE (大级别区间震荡)"
+                        pkg["structure_1h"] = "1H_SWING_CHOP"
     except Exception:
         pass
 
-    # 5. Funding Rate & OI
+    try:
+        raw_4h = fetch_candles(inst_id, bar="4H", limit=16)
+        if raw_4h:
+            pkg["recent_4h"] = [[float(c[1]), float(c[2]), float(c[3]), float(c[4]), round(float(c[5]), 1)] for c in raw_4h[:8]]
+            if len(raw_4h) >= 8:
+                closes_4h = [float(c[4]) for c in reversed(raw_4h)]
+                ma5_4h = sum(closes_4h[-5:]) / 5
+                ma12_4h = sum(closes_4h[-12:]) / min(len(closes_4h), 12)
+                if closes_4h[-1] > ma5_4h > ma12_4h:
+                    pkg["macro_4h"] = "4H_MACRO_BULL (大级别多头通道)"
+                elif closes_4h[-1] < ma5_4h < ma12_4h:
+                    pkg["macro_4h"] = "4H_MACRO_BEAR (大级别空头承压)"
+                else:
+                    pkg["macro_4h"] = "4H_MACRO_RANGE (大级别区间震荡)"
+    except Exception:
+        pass
+
     if item["type"] == "crypto":
         try:
-            req = urllib.request.Request(f"https://www.okx.com/api/v5/public/funding-rate?instId={inst_id}", headers=headers)
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                d = json.loads(resp.read().decode("utf-8"))
-                if d.get("code") == "0" and d.get("data"):
-                    pkg["fundingRate"] = round(float(d["data"][0].get("fundingRate", 0)) * 100, 4)
+            fr = fetch_funding_rate(inst_id)
+            if fr is not None:
+                pkg["fundingRate"] = round(float(fr), 4)
         except Exception:
             pass
 
         try:
-            req = urllib.request.Request(f"https://www.okx.com/api/v5/public/open-interest?instType=SWAP&instId={inst_id}", headers=headers)
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                d = json.loads(resp.read().decode("utf-8"))
-                if d.get("code") == "0" and d.get("data"):
-                    usd = float(d["data"][0].get("oiUsd", 0) or 0)
-                    pkg["oiUsd"] = f"{round(usd / 1e8, 2)}亿 U" if usd > 1e8 else f"{round(usd / 1e4, 1)}万 U"
+            oi_text = format_oi_usd(fetch_open_interest(inst_id), pkg["price"])
+            if oi_text:
+                pkg["oiUsd"] = oi_text
         except Exception:
             pass
 
-        if ccy:
-            try:
-                req = urllib.request.Request(f"https://www.okx.com/api/v5/rubik/stat/contracts/long-short-account-ratio?ccy={ccy}&period=5m", headers=headers)
-                with urllib.request.urlopen(req, timeout=3) as resp:
-                    d = json.loads(resp.read().decode("utf-8"))
-                    if d.get("code") == "0" and d.get("data") and len(d["data"]) > 0:
-                        pkg["lsRatio"] = float(d["data"][0][1])
-            except Exception:
-                pass
+        try:
+            ls = fetch_long_short_ratio(inst_id)
+            if ls is not None:
+                pkg["lsRatio"] = ls
+        except Exception:
+            pass
 
-            try:
-                req = urllib.request.Request(f"https://www.okx.com/api/v5/rubik/stat/taker-volume?ccy={ccy}&instType=CONTRACTS&period=5m", headers=headers)
-                with urllib.request.urlopen(req, timeout=3) as resp:
-                    d = json.loads(resp.read().decode("utf-8"))
-                    if d.get("code") == "0" and d.get("data") and len(d["data"]) > 0:
-                        b_vol = float(d["data"][0][1])
-                        s_vol = float(d["data"][0][2])
-                        net_diff = b_vol - s_vol
-                        pkg["takerNetUsd"] = f"{round(net_diff / 1e4, 1)}万 U"
-            except Exception:
-                pass
+        try:
+            taker = fetch_taker_volume(inst_id)
+            if taker:
+                net_diff = float(taker.get("buyVol") or 0) - float(taker.get("sellVol") or 0)
+                pkg["takerNetUsd"] = f"{round(net_diff / 1e4, 1)}万 U"
+        except Exception:
+            pass
 
-        # 6. OKX ADX Trend Strength Indicator (1H) via direct REST (zero Node CLI fork)
         try:
             adx_data = fetch_single_indicator(inst_id, "ADX", bar="1H")
-            if adx_data and "adx" in adx_data:
-                pkg["adx_1h"] = float(adx_data.get("adx", 0.0) or 0.0)
+            if adx_data and adx_data.get("adx") not in (None, ""):
+                adx_val = float(adx_data.get("adx"))
+                if adx_val == adx_val and abs(adx_val) != float("inf"):
+                    pkg["adx_1h"] = adx_val
         except Exception:
             pass
 
@@ -400,6 +404,7 @@ def fetch_single_instrument_package(item: Dict[str, Any]) -> Dict[str, Any]:
         and len(pkg["recent_15m"]) >= 12
         and len(pkg["recent_1h"]) >= 8
         and len(pkg["recent_4h"]) >= 6
+        and pkg["adx_1h"] is not None
     )
     try:
         from calculus_engine import calculate_multi_timeframe
@@ -541,7 +546,8 @@ SYSTEM_PROMPT = _SYSTEM_CORE + _PYRAMID + "\n" + _SYSTEM_JSON_CONTRACT
 
 def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: str = "[MISSING_CONTEXT:account_positions]", active_positions_detail: List[Dict[str, Any]] = None, pending_orders_detail: List[Dict[str, Any]] = None, current_time_str: str = "", usdt_available: float = None, runtime_context_out: Dict[str, Any] = None, policy_snapshot: Dict[str, Any] = None) -> str:
     tz_bj = datetime.timezone(datetime.timedelta(hours=8))
-    now_bj_str = current_time_str or datetime.datetime.now(tz_bj).strftime("%Y-%m-%d %H:%M:%S (北京时间)")
+    now_bj_str = current_time_str or datetime.datetime.now(tz_bj).strftime("%Y-%m-%d %H:%M:%S") + " (北京时间)"
+
     market_lines = []
     for p in packages:
         k15 = p.get("recent_15m", [])
@@ -550,7 +556,12 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
         quality = p.get("data_quality", "invalid")
 
         sm = p.get("smart_money", {})
-        adx_val = p.get("adx_1h", "--")
+        adx_val = "--" if p.get("adx_1h") is None else p.get("adx_1h")
+        sm_disp = (
+            f"加权做多占比={sm.get('weighted_long_pct')}% | 24H净流入={sm.get('net_flow_usdt', '--')} | 多头均价={sm.get('avg_long_entry', '--')} | 空头均价={sm.get('avg_short_entry', '--')} | {sm.get('top_win_rate', '')}"
+            if sm.get("available")
+            else "UNAVAILABLE (所选交易所无OKX专有SmartMoney，不得臆造或盗用OKX执行行情)"
+        )
         calc = p.get("calculus", {})
         calc_tfs = calc.get("timeframes", {}) if isinstance(calc, dict) else {}
         d_int = calc.get("definite_integrals", {}) if isinstance(calc, dict) else {}
@@ -562,7 +573,8 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
         calc_line = (
             f"动力学态={calc.get('regime', 'DATA_UNRELIABLE')} | 速度={calc.get('velocity', '--')} "
             f"| 加速度={calc.get('acceleration', '--')} | 累计冲量={calc.get('impulse', '--')} "
-            f"| 冲击变化={calc.get('max_abs_jerk', '--')} | 质量={calc.get('quality', 0)}"
+            f"| 冲击变化={calc.get('max_abs_jerk', '--')} | 曲率κ={calc.get('curvature', '--')} "
+            f"| 功率Φ={calc.get('power', '--')} | 功率态={calc.get('power_regime', '--')} | 质量={calc.get('quality', 0)}"
         )
         integral_line = (
             f"多周期净做功积分={d_int.get('energy_integral', 'UNKNOWN')} | 路径偏离面积积分={d_int.get('deviation_area_integral', 'UNKNOWN')} "
@@ -576,19 +588,22 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
         )
         core_math_line = (
             f"1H:v={calc_1h.get('velocity', 'UNKNOWN')},a={calc_1h.get('acceleration', 'UNKNOWN')},"
-            f"j={calc_1h.get('jerk', 'UNKNOWN')},I={calc_1h.get('impulse', 'UNKNOWN')},态={calc_1h.get('regime', 'UNKNOWN')} "
+            f"j={calc_1h.get('jerk', 'UNKNOWN')},I={calc_1h.get('impulse', 'UNKNOWN')},"
+            f"κ={calc_1h.get('curvature', 'UNKNOWN')},Φ={calc_1h.get('power', 'UNKNOWN')},"
+            f"功率态={calc_1h.get('power_regime', 'UNKNOWN')},态={calc_1h.get('regime', 'UNKNOWN')} "
             f"| E={int_1h.get('energy_integral', 'UNKNOWN')},A={int_1h.get('deviation_area_integral', 'UNKNOWN')} "
             f"| P续={prob_1h.get('continuation_prob_pct', 'UNKNOWN')}%,P破={prob_1h.get('breakdown_prob_pct', 'UNKNOWN')}%,"
             f"VaR={prob_1h.get('var_95_pct', 'UNKNOWN')}%,CVaR={prob_1h.get('cvar_95_pct', 'UNKNOWN')}%"
         )
         calc_tf_line = "；".join(
-            f"{tf}:v={v.get('velocity', '--')},a={v.get('acceleration', '--')},I={v.get('impulse', '--')},态={v.get('regime', '--')}"
+            f"{tf}:v={v.get('velocity', '--')},a={v.get('acceleration', '--')},I={v.get('impulse', '--')},"
+            f"κ={v.get('curvature', '--')},Φ={v.get('power', '--')},功率态={v.get('power_regime', '--')},态={v.get('regime', '--')}"
             for tf, v in calc_tfs.items() if isinstance(v, dict)
         )
         info = f"""---------------------------------------------------------
 【{p['name']} ({p['instId']})】| 数据质量: {quality} | 现价: {p['price']} | 24H涨跌: {p['chg24h']}% | 盘口买/卖: {p['bidPx']}/{p['askPx']}
 - 🏛️ 三重滤网宏观结构: 4H宏观大势={p.get('macro_4h', '4H_MACRO_RANGE')} | 1H波段结构={p.get('structure_1h', '1H_SWING_CHOP')}
-- 👑 顶级聪明钱 (SmartMoney Top100): 加权做多占比={sm.get('weighted_long_pct', 50)}% | 24H净流入={sm.get('net_flow_usdt', '--')} | 多头均价={sm.get('avg_long_entry', '--')} | 空头均价={sm.get('avg_short_entry', '--')} | {sm.get('top_win_rate', '')}
+- 👑 顶级聪明钱 (SmartMoney Top100): {sm_disp}
 - 📐 1H核心波段指标: 1H ATR(14)={p.get('atr_1h', p.get('atr', '--'))} (止损基准: 1.5~2.0x 1H ATR) | 1H RSI(14)={p.get('rsi_1h', '--')} | 1H ADX趋势强度={adx_val} (注:<20无趋势垃圾市, ≥22强单边)
 - ⚡ 15M微观执行参考: 15M ATR={p.get('atr_15m', '--')} | 15M RSI={p.get('rsi_15m', '--')} | VWAP乖离={p.get('vwap_bias', '--')}% | 15M量比={p.get('vol_ratio', '--')}x | OBV资金流={p.get('obv_flow', '--')}
 - 📐 1H三大数理基石硬证据: {core_math_line}
@@ -596,7 +611,7 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
 - ∫ 定积分能量学: {integral_line}
 - ⚅ 概率论与统计风险: {prob_line}
 - ∂ 分周期速度/加速度/冲量: {calc_tf_line or 'UNKNOWN'}
-- 衍生品博弈: 资金费率: {p['fundingRate']}% | OI未平仓: {p['oiUsd']} | 多空比: {p['lsRatio']} | 5M主动吃单净差: {p['takerNetUsd']}
+- 衍生品博弈: 资金费率: {f"{p['fundingRate']}%" if p.get('fundingRate') is not None else 'UNAVAILABLE'} | OI未平仓: {p['oiUsd']} | 多空比: {p['lsRatio']} | 5M主动吃单净差: {p['takerNetUsd']}
 - 15M K线(倒序12根 [O,H,L,C,V]): {k15}
 - 1H K线(倒序12根 [O,H,L,C,V]): {k1h}
 - 4H K线(倒序8根 [O,H,L,C,V]): {k4h}"""
@@ -609,7 +624,18 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
         for p in active_positions_detail:
             inst_name = p.get('name') or p.get('instId')
             side = p.get('side') or p.get('posSide', 'long')
-            is_long = "long" in str(side).lower()
+            raw_side = str(side).strip().lower()
+            pos_qty = safe_float(p.get('pos'))
+            if "long" in raw_side and "short" not in raw_side:
+                direction = "long"
+            elif "short" in raw_side:
+                direction = "short"
+            elif pos_qty > 0:
+                direction = "long"
+            elif pos_qty < 0:
+                direction = "short"
+            else:
+                direction = ""
             entry_px = safe_float(p.get('avgPx', 0))
             cur_px = safe_float(p.get('markPx') or p.get('lastPx') or entry_px)
             hwm = safe_float(p.get('highWaterMark', 0))
@@ -618,17 +644,17 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
             stage_desc = p.get('stage_desc', '持有监控中')
 
             profit_desc = ""
-            if is_long and hwm > entry_px and entry_px > 0:
+            if direction == "long" and hwm > entry_px and entry_px > 0:
                 peak_gain_pct = round((hwm - entry_px) / entry_px * 100, 2)
                 dd_from_peak = round((hwm - cur_px) / (hwm - entry_px) * 100, 1) if hwm > entry_px else 0.0
                 profit_desc = f" | 曾最高到: {hwm} (极值浮盈 +{peak_gain_pct}%, 现已从极值回撤 {dd_from_peak}%)"
-            elif not is_long and lwm > 0 and lwm < entry_px and entry_px > 0:
+            elif direction == "short" and lwm > 0 and lwm < entry_px and entry_px > 0:
                 peak_gain_pct = round((entry_px - lwm) / entry_px * 100, 2)
                 dd_from_peak = round((cur_px - lwm) / (entry_px - lwm) * 100, 1) if lwm < entry_px else 0.0
                 profit_desc = f" | 曾最低到: {lwm} (极值浮盈 +{peak_gain_pct}%, 现已从极值回撤 {dd_from_peak}%)"
 
             pos_lines.append(
-                f"- 标的: {inst_name} | 方向: {side} {p.get('lever', '3')}x | 开仓均价: {p.get('avgPx')} | 当前价: {cur_px} | 浮盈: {p.get('upl')} U (ROI: {round(safe_float(p.get('uplRatio')) * 100, 2)}%){profit_desc} | 动态止损线: {p.get('trailingStopPx', p.get('trailingSl', '--'))} | 目标止盈: {tp_px} | 状态: {stage_desc}"
+                f"- 标的: {inst_name} | 方向: {side} {p.get('lever', '3')}x | 开仓均价: {p.get('avgPx')} | 当前价: {cur_px} | 持仓量: {p.get('pos')} (BASE) | 浮盈: {p.get('upl')} U (ROI: {round(safe_float(p.get('uplRatio')) * 100, 2)}%){profit_desc} | 动态止损线: {p.get('trailingStopPx', p.get('trailingSl', '--'))} | 目标止盈: {tp_px} | 状态: {stage_desc}"
             )
     else:
         pos_lines.append("[MISSING_CONTEXT:account_positions]" if active_positions_detail is None else "当前无任何在途持仓敞口 (100% 现金空仓状态)")
@@ -666,7 +692,7 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
                 tp_sl_info = f" | 附带云端止盈: {tp_p} / 止损: {sl_p}"
 
             pending_lines.append(
-                f"- [挂单ID: {ord_id}] {inst_id} | {side_str} {sz_val}张 @ {px_val} | 挂单时间: {c_time_str}{tp_sl_info}"
+                f"- [挂单ID: {ord_id}] {inst_id} | {side_str} {sz_val} (BASE) @ {px_val} | 挂单时间: {c_time_str}{tp_sl_info}"
             )
     else:
         pending_lines.append("[MISSING_CONTEXT:pending_orders]" if pending_orders_detail is None else "当前无任何在途未成交限价挂单 (挂单池为空)")
@@ -677,19 +703,19 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
     # Damaged authority raises; empty authority never falls back to legacy text.
     memory_lessons = render_trading_memory(AI_MEMORY_MD_FILE, AI_MEMORY_FILE)
 
-    # Harvest Latest Live News & Multi-Coin Sentiment
+    # Source-filtered optional news; stale/absent news is not evidence of a calm market.
+    from r20_backend.news_config import load_news_snapshot
+    ns_data = load_news_snapshot(NEWS_SENTIMENT_FILE, limit=6)
     news_briefs = []
-    macro_env = "中性平衡"
-    if os.path.exists(NEWS_SENTIMENT_FILE):
-        try:
-            with open(NEWS_SENTIMENT_FILE, "r", encoding="utf-8") as f:
-                ns_data = json.load(f)
-                macro_env = ns_data.get("macro_sentiment", "中性平衡")
-                for n in ns_data.get("latest_news", [])[:6]:
-                    news_briefs.append(f"- [{n.get('time', '')}] {n.get('title', '')} ({n.get('summary', '')[:80]}...)")
-        except Exception:
-            pass
-
+    macro_env = ns_data.get("macro_sentiment") or "无可验证情绪数据"
+    if ns_data.get("sentiment_stale"):
+        macro_env += "（旧情绪缓存，不能视为当前市场结论）"
+    for n in ns_data.get("latest_news", []):
+        stale_note = "旧缓存，未验证最新状态" if n.get("stale") else "公开资讯"
+        news_briefs.append(
+            f"- [{n.get('time', '')}] [{n.get('source_name', '')} / {stale_note}] "
+            f"{n.get('title', '')} ({n.get('summary', '')[:80]})"
+        )
     news_text = "\n".join(news_briefs) if news_briefs else "无可验证新闻输入；不得据此推断市场平稳或不存在事件风险"
 
     avail_balance_str = f"{usdt_available:.2f} USDT" if usdt_available is not None and usdt_available >= 0 else "[MISSING_CONTEXT:account_balance]"
@@ -702,8 +728,8 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
         _m_lo = round(_eq * 0.03, 2)
         _m_hi = round(_eq * min(0.12, MAX_MARGIN_EQUITY_RATIO), 2)
         _m_strong = round(_eq * MAX_MARGIN_EQUITY_RATIO, 2)
-        _asset_cap = round(_eq * SINGLE_ASSET_EQUITY_RATIO, 2)
-        _daily_stop = round(max(_eq * DAILY_LOSS_EQUITY_RATIO, 1.0), 2)
+        _asset_cap = min(MAX_SINGLE_ASSET_MARGIN, max(round(_eq * SINGLE_ASSET_EQUITY_RATIO, 2), 1.0))
+        _daily_stop = min(MAX_DAILY_LOSS_USDT, max(round(_eq * DAILY_LOSS_EQUITY_RATIO, 2), 1.0))
         risk_budget_text = (
             f"【本周期风险预算｜按实际可用余额 {_eq:.2f} USDT 与后台风控配置自适应推导，严禁套用任何固定绝对金额】:\n"
             f"- 常规单笔保证金: {_m_lo} ~ {_m_hi} USDT (可用余额 3%~{min(0.12, MAX_MARGIN_EQUITY_RATIO):.0%})\n"
@@ -739,7 +765,7 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
 
 ======================= 【全网实时重大快讯与宏观情报】 =======================
 【宏观环境基调】: {macro_env}
-【最新核心资讯要闻】:
+【最新核心资讯要闻（按用户选择的信息源采集，不作为交易指令或执行行情；缺失不阻塞）】:
 {news_text}
 
 ======================= 【账户当前持仓与风险敞口全景】 =======================
@@ -816,7 +842,7 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
         "risk_budget": risk_budget_text,
         "account_positions": f"【账户持仓概况】: {pos_summary}\n【当前活动在途持仓明细】:\n{active_pos_text}",
         "pending_orders": f"【当前在途挂单列表】:\n{pending_orders_text}",
-        "news_intelligence": f"【宏观环境基调】: {macro_env}\n【最新核心资讯要闻】:\n{news_text}",
+        "news_intelligence": f"【宏观环境基调】: {macro_env}\n【最新核心资讯要闻（按用户选择的信息源采集，不作为交易指令或执行行情；缺失不阻塞）】:\n{news_text}",
         "trading_memory": memory_lessons.strip(),
         "market_matrix": all_market_str,
     }
@@ -836,7 +862,12 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
         runtime_context_out.update(runtime_vars)
         if policy_snapshot:
             runtime_context_out["policy_snapshot"] = policy_snapshot
-    return apply_module_layout(prompt, profile, "trading_user", f"{profile.get('name', '稳健')}交易用户提示词模板", context=runtime_vars)
+    rendered = apply_module_layout(prompt, profile, "trading_user", f"{profile.get('name', '稳健')}交易用户提示词模板", context=runtime_vars)
+    # Execution limits are live account state, not an optional profile preference.
+    # Older/custom base modules can replace the time/balance group and omit this state.
+    if risk_budget_text not in rendered:
+        rendered = f"{risk_budget_text}\n\n{rendered}"
+    return rendered
 
 def validate_and_filter_decision(p: Dict[str, Any], d_item: Dict[str, Any], active_inst_ids: set, active_position_sides: Dict[str, str]) -> tuple[str, str, float]:
     """
@@ -966,7 +997,7 @@ def assemble_decision_cache(
                 "askPx": p.get("askPx"),
                 "chg24h": p.get("chg24h")
             },
-            "raw_funding_rate": f"{p['fundingRate']}%" if p.get('fundingRate') else "--",
+            "raw_funding_rate": f"{p['fundingRate']}%" if p.get('fundingRate') is not None else "--",
             "raw_oi": p.get('oiUsd') or "--",
             "raw_taker_vol": p.get('takerNetUsd') or "--",
             "raw_ls_ratio": str(p.get('lsRatio')) if p.get('lsRatio') is not None else "--"
@@ -1014,72 +1045,85 @@ def execute_batch_ai_brain_cycle(
     policy_summary = policy_snapshot.get("summary", "")
     print(f"[AI Brain Batch] 📌 当前决策策略快照: {policy_version} ({policy_hash})")
 
-    print(f"[AI Brain Batch] 并行获取 {len(TARGET_INSTRUMENTS)} 币种原生行情、技术指标与顶级聪明钱数据...")
+    instruments = load_instruments()
+    print(f"[AI Brain Batch] 并行获取 {len(instruments)} 币种原生行情、技术指标与顶级聪明钱数据...")
     with ThreadPoolExecutor(max_workers=8) as executor:
-        packages = list(executor.map(fetch_single_instrument_package, TARGET_INSTRUMENTS))
+        packages = list(executor.map(fetch_single_instrument_package, instruments))
 
-    # Fetch OKX Smart Money Signals
     try:
-        instruments_ccy = ",".join([p["name"] for p in packages])
-        sm_cmd = f"okx smartmoney signal-overview-by-filter --instCcyList {instruments_ccy} --json 2>/dev/null"
-        sm_res = subprocess.run(sm_cmd, shell=True, capture_output=True, text=True, timeout=8)
-        if sm_res.stdout:
-            sm_data = json.loads(sm_res.stdout).get("data", [])
-            sm_dict = {item.get("ccy"): item for item in sm_data if item.get("ccy")}
-            for p in packages:
-                ccy = p["name"]
-                if ccy in sm_dict:
-                    item = sm_dict[ccy]
-                    ls = item.get("longShortRatio", {})
-                    notional = item.get("notional", {})
-                    win = item.get("winRate", {})
-                    w_long = round(float(ls.get("weightedLongRatio", 0.5)) * 100, 1)
-                    net_usdt = float(notional.get("netNotionalUsdt", 0) or 0)
-                    net_flow_str = f"{round(net_usdt / 1e4, 1)}万 U" if abs(net_usdt) >= 1e4 else f"{round(net_usdt, 0)} U"
-                    long_cost = notional.get("smartMoneyLongAvgEntry") or "--"
-                    short_cost = notional.get("smartMoneyShortAvgEntry") or "--"
-                    top_win = f"多胜率{round(float(win.get('avgLongWinRate', 0))*100, 1)}%" if win.get('avgLongWinRate') else "--"
-
-                    p["smart_money"] = {
-                        "weighted_long_pct": w_long,
-                        "net_flow_usdt": net_flow_str,
-                        "avg_long_entry": str(long_cost)[:10],
-                        "avg_short_entry": str(short_cost)[:10],
-                        "top_win_rate": top_win
-                    }
-    except Exception as e:
-        print(f"[AI Brain Batch] SmartMoney fetch warning: {e}")
+        exchange_name = str(getattr(get_exchange().env, "exchange", "") or "").lower()
+    except Exception:
+        exchange_name = ""
+    if exchange_name == "okx":
+        try:
+            instruments_ccy = ",".join([p["name"] for p in packages])
+            sm_cmd = f"okx smartmoney signal-overview-by-filter --instCcyList {instruments_ccy} --json 2>/dev/null"
+            sm_res = subprocess.run(sm_cmd, shell=True, capture_output=True, text=True, timeout=8)
+            if sm_res.stdout:
+                sm_data = json.loads(sm_res.stdout).get("data", [])
+                sm_dict = {item.get("ccy"): item for item in sm_data if item.get("ccy")}
+                for p in packages:
+                    ccy = p["name"]
+                    if ccy in sm_dict:
+                        item = sm_dict[ccy]
+                        ls = item.get("longShortRatio", {})
+                        notional = item.get("notional", {})
+                        win = item.get("winRate", {})
+                        w_long = round(float(ls.get("weightedLongRatio", 0.5)) * 100, 1)
+                        net_usdt = float(notional.get("netNotionalUsdt", 0) or 0)
+                        net_flow_str = f"{round(net_usdt / 1e4, 1)}万 U" if abs(net_usdt) >= 1e4 else f"{round(net_usdt, 0)} U"
+                        long_cost = notional.get("smartMoneyLongAvgEntry") or "--"
+                        short_cost = notional.get("smartMoneyShortAvgEntry") or "--"
+                        top_win = f"多胜率{round(float(win.get('avgLongWinRate', 0))*100, 1)}%" if win.get('avgLongWinRate') else "--"
+                        p["smart_money"] = {
+                            "weighted_long_pct": w_long,
+                            "net_flow_usdt": net_flow_str,
+                            "avg_long_entry": str(long_cost)[:10],
+                            "avg_short_entry": str(short_cost)[:10],
+                            "top_win_rate": top_win,
+                            "available": True,
+                        }
+        except Exception as e:
+            print(f"[AI Brain Batch] SmartMoney fetch warning: {e}")
 
     positions_context = active_positions_detail
     active_positions_detail = active_positions_detail or []
     active_inst_ids = {
         str(p.get("instId", "")) for p in active_positions_detail if p.get("instId")
     }
+    def _resolved_side(pos: Dict[str, Any]) -> str:
+        raw = str(pos.get("side") or pos.get("posSide") or "").strip().lower()
+        if "long" in raw and "short" not in raw:
+            return "long"
+        if "short" in raw:
+            return "short"
+        qty = safe_float(pos.get("pos"))
+        if qty > 0:
+            return "long"
+        if qty < 0:
+            return "short"
+        return raw
+
     active_position_sides = {
-        str(p.get("instId", "")): str(p.get("side", p.get("posSide", ""))).lower()
+        str(p.get("instId", "")): _resolved_side(p)
         for p in active_positions_detail if p.get("instId")
     }
     package_by_id = {p["instId"]: p for p in packages}
 
-    # Automatically Update & Persist Comprehensive Factor Library Snapshot
     try:
-        sys.path.append(os.path.join(WORKSPACE_DIR, "scripts"))
         import factor_library
         factor_library.update_factor_library()
     except Exception as e:
         print(f"[AI Brain Batch] Factor Library update warning: {e}")
 
-    # Fetch live pending limit orders from exchange
     pending_orders_list = None
     try:
-        ord_cmd = okx_private_command("okx swap orders --json 2>/dev/null")
-        ord_res = subprocess.run(ord_cmd, shell=True, capture_output=True, text=True, timeout=8)
-        if ord_res.returncode == 0 and ord_res.stdout:
-            pending_orders_list = json.loads(ord_res.stdout)
-            if not isinstance(pending_orders_list, list):
-                pending_orders_list = None
+        pending_orders_list = get_exchange().open_orders()
+        if not isinstance(pending_orders_list, list):
+            pending_orders_list = None
     except Exception as e:
         print(f"[AI Brain Batch] Pending orders fetch warning: {e}")
+
 
     try:
         calculus_snapshot = {
@@ -1107,10 +1151,11 @@ def execute_batch_ai_brain_cycle(
 
     # Save Realtime Prompt Snapshot for Web Transparent Inspection
     try:
-        tmp_prompt = AI_LAST_PROMPT_FILE + ".tmp"
+        last_prompt_path = ai_last_prompt_file()
+        tmp_prompt = last_prompt_path + ".tmp"
         with open(tmp_prompt, "w", encoding="utf-8") as f:
             f.write(f"【SYSTEM PROMPT】:\n{effective_system_prompt.strip()}\n\n{'='*70}\n【USER PROMPT ({time_str})】：\n{prompt.strip()}")
-        os.replace(tmp_prompt, AI_LAST_PROMPT_FILE)
+        os.replace(tmp_prompt, last_prompt_path)
     except Exception:
         pass
 
@@ -1260,8 +1305,10 @@ def execute_batch_ai_brain_cycle(
                 p_inst_id = str(p_order.get("instId", ""))
                 p_reason = str(p_order.get("reason", "模型指示撤销该挂单"))
                 if p_act == "CANCEL" and p_ord_id and p_inst_id:
-                    cxl_cmd = okx_private_command(f"okx swap cancel {p_inst_id} --ordId {p_ord_id} --json")
-                    cxl_res = subprocess.run(cxl_cmd, shell=True, capture_output=True, text=True, timeout=10)
+                    try:
+                        get_exchange().cancel_order(p_inst_id, p_ord_id)
+                    except Exception as exc:
+                        print(f"[AI Brain Batch] cancel_order failed: {p_inst_id} {p_ord_id}: {exc}")
                     print(f"[AI Brain Batch] 🛑 AI自主撤回失效/过时限价单: {p_inst_id} (ordId={p_ord_id}, 原因={p_reason})")
 
         standard_cache = assemble_decision_cache(
@@ -1274,8 +1321,8 @@ def execute_batch_ai_brain_cycle(
             policy_snapshot=policy_snapshot,
         )
 
-        atomic_write_json(AI_DECISION_CACHE_FILE, standard_cache)
-        atomic_write_json(AI_POSITION_MANAGEMENT_FILE, {
+        atomic_write_json(ai_decision_cache_file(), standard_cache)
+        atomic_write_json(ai_position_management_file(), {
             "timestamp": int(time.time()),
             "time_str": time_str,
             "policy_version": policy_version,
@@ -1312,9 +1359,10 @@ def execute_batch_ai_brain_cycle(
         }
 
         history_list = []
-        if os.path.exists(AI_DECISION_HISTORY_FILE):
+        history_path = ai_decision_history_file()
+        if os.path.exists(history_path):
             try:
-                with open(AI_DECISION_HISTORY_FILE, "r", encoding="utf-8") as f:
+                with open(history_path, "r", encoding="utf-8") as f:
                     history_list = json.load(f)
             except Exception:
                 pass
@@ -1322,7 +1370,7 @@ def execute_batch_ai_brain_cycle(
         history_list.insert(0, history_record)
         history_list = history_list[:50] # Keep recent 50 rounds
 
-        atomic_write_json(AI_DECISION_HISTORY_FILE, history_list)
+        atomic_write_json(history_path, history_list)
 
         latency = round(time.time() - t0, 2)
         telemetry.finish("success", raw_res, output_chars=len(content))
@@ -1336,9 +1384,10 @@ def execute_batch_ai_brain_cycle(
 
 def get_latest_ai_decision(inst_id: str, max_age_seconds: int = DECISION_MAX_AGE_SECONDS) -> Optional[Dict[str, Any]]:
     """Read a validated decision only while its cache timestamp is fresh."""
-    if os.path.exists(AI_DECISION_CACHE_FILE):
+    cache_path = ai_decision_cache_file()
+    if os.path.exists(cache_path):
         try:
-            with open(AI_DECISION_CACHE_FILE, "r", encoding="utf-8") as f:
+            with open(cache_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             item = data.get(inst_id)
             if not isinstance(item, dict):

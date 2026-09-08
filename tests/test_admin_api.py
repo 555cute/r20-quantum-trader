@@ -1,6 +1,8 @@
 """Administrator API RBAC tests using an isolated auth database."""
 from __future__ import annotations
+import os
 import tempfile
+
 import unittest
 from pathlib import Path
 
@@ -41,7 +43,7 @@ class AdminApiTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/v1/admin/users", headers=operator).status_code, 403)
         self.assertEqual(self.client.get("/api/v1/admin/about", headers=operator).status_code, 200)
 
-    def test_health_and_about_report_651_release(self):
+    def test_health_and_about_report_dynamic_version(self):
         health=self.client.get("/api/v1/health")
         self.assertEqual(health.status_code,200,health.text)
         self.assertEqual(health.json()["version"], __version__)
@@ -52,9 +54,27 @@ class AdminApiTests(unittest.TestCase):
         versions={item["name"]:item["version"] for item in about.json()["components"]}
         self.assertEqual(versions["FastAPI Control Plane"], __version__)
 
-    def test_legacy_header_disabled_after_initialization(self):
-        response = self.client.get("/api/v1/admin/overview", headers={"X-R20-Admin-Token": "InitialAdmin123456"})
-        self.assertEqual(response.status_code, 401)
+    def test_admin_token_header_after_users_exist(self):
+        original = app_module.settings.admin_token
+        original_env = os.environ.get("R20_ADMIN_TOKEN")
+        os.environ["R20_ADMIN_TOKEN"] = "ServiceAdminToken123"
+        app_module.settings.admin_token = "ServiceAdminToken123"
+        try:
+            allowed = self.client.get("/api/v1/admin/overview", headers={"X-R20-Admin-Token": "ServiceAdminToken123"})
+            self.assertEqual(allowed.status_code, 200, allowed.text)
+            password = self.client.get("/api/v1/admin/overview", headers={"X-R20-Admin-Token": "InitialAdmin123456"})
+            self.assertEqual(password.status_code, 403)
+            me = self.client.get("/api/v1/admin/auth/me", headers={"X-R20-Admin-Token": "ServiceAdminToken123"})
+            self.assertEqual(me.status_code, 401)
+            users = self.client.get("/api/v1/admin/users", headers={"X-R20-Admin-Token": "ServiceAdminToken123"})
+            self.assertEqual(users.status_code, 401)
+        finally:
+            app_module.settings.admin_token = original
+            if original_env is None:
+                os.environ.pop("R20_ADMIN_TOKEN", None)
+            else:
+                os.environ["R20_ADMIN_TOKEN"] = original_env
+
 
     def test_vue_console_endpoints_require_session_and_return_data(self):
         headers = self.login("admin", "InitialAdmin123456")
@@ -367,13 +387,18 @@ class AdminApiTests(unittest.TestCase):
                 test_file.unlink()
 
     def test_market_candles_endpoint(self):
-        # Invalid instrument without -SWAP suffix
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
         bad = self.client.get("/api/v1/market/BTC-USDT/candles")
         self.assertEqual(bad.status_code, 400)
-
-        # Valid instrument request
-        resp = self.client.get("/api/v1/market/BTC-USDT-SWAP/candles?bar=1H&limit=10")
-        self.assertEqual(resp.status_code, 200)
+        env = SimpleNamespace(exchange="binance", mode="demo", configured=False, simulated=True)
+        rows = [["1", "1", "1", "1", "1", "1"]]
+        adapter = Mock()
+        adapter.candles.return_value = rows
+        with patch.object(app_module, "selected_environment", return_value=env), patch.object(app_module, "get_exchange", return_value=adapter):
+            app_module._CANDLES_CACHE.clear()
+            resp = self.client.get("/api/v1/market/BTC-USDT-SWAP/candles?bar=1H&limit=10")
+        self.assertEqual(resp.status_code, 200, resp.text)
         data = resp.json()
         self.assertEqual(data["instId"], "BTC-USDT-SWAP")
         self.assertEqual(data["bar"], "1H")
@@ -382,6 +407,118 @@ class AdminApiTests(unittest.TestCase):
         c0 = data["candles"][0]
         for k in ("ts", "open", "high", "low", "close", "vol"):
             self.assertIn(k, c0)
+
+    def test_exchange_runtime_is_local_unconfigured_and_never_leaks_secrets(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        self.assertEqual(self.client.get("/api/v1/admin/exchange/runtime").status_code, 401)
+        headers = self.login("admin", "InitialAdmin123456")
+        env = SimpleNamespace(exchange="binance", mode="demo", configured=False, simulated=True)
+        with patch.object(app_module, "selected_environment", return_value=env), patch.object(app_module, "diagnose_okx_runtime", side_effect=AssertionError("must not diagnose")):
+            response = self.client.get("/api/v1/admin/exchange/runtime", headers=headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["exchange"], "binance")
+        self.assertEqual(payload["environment"], "demo")
+        self.assertFalse(payload["configured"])
+        self.assertEqual(payload["status"], "unconfigured")
+        self.assertTrue(payload["notes"])
+        text = response.text.lower()
+        self.assertNotIn("secret", text)
+        self.assertNotIn("api_key", text)
+        self.assertNotIn("passphrase", text)
+
+    def test_config_exposes_exchange_flags_without_plaintext_keys(self):
+        headers = self.login("admin", "InitialAdmin123456")
+        response = self.client.get("/api/v1/admin/config", headers=headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        editable = response.json()["editable"]
+        self.assertIn("exchange", editable)
+        self.assertIn("binance_environment", editable)
+        self.assertIn("binance_demo_configured", editable)
+        self.assertIn("binance_live_configured", editable)
+        self.assertNotIn("binance_demo_api_key", editable)
+        self.assertNotIn("binance_demo_secret_key", editable)
+        self.assertNotIn("okx_api_key", editable)
+
+    def test_put_binance_demo_requires_switch_phrase_and_skips_blank_secrets(self):
+        from unittest.mock import patch
+        headers = self.login("admin", "InitialAdmin123456")
+        captured = {}
+        def fake_save(values):
+            captured.update(values)
+        with patch.object(app_module, "save_secrets", side_effect=fake_save), patch.object(app_module, "update_env"), patch.object(app_module, "_acquire_trader_cycle_lock", return_value=None), patch.object(app_module, "_release_trader_cycle_lock"):
+            missing = self.client.put("/api/v1/admin/config", headers=headers, json={"exchange": "binance", "binance_environment": "demo", "binance_demo_api_key": "demo-key", "binance_demo_secret_key": ""})
+            self.assertEqual(missing.status_code, 400, missing.text)
+            captured.clear()
+            generic = self.client.put("/api/v1/admin/config", headers=headers, json={"exchange": "binance", "binance_environment": "demo", "binance_demo_api_key": "demo-key", "confirmation": "SWITCH EXCHANGE MODE"})
+            self.assertEqual(generic.status_code, 400, generic.text)
+            wrong = self.client.put("/api/v1/admin/config", headers=headers, json={"exchange": "binance", "binance_environment": "demo", "binance_demo_api_key": "demo-key", "confirmation": "SWITCH OKX LIVE"})
+            self.assertEqual(wrong.status_code, 400, wrong.text)
+            captured.clear()
+            ok = self.client.put("/api/v1/admin/config", headers=headers, json={"exchange": "binance", "binance_environment": "demo", "binance_demo_api_key": "demo-key", "binance_demo_secret_key": "", "confirmation": "SWITCH BINANCE DEMO"})
+        self.assertEqual(ok.status_code, 200, ok.text)
+        body = ok.json()
+        self.assertTrue(body.get("updated"))
+        self.assertIn("binance_demo_configured", body)
+        self.assertNotIn("demo-key", ok.text)
+        self.assertNotIn("binance_demo_api_key", body)
+        self.assertEqual(captured.get("BINANCE_DEMO_API_KEY"), "demo-key")
+        self.assertNotIn("BINANCE_DEMO_SECRET_KEY", captured)
+
+    def test_put_exchange_config_forbidden_for_operator(self):
+        root = self.login("admin", "InitialAdmin123456")
+        self.client.post("/api/v1/admin/users", headers=root, json={"username": "op_ex", "password": "OperatorPassword123", "role": "admin"})
+        operator = self.login("op_ex", "OperatorPassword123")
+        response = self.client.put("/api/v1/admin/config", headers=operator, json={"exchange": "binance", "binance_environment": "demo", "confirmation": "SWITCH BINANCE DEMO"})
+        self.assertEqual(response.status_code, 403)
+
+    def test_unconfigured_snapshot_does_not_call_trade_service(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        headers = self.login("admin", "InitialAdmin123456")
+        env = SimpleNamespace(exchange="binance", mode="demo", configured=False, simulated=True)
+        with patch.object(app_module, "selected_environment", return_value=env):
+            response = self.client.get("/api/v1/admin/account-snapshot", headers=headers)
+        self.assertEqual(response.status_code, 503)
+
+    def test_trader_job_requires_superadmin_and_exact_run_phrase(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        root = self.login("admin", "InitialAdmin123456")
+        self.client.post("/api/v1/admin/users", headers=root, json={"username": "op_job", "password": "OperatorPassword123", "role": "admin"})
+        operator = self.login("op_job", "OperatorPassword123")
+        env = SimpleNamespace(exchange="binance", mode="demo", configured=False, simulated=True)
+        with patch.object(app_module, "selected_environment", return_value=env), patch("subprocess.run") as run:
+            forbidden = self.client.post("/api/v1/admin/gateway/jobs/trader/run", headers=operator, json={"confirmation": "RUN BINANCE DEMO TRADER"})
+            self.assertEqual(forbidden.status_code, 403)
+            wrong = self.client.post("/api/v1/admin/gateway/jobs/trader/run", headers=root, json={"confirmation": "RUN JOB"})
+            self.assertEqual(wrong.status_code, 400)
+            mismatched = self.client.post("/api/v1/admin/gateway/jobs/trader/run", headers=root, json={"confirmation": "RUN OKX LIVE TRADER"})
+            self.assertEqual(mismatched.status_code, 400)
+            run.assert_not_called()
+
+
+
+
+
+    def test_account_refresh_requires_session_and_uses_dashboard_bind(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        self.assertEqual(self.client.post("/api/v1/admin/account/refresh").status_code, 401)
+        headers = self.login("admin", "InitialAdmin123456")
+        env = SimpleNamespace(exchange="binance", mode="demo", configured=False, simulated=True)
+        with patch("dashboard.app.refresh_account_snapshot", return_value={}) as refresh, patch.object(app_module, "selected_environment", return_value=env):
+            response = self.client.post("/api/v1/admin/account/refresh", headers=headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["exchange"], "binance")
+        self.assertFalse(payload["configured"])
+        self.assertNotIn("secret", response.text.lower())
+        refresh.assert_called_once()
+
+
+
 
 
 if __name__ == "__main__":

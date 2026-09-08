@@ -1,4 +1,7 @@
 from __future__ import annotations
+import base64
+import hashlib
+import hmac
 import json
 import os
 import tempfile
@@ -25,14 +28,16 @@ class OKXV5Tests(unittest.TestCase):
         captured={}
         def open_(request,timeout=0):
             captured["request"]=request; return Response()
-        with patch.object(okx.urllib.request,"urlopen",side_effect=open_):
+        with patch.object(okx._OPENER, "open", side_effect=open_):
             self.assertEqual(okx._request("GET","/api/v5/account/positions",{"instType":"SWAP"},env),[])
         req=captured["request"]
         headers={k.lower():v for k,v in req.header_items()}
         self.assertIn("/api/v5/account/positions?instType=SWAP",req.full_url)
         self.assertEqual(headers["x-simulated-trading"],"1")
         self.assertEqual(headers["ok-access-key"],"AK")
-        self.assertTrue(headers["ok-access-sign"])
+        material = headers["ok-access-timestamp"] + "GET/api/v5/account/positions?instType=SWAP"
+        expected = base64.b64encode(hmac.new(b"SK", material.encode(), hashlib.sha256).digest()).decode()
+        self.assertEqual(headers["ok-access-sign"], expected)
 
     def test_business_scode_fails_closed(self):
         env=OKXEnvironment("live","AK","SK","PP")
@@ -41,7 +46,7 @@ class OKXV5Tests(unittest.TestCase):
             def __enter__(self): return self
             def __exit__(self,*_): return False
             def read(self): return b'{"code":"0","data":[{"sCode":"51008","sMsg":"margin"}]}'
-        with patch.object(okx.urllib.request,"urlopen",return_value=Response()):
+        with patch.object(okx._OPENER, "open", return_value=Response()):
             with self.assertRaises(RuntimeError): okx._request("POST","/api/v5/trade/close-position",{"instId":"BTC-USDT-SWAP"},env)
 
 
@@ -134,15 +139,26 @@ class PromptModuleTests(unittest.TestCase):
 
 class GatewayFDTests(unittest.TestCase):
     def test_connections_are_closed(self):
-        import gc
+        import sqlite3
         with tempfile.TemporaryDirectory() as tmp:
-            store=GatewayStore(Path(tmp)/"gateway.db")
-            gc.collect()
-            before=len(os.listdir("/proc/self/fd"))
-            for i in range(150): store.set_state("x",str(i)); store.get_state("x"); store.stats()
-            gc.collect()
-            after=len(os.listdir("/proc/self/fd"))
-            self.assertLessEqual(after-before,10)
+            store = GatewayStore(Path(tmp) / "gateway.db")
+            with store.connect() as connection:
+                connection.execute("SELECT 1").fetchone()
+            with self.assertRaises(sqlite3.ProgrammingError):
+                connection.execute("SELECT 1")
+
+    def test_failed_transaction_rolls_back_and_closes_connection(self):
+        import sqlite3
+        with tempfile.TemporaryDirectory() as tmp:
+            store = GatewayStore(Path(tmp) / "gateway.db")
+            store.set_state("value", "before")
+            with self.assertRaisesRegex(RuntimeError, "interrupted"):
+                with store.connect() as connection:
+                    connection.execute("UPDATE runtime_state SET value='after' WHERE key='value'")
+                    raise RuntimeError("interrupted")
+            self.assertEqual(store.get_state("value"), "before")
+            with self.assertRaises(sqlite3.ProgrammingError):
+                connection.execute("SELECT 1")
 
 
 if __name__ == "__main__": unittest.main()

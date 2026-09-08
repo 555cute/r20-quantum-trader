@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
+from r20_backend.config_path import env_file_path
 
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWED_ENVIRONMENTS = {"demo", "live"}
@@ -12,7 +13,7 @@ ALLOWED_ENVIRONMENTS = {"demo", "live"}
 
 def _load_dotenv() -> dict[str, str]:
     values: dict[str, str] = {}
-    path = ROOT / ".env"
+    path = env_file_path(ROOT)
     if path.exists():
         for line in path.read_text(encoding="utf-8").splitlines():
             line = line.strip()
@@ -55,11 +56,10 @@ class OKXEnvironment:
         env["R20_OKX_ENV"] = self.mode
         return env
 
-    def cli_prefix(self) -> str: return f"okx --{self.mode}"
 
 
 def selected_environment(values: Mapping[str, str] | None = None) -> OKXEnvironment:
-    env = dict(values or _load_dotenv())
+    env = dict(_load_dotenv() if values is None else values)
     legacy_simulated = str(env.get("OKX_IS_SIMULATED", "1")).lower() in {"1", "true", "yes"}
     mode = str(env.get("R20_OKX_ENV") or ("demo" if legacy_simulated else "live")).lower()
     if mode not in ALLOWED_ENVIRONMENTS: mode = "demo"
@@ -72,34 +72,3 @@ def selected_environment(values: Mapping[str, str] | None = None) -> OKXEnvironm
     return OKXEnvironment(mode, api_key, secret_key, passphrase, base_url, "separate-credentials" if env.get(f"{prefix}_API_KEY") else "legacy-or-oauth")
 
 
-def cli_command(arguments: str, values: Mapping[str, str] | None = None) -> str:
-    return f"{selected_environment(values).cli_prefix()} {arguments.strip()}"
-
-
-_FROZEN_ENVIRONMENT: OKXEnvironment | None = None
-
-
-def freeze_environment(values: Mapping[str, str] | None = None) -> OKXEnvironment:
-    """Freeze LIVE/DEMO and credentials for one trading cycle."""
-    global _FROZEN_ENVIRONMENT
-    _FROZEN_ENVIRONMENT = selected_environment(values)
-    return _FROZEN_ENVIRONMENT
-
-
-def unfreeze_environment() -> None:
-    global _FROZEN_ENVIRONMENT
-    _FROZEN_ENVIRONMENT = None
-
-
-def replace_cli_prefix(command: str, values: Mapping[str, str] | None = None) -> str:
-    """Bind the process to the frozen/current credential group and replace a legacy CLI prefix."""
-    selected = _FROZEN_ENVIRONMENT or selected_environment(values)
-    if selected.configured:
-        os.environ.update({"OKX_API_KEY": selected.api_key, "OKX_SECRET_KEY": selected.secret_key, "OKX_PASSPHRASE": selected.passphrase})
-    os.environ["OKX_DEMO"] = "1" if selected.simulated else "0"
-    os.environ["R20_OKX_ENV"] = selected.mode
-    stripped = command.strip()
-    for prefix in ("okx --demo ", "okx --live ", "okx "):
-        if stripped.startswith(prefix):
-            return f"{selected.cli_prefix()} {stripped[len(prefix):]}"
-    return f"{selected.cli_prefix()} {stripped}"

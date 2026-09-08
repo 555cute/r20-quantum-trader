@@ -25,6 +25,8 @@ from pydantic import BaseModel, Field
 from r20_backend.admin_auth import AdminAuthStore
 from scripts import evolution_shield as shield
 
+from path_guard import contained
+
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / 'r20_backend' / 'app.py'
 SAFE = '【合理经验】4H多头回踩均线支撑时开多'
@@ -39,7 +41,7 @@ class MemoryRouteTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
         # Read source only, never execute module-level imports/initializers.
-        tree = ast.parse(SOURCE.read_text())
+        tree = ast.parse(SOURCE.read_text(encoding="utf-8"))
         temporary = TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
@@ -55,12 +57,11 @@ class MemoryRouteTests(unittest.IsolatedAsyncioTestCase):
             def checked(file, *args, **kwargs):
                 if not isinstance(file, int):
                     path = Path(file).resolve()
-                    # Runtime file IO is restricted to synthetic fixtures. Python
-                    # import machinery is not replaced and may read library code.
-                    if not path.is_relative_to(self.root):
+                    if not contained(path, self.root):
                         raise AssertionError(f'non-fixture file IO: {path}')
                 return original(file, *args, **kwargs)
             return checked
+
         self.start_patch(patch('builtins.open', guard(builtins.open)))
         self.start_patch(patch('io.open', guard(io.open)))
         self.start_patch(patch('sqlite3.connect', guard(sqlite3.connect)))
@@ -84,7 +85,7 @@ class MemoryRouteTests(unittest.IsolatedAsyncioTestCase):
         exec(compile(ast.Module(body=nodes, type_ignores=[]), str(SOURCE), 'exec'), self.scope)
         self.client = AsyncClient(transport=ASGITransport(app=self.app), base_url='http://isolated.test')
         self.addAsyncCleanup(self.client.aclose)
-        shield.STRUCTURED_MEMORY_FILE.write_text('[]')
+        shield.STRUCTURED_MEMORY_FILE.write_text('[]', encoding="utf-8")
         shield.admin_mutate('add', texts=[SAFE], expected_version=shield.read_memory_snapshot()['version'])
         self.lesson_id = shield.load_structured_memory()[0]['id']
 
@@ -117,8 +118,8 @@ class MemoryRouteTests(unittest.IsolatedAsyncioTestCase):
                                          headers={'X-R20-Session': self.token} if token else {})
 
     async def test_empty_get_is_pure_and_does_not_fallback(self):
-        shield.STRUCTURED_MEMORY_FILE.write_text('[]')
-        shield.AI_MEMORY_MD_FILE.write_text('- stale legacy')
+        shield.STRUCTURED_MEMORY_FILE.write_text('[]', encoding="utf-8")
+        shield.AI_MEMORY_MD_FILE.write_text('- stale legacy', encoding="utf-8")
         before = self.snapshot()
         def memory_files():
             # SQLite session validation can create WAL/SHM; exclude only auth DB files.

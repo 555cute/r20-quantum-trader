@@ -5,6 +5,7 @@ import { Zap, RefreshCw, RotateCcw, Server, Clock, AlertTriangle } from 'lucide-
 
 const { api } = useApi()
 const gw = ref<any>(null)
+const exchangeRt = ref<any>(null)
 const loading = ref(true)
 const bannerMsg = ref<{ text: string; type: 'ok' | 'err' } | null>(null)
 
@@ -15,7 +16,12 @@ const overdueCount = computed(() => (gw.value?.scheduler?.jobs || []).filter((j:
 async function load() {
   loading.value = true
   try {
-    gw.value = await api('/api/v1/admin/gateway?limit=50')
+    const [gateway, localRt] = await Promise.all([
+      api('/api/v1/admin/gateway?limit=50'),
+      api('/api/v1/admin/exchange/runtime').catch(() => null),
+    ])
+    gw.value = gateway
+    exchangeRt.value = localRt
   } catch (e: any) {
     bannerMsg.value = { text: `加载失败：${e.message}`, type: 'err' }
   } finally {
@@ -37,6 +43,26 @@ async function replayDelivery(id: number) {
     bannerMsg.value = { text: `重放失败：${e.message}`, type: 'err' }
   }
 }
+
+async function runTrader() {
+  const ex = String(exchangeRt.value?.exchange || 'EXCHANGE').toUpperCase()
+  const mode = String(exchangeRt.value?.environment || 'DEMO').toUpperCase()
+  const phrase = `RUN ${ex} ${mode} TRADER`
+  const risk = mode === 'LIVE' ? '⚠ 当前为实盘 LIVE，将向真实账户提交交易。' : '当前为模拟盘 DEMO。'
+  const typed = prompt(`手动运行交易主脑\n交易所：${ex}\n账户模式：${mode}\n${risk}\n输入确认短语：${phrase}`)
+  if (!typed) return
+  try {
+    await api('/api/v1/admin/gateway/jobs/trader/run', {
+      method: 'POST',
+      body: JSON.stringify({ confirmation: typed.trim().toUpperCase() }),
+    })
+    bannerMsg.value = { text: `${ex} ${mode} 交易主脑已触发`, type: 'ok' }
+    await load()
+  } catch (e: any) {
+    bannerMsg.value = { text: `运行失败：${e.message}`, type: 'err' }
+  }
+}
+
 
 function statusColor(s: string) {
   if (s === 'success' || s === 'delivered' || s === 'ok') return 'text-emerald-400'
@@ -108,6 +134,7 @@ onMounted(load)
                 <td class="py-2.5 px-3 font-medium" style="color: var(--text-main);">{{ j.schedule }}</td>
                 <td class="py-2.5 px-3 num-tabular" style="color: var(--text-faint);">{{ j.last_scheduled_at || '尚未调度' }}</td>
                 <td class="py-2.5 px-4 text-right font-bold" :class="j.overdue ? 'text-rose-400' : 'text-emerald-400'">
+                  <button v-if="j.name === 'trader'" @click="runTrader" class="mr-2 px-2 py-1 rounded-md border text-[10px] font-mono cursor-pointer" style="background-color: var(--color-warn-bg); border-color: var(--color-warn-border); color: var(--color-warn);">运行交易主脑</button>
                   {{ j.overdue ? '⚠ 逾期' : '正常' }}
                 </td>
               </tr>

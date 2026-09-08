@@ -35,14 +35,21 @@ try:
 except Exception:
     __version__ = "7.6.0"
 
-from okx_runtime import freeze_environment as freeze_okx_environment, replace_cli_prefix as okx_private_command, unfreeze_environment as unfreeze_okx_environment, selected_environment
+from r20_exchange.runtime import (
+    freeze_environment,
+    get_exchange,
+    selected_environment,
+    state_path,
+    unfreeze_environment,
+)
 import json
 import math
 import time
 import datetime
 import subprocess
-import urllib.request
-import fcntl
+from decimal import Decimal, InvalidOperation, ROUND_DOWN
+import tempfile
+from r20_backend.file_lock import acquire, release
 from typing import Tuple, Dict, Any, List, Optional
 from concurrent.futures import ThreadPoolExecutor
 from market_data_service import fetch_candles, fetch_ticker
@@ -81,6 +88,9 @@ NEWS_SENTIMENT_FILE = os.path.join(DATA_DIR, "news_sentiment.json")
 AI_POSITION_MANAGEMENT_FILE = os.path.join(DATA_DIR, "ai_position_management.json")
 TRADER_LOCK_FILE = os.path.join(DATA_DIR, ".ai_factor_trader.lock")
 TRADER_SLOT_FILE = os.path.join(DATA_DIR, ".ai_factor_trader_slot.json")
+TRADING_STATE_FILE = os.path.join(DATA_DIR, "trading_state.json")
+UNCERTAIN_PREFIX = "uncertain:"
+_PROTECTION_TYPES = {"oco", "paired_conditional"}
 
 try:
     import sys
@@ -157,6 +167,22 @@ def effective_single_asset_margin(usdt_available: float = None) -> float:
     return cap
 
 
+def planned_entry_margin(ai_margin: float, risk_notional: float, ai_lever: float) -> float:
+    margin = float(ai_margin or 0.0)
+    if margin > 0:
+        return margin
+    lever = max(1.0, float(ai_lever or 0.0))
+    return float(risk_notional or 0.0) / lever
+
+
+def remaining_asset_margin(usdt_available: float, curr_margin: float = 0.0) -> float:
+    return max(0.0, effective_single_asset_margin(usdt_available) - float(curr_margin or 0.0))
+
+
+def within_asset_margin_cap(curr_margin: float, planned_margin: float, usdt_available: float) -> bool:
+    return (float(curr_margin or 0.0) + float(planned_margin or 0.0)) <= effective_single_asset_margin(usdt_available)
+
+
 # 单笔 1R 风险额与单笔保证金占比 (RISK_PER_TRADE_EQUITY_RATIO / MAX_MARGIN_EQUITY_RATIO)
 # 由 risk_constants 单一事实源注入，与提示词 {{risk_budget}} 保持同口径。
 
@@ -169,31 +195,8 @@ def effective_risk_per_trade(pool_risk_usd: float, usdt_available: float = None)
     return cap
 
 
-def quantize_size(raw_sz: float, min_sz: float) -> float:
-    """按交易所最小下单步长(minSz)向下量化张数。
-
-    关键修正：历史实现把数量强制取整并抬到「至少 1 张」，而 OKX 多数永续的 minSz 实为 0.01 张，
-    导致小资金账户仓位被向上放大最多 100 倍(如 BTC 0.01 张=7.92U 名义被抬成 1 张=792U)。
-    现在低于最小步长时返回 0.0 由上层跳过该标的，而不是放大成 1 张。
-    """
-    step = float(min_sz or 0) or 1.0
-    try:
-        raw = float(raw_sz or 0.0)
-    except (TypeError, ValueError):
-        return 0.0
-    if raw <= 0:
-        return 0.0
-    return round(math.floor(raw / step + 1e-9) * step, 10)
 
 
-def max_size_within_margin(usdt_available: float, leverage: float, price: float, ct_val: float, min_sz: float) -> float:
-    """可用余额硬顶：单笔保证金不得超过可用余额的 MAX_MARGIN_EQUITY_RATIO，超出部分直接砍掉。"""
-    if not usdt_available or usdt_available <= 0 or price <= 0 or ct_val <= 0:
-        return float("inf")
-    max_margin = float(usdt_available) * MAX_MARGIN_EQUITY_RATIO
-    raw = (max_margin * max(1.0, float(leverage or 1.0))) / (float(price) * float(ct_val))
-    return quantize_size(raw, min_sz)
-# MIN_SCALE_IN_CONFIDENCE (顺势加仓最低 AI 置信度) 由 risk_constants 单一事实源注入
 
 def is_tradfi_market_liquid(asset_type: str) -> bool:
     """Strict US Regular Trading Window (BJ 21:30 ~ 次日 04:00)"""
@@ -216,49 +219,200 @@ def is_tradfi_market_liquid(asset_type: str) -> bool:
         return True
     return False
 
-def run_cmd_result(cmd, timeout=15):
-    """Return process metadata; callers must inspect returncode before mutating local state."""
+def _as_decimal(value: Any) -> Decimal:
+    if isinstance(value, Decimal):
+        return value
+    if value is None or value is False:
+        return Decimal("0")
     try:
-        res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
-        parsed = None
-        if res.stdout.strip():
-            try:
-                parsed = json.loads(res.stdout.strip())
-            except json.JSONDecodeError:
-                pass
-        business_ok = True
-        if isinstance(parsed, dict) and "code" in parsed:
-            business_ok = str(parsed.get("code")) == "0"
-        elif isinstance(parsed, list):
-            status_rows = [row for row in parsed if isinstance(row, dict) and "sCode" in row]
-            if status_rows:
-                business_ok = all(str(row.get("sCode")) == "0" for row in status_rows)
-        return {
-            "ok": res.returncode == 0 and business_ok,
-            "returncode": res.returncode,
-            "stdout": res.stdout.strip(),
-            "stderr": res.stderr.strip(),
-            "data": parsed,
-        }
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return Decimal("0")
+
+
+def _qty_epsilon(size: Any) -> Decimal:
+    size_d = abs(_as_decimal(size))
+    return max(Decimal("1e-12"), size_d * Decimal("0.001"))
+
+
+def is_uncertain_submit(reason: Any) -> bool:
+    return str(reason or "").startswith(UNCERTAIN_PREFIX)
+
+
+def floor_to_step(value: Any, step: Any) -> Decimal:
+    qty = _as_decimal(value)
+    step_d = _as_decimal(step)
+    if qty <= 0:
+        return Decimal("0")
+    if step_d <= 0:
+        return qty
+    steps = (qty / step_d).to_integral_value(rounding=ROUND_DOWN)
+    return steps * step_d
+
+
+def _ensure_state_dir(path: str) -> None:
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+
+
+def refresh_account_state_paths(env=None) -> None:
+    """Bind account-scoped files to the frozen exchange/env/credential identity."""
+    global LEDGER_JSON_FILE, POSITION_TRACKER_FILE, STOP_COOLDOWN_FILE
+    global TRADER_SLOT_FILE, TRADING_STATE_FILE, SIGNAL_JOURNAL_FILE
+    global AI_POSITION_MANAGEMENT_FILE
+    LEDGER_JSON_FILE = str(state_path("trading_ledger.json", env))
+    POSITION_TRACKER_FILE = str(state_path("position_trackers.json", env))
+    STOP_COOLDOWN_FILE = str(state_path("stop_cooldown.json", env))
+    SIGNAL_JOURNAL_FILE = str(state_path("signal_journal.json", env))
+    TRADER_SLOT_FILE = str(state_path(".ai_factor_trader_slot.json", env))
+    TRADING_STATE_FILE = str(state_path("trading_state.json", env))
+    AI_POSITION_MANAGEMENT_FILE = str(state_path("ai_position_management.json", env))
+    _ensure_state_dir(POSITION_TRACKER_FILE)
+    _ensure_state_dir(AI_POSITION_MANAGEMENT_FILE)
+
+
+def _call_exchange(method: str, *args, **kwargs) -> Tuple[bool, Any, str]:
+    try:
+        fn = getattr(get_exchange(), method)
+        return True, fn(*args, **kwargs), ""
+    except ValueError as e:
+        return False, None, str(e)
+    except RuntimeError as e:
+        return False, None, f"{UNCERTAIN_PREFIX}{e}"
     except Exception as e:
-        return {"ok": False, "returncode": -1, "stdout": "", "stderr": str(e), "data": None}
+        return False, None, f"{UNCERTAIN_PREFIX}{e}"
 
 
-def run_cmd(cmd, timeout=15):
-    result = run_cmd_result(cmd, timeout)
-    return result["stdout"] if result["ok"] else f"Error: {result['stderr'] or result['stdout']}"
+def instrument_filters(inst_id: str, item: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    meta: Dict[str, Any] = {}
+    ok, rows, _err = _call_exchange("instruments", inst_id)
+    if ok:
+        if isinstance(rows, list) and rows:
+            meta = rows[0] if isinstance(rows[0], dict) else {}
+        elif isinstance(rows, dict):
+            meta = rows
+    pool = item or {}
+    lot = meta.get("lotSz") if meta.get("lotSz") not in (None, "") else pool.get("lotSz")
+    min_sz = meta.get("minSz") if meta.get("minSz") not in (None, "") else pool.get("minSz")
+    tick = meta.get("tickSz") if meta.get("tickSz") not in (None, "") else pool.get("tickSz")
+    min_notional = meta.get("minNotional") if meta.get("minNotional") not in (None, "") else pool.get("minNotional")
+    if lot in (None, "") and min_sz not in (None, ""):
+        lot = min_sz
+    if min_sz in (None, "") and lot not in (None, ""):
+        min_sz = lot
+    return {
+        "lotSz": _as_decimal(lot) if lot not in (None, "") else Decimal("0"),
+        "minSz": _as_decimal(min_sz) if min_sz not in (None, "") else Decimal("0"),
+        "tickSz": _as_decimal(tick) if tick not in (None, "") else Decimal("0"),
+        "minNotional": _as_decimal(min_notional),
+        "live": bool(meta),
+    }
 
-def run_json_cmd(cmd, timeout=15):
-    try:
-        res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
-        if res.returncode == 0 and res.stdout.strip():
-            return json.loads(res.stdout.strip())
-        return None
-    except Exception:
-        return None
+
+def pool_base_qty(item: Dict[str, Any]) -> Decimal:
+    if item.get("base_qty") not in (None, ""):
+        return _as_decimal(item.get("base_qty"))
+    return _as_decimal(item.get("base_sz", 0)) * _as_decimal(item.get("ctVal") or 1)
+
+
+def plan_base_quantity(
+    *,
+    price: Any,
+    available_margin: Any,
+    leverage: Any,
+    lot_sz: Any,
+    min_sz: Any,
+    min_notional: Any,
+    risk_usd: Any = 0,
+    stop_distance: Any = 0,
+    planned_margin: Any = None,
+) -> Decimal:
+    """Decimal BASE qty floored to step; never round up to minSz or 1 contract."""
+    price_d = _as_decimal(price)
+    if price_d <= 0:
+        return Decimal("0")
+    avail = max(Decimal("0"), _as_decimal(available_margin))
+    lev = _as_decimal(leverage)
+    if lev < 1:
+        lev = Decimal("1")
+    requested_margin = _as_decimal(planned_margin) if planned_margin not in (None, "") else avail
+    if requested_margin <= 0:
+        requested_margin = avail
+    usable_margin = min(requested_margin, avail) if avail > 0 else Decimal("0")
+    if usable_margin <= 0:
+        return Decimal("0")
+    budget_qty = (usable_margin * lev) / price_d
+    stop_d = _as_decimal(stop_distance)
+    risk_d = _as_decimal(risk_usd)
+    risk_qty = (risk_d / stop_d) if stop_d > 0 and risk_d > 0 else Decimal("0")
+    qty = budget_qty
+    if risk_qty > 0:
+        qty = min(qty, risk_qty)
+    qty = floor_to_step(qty, lot_sz)
+    min_sz_d = _as_decimal(min_sz)
+    if min_sz_d > 0 and qty < min_sz_d:
+        return Decimal("0")
+    min_notional_d = _as_decimal(min_notional)
+    if min_notional_d > 0 and (qty * price_d) < min_notional_d:
+        return Decimal("0")
+    return qty
+
+
+def _position_close_fee(pos_sz: Any, price: Any) -> float:
+    return float(_as_decimal(pos_sz) * _as_decimal(price) * _as_decimal(TAKER_FEE_RATE))
+
+
+def _normalize_position_side(row: Dict[str, Any]) -> Tuple[str, float]:
+    pos_val = float(row.get("pos", 0) or 0)
+    side = str(row.get("posSide", row.get("side", "net")) or "net").lower()
+    if side == "net":
+        if pos_val > 0:
+            return "long", abs(pos_val)
+        if pos_val < 0:
+            return "short", abs(pos_val)
+        return "net", 0.0
+    return side, abs(pos_val)
+
+
+def apply_confirmed_leverage(inst_id: str, leverage: Any, pos_side: str) -> Tuple[bool, str, Decimal]:
+    requested = min(_as_decimal(leverage), _as_decimal(MAX_LEVERAGE))
+    if requested < 1:
+        return False, "leverage must be >= 1", Decimal("0")
+    lev_int = int(requested.to_integral_value(rounding=ROUND_DOWN))
+    if lev_int < 1:
+        return False, "leverage must be >= 1", Decimal("0")
+    ok, payload, err = _call_exchange("set_leverage", inst_id, lev_int, pos_side)
+    if not ok:
+        return False, err or "set_leverage failed", Decimal("0")
+    confirmed = None
+    if isinstance(payload, dict):
+        for key in ("lever", "leverage", "leverageValue"):
+            raw = payload.get(key)
+            if raw not in (None, ""):
+                confirmed = _as_decimal(raw)
+                break
+        nested = payload.get("data")
+        if confirmed is None and isinstance(nested, dict):
+            for key in ("lever", "leverage"):
+                raw = nested.get(key)
+                if raw not in (None, ""):
+                    confirmed = _as_decimal(raw)
+                    break
+        elif confirmed is None and isinstance(nested, list) and nested and isinstance(nested[0], dict):
+            for key in ("lever", "leverage"):
+                raw = nested[0].get(key)
+                if raw not in (None, ""):
+                    confirmed = _as_decimal(raw)
+                    break
+    if confirmed is None:
+        return False, "set_leverage did not confirm exchange leverage", Decimal("0")
+    if int(confirmed) != lev_int:
+        return False, f"exchange leverage {confirmed} != requested {lev_int}", Decimal("0")
+    return True, "", Decimal(lev_int)
+
 
 def fetch_candles_direct(inst_id: str, bar: str = "15m", limit: int = 45):
-    """Direct fetch from OKX Official Market REST API with Keep-Alive connection pooling."""
     return fetch_candles(inst_id, bar=bar, limit=limit)
 
 def load_trackers():
@@ -272,6 +426,7 @@ def load_trackers():
 
 def save_trackers(trackers):
     try:
+        _ensure_state_dir(POSITION_TRACKER_FILE)
         with open(POSITION_TRACKER_FILE, "w", encoding="utf-8") as f:
             json.dump(trackers, f, ensure_ascii=False, indent=2)
     except Exception:
@@ -296,6 +451,7 @@ def add_stop_cooldown(inst_id: str, side: str, reason: str = "止损冷却"):
         "reason": reason
     }
     try:
+        _ensure_state_dir(STOP_COOLDOWN_FILE)
         with open(STOP_COOLDOWN_FILE, "w", encoding="utf-8") as f:
             json.dump(cooldowns, f, ensure_ascii=False, indent=2)
     except Exception:
@@ -323,20 +479,20 @@ def load_adaptive_config():
 
 def clean_stale_open_orders() -> Tuple[bool, str]:
     """Cancel stale entry orders; any inability to verify/cancel blocks the trading cycle."""
-    result = run_cmd_result(okx_private_command("okx swap orders --json"), timeout=20)
-    if not result["ok"] or not isinstance(result.get("data"), list):
-        return False, result["stderr"] or result["stdout"] or "invalid open-orders response"
+    ok, orders, err = _call_exchange("open_orders")
+    if not ok or not isinstance(orders, list):
+        return False, err or "invalid open-orders response"
     now_ts = int(time.time() * 1000)
-    for order in result["data"]:
+    for order in orders:
         inst_id = str(order.get("instId") or "")
         order_id = str(order.get("ordId") or "")
         state = str(order.get("state", "live")).lower()
         created_at = int(order.get("cTime", now_ts) or now_ts)
         if state not in {"live", "partially_filled"} or not order_id or now_ts - created_at <= 240000:
             continue
-        canceled = run_cmd_result(okx_private_command(f"okx swap cancel {inst_id} --ordId {order_id} --json"), timeout=20)
-        if not canceled["ok"]:
-            return False, f"failed to cancel stale order {inst_id}/{order_id}: {canceled['stderr'] or canceled['stdout']}"
+        canceled_ok, _payload, canceled_err = _call_exchange("cancel_order", inst_id, order_id)
+        if not canceled_ok:
+            return False, f"failed to cancel stale order {inst_id}/{order_id}: {canceled_err}"
         print(f"[挂单生命周期管理] 自动撤销超时挂单: {inst_id} (ordId={order_id}, state={state})")
     return True, "open orders verified"
 
@@ -359,11 +515,11 @@ def check_black_swan_sentinel() -> Tuple[bool, str]:
     # Check news sentiment file
     if os.path.exists(NEWS_SENTIMENT_FILE):
         try:
-            with open(NEWS_SENTIMENT_FILE, "r", encoding="utf-8") as f:
-                n_data = json.load(f)
-                score = float(n_data.get("overall_score", 50.0))
-                if score <= 20.0:
-                    return True, f"🚨 监测到突发黑天鹅极度恶性利空舆情 (情绪指数: {score:.1f})，触发全网黑天鹅紧急熔断！"
+            from r20_backend.news_config import load_news_snapshot
+            n_data = load_news_snapshot(NEWS_SENTIMENT_FILE)
+            score = float(n_data.get("overall_score", 50.0))
+            if score <= 20.0:
+                return True, f"监测到极度恶性利空舆情 (情绪指数: {score:.1f})，触发新闻熔断"
         except Exception:
             pass
 
@@ -409,47 +565,44 @@ def is_circuit_breaker_active(usdt_available: float = None):
 
 def query_positions() -> Tuple[bool, List[Dict[str, Any]], str]:
     """Distinguish an exchange-confirmed empty account from a failed query."""
-    result = run_cmd_result(okx_private_command("okx account positions --json"), timeout=20)
-    if not result["ok"] or not isinstance(result.get("data"), list):
-        return False, [], result["stderr"] or result["stdout"] or "invalid positions response"
-    return True, result["data"], ""
+    ok, data, err = _call_exchange("positions")
+    if not ok or not isinstance(data, list):
+        return False, [], err or "invalid positions response"
+    return True, data, ""
 
 
 def close_position_confirmed(inst_id: str, pos_side: str, before_size: float) -> Tuple[bool, str]:
     """Close a position and verify at the exchange before changing local state."""
-    # Pre-cancel any conflicting pending/reduce-only orders for this instrument to release available size
     try:
-        ord_res = run_cmd_result(okx_private_command(f"okx swap orders --instId {inst_id} --json"), timeout=10)
-        if ord_res.get("ok") and isinstance(ord_res.get("data"), list):
-            for o in ord_res["data"]:
+        ok, orders, _err = _call_exchange("open_orders", inst_id)
+        if ok and isinstance(orders, list):
+            for o in orders:
                 o_side = str(o.get("posSide", "net")).lower()
                 if o_side in (pos_side.lower(), "net"):
                     o_id = str(o.get("ordId") or "")
                     if o_id:
-                        run_cmd_result(okx_private_command(f"okx swap cancel {inst_id} --ordId {o_id} --json"), timeout=10)
+                        _call_exchange("cancel_order", inst_id, o_id)
     except Exception as e:
         print(f"[Close Pre-Clean] Warning cancelling pending orders for {inst_id}: {e}")
 
-    result = run_cmd_result(
-        okx_private_command(f"okx swap close --instId {inst_id} --mgnMode cross --posSide {pos_side} --autoCxl --json"),
-        timeout=20,
-    )
-    if not result["ok"]:
-        return False, result["stderr"] or result["stdout"] or "close command failed"
+    ok, _payload, err = _call_exchange("close_position", inst_id, pos_side)
+    if not ok:
+        return False, err or "close command failed"
 
     saw_successful_query = False
     for _ in range(6):
         time.sleep(0.6)
-        query_ok, positions, query_error = query_positions()
+        query_ok, positions, _query_error = query_positions()
         if not query_ok:
             continue
         saw_successful_query = True
         remaining = 0.0
         for position in positions:
-            if position.get("instId") == inst_id and str(position.get("posSide", "net")).lower() == pos_side:
-                remaining = abs(float(position.get("pos", 0) or 0))
+            side, pos_val = _normalize_position_side(position)
+            if position.get("instId") == inst_id and side == pos_side:
+                remaining = pos_val
                 break
-        if remaining < max(1e-12, abs(before_size) * 0.001):
+        if remaining < max(1e-12, abs(float(before_size)) * 0.001):
             return True, "exchange position closed"
     if not saw_successful_query:
         return False, "position verification failed: no successful exchange response"
@@ -458,11 +611,11 @@ def close_position_confirmed(inst_id: str, pos_side: str, before_size: float) ->
 
 def prune_trackers(trackers: Dict[str, Any], real_pos_dict: Dict[str, Any]) -> int:
     """Remove stale/non-universe trackers while preserving every live exchange position."""
-    valid_keys = {
-        f"{inst_id}_{str(position.get('posSide', 'net')).lower()}"
-        for inst_id, position in real_pos_dict.items()
-        if float(position.get("pos", 0) or 0) > 0
-    }
+    valid_keys = set()
+    for inst_id, position in real_pos_dict.items():
+        side, pos_val = _normalize_position_side(position)
+        if pos_val > 0:
+            valid_keys.add(f"{inst_id}_{side}")
     removed = 0
     for key in list(trackers):
         if key not in valid_keys:
@@ -471,43 +624,12 @@ def prune_trackers(trackers: Dict[str, Any], real_pos_dict: Dict[str, Any]) -> i
     return removed
 
 
-def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: float, price: float, tp_px: float, sl_px: float) -> Tuple[bool, str]:
+def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size, price: float, tp_px: float, sl_px: float) -> Tuple[bool, str]:
     """Submit a protected limit order; acceptance is not treated as a fill."""
-    # Check if we are running in simulated/demo mode and price diverged significantly from demo orderbook
-    env = selected_environment()
-    effective_px = price
-    effective_tp = tp_px
-    effective_sl = sl_px
+    effective_px = float(price)
+    effective_tp = float(tp_px)
+    effective_sl = float(sl_px)
 
-    if env.simulated:
-        try:
-            demo_ticker = run_json_cmd(f"okx --demo market ticker {inst_id} --json")
-            if demo_ticker and isinstance(demo_ticker, list) and demo_ticker[0].get("last"):
-                demo_last = float(demo_ticker[0]["last"])
-                if demo_last > 0 and price > 0:
-                    divergence = abs(price - demo_last) / demo_last
-                    # If live market price diverged from demo sandbox by more than 5% (e.g. ASTER / illiquid demo pair)
-                    if divergence > 0.05:
-                        scale = demo_last / price
-                        prec = len(str(demo_ticker[0]["last"]).split(".")[1]) if "." in str(demo_ticker[0]["last"]) else 4
-                        effective_px = round(price * scale, prec)
-                        effective_tp = round(tp_px * scale, prec)
-                        effective_sl = round(sl_px * scale, prec)
-                        # Re-verify boundary constraints for demo sandbox
-                        if pos_side == "long":
-                            if effective_sl >= effective_px:
-                                effective_sl = round(effective_px * 0.98, prec)
-                            if effective_tp <= effective_px:
-                                effective_tp = round(effective_px * 1.04, prec)
-                        else:
-                            if effective_sl <= effective_px:
-                                effective_sl = round(effective_px * 1.02, prec)
-                            if effective_tp >= effective_px:
-                                effective_tp = round(effective_px * 0.96, prec)
-        except Exception:
-            pass
-
-    # Final Non-Bypassable Verification: verify actual effective price, tp and sl
     from scripts.order_risk import validate_quote_geometry_and_rr
     action_type = "BUY_LONG" if pos_side == "long" else "SELL_SHORT"
     is_valid, reason, _ = validate_quote_geometry_and_rr(action_type, effective_px, effective_tp, effective_sl)
@@ -515,15 +637,18 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: f
         print(f"[Order Rejected] 最终有效开仓报价未通过核心安全复验: {reason} (px={effective_px}, tp={effective_tp}, sl={effective_sl})")
         return False, f"最终订单核心安全复验拒绝: {reason}"
 
-    command = okx_private_command(
-        f"okx swap place --instId {inst_id} --tdMode cross --side {side} "
-        f"--posSide {pos_side} --ordType limit --px {effective_px} --sz {size:g} "
-        f"--tpTriggerPx {effective_tp} --tpOrdPx=-1 --slTriggerPx {effective_sl} --slOrdPx=-1 --json"
+    size_d = _as_decimal(size)
+    if size_d <= 0:
+        return False, "order size must be a positive BASE quantity"
+
+    ok, payload, err = _call_exchange(
+        "place_protected_limit_order",
+        inst_id, side, pos_side, size_d, effective_px, effective_tp, effective_sl,
     )
-    result = run_cmd_result(command, timeout=20)
-    if not result["ok"]:
-        return False, result["stderr"] or result["stdout"] or "order command failed"
-    payload = result.get("data")
+    if not ok:
+        if is_uncertain_submit(err):
+            return False, err or f"{UNCERTAIN_PREFIX}order submission failed"
+        return False, err or "order command failed"
     order_id = None
     if isinstance(payload, dict):
         order_id = payload.get("ordId") or payload.get("orderId")
@@ -535,7 +660,7 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: f
     elif isinstance(payload, list) and payload and isinstance(payload[0], dict):
         order_id = payload[0].get("ordId")
     if not order_id:
-        return False, "exchange accepted response without a verifiable order id"
+        return False, f"{UNCERTAIN_PREFIX}exchange accepted response without a verifiable order id"
     return True, str(order_id)
 
 
@@ -546,62 +671,92 @@ def _float_or_zero(value: Any) -> float:
         return 0.0
 
 
-def _live_oco_coverage(orders: List[Dict[str, Any]], pos_side: str) -> float:
-    """Return contract size covered by live, reduce-only OCO TP/SL orders."""
-    coverage = 0.0
-    close_side = "sell" if pos_side == "long" else "buy"
+def _protection_is_live_pair(order: Dict[str, Any], pos_side: str) -> bool:
+    if str(order.get("state", "live")).lower() not in {"live", "effective"}:
+        return False
+    if str(order.get("posSide", "net")).lower() not in {pos_side, "net"}:
+        return False
+    ord_type = str(order.get("ordType", "")).lower()
+    if ord_type and ord_type not in _PROTECTION_TYPES:
+        return False
+    if not order.get("tpTriggerPx") or not order.get("slTriggerPx"):
+        return False
+    return True
+
+
+def _live_protection_coverage(orders: List[Dict[str, Any]], pos_side: str) -> Tuple[Decimal, bool]:
+    coverage = Decimal("0")
+    close_all = False
     for order in orders:
-        if str(order.get("state", "live")).lower() not in {"live", "effective"}:
+        if not _protection_is_live_pair(order, pos_side):
             continue
-        if str(order.get("posSide", "net")).lower() not in {pos_side, "net"}:
-            continue
-        if str(order.get("side", close_side)).lower() != close_side:
-            continue
-        if not order.get("tpTriggerPx") or not order.get("slTriggerPx"):
-            continue
-        reduce_only = str(order.get("reduceOnly", "true")).lower() in {"true", "1", "yes"}
-        if not reduce_only:
-            continue
-        coverage += _float_or_zero(order.get("sz") or order.get("actualSz"))
-    return coverage
+        if order.get("closeAll") is True:
+            close_all = True
+        coverage += _as_decimal(order.get("sz") or order.get("actualSz") or 0)
+    return coverage, close_all
+
+
 
 
 def ensure_cloud_position_protection(inst_id: str, pos_side: str, size: float, tp_px: float, sl_px: float) -> Tuple[bool, str]:
-    """Verify 100% live cloud OCO coverage, repair any gap, and verify again."""
-    query = run_cmd_result(okx_private_command(f"okx swap algo orders --instId {inst_id} --json"), timeout=20)
-    if not query["ok"] or not isinstance(query.get("data"), list):
-        return False, f"unable to verify cloud OCO: {query['stderr'] or query['stdout'] or 'invalid response'}"
-    coverage = _live_oco_coverage(query["data"], pos_side)
-    missing = max(0.0, float(size) - coverage)
-    if missing <= max(1e-12, float(size) * 0.001):
-        return True, f"cloud OCO coverage verified ({coverage:g}/{size:g})"
-
-    close_side = "sell" if pos_side == "long" else "buy"
-    command = okx_private_command(
-        f"okx swap algo place --instId {inst_id} --side {close_side} --posSide {pos_side} "
-        f"--tdMode cross --ordType oco --sz {missing:g} --tpTriggerPx {tp_px} --tpOrdPx=-1 "
-        f"--slTriggerPx {sl_px} --slOrdPx=-1 --reduceOnly --cxlOnClosePos --json"
-    )
-    placed = run_cmd_result(command, timeout=20)
-    if not placed["ok"]:
-        return False, f"cloud OCO repair failed: {placed['stderr'] or placed['stdout'] or 'order rejected'}"
-
+    """Verify 100% live dual-leg coverage, repair any gap, and verify again."""
+    ok, orders, err = _call_exchange("protection_orders", inst_id)
+    if not ok or not isinstance(orders, list):
+        return False, f"unable to verify cloud protection: {err or 'invalid response'}"
+    coverage, close_all = _live_protection_coverage(orders, pos_side)
+    size_d = _as_decimal(size)
+    if close_all or coverage + _qty_epsilon(size_d) >= size_d:
+        return True, f"cloud protection coverage verified ({coverage:g}/{size:g})"
+    missing = size_d - coverage
+    if missing <= 0:
+        return True, f"cloud protection coverage verified ({coverage:g}/{size:g})"
+    placed_ok, _placed, placed_err = _call_exchange("place_protection", inst_id, pos_side, missing, tp_px, sl_px)
+    if not placed_ok:
+        return False, f"cloud protection repair failed: {placed_err or 'order rejected'}"
     for _ in range(4):
         time.sleep(0.5)
-        verify = run_cmd_result(okx_private_command(f"okx swap algo orders --instId {inst_id} --json"), timeout=20)
-        if not verify["ok"] or not isinstance(verify.get("data"), list):
+        verify_ok, verify_orders, _verify_err = _call_exchange("protection_orders", inst_id)
+        if not verify_ok or not isinstance(verify_orders, list):
             continue
-        verified_coverage = _live_oco_coverage(verify["data"], pos_side)
-        if verified_coverage + max(1e-12, float(size) * 0.001) >= float(size):
-            return True, f"cloud OCO repaired and verified ({verified_coverage:g}/{size:g})"
-    return False, "cloud OCO repair was submitted but full coverage could not be verified"
+        verified_coverage, verified_close_all = _live_protection_coverage(verify_orders, pos_side)
+        if verified_close_all or verified_coverage + _qty_epsilon(size_d) >= size_d:
+            return True, f"cloud protection repaired and verified ({verified_coverage:g}/{size:g})"
+    return False, "cloud protection repair was submitted but full coverage could not be verified"
+
+
+def clean_orphan_protections(real_pos_dict: Dict[str, Any]) -> Tuple[bool, str]:
+    inst_ids = {str(item.get("instId") or "") for item in TARGET_INSTRUMENTS if item.get("instId")}
+    inst_ids.update(str(k) for k in real_pos_dict.keys())
+    inst_ids.discard("")
+    for inst_id in inst_ids:
+        ok, orders, err = _call_exchange("protection_orders", inst_id)
+        if not ok:
+            return False, err or f"unable to list protection orders for {inst_id}"
+        if not isinstance(orders, list):
+            return False, f"invalid protection orders for {inst_id}"
+        pos = real_pos_dict.get(inst_id)
+        live_side, live_sz = _normalize_position_side(pos) if pos else ("", 0.0)
+        for order in orders:
+            if str(order.get("state", "live")).lower() not in {"live", "effective"}:
+                continue
+            algo_id = str(order.get("algoId") or "")
+            if not algo_id:
+                continue
+            o_side = str(order.get("posSide", "net")).lower()
+            orphan = live_sz <= 0 or (o_side not in {live_side, "net"} and bool(live_side))
+            if not orphan:
+                continue
+            canceled_ok, _payload, canceled_err = _call_exchange("cancel_protection", inst_id, algo_id)
+            if not canceled_ok:
+                return False, f"failed to cancel orphan protection {inst_id}/{algo_id}: {canceled_err}"
+    return True, "orphan protections cleaned"
 
 
 def build_signal_snapshot(f: dict) -> dict:
     """抽取开仓时刻的因果动力学与数理快照，供自进化复盘做真实因果归因（而非事后倒推）。"""
-    calc = f.get("calculus_dynamics") or {}
-    prob = f.get("probability_theory") or {}
-    integ = f.get("definite_integrals") or {}
+    calc = f.get("calculus") or f.get("calculus_dynamics") or {}
+    prob = calc.get("probability_theory") or f.get("probability_theory") or {}
+    integ = calc.get("definite_integrals") or f.get("definite_integrals") or {}
     micro = f.get("microstructure") or {}
     money = f.get("smart_money_derivatives") or {}
     trend = f.get("trend_momentum") or {}
@@ -626,7 +781,7 @@ def build_signal_snapshot(f: dict) -> dict:
         "energy_integral": integ.get("energy_integral"),
         "deviation_area_integral": integ.get("deviation_area_integral"),
         "adx": trend.get("adx"),
-        "rsi": trend.get("rsi"),
+        "rsi": f.get("rsi", trend.get("rsi")),
         "funding_rate": micro.get("funding_rate"),
         "composite_alpha_score": f.get("composite_alpha_score"),
         "smart_money_net": money.get("net_flow") or money.get("taker_net"),
@@ -634,17 +789,26 @@ def build_signal_snapshot(f: dict) -> dict:
 
 
 def record_signal_snapshot(snap: dict) -> None:
-    """把开仓时刻的数理快照写入 signal_journal.json，保留最近 500 条供复盘 join。"""
+    """Record submitted-order evidence, not a fill; scoped to the frozen account."""
+    temp_path = None
     try:
+        _ensure_state_dir(SIGNAL_JOURNAL_FILE)
         journal = []
         if os.path.exists(SIGNAL_JOURNAL_FILE):
             with open(SIGNAL_JOURNAL_FILE, "r", encoding="utf-8") as handle:
                 journal = json.load(handle)
         journal.append(snap)
-        with open(SIGNAL_JOURNAL_FILE, "w", encoding="utf-8") as handle:
-            json.dump(journal[-500:], handle, ensure_ascii=False, indent=2)
-    except Exception as e:
-        print(f"Failed to record signal snapshot: {e}")
+        fd, temp_path = tempfile.mkstemp(prefix=".signals-", suffix=".tmp", dir=os.path.dirname(SIGNAL_JOURNAL_FILE))
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(journal[-500:], handle, ensure_ascii=False, indent=2, allow_nan=False)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, SIGNAL_JOURNAL_FILE)
+    except (OSError, ValueError, TypeError) as exc:
+        print(f"Failed to record signal snapshot: {exc}")
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.unlink(temp_path)
 
 
 def record_trade(trade_data):
@@ -817,7 +981,7 @@ def fetch_single_instrument_data(item, all_positions, usdt_available):
     inst_id = item["instId"]
     name = item["name"]
     asset_type = item["type"]
-    base_sz = item["base_sz"]
+    base_qty = pool_base_qty(item)
     # 交易所最小下单量与步长（OKX 多数永续为 0.01 张），此前被代码的 int()+max(1,..) 完全忽略
     min_sz = float(item.get("minSz", 1) or 1)
 
@@ -825,10 +989,11 @@ def fetch_single_instrument_data(item, all_positions, usdt_available):
         "instId": inst_id,
         "name": name,
         "type": asset_type,
-        "base_sz": base_sz,
-        "sz": base_sz,
+        "base_sz": base_qty,
+        "base_qty": base_qty,
+        "sz": Decimal("0"),
         "precision": item["precision"],
-        "ctVal": item["ctVal"],
+        "ctVal": item.get("ctVal", 1),
         "risk_per_trade_usd": effective_risk_per_trade(item.get("risk_per_trade_usd", 15.0), usdt_available),
         "minSz": min_sz,
         # 标的分级信息随因子包下发，供拦截插件与提示词按「层级」而非写死币种名做通用判断
@@ -875,18 +1040,20 @@ def fetch_single_instrument_data(item, all_positions, usdt_available):
     # Match existing position
     for p in all_positions:
         if p.get("instId") == inst_id:
-            pos_val = float(p.get("pos", 0))
+            side, pos_val = _normalize_position_side(p)
             if pos_val != 0:
                 f["position"] = {
                     "instId": inst_id,
                     "name": name,
-                    "side": p.get("posSide", p.get("side", "")),
+                    "side": side,
                     "pos": pos_val,
                     "avgPx": float(p.get("avgPx", 0)),
                     "markPx": float(p.get("markPx", p.get("last", 0)) or 0),
                     "upl": float(p.get("upl", 0)),
                     "uplRatio": float(p.get("uplRatio", 0) or 0),
-                    "lever": p.get("lever", "3")
+                    "lever": p.get("lever", "3"),
+                    "margin": float(p.get("margin", 0) or 0),
+                    "posSide": side,
                 }
                 break
 
@@ -941,13 +1108,10 @@ def fetch_single_instrument_data(item, all_positions, usdt_available):
         f["askPx"] = f["price"]
         # Fetch Real-time Orderbook Ticker BBO (Best Bid & Ask) for Precision Limit Placement
         try:
-            req_t = urllib.request.Request(f"https://www.okx.com/api/v5/market/ticker?instId={inst_id}", headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req_t, timeout=3) as response_t:
-                d_t = json.loads(response_t.read().decode("utf-8"))
-                if d_t.get("code") == "0" and "data" in d_t and len(d_t["data"]) > 0:
-                    t_item = d_t["data"][0]
-                    f["bidPx"] = float(t_item.get("bidPx", f["price"]) or f["price"])
-                    f["askPx"] = float(t_item.get("askPx", f["price"]) or f["price"])
+            ok, t_item, _err = _call_exchange("ticker", inst_id)
+            if ok and isinstance(t_item, dict):
+                f["bidPx"] = float(t_item.get("bidPx", f["price"]) or f["price"])
+                f["askPx"] = float(t_item.get("askPx", f["price"]) or f["price"])
         except Exception:
             pass
 
@@ -1022,11 +1186,11 @@ def fetch_single_instrument_data(item, all_positions, usdt_available):
     # 4. Load Real-time News Sentiment
     if os.path.exists(NEWS_SENTIMENT_FILE):
         try:
-            with open(NEWS_SENTIMENT_FILE, "r", encoding="utf-8") as f_news:
-                n_data = json.load(f_news)
-                coins_s = n_data.get("coins_sentiment", {})
-                if name in coins_s:
-                    f["sentiment_score"] = float(coins_s[name].get("sentiment_factor_score", 0.0) or 0.0)
+            from r20_backend.news_config import load_news_snapshot
+            n_data = load_news_snapshot(NEWS_SENTIMENT_FILE)
+            coins_s = n_data.get("coins_sentiment", {})
+            if name in coins_s and not n_data.get("sentiment_stale"):
+                f["sentiment_score"] = float(coins_s[name].get("sentiment_factor_score", 0.0) or 0.0)
         except Exception:
             pass
 
@@ -1042,19 +1206,32 @@ def fetch_single_instrument_data(item, all_positions, usdt_available):
     except Exception:
         pass
 
-    # 6. Dynamic Equal-Risk Position Sizing with AI Self-Evolution Kelly Multipliers
+    # 6. Dynamic Equal-Risk Position Sizing in BASE units (no contract rounding).
     adaptive_cfg = load_adaptive_config()
     pos_multipliers = adaptive_cfg.get("position_size_multipliers", {})
     pos_mult = float(pos_multipliers.get(f["name"], 1.0))
 
     sl_mult = ASSET_CLASS_PROFILES.get(asset_type, {}).get("sl_atr_mult", 1.3)
     atr_val = max(f["atr"], f["price"] * 0.005)
-    if f["ctVal"] > 0 and atr_val > 0:
-        raw_dyn_sz = (f["risk_per_trade_usd"] * pos_mult) / (f["ctVal"] * atr_val * sl_mult)
-        f["sz"] = quantize_size(raw_dyn_sz, min_sz) if pos_mult > 0 else 0.0
+    filters = instrument_filters(inst_id, item)
+    f["lotSz"] = filters["lotSz"]
+    f["minSz"] = filters["minSz"]
+    f["tickSz"] = filters["tickSz"]
+    f["minNotional"] = filters["minNotional"]
+    if pos_mult > 0 and atr_val > 0 and f["price"] > 0:
+        f["sz"] = plan_base_quantity(
+            price=f["price"],
+            available_margin=_as_decimal(usdt_available) * _as_decimal(MAX_MARGIN_EQUITY_RATIO),
+            leverage=MAX_LEVERAGE,
+            lot_sz=filters["lotSz"],
+            min_sz=filters["minSz"],
+            min_notional=filters["minNotional"],
+            risk_usd=_as_decimal(f["risk_per_trade_usd"]) * _as_decimal(pos_mult),
+            stop_distance=_as_decimal(atr_val) * _as_decimal(sl_mult),
+        )
     else:
-        f["sz"] = quantize_size(base_sz * pos_mult, min_sz) if pos_mult > 0 else 0.0
-    # 基准风险额推导出的数量不足交易所最小下单步长 -> 标记为资金规模不匹配，由上层跳过而非放大成 1 张
+        f["sz"] = Decimal("0")
+    # 基准风险额推导的数量不足交易所最小下单步长 -> 标记为资金规模不匹配，由上层跳过而非放大
     f["size_below_exchange_min"] = bool(f["sz"] <= 0 and pos_mult > 0)
 
     market_data_valid = (
@@ -1068,34 +1245,92 @@ def fetch_single_instrument_data(item, all_positions, usdt_available):
     )
     f["market_data_valid"] = market_data_valid
     if not market_data_valid:
-        f["sz"] = 0
+        f["sz"] = Decimal("0")
 
     return f
 
 # =============================================================================
 # Trailing Stop & Risk Management
 # =============================================================================
+def _sl_protects_target(order: Dict[str, Any], new_sl: Any, pos_side: str) -> bool:
+    current = _as_decimal(order.get("slTriggerPx"))
+    target = _as_decimal(new_sl)
+    if current <= 0 or target <= 0:
+        return False
+    if pos_side == "long":
+        return current >= target
+    if pos_side == "short":
+        return current <= target
+    return current == target
+
+
+def _cloud_stop_retry_pending(tracker: Dict[str, Any], target_sl: float) -> bool:
+    pending = _as_decimal(tracker.get("pendingCloudStopPx"))
+    confirmed = _as_decimal(tracker.get("cloudStopPx"))
+    return (
+        pending > 0 and pending != confirmed
+    ) or (
+        tracker.get("cloudStopSynced") is False and _as_decimal(target_sl) != confirmed
+    )
+
+
+def _record_cloud_stop_sync(tracker: Dict[str, Any], inst_id: str, pos_side: str, new_sl: float, reason: str) -> bool:
+    synced = sync_cloud_algo_stop(inst_id, pos_side, new_sl, reason=reason)
+    if synced:
+        tracker["cloudStopPx"] = new_sl
+        tracker["cloudStopSynced"] = True
+        tracker.pop("pendingCloudStopPx", None)
+    else:
+        tracker["pendingCloudStopPx"] = new_sl
+        tracker["cloudStopSynced"] = False
+    return synced
+
+
 def sync_cloud_algo_stop(inst_id: str, pos_side: str, new_sl: float, reason: str = "") -> bool:
-    """Sync ratchet dynamic stop to OKX cloud conditional OCO order.
-    
-    Ensures that once a position reaches Breakeven (Tier 1) or Profit-Lock (Tier 2),
-    the cloud trigger order is immediately amended without waiting for the 15-minute LLM cycle.
+    """Sync ratchet stop to live cloud protection (OKX OCO or Binance paired conditional).
+
+    DEMO is a real venue: success requires a post-update query whose slTriggerPx matches.
+    Empty, failed, or unconfirmed responses are never treated as success.
     """
-    if SIMULATED_TRADING:
-        return True
+    _ = reason
+    side = str(pos_side or "").lower()
+    target_sl = _as_decimal(new_sl)
+    if target_sl <= 0 or side not in {"long", "short", "net"}:
+        return False
     try:
-        algo_orders = run_json_cmd(okx_private_command(f"okx swap algo orders --instId {inst_id} --json")) or []
-        live_algo = next((o for o in algo_orders if o.get("state") == "live" and o.get("posSide") == pos_side and o.get("slTriggerPx")), None)
-        if not live_algo:
+        ok, algo_orders, _err = _call_exchange("protection_orders", inst_id)
+        if not ok or not isinstance(algo_orders, list) or not algo_orders:
             return False
-        current_cloud_sl = float(live_algo.get("slTriggerPx") or 0.0)
-        # Avoid redundant amend if price already matches
-        if abs(current_cloud_sl - new_sl) < 1e-6:
+        live_algos = [
+            order for order in algo_orders
+            if isinstance(order, dict) and _protection_is_live_pair(order, side) and order.get("algoId")
+        ]
+        if not live_algos:
+            return False
+        changed = False
+        for order in live_algos:
+            if _sl_protects_target(order, target_sl, side):
+                continue
+            result_ok, result, _result_err = _call_exchange("amend_stop", inst_id, order["algoId"], target_sl)
+            if not result_ok or not result:
+                return False
+            changed = True
+        if not changed:
             return True
-        result = run_json_cmd(okx_private_command(f"okx swap algo amend --instId {inst_id} --algoId {live_algo['algoId']} --newSlTriggerPx {new_sl} --newSlOrdPx=-1 --json"))
-        return result is not None
+        verify_ok, verify_orders, _verify_err = _call_exchange("protection_orders", inst_id)
+        if not verify_ok or not isinstance(verify_orders, list):
+            return False
+        confirmed = {
+            str(order["algoId"]): order for order in verify_orders
+            if isinstance(order, dict) and order.get("algoId") and _protection_is_live_pair(order, side)
+        }
+        return all(
+            str(order["algoId"]) in confirmed
+            and _sl_protects_target(confirmed[str(order["algoId"])], target_sl, side)
+            for order in live_algos
+        )
     except Exception as e:
-        print(f"[Cloud OCO Sync Error] {inst_id} {pos_side}: {e}")
+        print(f"[Cloud protection sync error] {inst_id} {pos_side}: {e}")
         return False
 
 
@@ -1110,7 +1345,6 @@ def manage_position_tp_and_trailing(f, curr_pos, trackers, timestamp_full, execu
     profile = ASSET_CLASS_PROFILES.get(asset_type, ASSET_CLASS_PROFILES["crypto"])
     atr = max(f["atr"], cur_px * 0.005)
     prec = f["precision"]
-    ct_val = f["ctVal"]
     
     pos_sz = float(curr_pos["pos"])
     is_long = "long" in curr_pos["side"].lower()
@@ -1136,20 +1370,9 @@ def manage_position_tp_and_trailing(f, curr_pos, trackers, timestamp_full, execu
             "lowWaterMark": cur_px,
             "trailingStopPx": round((entry_px - atr * profile["sl_atr_mult"]) if is_long else (entry_px + atr * profile["sl_atr_mult"]), prec),
             "takeProfitPx": round((entry_px + max(atr * profile["tp_atr_mult"], entry_px * profile["min_profit_ratio"])) if is_long else (entry_px - max(atr * profile["tp_atr_mult"], entry_px * profile["min_profit_ratio"])), prec),
-            "signal_snapshot": build_signal_snapshot(f),
+            "observation_snapshot": build_signal_snapshot(f),
             "stage_desc": "持有监控中"
         }
-        record_signal_snapshot({
-            "instId": inst_id,
-            "name": name,
-            "side": curr_pos["side"],
-            "entryTs": now_ts,
-            "entryTime": timestamp_full,
-            "entryPx": entry_px,
-            "sz": pos_sz,
-            "policy_version": f.get("policy_version", ""),
-            "snapshot": trackers[pos_key]["signal_snapshot"],
-        })
 
     t = trackers[pos_key]
     if not t.get("policy_version") and f.get("policy_version"):
@@ -1180,7 +1403,7 @@ def manage_position_tp_and_trailing(f, curr_pos, trackers, timestamp_full, execu
         if not closed:
             executed_actions.append(f"[{name}] 硬止损平仓失败，仓位仍保留: {close_detail}")
             return False, "硬止损平仓失败"
-        close_fee = (pos_sz * ct_val * cur_px) * TAKER_FEE_RATE
+        close_fee = _position_close_fee(pos_sz, cur_px)
         pnl_val = curr_pos["upl"]
         executed_actions.append(f"[{name}] 🛑 触发硬止损 {hard_stop_px} 并确认平仓 (净盈亏: {pnl_val:+.2f}U)")
         record_trade({
@@ -1223,7 +1446,7 @@ def manage_position_tp_and_trailing(f, curr_pos, trackers, timestamp_full, execu
             "action": "平仓", "action_type": "保护失效退出",
             "direction": f"平{'多' if is_long else '空'}", "side": f"{'多' if is_long else '空'}单保护失效退出",
             "size": pos_sz, "sz": pos_sz, "price": cur_px,
-            "fee": (pos_sz * ct_val * cur_px) * TAKER_FEE_RATE, "pnl": pnl_val,
+            "fee": _position_close_fee(pos_sz, cur_px), "pnl": pnl_val,
             "remark": f"云端 OCO 无法达到全仓覆盖，交易所确认安全平仓：{protection_detail}"
         })
         add_stop_cooldown(inst_id, "long" if is_long else "short", "云端保护失效")
@@ -1240,7 +1463,7 @@ def manage_position_tp_and_trailing(f, curr_pos, trackers, timestamp_full, execu
         if not closed:
             executed_actions.append(f"[{name}] 时间止损平仓失败，仓位仍保留: {close_detail}")
             return False, "平仓失败"
-        close_fee = (pos_sz * ct_val * cur_px) * TAKER_FEE_RATE
+        close_fee = _position_close_fee(pos_sz, cur_px)
         executed_actions.append(f"[{name}] ⌛ 超过 {TIME_STOP_HOURS:g} 小时无波动横盘，时间止损平仓释放保证金")
         record_trade({
             "is_trade": True,
@@ -1284,12 +1507,10 @@ def manage_position_tp_and_trailing(f, curr_pos, trackers, timestamp_full, execu
             dynamic_floor_sl = max(dynamic_floor_sl, round(entry_px + 0.0020 * entry_px, prec))
             t["stage_desc"] = f"已推保本无风险 (保底止损 {dynamic_floor_sl})"
         
-        # If dynamic floor stop ratcheted up, commit and sync to cloud OCO
-        if dynamic_floor_sl > old_sl and old_sl > 0:
-            t["trailingStopPx"] = dynamic_floor_sl
-            sync_cloud_algo_stop(inst_id, "long", dynamic_floor_sl, reason=t["stage_desc"])
-        else:
-            t["trailingStopPx"] = dynamic_floor_sl
+        # If dynamic floor stop ratcheted up, commit and sync to cloud protection
+        t["trailingStopPx"] = dynamic_floor_sl
+        if (dynamic_floor_sl > old_sl and old_sl > 0) or _cloud_stop_retry_pending(t, dynamic_floor_sl):
+            _record_cloud_stop_sync(t, inst_id, "long", dynamic_floor_sl, t["stage_desc"])
 
         # A. Hit Ratchet Floor Stop (Locked Profit Trigger)
         if cur_px <= dynamic_floor_sl and peak_profit_px >= tier1_breakeven_trigger:
@@ -1297,7 +1518,7 @@ def manage_position_tp_and_trailing(f, curr_pos, trackers, timestamp_full, execu
             if not closed:
                 executed_actions.append(f"[{name}] 锁利平多失败，仓位仍保留: {close_detail}")
                 return False, "平仓失败"
-            close_fee = (pos_sz * ct_val * cur_px) * TAKER_FEE_RATE
+            close_fee = _position_close_fee(pos_sz, cur_px)
             pnl_val = curr_pos["upl"]
             executed_actions.append(f"[{name}] 🛡️ 触发阶梯动态锁利平仓 (净盈亏: {pnl_val:+.2f}U)")
             record_trade({
@@ -1327,7 +1548,7 @@ def manage_position_tp_and_trailing(f, curr_pos, trackers, timestamp_full, execu
             if not closed:
                 executed_actions.append(f"[{name}] 动能见顶移动止盈失败，仓位仍保留: {close_detail}")
                 return False, "平仓失败"
-            close_fee = (pos_sz * ct_val * cur_px) * TAKER_FEE_RATE
+            close_fee = _position_close_fee(pos_sz, cur_px)
             pnl_val = curr_pos["upl"]
             executed_actions.append(f"[{name}] 🎯 触发高点回撤动能止盈 (净盈亏: {pnl_val:+.2f}U)")
             record_trade({
@@ -1362,12 +1583,10 @@ def manage_position_tp_and_trailing(f, curr_pos, trackers, timestamp_full, execu
             dynamic_floor_sl = min(dynamic_floor_sl, round(entry_px - 0.0020 * entry_px, prec))
             t["stage_desc"] = f"已推保本无风险 (保底止损 {dynamic_floor_sl})"
         
-        # If dynamic floor stop ratcheted down (tightened for short), commit and sync to cloud OCO
-        if dynamic_floor_sl < old_sl and old_sl > 0:
-            t["trailingStopPx"] = dynamic_floor_sl
-            sync_cloud_algo_stop(inst_id, "short", dynamic_floor_sl, reason=t["stage_desc"])
-        else:
-            t["trailingStopPx"] = dynamic_floor_sl
+        # If dynamic floor stop ratcheted down (tightened for short), commit and sync to cloud protection
+        t["trailingStopPx"] = dynamic_floor_sl
+        if (dynamic_floor_sl < old_sl and old_sl > 0) or _cloud_stop_retry_pending(t, dynamic_floor_sl):
+            _record_cloud_stop_sync(t, inst_id, "short", dynamic_floor_sl, t["stage_desc"])
 
         # A. Hit Ratchet Floor Stop (Locked Profit Trigger)
         if cur_px >= dynamic_floor_sl and peak_profit_px >= tier1_breakeven_trigger:
@@ -1375,7 +1594,7 @@ def manage_position_tp_and_trailing(f, curr_pos, trackers, timestamp_full, execu
             if not closed:
                 executed_actions.append(f"[{name}] 锁利平空失败，仓位仍保留: {close_detail}")
                 return False, "平仓失败"
-            close_fee = (pos_sz * ct_val * cur_px) * TAKER_FEE_RATE
+            close_fee = _position_close_fee(pos_sz, cur_px)
             pnl_val = curr_pos["upl"]
             executed_actions.append(f"[{name}] 🛡️ 触发阶梯动态锁利平仓 (净盈亏: {pnl_val:+.2f}U)")
             record_trade({
@@ -1405,7 +1624,7 @@ def manage_position_tp_and_trailing(f, curr_pos, trackers, timestamp_full, execu
             if not closed:
                 executed_actions.append(f"[{name}] 动能见底移动止盈失败，仓位仍保留: {close_detail}")
                 return False, "平仓失败"
-            close_fee = (pos_sz * ct_val * cur_px) * TAKER_FEE_RATE
+            close_fee = _position_close_fee(pos_sz, cur_px)
             pnl_val = curr_pos["upl"]
             executed_actions.append(f"[{name}] 🎯 触发低点反弹动能止盈 (净盈亏: {pnl_val:+.2f}U)")
             record_trade({
@@ -1491,13 +1710,19 @@ def execute_ai_position_management(real_pos_dict, trackers, timestamp_full, exec
             if not tightens_risk:
                 executed_actions.append(f"[{name}] 浮盈空间不足或与现价缓冲过近({current_px} vs 拟调SL {new_sl})，拒绝过早收紧止损")
                 continue
-            algo_orders = run_json_cmd(okx_private_command(f"okx swap algo orders --instId {inst_id} --json")) or []
-            live_algo = next((o for o in algo_orders if o.get("state") == "live" and o.get("posSide") == pos_side and o.get("slTriggerPx")), None)
+            ok, algo_orders, err = _call_exchange("protection_orders", inst_id)
+            if not ok or not isinstance(algo_orders, list):
+                executed_actions.append(f"[{name}] 无法读取云端保护单，原保护单保持不变: {err}")
+                continue
+            live_algo = next(
+                (o for o in algo_orders if _protection_is_live_pair(o, pos_side) and o.get("algoId")),
+                None,
+            )
             if not live_algo:
                 executed_actions.append(f"[{name}] 未找到真实云端止损单，无法更新")
                 continue
-            result = run_json_cmd(okx_private_command(f"okx swap algo amend --instId {inst_id} --algoId {live_algo['algoId']} --newSlTriggerPx {new_sl} --newSlOrdPx=-1 --json"))
-            if result is not None:
+            result_ok, _result, result_err = _call_exchange("amend_stop", inst_id, live_algo["algoId"], new_sl)
+            if result_ok:
                 executed_actions.append(f"[{name}] 云端止损收紧至 {new_sl}: {reason}")
                 tracker = trackers.get(f"{inst_id}_{pos_side}")
                 if tracker:
@@ -1508,7 +1733,7 @@ def execute_ai_position_management(real_pos_dict, trackers, timestamp_full, exec
                 except Exception:
                     pass
             else:
-                executed_actions.append(f"[{name}] 云端止损更新失败，原保护单保持不变")
+                executed_actions.append(f"[{name}] 云端止损更新失败，原保护单保持不变: {result_err}")
 
 # =============================================================================
 # 🧠 R20 Quantum Trader v6.8.1 Multi-Factor Scoring & Strategy Setup Classifier
@@ -1730,15 +1955,22 @@ def evaluate_asset_signal(f):
 def single_trader_cycle(func):
     """Prevent cron/manual overlap across the complete order-management cycle."""
     def wrapped(*args, **kwargs):
-        os.makedirs(DATA_DIR, exist_ok=True)
-        lock_handle = open(TRADER_LOCK_FILE, "a+", encoding="utf-8")
+        cycle_environment = None
+        lock_handle = None
         try:
-            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            lock_handle.close()
-            print("[Trader] Skip: another portfolio cycle is still running")
-            return None
-        try:
+            os.makedirs(DATA_DIR, exist_ok=True)
+            _ensure_state_dir(TRADER_LOCK_FILE)
+            lock_handle = open(TRADER_LOCK_FILE, "a+", encoding="utf-8")
+            try:
+                acquire(lock_handle, blocking=False)
+            except BlockingIOError:
+                lock_handle.close()
+                lock_handle = None
+                print("[Trader] Skip: another portfolio cycle is still running")
+                return None
+            # Match the control-plane configuration lock before selecting an account.
+            cycle_environment = freeze_environment()
+            refresh_account_state_paths(cycle_environment)
             now_slot = int(time.time()) // 900
             if os.path.exists(TRADER_SLOT_FILE):
                 try:
@@ -1752,24 +1984,208 @@ def single_trader_cycle(func):
                 except Exception:
                     pass
             with open(TRADER_SLOT_FILE, "w", encoding="utf-8") as f:
-                json.dump({"slot": now_slot, "started_at": int(time.time()), "pid": os.getpid()}, f)
+                json.dump({
+                    "slot": now_slot,
+                    "started_at": int(time.time()),
+                    "pid": os.getpid(),
+                    "identity": cycle_environment.identity,
+                    "exchange": cycle_environment.exchange,
+                    "mode": cycle_environment.mode,
+                }, f)
             lock_handle.seek(0)
             lock_handle.truncate()
             lock_handle.write(str(os.getpid()))
             lock_handle.flush()
-            cycle_environment = freeze_okx_environment()
-            print(f"[Trader] OKX environment frozen for cycle: {cycle_environment.mode.upper()} / {cycle_environment.identity}")
+            print(
+                f"[Trader] environment frozen for cycle: "
+                f"{cycle_environment.exchange}:{cycle_environment.mode.upper()} / {cycle_environment.identity}"
+            )
             return func(*args, **kwargs)
         finally:
-            unfreeze_okx_environment()
-            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
-            lock_handle.close()
+            if lock_handle is not None:
+                try:
+                    release(lock_handle)
+                except OSError:
+                    pass
+                lock_handle.close()
+            if cycle_environment is not None:
+                unfreeze_environment()
     return wrapped
 
 
 # =============================================================================
 # Master Portfolio Execution Loop
 # =============================================================================
+def _quantize_px(px, tick, prec) -> float:
+    tick_d = _as_decimal(tick)
+    if tick_d > 0:
+        q = floor_to_step(px, tick_d)
+        return float(q) if q > 0 else float(_as_decimal(px))
+    return round(float(px), int(prec) if prec is not None else 4)
+
+
+def submit_entry_with_confirmed_leverage(
+    inst_id: str,
+    side: str,
+    pos_side: str,
+    f: Dict[str, Any],
+    ai_decision: Dict[str, Any],
+    ai_reason: str,
+    strat_tag: str,
+    usdt_available: float,
+    planned_margin: float,
+    ai_lever: float,
+    is_scale_in: bool,
+    curr_margin: float,
+    trackers: Dict[str, Any],
+    executed_actions: List[str],
+    pending_inst_ids: set,
+    tp_dist: float,
+    sl_dist: float,
+    prec: int,
+) -> str:
+    """Set+confirm leverage, size in BASE, then submit. Never retry an uncertain send."""
+
+    remaining_cap = remaining_asset_margin(usdt_available, curr_margin)
+
+
+    usable_margin = min(
+        _as_decimal(planned_margin) if planned_margin and planned_margin > 0 else _as_decimal(usdt_available),
+        _as_decimal(usdt_available),
+        _as_decimal(usdt_available) * _as_decimal(MAX_MARGIN_EQUITY_RATIO),
+        _as_decimal(remaining_cap),
+    )
+    risk_budget = effective_risk_per_trade(f.get("risk_per_trade_usd", 0), usdt_available)
+    if usable_margin <= 0 or not math.isfinite(risk_budget) or risk_budget <= 0:
+        executed_actions.append(f"[{f['name']}] 无可用保证金或有效风险预算，拒绝开仓")
+        return "rejected"
+    filters = {
+        "lotSz": _as_decimal(f.get("lotSz")),
+        "minSz": _as_decimal(f.get("minSz")),
+        "tickSz": _as_decimal(f.get("tickSz")),
+        "minNotional": _as_decimal(f.get("minNotional")),
+    }
+    if filters["lotSz"] <= 0 or filters["minSz"] <= 0:
+        live = instrument_filters(inst_id)
+        filters.update(live)
+    if filters["lotSz"] <= 0 or filters["minSz"] <= 0 or filters["tickSz"] <= 0:
+        executed_actions.append(f"[{f['name']}] 交易所数量或价格精度不可用，拒绝开仓")
+        return "rejected"
+    tick = filters["tickSz"]
+    if pos_side == "long":
+        raw_px = ai_decision.get("entry_price") if (ai_decision and ai_decision.get("entry_price", 0) > 0) else (f.get("bidPx") or f["price"])
+        limit_px = _quantize_px(raw_px, tick, prec)
+        tp_px = _quantize_px(ai_decision.get("take_profit_price") if (ai_decision and ai_decision.get("take_profit_price", 0) > 0) else (limit_px + tp_dist), tick, prec)
+        sl_px = _quantize_px(ai_decision.get("stop_loss_price") if (ai_decision and ai_decision.get("stop_loss_price", 0) > 0) else (limit_px - sl_dist), tick, prec)
+        if sl_px >= limit_px:
+            sl_px = _quantize_px(limit_px - max(sl_dist, f["price"] * 0.012), tick, prec)
+        if tp_px <= limit_px:
+            tp_px = _quantize_px(limit_px + max(tp_dist, f["price"] * 0.024), tick, prec)
+    else:
+        raw_px = ai_decision.get("entry_price") if (ai_decision and ai_decision.get("entry_price", 0) > 0) else (f.get("askPx") or f["price"])
+        limit_px = _quantize_px(raw_px, tick, prec)
+        tp_px = _quantize_px(ai_decision.get("take_profit_price") if (ai_decision and ai_decision.get("take_profit_price", 0) > 0) else (limit_px - tp_dist), tick, prec)
+        sl_px = _quantize_px(ai_decision.get("stop_loss_price") if (ai_decision and ai_decision.get("stop_loss_price", 0) > 0) else (limit_px + sl_dist), tick, prec)
+        if sl_px <= limit_px:
+            sl_px = _quantize_px(limit_px + max(sl_dist, f["price"] * 0.012), tick, prec)
+        if tp_px >= limit_px:
+            tp_px = _quantize_px(limit_px - max(tp_dist, f["price"] * 0.024), tick, prec)
+
+    from scripts.order_risk import validate_quote_geometry_and_rr
+    action = "BUY_LONG" if pos_side == "long" else "SELL_SHORT"
+    valid, reason, _ = validate_quote_geometry_and_rr(action, limit_px, tp_px, sl_px)
+    if not valid:
+        executed_actions.append(f"[{f['name']}] 开仓报价未通过核心风控: {reason}")
+        return "rejected"
+
+    lev_ok, lev_err, confirmed_lev = apply_confirmed_leverage(inst_id, ai_lever, pos_side)
+    if not lev_ok:
+        executed_actions.append(f"[{f['name']}] 杠杆未在交易所确认，拒绝开仓: {lev_err}")
+        return "uncertain" if is_uncertain_submit(lev_err) else "rejected"
+    actual_sz = plan_base_quantity(
+        price=limit_px,
+        available_margin=usable_margin,
+        leverage=confirmed_lev,
+        lot_sz=filters["lotSz"],
+        min_sz=filters["minSz"],
+        min_notional=filters["minNotional"],
+        risk_usd=risk_budget,
+        stop_distance=abs(_as_decimal(limit_px) - _as_decimal(sl_px)),
+        planned_margin=usable_margin,
+    )
+    risk_sz = _as_decimal(f.get("sz") or 0)
+    if risk_sz > 0 and actual_sz > risk_sz * 2:
+        actual_sz = floor_to_step(risk_sz * 2, filters["lotSz"])
+        if filters["minSz"] > 0 and actual_sz < filters["minSz"]:
+            actual_sz = Decimal("0")
+    if actual_sz <= 0 or actual_sz * _as_decimal(limit_px) < filters["minNotional"]:
+        executed_actions.append(f"[{f['name']}] BASE数量量化后为0，拒绝开仓")
+        return "rejected"
+
+
+    submitted_at = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
+    accepted, order_ref = submit_protected_limit_order(inst_id, side, pos_side, actual_sz, limit_px, tp_px, sl_px)
+    qty_text = format(actual_sz.normalize(), "f")
+    if accepted:
+        record_signal_snapshot({
+            "instId": inst_id,
+            "name": f["name"],
+            "posSide": pos_side,
+            "order_id": order_ref,
+            "entryTime": submitted_at,
+            "status": "submitted",
+            "policy_version": f.get("policy_version", ""),
+            "policy_hash": f.get("policy_hash", ""),
+            "strategy": strat_tag,
+            "snapshot": {
+                **build_signal_snapshot(f),
+                "entry_price": limit_px, "take_profit_price": tp_px, "stop_loss_price": sl_px,
+                "quantity": qty_text, "leverage": float(confirmed_lev),
+            },
+        })
+        if is_scale_in:
+            tracker = trackers.get(f"{inst_id}_{pos_side}", {})
+            tracker["scale_count"] = tracker.get("scale_count", 0) + 1
+            trackers[f"{inst_id}_{pos_side}"] = tracker
+            save_trackers(trackers)
+            tag = "🚀 顺势金字塔加多" if pos_side == "long" else "🌪️ 顺势金字塔加空"
+            executed_actions.append(f"[{f['name']}] {tag}挂单已提交 {qty_text}@{limit_px} (order={order_ref}, TP={tp_px}, SL={sl_px})")
+            if notify_trade_open:
+                notify_trade_open(
+                    inst=f["name"],
+                    side="多 (顺势加多)" if pos_side == "long" else "空 (顺势加空)",
+                    sz=float(actual_sz),
+                    px=limit_px,
+                    strategy=tag,
+                    reason=str(ai_reason),
+                    tp_px=tp_px,
+                    sl_px=sl_px,
+                    leverage=float(confirmed_lev),
+                )
+        else:
+            executed_actions.append(
+                f"[{f['name']}] AI限价{'多' if pos_side == 'long' else '空'}单已提交待成交 {qty_text}@{limit_px} (order={order_ref}, TP={tp_px}, SL={sl_px})"
+            )
+            if notify_trade_open:
+                notify_trade_open(
+                    inst=f["name"],
+                    side="多" if pos_side == "long" else "空",
+                    sz=float(actual_sz),
+                    px=limit_px,
+                    strategy=strat_tag,
+                    reason=str(ai_reason),
+                    tp_px=tp_px,
+                    sl_px=sl_px,
+                    leverage=float(confirmed_lev),
+                )
+        return "accepted"
+    if is_uncertain_submit(order_ref):
+        executed_actions.append(f"[{f['name']}] AI限价单提交结果未知，本轮禁止重复下单: {order_ref}")
+        return "uncertain"
+    executed_actions.append(f"[{f['name']}] AI限价{'多' if pos_side == 'long' else '空'}单提交失败: {order_ref}")
+    return "rejected"
+
+
 @single_trader_cycle
 def execute_portfolio():
     tz_bj = datetime.timezone(datetime.timedelta(hours=8))
@@ -1799,56 +2215,65 @@ def execute_portfolio():
 
     if isinstance(all_positions, list):
         for p in all_positions:
-            pos_sz = float(p.get("pos", 0) or 0)
-            if pos_sz > 0:
-                side = p.get("posSide", "net").lower()
-                inst_id = p.get("instId")
-                if inst_id in real_pos_dict:
-                    print(f"[Trader] Abort: simultaneous long/short positions for {inst_id} are not supported")
-                    return None
-                real_pos_dict[inst_id] = p
-                if "long" in side:
-                    real_long_count += 1
-                elif "short" in side:
-                    real_short_count += 1
+            side, pos_sz = _normalize_position_side(p)
+            if pos_sz <= 0:
+                continue
+            inst_id = p.get("instId")
+            if inst_id in real_pos_dict:
+                print(f"[Trader] Abort: simultaneous long/short positions for {inst_id} are not supported")
+                return None
+            row = dict(p)
+            row["posSide"] = side
+            row["pos"] = pos_sz
+            real_pos_dict[inst_id] = row
+            if side == "long":
+                real_long_count += 1
+            elif side == "short":
+                real_short_count += 1
 
     active_pos_count = len(real_pos_dict)
     long_count = real_long_count
     short_count = real_short_count
 
-    pending_result = run_cmd_result(okx_private_command("okx swap orders --json"), timeout=20)
-    if not pending_result["ok"] or not isinstance(pending_result.get("data"), list):
-        print(f"[Trader] Abort: unable to verify pending orders: {pending_result['stderr'] or pending_result['stdout']}")
+    orphans_ok, orphans_error = clean_orphan_protections(real_pos_dict)
+    if not orphans_ok:
+        print(f"[Trader] Abort: unable to clean orphan protections: {orphans_error}")
         return None
-    pending_orders = pending_result["data"]
+
+    pending_ok, pending_orders, pending_err = _call_exchange("open_orders")
+    if not pending_ok or not isinstance(pending_orders, list):
+        print(f"[Trader] Abort: unable to verify pending orders: {pending_err}")
+        return None
     pending_inst_ids = set()
     pending_long_count = 0
     pending_short_count = 0
-    if isinstance(pending_orders, list):
-        for order in pending_orders:
-            if str(order.get("state", "live")).lower() not in {"live", "partially_filled"}:
-                continue
-            inst_id = str(order.get("instId", ""))
-            if inst_id:
-                pending_inst_ids.add(inst_id)
-            pos_side = str(order.get("posSide", "")).lower()
-            if pos_side == "long":
-                pending_long_count += 1
-            elif pos_side == "short":
-                pending_short_count += 1
+    pending_sides: Dict[str, set] = {}
+    for order in pending_orders:
+        if str(order.get("state", "live")).lower() not in {"live", "partially_filled"}:
+            continue
+        inst_id = str(order.get("instId", ""))
+        if inst_id:
+            pending_inst_ids.add(inst_id)
+        pos_side = str(order.get("posSide", "")).lower()
+        if inst_id and pos_side:
+            pending_sides.setdefault(inst_id, set()).add(pos_side)
+        if pos_side == "long":
+            pending_long_count += 1
+        elif pos_side == "short":
+            pending_short_count += 1
     reserved_slot_count = active_pos_count + len(pending_inst_ids)
     reserved_long_count = long_count + pending_long_count
     reserved_short_count = short_count + pending_short_count
 
-    bal_res = run_json_cmd(okx_private_command("okx account balance --json"))
-    if not isinstance(bal_res, list):
-        print("[Trader] Abort: unable to verify account balance")
+    bal_ok, bal_res, bal_err = _call_exchange("balance")
+    if not bal_ok or not isinstance(bal_res, list):
+        print(f"[Trader] Abort: unable to verify account balance: {bal_err}")
         return None
     usdt_available = 0.0
-    if bal_res and isinstance(bal_res, list) and len(bal_res) > 0:
+    if bal_res:
         for d in bal_res[0].get("details", []):
             if d.get("ccy") == "USDT":
-                usdt_available = float(d.get("availBal", 0.0))
+                usdt_available = float(d.get("availBal", 0.0) or 0.0)
                 break
 
     # 2. Parallel fetch for the configured crypto universe
@@ -1918,9 +2343,8 @@ def execute_portfolio():
             inst_id = f["instId"]
             curr_pos = f["position"]
             prec = f["precision"]
-            ct_val = f["ctVal"]
             profile = ASSET_CLASS_PROFILES.get(asset_type, ASSET_CLASS_PROFILES["crypto"])
-            
+
             adaptive_cfg = load_adaptive_config()
             tp_mult = adaptive_cfg.get("tp_atr_mult", profile.get("tp_atr_mult", 2.2))
             sl_mult = adaptive_cfg.get("sl_atr_mult", profile.get("sl_atr_mult", 1.3))
@@ -1930,8 +2354,6 @@ def execute_portfolio():
             tp_dist = max(atr * tp_mult, f["price"] * min_prof)
             sl_dist = atr * sl_mult
 
-            # Gate 1: LLM AI Brain Full Execution Authority
-            # When AI Brain is active, AI Brain is the SOLE decider for action, leverage, margin, and TP/SL.
             ai_info = brain_cache.get(inst_id) if isinstance(brain_cache, dict) else None
             if not ai_info or "decision" not in ai_info:
                 print(f"[AI Brain 全权拦截] {f['name']} 本轮无有效新鲜 AI 决策，禁止开仓")
@@ -1948,60 +2370,50 @@ def execute_portfolio():
             f["policy_version"] = ai_info.get("policy_version", "")
             f["policy_hash"] = ai_info.get("policy_hash", "")
 
-            # Direct Action Assignment from LLM
             if ai_act in ["BUY_LONG", "SELL_SHORT"]:
                 action = ai_act
                 strat_tag = f"🧠 AI大脑({ai_act})"
                 strat_desc = f"【AI全权决策】{ai_reason}"
                 print(f"[AI Brain 全权指令] {f['name']} AI 直接指示 {action} (置信度={ai_conf}%, 理由: {ai_reason})")
             else:
-                action = "HOLD"
-                strat_tag = "🤖 AI观望"
-                strat_desc = f"AI大脑判定当前无高确定性机会({ai_reason})"
                 continue
 
-            # Dynamic Equal-Risk Position Size with AI Custom Margin Allocation
-            actual_sz = f["sz"]
             ai_margin = float(ai_decision.get("margin_usdt", 0.0) or 0.0)
             ai_lever = float(ai_decision.get("leverage", 3) or 3)
-            # 杠杆硬钳制：无论 AI 裁决多激进，执行层不超过后台风控管理页配置的杠杆上限
             ai_lever = max(1.0, min(ai_lever, MAX_LEVERAGE))
-            step_sz = float(f.get("minSz", 1) or 1)
+            risk_notional = float(_as_decimal(f.get("sz") or 0) * _as_decimal(f.get("price") or 0))
+            planned_margin = planned_entry_margin(ai_margin, risk_notional, ai_lever)
 
-            # If AI planned margin & leverage, calculate custom contract size
-            if ai_margin > 0 and ai_lever >= 1.0 and f["price"] > 0 and ct_val > 0:
-                planned_notional = ai_margin * ai_lever
-                calculated_sz = quantize_size(planned_notional / (f["price"] * ct_val), step_sz)
-                if calculated_sz > 0:
-                    # 风险钳制：围绕自适应基准仓位的 0.5x~2.0x（按交易所最小步长量化，不再强制整数）
-                    min_allowed_sz = max(step_sz, quantize_size(f["sz"] * 0.5, step_sz))
-                    max_allowed_sz = max(min_allowed_sz, quantize_size(f["sz"] * 2.0, step_sz))
-                    actual_sz = max(min_allowed_sz, min(max_allowed_sz, calculated_sz))
-                    # 可用余额硬顶：单笔保证金不得超过风控页配置的余额占比，付不起则直接归零跳过而非放大
-                    afford_sz = max_size_within_margin(usdt_available, ai_lever, f["price"], ct_val, step_sz)
-                    if afford_sz is not None and afford_sz < float("inf"):
-                        actual_sz = min(actual_sz, afford_sz)
-                    actual_sz = quantize_size(actual_sz, step_sz)
-
-            if actual_sz <= 0:
-                if f.get("size_below_exchange_min") or ai_margin > 0:
-                    print(f"[仓位跳过] {f['name']} 按风险预算推导的数量低于交易所最小下单量 {step_sz} 张"
-                          f"(可用余额 {usdt_available}, 单笔风险额 {f['risk_per_trade_usd']}U)，本周期不交易该标的")
+            opposite = "short" if action == "BUY_LONG" else "long"
+            if opposite in pending_sides.get(inst_id, set()):
+                print(f"[方向冲突拦截] {f['name']} 已有反向挂单/部分成交，禁止反向或重复提交")
                 continue
 
-            # Long Execution (Initial Entry or Strict Pyramiding Scale-In)
+            if _as_decimal(f.get("sz") or 0) <= 0:
+                print(f"[仓位跳过] {f['name']} 按风险预算推导的数量低于交易所最小下单量"
+                      f"(可用余额 {usdt_available}, 单笔风险额 {f['risk_per_trade_usd']}U)，本周期不交易该标的")
+                continue
+
+            def _record_submit_result(result: str, pos_side: str) -> None:
+                nonlocal reserved_slot_count, reserved_long_count, reserved_short_count
+                if result in {"accepted", "uncertain"}:
+                    pending_inst_ids.add(inst_id)
+                    pending_sides.setdefault(inst_id, set()).add(pos_side)
+                    reserved_slot_count += 1
+                    if pos_side == "long":
+                        reserved_long_count += 1
+                    else:
+                        reserved_short_count += 1
+
             if action == "BUY_LONG":
                 is_scale_in = False
                 allow_entry = False
-
-                # Case A: Standard Initial Entry (No existing position & slot available)
+                curr_margin = 0.0
                 if not curr_pos and inst_id not in pending_inst_ids and reserved_slot_count < MAX_CONCURRENT_POSITIONS and reserved_long_count < MAX_SAME_DIRECTION_POSITIONS:
                     if ai_conf >= MIN_ENTRY_CONFIDENCE:
                         allow_entry = True
                     else:
                         print(f"[首发开多拦截] {f['name']} AI置信度 {ai_conf:.1f}% 未达 80% 门禁，宁缺毋滥，拦截入场")
-
-                # Case B: Strict Pyramiding Scale-In (Existing long position in profit/breakeven)
                 elif curr_pos and str(curr_pos.get("side", "")).lower() == "long" and inst_id not in pending_inst_ids:
                     pos_upl = float(curr_pos.get("upl", 0.0) or 0.0)
                     pos_upl_ratio = float(curr_pos.get("uplRatio", 0.0) or 0.0)
@@ -2010,27 +2422,18 @@ def execute_portfolio():
                     tracker = trackers.get(f"{inst_id}_long", {})
                     scale_count = int(tracker.get("scale_count", 0))
                     trailing_sl = float(tracker.get("trailingStopPx", 0.0) or 0.0)
-
-                    # Ironclad Pyramiding Rules:
-                    # 1. Base position must be in profit (ROI >= +0.8%) OR stop-loss already moved to/above avg entry px (No-risk trade).
-                    # 2. Maximum 1 scale-in per position to prevent overconcentration.
-                    # 3. Combined margin must not exceed MAX_SINGLE_ASSET_MARGIN.
-                    # 4. AI Confidence must be >= 75%.
-                    # 5. Calculus Momentum & Probability Gateway: Acceleration a >= -0.25 and Continuation Prob >= 40%
                     c_dyn = f.get("calculus", {})
                     c_accel = float(c_dyn.get("acceleration", 0.0) or 0.0)
                     p_th = c_dyn.get("probability_theory", {})
                     p_cont = float(p_th.get("continuation_prob_pct", 50.0) or 50.0)
                     calculus_accel_ok = (c_accel >= -0.25 and p_cont >= 40.0)
-
                     is_profit_or_breakeven = (pos_upl > 0 and pos_upl_ratio >= MIN_SCALE_IN_PROFIT_RATIO) or (trailing_sl > 0 and trailing_sl >= pos_avg_px)
-                    planned_margin = ai_margin if ai_margin > 0 else (actual_sz * ct_val * f["price"] / max(1.0, ai_lever))
-                    within_margin_cap = (curr_margin + planned_margin) <= ASSET_MARGIN_CAP
+                    within_margin_cap = within_asset_margin_cap(curr_margin, planned_margin, usdt_available)
+
 
                     if is_profit_or_breakeven and scale_count < MAX_SCALE_IN_COUNT and within_margin_cap and ai_conf >= MIN_SCALE_IN_CONFIDENCE and calculus_accel_ok:
                         allow_entry = True
                         is_scale_in = True
-                        print(f"[Pyramiding] {f['name']} 满足顺势浮盈加多条件: 底仓浮盈={pos_upl:+.2f}U ({pos_upl_ratio*100:+.1f}%), 已加仓{scale_count}次, 微积分加速度={c_accel:+.2f}, 延续概率={p_cont:.1f}%, 计划加仓{actual_sz}张")
                     else:
                         if not is_profit_or_breakeven:
                             print(f"[Pyramiding 拦截] {f['name']} 底仓未达浮盈保本门禁 (浮盈={pos_upl:+.2f}U ROI={pos_upl_ratio*100:+.1f}%), 严禁逆势加仓")
@@ -2042,70 +2445,26 @@ def execute_portfolio():
                             print(f"[Pyramiding 拦截] {f['name']} AI加仓置信度不足 ({ai_conf:.0f}% < {MIN_SCALE_IN_CONFIDENCE}%)")
                         elif not calculus_accel_ok:
                             print(f"[Pyramiding 拦截] {f['name']} 数理动能衰竭或延续概率偏低 (加速度={c_accel:+.2f}, 概率={p_cont:.1f}%)，禁止追多加仓")
-
                 if allow_entry:
-                    limit_px = round(ai_decision.get("entry_price") if (ai_decision and ai_decision.get("entry_price", 0) > 0) else (f.get("bidPx") or f["price"]), prec)
-                    tp_px = round(ai_decision.get("take_profit_price") if (ai_decision and ai_decision.get("take_profit_price", 0) > 0) else (limit_px + tp_dist), prec)
-                    sl_px = round(ai_decision.get("stop_loss_price") if (ai_decision and ai_decision.get("stop_loss_price", 0) > 0) else (limit_px - sl_dist), prec)
+                    result = submit_entry_with_confirmed_leverage(
+                        inst_id, "buy", "long", f, ai_decision, ai_reason, strat_tag,
+                        usdt_available, planned_margin, ai_lever, is_scale_in, curr_margin,
+                        trackers, executed_actions, pending_inst_ids, tp_dist, sl_dist, prec,
+                    )
+                    if not is_scale_in:
+                        _record_submit_result(result, "long")
+                    elif result == "uncertain":
+                        pending_inst_ids.add(inst_id)
 
-                    # Hard check: For BUY LONG, OKX strictly requires sl_px < limit_px < tp_px
-                    if sl_px >= limit_px:
-                        sl_px = round(limit_px - max(sl_dist, f["price"] * 0.012), prec)
-                    if tp_px <= limit_px:
-                        tp_px = round(limit_px + max(tp_dist, f["price"] * 0.024), prec)
-
-                    accepted, order_ref = submit_protected_limit_order(inst_id, "buy", "long", actual_sz, limit_px, tp_px, sl_px)
-                    if accepted:
-                        if is_scale_in:
-                            tracker = trackers.get(f"{inst_id}_long", {})
-                            tracker["scale_count"] = tracker.get("scale_count", 0) + 1
-                            save_trackers(trackers)
-                            executed_actions.append(f"[{f['name']}] 🚀 AI顺势浮盈金字塔加多挂单已提交 {actual_sz}张@{limit_px} (order={order_ref}, TP={tp_px}, SL={sl_px})")
-                            if notify_trade_open:
-                                notify_trade_open(
-                                    inst=f["name"],
-                                    side="多 (顺势加多)",
-                                    sz=actual_sz,
-                                    px=limit_px,
-                                    strategy="🚀 顺势金字塔加多",
-                                    reason=str(ai_reason),
-                                    tp_px=tp_px,
-                                    sl_px=sl_px,
-                                    leverage=3,
-                                )
-                        else:
-                            executed_actions.append(f"[{f['name']}] AI限价多单已提交待成交 {actual_sz}张@{limit_px} (order={order_ref}, TP={tp_px}, SL={sl_px})")
-                            pending_inst_ids.add(inst_id)
-                            reserved_slot_count += 1
-                            reserved_long_count += 1
-                            if notify_trade_open:
-                                notify_trade_open(
-                                    inst=f["name"],
-                                    side="多",
-                                    sz=actual_sz,
-                                    px=limit_px,
-                                    strategy=strat_tag,
-                                    reason=str(ai_reason),
-                                    tp_px=tp_px,
-                                    sl_px=sl_px,
-                                    leverage=3,
-                                )
-                    else:
-                        executed_actions.append(f"[{f['name']}] AI限价多单提交失败: {order_ref}")
-
-            # Short Execution (Initial Entry or Strict Pyramiding Scale-In)
             elif action == "SELL_SHORT":
                 is_scale_in = False
                 allow_entry = False
-
-                # Case A: Standard Initial Entry
+                curr_margin = 0.0
                 if not curr_pos and inst_id not in pending_inst_ids and reserved_slot_count < MAX_CONCURRENT_POSITIONS and reserved_short_count < MAX_SAME_DIRECTION_POSITIONS:
                     if ai_conf >= MIN_ENTRY_CONFIDENCE:
                         allow_entry = True
                     else:
                         print(f"[首发开空拦截] {f['name']} AI置信度 {ai_conf:.1f}% 未达 80% 门禁，宁缺毋滥，拦截入场")
-
-                # Case B: Strict Pyramiding Scale-In (Existing short position in profit/breakeven)
                 elif curr_pos and str(curr_pos.get("side", "")).lower() == "short" and inst_id not in pending_inst_ids:
                     pos_upl = float(curr_pos.get("upl", 0.0) or 0.0)
                     pos_upl_ratio = float(curr_pos.get("uplRatio", 0.0) or 0.0)
@@ -2114,21 +2473,18 @@ def execute_portfolio():
                     tracker = trackers.get(f"{inst_id}_short", {})
                     scale_count = int(tracker.get("scale_count", 0))
                     trailing_sl = float(tracker.get("trailingStopPx", 0.0) or 0.0)
-
                     is_profit_or_breakeven = (pos_upl > 0 and pos_upl_ratio >= MIN_SCALE_IN_PROFIT_RATIO) or (trailing_sl > 0 and trailing_sl <= pos_avg_px)
-                    planned_margin = ai_margin if ai_margin > 0 else (actual_sz * ct_val * f["price"] / max(1.0, ai_lever))
-                    within_margin_cap = (curr_margin + planned_margin) <= ASSET_MARGIN_CAP
+                    within_margin_cap = within_asset_margin_cap(curr_margin, planned_margin, usdt_available)
+
 
                     c_dyn = f.get("calculus", {})
                     c_accel = float(c_dyn.get("acceleration", 0.0) or 0.0)
                     p_th = c_dyn.get("probability_theory", {})
                     p_break = float(p_th.get("breakdown_prob_pct", 50.0) or 50.0)
                     calculus_accel_ok = (c_accel <= 0.25 and p_break >= 40.0)
-
                     if is_profit_or_breakeven and scale_count < MAX_SCALE_IN_COUNT and within_margin_cap and ai_conf >= MIN_SCALE_IN_CONFIDENCE and calculus_accel_ok:
                         allow_entry = True
                         is_scale_in = True
-                        print(f"[Pyramiding] {f['name']} 满足顺势浮盈加空条件: 底仓浮盈={pos_upl:+.2f}U ({pos_upl_ratio*100:+.1f}%), 已加仓{scale_count}次, 微积分加速度={c_accel:+.2f}, 击穿概率={p_break:.1f}%, 计划加仓{actual_sz}张")
                     else:
                         if not is_profit_or_breakeven:
                             print(f"[Pyramiding 拦截] {f['name']} 底仓未达浮盈保本门禁 (浮盈={pos_upl:+.2f}U ROI={pos_upl_ratio*100:+.1f}%), 严禁逆势加仓")
@@ -2140,56 +2496,16 @@ def execute_portfolio():
                             print(f"[Pyramiding 拦截] {f['name']} AI加仓置信度不足 ({ai_conf:.0f}% < {MIN_SCALE_IN_CONFIDENCE}%)")
                         elif not calculus_accel_ok:
                             print(f"[Pyramiding 拦截] {f['name']} 数理动能失速企稳或击穿概率偏低 (加速度={c_accel:+.2f}, 概率={p_break:.1f}%)，禁止追空加仓")
-
                 if allow_entry:
-                    limit_px = round(ai_decision.get("entry_price") if (ai_decision and ai_decision.get("entry_price", 0) > 0) else (f.get("askPx") or f["price"]), prec)
-                    tp_px = round(ai_decision.get("take_profit_price") if (ai_decision and ai_decision.get("take_profit_price", 0) > 0) else (limit_px - tp_dist), prec)
-                    sl_px = round(ai_decision.get("stop_loss_price") if (ai_decision and ai_decision.get("stop_loss_price", 0) > 0) else (limit_px + sl_dist), prec)
-
-                    # Hard check: For SELL SHORT, OKX strictly requires tp_px < limit_px < sl_px
-                    if sl_px <= limit_px:
-                        sl_px = round(limit_px + max(sl_dist, f["price"] * 0.012), prec)
-                    if tp_px >= limit_px:
-                        tp_px = round(limit_px - max(tp_dist, f["price"] * 0.024), prec)
-
-                    accepted, order_ref = submit_protected_limit_order(inst_id, "sell", "short", actual_sz, limit_px, tp_px, sl_px)
-                    if accepted:
-                        if is_scale_in:
-                            tracker = trackers.get(f"{inst_id}_short", {})
-                            tracker["scale_count"] = tracker.get("scale_count", 0) + 1
-                            save_trackers(trackers)
-                            executed_actions.append(f"[{f['name']}] 🌪️ AI顺势浮盈金字塔加空挂单已提交 {actual_sz}张@{limit_px} (order={order_ref}, TP={tp_px}, SL={sl_px})")
-                            if notify_trade_open:
-                                notify_trade_open(
-                                    inst=f["name"],
-                                    side="空 (顺势加空)",
-                                    sz=actual_sz,
-                                    px=limit_px,
-                                    strategy="🌪️ 顺势金字塔加空",
-                                    reason=str(ai_reason),
-                                    tp_px=tp_px,
-                                    sl_px=sl_px,
-                                    leverage=3,
-                                )
-                        else:
-                            executed_actions.append(f"[{f['name']}] AI限价空单已提交待成交 {actual_sz}张@{limit_px} (order={order_ref}, TP={tp_px}, SL={sl_px})")
-                            pending_inst_ids.add(inst_id)
-                            reserved_slot_count += 1
-                            reserved_short_count += 1
-                            if notify_trade_open:
-                                notify_trade_open(
-                                    inst=f["name"],
-                                    side="空",
-                                    sz=actual_sz,
-                                    px=limit_px,
-                                    strategy=strat_tag,
-                                    reason=str(ai_reason),
-                                    tp_px=tp_px,
-                                    sl_px=sl_px,
-                                    leverage=3,
-                                )
-                    else:
-                        executed_actions.append(f"[{f['name']}] AI限价空单提交失败: {order_ref}")
+                    result = submit_entry_with_confirmed_leverage(
+                        inst_id, "sell", "short", f, ai_decision, ai_reason, strat_tag,
+                        usdt_available, planned_margin, ai_lever, is_scale_in, curr_margin,
+                        trackers, executed_actions, pending_inst_ids, tp_dist, sl_dist, prec,
+                    )
+                    if not is_scale_in:
+                        _record_submit_result(result, "short")
+                    elif result == "uncertain":
+                        pending_inst_ids.add(inst_id)
 
     # 5. Persist Latest State for Web Monitoring Dashboard
     state_payload = {
@@ -2229,7 +2545,8 @@ def execute_portfolio():
             "position": f["position"]
         })
 
-    with open(os.path.join(DATA_DIR, "trading_state.json"), "w", encoding="utf-8") as f:
+    _ensure_state_dir(TRADING_STATE_FILE)
+    with open(TRADING_STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(state_payload, f, ensure_ascii=False, indent=2)
 
     # 6. Always Sync Full Lifecycle Ledger and SQLite DB in Realtime

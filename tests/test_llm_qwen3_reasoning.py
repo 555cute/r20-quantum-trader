@@ -65,25 +65,25 @@ class Qwen3ReasoningEffortTests(unittest.TestCase):
         self.assertIn("temperature", payload)
 
     def test_upsert_model_honours_frontend_reasoning_effort(self):
-        # 前端只发 reasoning_effort（不发 default_effort），pydantic 默认值不得劫持用户选择。
-        # 走完整 pydantic → upsert 链路（与 POST /api/v1/admin/llm/models 相同）。
+        # Exercise the API schema and persistence without provider requests.
         import json, tempfile
         from unittest import mock
         from r20_backend.app import LLMModelUpsertRequest
-        tmp = Path(tempfile.mkdtemp()) / "llm_models.json"
-        tmp.write_text(json.dumps({"version": "3.1", "providers": [], "models": []}), encoding="utf-8")
-        req = LLMModelUpsertRequest(
-            id="qwen3.8-flash", name="qwen3.8-flash",
-            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-            api_format="openai_chat", reasoning_type="auto",
-            reasoning_effort="low",  # 用户显式选 low
-        )
-        dump = req.model_dump(exclude_none=True)
-        with mock.patch.object(llm_manager, "LLM_CONFIG_FILE", tmp):
-            llm_manager.upsert_model("custom", dump)
-            saved = json.loads(tmp.read_text())
-            m = next(x for x in saved["models"] if x["id"] == "qwen3.8-flash")
-            self.assertEqual(m["reasoning_effort"], "low", "用户显式 effort 不得被 default_effort 默认值覆盖")
+        with tempfile.TemporaryDirectory() as directory:
+            tmp = Path(directory) / "llm_models.json"
+            tmp.write_text(json.dumps({"version": "3.1", "providers": [], "models": []}), encoding="utf-8")
+            req = LLMModelUpsertRequest(
+                id="qwen3.8-flash", name="qwen3.8-flash",
+                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+                api_format="openai_chat", reasoning_type="auto",
+                reasoning_effort="low",
+            )
+            dump = req.model_dump(exclude_none=True)
+            with mock.patch.object(llm_manager, "LLM_CONFIG_FILE", tmp):
+                llm_manager.upsert_model("custom", dump)
+                saved = json.loads(tmp.read_text(encoding="utf-8"))
+                model = next(item for item in saved["models"] if item["id"] == "qwen3.8-flash")
+                self.assertEqual(model["reasoning_effort"], "low")
 
 
 if __name__ == "__main__":

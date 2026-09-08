@@ -2,19 +2,23 @@
 from __future__ import annotations
 import os
 import tempfile
-from pathlib import Path
 from typing import Mapping
 from .config import ROOT, refresh_settings
+from .config_path import env_file_path
 
-ENV_FILE = ROOT / ".env"
+ENV_FILE = env_file_path(ROOT)
 MANAGED_KEYS = {
     "OKX_BASE_URL",
+    "R20_EXCHANGE",
     "R20_OKX_ENV",
+    "R20_BINANCE_ENV",
     "OKX_API_KEY",
     "OKX_SECRET_KEY",
     "OKX_PASSPHRASE",
     "OKX_LIVE_API_KEY", "OKX_LIVE_SECRET_KEY", "OKX_LIVE_PASSPHRASE",
     "OKX_DEMO_API_KEY", "OKX_DEMO_SECRET_KEY", "OKX_DEMO_PASSPHRASE",
+    "BINANCE_LIVE_API_KEY", "BINANCE_LIVE_SECRET_KEY",
+    "BINANCE_DEMO_API_KEY", "BINANCE_DEMO_SECRET_KEY",
     "OKX_IS_SIMULATED",
     "LLM_BASE_URL",
     "LLM_API_KEY",
@@ -34,6 +38,7 @@ MANAGED_KEYS = {
     "R20_SETUP_TOKEN",
     "R20_ADMIN_TOKEN",
     "R20_MANUAL_CLOSE_ENABLED",
+    "R20_NEWS_SOURCES",
 }
 
 # 执行层风控参数（后台「风控管理页」写入，scripts/risk_constants.py 读取）
@@ -68,6 +73,7 @@ def mask_url(url: str, visible_tail: int = 6) -> str:
 
 def remove_env(keys: set[str] | list[str] | tuple[str, ...]) -> None:
     targets = set(keys)
+    ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
     existing = ENV_FILE.read_text(encoding="utf-8").splitlines() if ENV_FILE.exists() else []
     result = []
     for line in existing:

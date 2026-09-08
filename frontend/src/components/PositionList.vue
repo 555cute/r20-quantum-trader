@@ -53,7 +53,7 @@ const poolCapacity = computed(() => Math.max(store.factors?.length || 0, 1))
       >
         <ShieldCheck v-if="allProtected" class="w-3.5 h-3.5" />
         <ShieldAlert v-else class="w-3.5 h-3.5" />
-        <span>{{ allProtected ? '100% 交易所云端 OCO 止损覆盖' : '部分仓位未设止损' }}</span>
+        <span>{{ store.usesPairedConditional ? '配对条件单（非原生 OCO）' : allProtected ? '100% 云端保护' : '部分仓位未设止损' }}</span>
       </div>
     </div>
 
@@ -119,7 +119,7 @@ const poolCapacity = computed(() => Math.max(store.factors?.length || 0, 1))
 
             <!-- 持仓量 -->
             <td class="py-3 px-3.5 font-bold num-tabular" style="color: var(--text-main);">
-              {{ pos.pos }} <span class="text-[10px] font-normal" style="color: var(--text-faint);">张</span>
+              {{ pos.pos }} <span class="text-[10px] font-normal" style="color: var(--text-faint);">base</span>
             </td>
 
             <!-- 开仓均价 -->

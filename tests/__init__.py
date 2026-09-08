@@ -9,10 +9,19 @@
 4) 再首次导入 risk_constants（此时得到代码默认基线），并断言静态键表与单一事实源一致。
 """
 import os
+import sys
+from pathlib import Path
+
+_TESTS_DIR = str(Path(__file__).resolve().parent)
+if _TESTS_DIR not in sys.path:
+    sys.path.insert(0, _TESTS_DIR)
 
 import r20_backend.config as _config
 
+_ORIGINAL_LOAD_DOTENV = _config.load_dotenv
 _config.load_dotenv = lambda path: None
+_config._ORIGINAL_LOAD_DOTENV = _ORIGINAL_LOAD_DOTENV
+
 
 _RISK_KEYS_STATIC = (
     "R20_MAX_CONCURRENT_POSITIONS", "R20_MAX_SAME_DIRECTION_POSITIONS",

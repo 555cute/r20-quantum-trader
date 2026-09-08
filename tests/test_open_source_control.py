@@ -8,7 +8,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 import r20_backend.notifications as notifications
-import r20_backend.okx_trade_service as trade_service
+import r20_backend.okx_trade_service as okx_transport
+import r20_backend.trade_service as trade_service
+from r20_exchange.runtime import ExchangeEnvironment
 import scripts.okx_runtime as okx_runtime
 import scripts.prompt_library as prompts
 import scripts.backup_runtime as backup_runtime
@@ -29,51 +31,65 @@ class OKXEnvironmentTests(unittest.TestCase):
         self.assertEqual((live.mode, live.api_key), ("live", "LIVE_AK"))
         self.assertNotEqual(demo.identity, live.identity)
 
-    def test_legacy_private_command_is_rebound(self):
-        values={"R20_OKX_ENV":"live","OKX_LIVE_API_KEY":"A","OKX_LIVE_SECRET_KEY":"B","OKX_LIVE_PASSPHRASE":"C"}
-        with patch.dict(os.environ, {}, clear=True):
-            command=okx_runtime.replace_cli_prefix("okx --demo account positions --json", values)
-            self.assertTrue(command.startswith("okx --live "))
-            self.assertEqual(os.environ["OKX_API_KEY"], "A")
-
-    def test_environment_is_frozen_for_cycle(self):
-        first={"R20_OKX_ENV":"demo","OKX_DEMO_API_KEY":"D","OKX_DEMO_SECRET_KEY":"S","OKX_DEMO_PASSPHRASE":"P"}
-        try:
-            okx_runtime.freeze_environment(first)
-            with patch.dict(os.environ, {"R20_OKX_ENV":"live","OKX_LIVE_API_KEY":"L","OKX_LIVE_SECRET_KEY":"S","OKX_LIVE_PASSPHRASE":"P"}, clear=True):
-                self.assertTrue(okx_runtime.replace_cli_prefix("okx account positions").startswith("okx --demo "))
-        finally: okx_runtime.unfreeze_environment()
 
     def test_fast_close_rejects_environment_change_before_any_order(self):
-        snapshot_env = okx_runtime.OKXEnvironment("demo", "A", "B", "C")
-        changed_env = okx_runtime.OKXEnvironment("live", "L", "S", "P")
+        snapshot_env = ExchangeEnvironment("okx", "demo", "A", "B", "C")
+        changed_env = ExchangeEnvironment("binance", "demo", "L", "S")
         token, confirmation = trade_service._create_intent(snapshot_env, {"instId":"BTC-USDT-SWAP","posSide":"long","posId":"1","pos":"2"})
-        with patch.object(trade_service, "selected_environment", return_value=changed_env), patch.object(trade_service, "_request") as request:
+        with patch.object(trade_service, "selected_environment", return_value=changed_env), patch.object(trade_service, "get_exchange") as request:
             with self.assertRaises(ValueError): trade_service.fast_close_confirmed(token, confirmation)
             request.assert_not_called()
 
     def test_cli_cancel_uses_positional_instrument_argument(self):
         env = okx_runtime.OKXEnvironment("demo", "", "", "")
-        with patch.object(trade_service, "_run_cli", return_value=[]) as run:
-            trade_service._request("POST", "/api/v5/trade/cancel-order", {"instId":"SOL-USDT-SWAP","ordId":"123"}, env)
+        with patch.object(okx_transport, "_run_cli", return_value=[]) as run:
+            okx_transport._request("POST", "/api/v5/trade/cancel-order", {"instId":"SOL-USDT-SWAP","ordId":"123"}, env)
         self.assertEqual(run.call_args.args[0], ["okx","--demo","swap","cancel","SOL-USDT-SWAP","--ordId","123","--json"])
 
-    def test_fast_close_cancels_all_same_position_orders_before_close(self):
-        env = okx_runtime.OKXEnvironment("demo", "A", "B", "C")
-        position={"instId":"SOL-USDT-SWAP","posSide":"long","posId":"1","pos":"4","mgnMode":"cross"}
+    def test_fast_close_cancels_entries_and_retains_protection_until_flat(self):
+        env = ExchangeEnvironment("okx", "demo", "A", "B", "C")
+        position = {"instId": "SOL-USDT-SWAP", "posSide": "long", "posId": "1", "pos": "4"}
+
+        class Exchange:
+            holding = True
+            pending = True
+            protected = True
+
+            def positions(self, _):
+                return [position] if self.holding else []
+
+            def open_orders(self, _):
+                return [{"instId": position["instId"], "posSide": "long", "ordId": "11"}] if self.pending else []
+
+            def cancel_order(self, _, order_id):
+                if order_id != "11":
+                    raise ValueError("unknown order")
+                self.pending = False
+
+            def close_position(self, *_):
+                if self.pending or not self.protected:
+                    raise RuntimeError("unsafe close ordering")
+                self.holding = False
+                return {"ordId": "close"}
+
+            def protection_orders(self, _):
+                return [{"algoId": "stop", "posSide": "long"}]
+
+            def cancel_protection(self, *_):
+                if self.holding:
+                    raise RuntimeError("position still exposed")
+                self.protected = False
+
+        exchange = Exchange()
         token, confirmation = trade_service._create_intent(env, position)
-        responses=[
-            [position],
-            [{"instId":"SOL-USDT-SWAP","posSide":"long","ordId":"11","reduceOnly":"true","side":"sell"}],
-            [], [], [],
-        ]
-        with patch.object(trade_service,"selected_environment",return_value=env), patch.object(trade_service,"_request",side_effect=responses) as request, patch.object(trade_service.time,"sleep"):
-            result=trade_service.fast_close_confirmed(token,confirmation)
-        self.assertEqual(result["status"],"confirmed_closed")
-        self.assertEqual(result["canceled_entry_orders"],["11"])
-        calls=[(c.args[0],c.args[1],c.args[2]) for c in request.call_args_list]
-        self.assertIn(("POST","/api/v5/trade/cancel-order",{"instId":"SOL-USDT-SWAP","ordId":"11"}),calls)
-        self.assertTrue(any(path=="/api/v5/trade/close-position" for _,path,_ in calls))
+        with patch.object(trade_service, "selected_environment", return_value=env), patch.object(trade_service, "get_exchange", return_value=exchange):
+            result = trade_service.fast_close_confirmed(token, confirmation)
+        self.assertEqual(result["status"], "confirmed_closed")
+        self.assertFalse(exchange.holding)
+        self.assertFalse(exchange.pending)
+        self.assertFalse(exchange.protected)
+        with self.assertRaises(ValueError):
+            trade_service.fast_close_confirmed(token, confirmation)
 
 
 class NotificationChannelRemovalTests(unittest.TestCase):
@@ -90,7 +106,7 @@ class NotificationChannelRemovalTests(unittest.TestCase):
     def test_dotenv_still_overrides_stale_process_environment(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp); (root/".env").write_text("R20_NOTIFY_QQ_ENABLED=1\n")
-            with patch.object(notifications, "ROOT", root), patch.dict(os.environ, {"R20_NOTIFY_QQ_ENABLED":"0"}, clear=True):
+            with patch.object(notifications, "ROOT", root), patch("r20_backend.config_path._ENV_FILE_OVERRIDE", None), patch.dict(os.environ, {"R20_NOTIFY_QQ_ENABLED":"0"}, clear=True):
                 self.assertEqual(notifications._env()["R20_NOTIFY_QQ_ENABLED"], "1")
 
 

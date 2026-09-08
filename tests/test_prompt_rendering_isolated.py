@@ -22,15 +22,16 @@ from typing import Any, Dict, List
 from unittest.mock import Mock, patch
 
 import scripts.prompt_library as prompts
+from r20_backend import news_config
 # 纯配置数据模块（import 时只读 .env，早于 IO 栅栏安装）：风控提示词函数引用的
 # 全部大写常量由此注入沙箱命名空间，新增风控参数无需再改本测试。
 import scripts.risk_constants as risk_constants
 
 # Read code only, before installing the runtime IO fence.
 PROJECT = Path(__file__).resolve().parents[1]
-TRADER_TREE = ast.parse((PROJECT / "scripts/ai_brain_trader.py").read_text())
-APP_TREE = ast.parse((PROJECT / "r20_backend/app.py").read_text())
-OLD_TREE = ast.parse((PROJECT / "tests/test_control_plane_v2.py").read_text())
+TRADER_TREE = ast.parse((PROJECT / "scripts/ai_brain_trader.py").read_text(encoding="utf-8"))
+APP_TREE = ast.parse((PROJECT / "r20_backend/app.py").read_text(encoding="utf-8"))
+OLD_TREE = ast.parse((PROJECT / "tests/test_control_plane_v2.py").read_text(encoding="utf-8"))
 
 
 class Sandbox(unittest.TestCase):
@@ -42,14 +43,18 @@ class Sandbox(unittest.TestCase):
         self.addCleanup(self.stack.close)
         self.stack.enter_context(patch.object(prompts, "ROOT", self.root))
         self.stack.enter_context(patch.object(prompts, "LIBRARY_FILE", self.root / "library.json"))
+        self.stack.enter_context(patch.object(news_config, "ENV_FILE", self.root / ".env"))
+        self.stack.enter_context(patch.dict(os.environ, {"R20_NEWS_SOURCES": "okx"}))
         original_open, original_io_open, original_os_open = builtins.open, io.open, os.open
+        from path_guard import contained
+
 
         def check(path):
             if isinstance(path, int):
                 return
-            resolved = Path(path).resolve()
-            if not resolved.is_relative_to(self.root):
-                raise AssertionError(f"Non-sandbox file access blocked: {resolved}")
+            if not contained(path, self.root):
+                raise AssertionError(f"Non-sandbox file access blocked: {Path(path).resolve()}")
+
 
         def guarded(fn):
             def call(path, *args, **kwargs):
@@ -148,7 +153,7 @@ class RenderingTests(Sandbox):
     def test_storage_roundtrip_retains_slots(self):
         profile = prompts._clean_profile(self.profile, "custom-test")
         prompts.save_library({"version": 2, "profiles": {"custom-test": profile}, "active_profile_id": "custom-test", "revisions": []})
-        disk = json.loads(prompts.LIBRARY_FILE.read_text())
+        disk = json.loads(prompts.LIBRARY_FILE.read_text(encoding="utf-8"))
         for value in (disk["profiles"]["custom-test"]["trading_user"], prompts.active_profile()["trading_user"]):
             self.assertIn("{{account_balance}}", value)
             self.assertIn("{{account_positions}}", value)
@@ -197,7 +202,7 @@ class RenderingTests(Sandbox):
 
     def test_sandbox_blocks_files_network_and_processes(self):
         with self.assertRaises(AssertionError):
-            Path("/blocked-business-data").read_text()
+            Path("/blocked-business-data").read_text(encoding="utf-8")
         with self.assertRaises(AssertionError):
             socket.create_connection(("example.invalid", 443))
         with self.assertRaises(AssertionError):

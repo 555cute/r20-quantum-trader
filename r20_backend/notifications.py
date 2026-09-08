@@ -9,6 +9,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 from r20_backend.net_security import validate_outbound_url
+from r20_backend.config_path import env_file_path
 
 ROOT = Path(__file__).resolve().parents[1]
 SECRET_LOADER = None
@@ -18,7 +19,7 @@ QQ_API_BASE = "https://api.sgroup.qq.com"
 
 def _env() -> dict[str, str]:
     values: dict[str, str] = {}
-    path = ROOT / ".env"
+    path = env_file_path(ROOT)
     if path.exists():
         for line in path.read_text(encoding="utf-8").splitlines():
             if "=" in line and not line.lstrip().startswith("#"):

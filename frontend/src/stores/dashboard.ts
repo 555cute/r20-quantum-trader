@@ -17,6 +17,19 @@ export const useDashboardStore = defineStore('dashboard', () => {
   const account = computed(() => data.value?.account || null)
   const positions = computed<PositionItem[]>(() => data.value?.positions_summary?.items || [])
   const pendingOrders = computed<PendingOrderItem[]>(() => data.value?.pending_orders || [])
+  const exchange = computed(() => String(data.value?.exchange || ''))
+  const environment = computed(() => String(data.value?.environment || ''))
+  const quantityUnit = computed(() => String(data.value?.quantity_unit || 'base'))
+  const exchangeLabel = computed(() => {
+    const ex = exchange.value.toLowerCase()
+    const mode = environment.value.toUpperCase()
+    if (ex === 'binance') return `BINANCE USD-M${mode ? ' ' + mode : ''}`
+    if (ex === 'okx') return `OKX${mode ? ' ' + mode : ''}`
+    return mode || 'EXCHANGE'
+  })
+  const usesPairedConditional = computed(() =>
+    positions.value.some((p) => (p.ordType || p.protection_mechanism) === 'paired_conditional')
+  )
   const factors = computed<InstrumentFactor[]>(() => {
     const rawFactors = data.value?.factors || []
     const libInstruments: any[] = (data.value as any)?.factor_library?.instruments || (data.value as any)?.factor_library_snapshot?.instruments || []
@@ -131,6 +144,11 @@ export const useDashboardStore = defineStore('dashboard', () => {
     lastUpdated,
     isConnected,
     account,
+    exchange,
+    environment,
+    quantityUnit,
+    exchangeLabel,
+    usesPairedConditional,
     positions,
     pendingOrders,
     factors,

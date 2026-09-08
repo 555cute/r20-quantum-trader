@@ -13,7 +13,6 @@ import time
 import datetime
 import urllib.request
 import tempfile
-import fcntl
 import hashlib
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -41,11 +40,53 @@ AI_MEMORY_MD_FILE = os.path.join(DATA_DIR, "AI_TRADING_MEMORY.md")
 EVOLUTION_LAST_PROMPT_FILE = os.path.join(DATA_DIR, "self_improvement_last_prompt.txt")
 LOG_FILE = os.path.join(LOGS_DIR, "self_improvement.log")
 EVOLUTION_LOCK_FILE = os.path.join(DATA_DIR, ".self_improvement.lock")
+SIGNAL_JOURNAL_FILE = os.path.join(DATA_DIR, "signal_journal.json")
+_LEDGER_DEFAULT = LEDGER_JSON_FILE
+_REPORT_DEFAULT = REPORT_JSON_FILE
+_JOURNAL_DEFAULT = SIGNAL_JOURNAL_FILE
+
+
+def _ledger_file() -> str:
+    if LEDGER_JSON_FILE != _LEDGER_DEFAULT:
+        return LEDGER_JSON_FILE
+    from r20_exchange.runtime import state_path
+    return str(state_path("trading_ledger.json"))
+
+
+def _report_file() -> str:
+    if REPORT_JSON_FILE != _REPORT_DEFAULT:
+        return REPORT_JSON_FILE
+    from r20_exchange.runtime import state_path
+    return str(state_path("self_improvement_report.json"))
+
+
+def _journal_file() -> str:
+    if SIGNAL_JOURNAL_FILE != _JOURNAL_DEFAULT:
+        return SIGNAL_JOURNAL_FILE
+    from r20_exchange.runtime import state_path
+    return str(state_path("signal_journal.json"))
+
+
+
+def _ledger_incomplete() -> bool:
+    if LEDGER_JSON_FILE != _LEDGER_DEFAULT:
+        status_path = os.path.join(os.path.dirname(LEDGER_JSON_FILE), "ledger_sync_status.json")
+        try:
+            with open(status_path, "r", encoding="utf-8") as handle:
+                status = json.load(handle)
+            return bool(isinstance(status, dict) and (status.get("incomplete") or status.get("status") == "unavailable"))
+        except Exception:
+            return False
+    from r20_backend.account_paths import ledger_is_incomplete
+    return ledger_is_incomplete()
+
 
 from r20_backend.version import __version__
+from r20_backend.file_lock import acquire, release
 from instrument_pool import load_instruments
 from prompt_library import active_profile, apply_module_layout
 from r20_gateway.telemetry import ModelCallTelemetry
+from scripts.sync_full_ledger import match_journal_entry_evidence
 TARGET_INSTRUMENTS = [item["name"] for item in load_instruments()]
 
 def atomic_write_json(path: str, payload: Any) -> None:
@@ -73,7 +114,7 @@ def single_evolution_cycle(func):
     def wrapped(*args, **kwargs):
         lock_handle = open(EVOLUTION_LOCK_FILE, "a+", encoding="utf-8")
         try:
-            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            acquire(lock_handle, blocking=False)
         except BlockingIOError:
             lock_handle.close()
             log_msg("Self-evolution skipped: another cycle is still running")
@@ -81,7 +122,10 @@ def single_evolution_cycle(func):
         try:
             return func(*args, **kwargs)
         finally:
-            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+            try:
+                release(lock_handle)
+            except OSError:
+                pass
             lock_handle.close()
     return wrapped
 
@@ -114,59 +158,64 @@ def get_cpa_client_config() -> Tuple[str, str]:
         os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY") or "",
     )
 
+
 def load_signal_journal():
-    """读取开仓时刻的数理快照日志，按标的分组，供平仓台账 join 真实因果证据。"""
-    journal_file = os.path.join(DATA_DIR, "signal_journal.json")
-    by_inst = {}
+    """Account-scoped submit journal. Not fill evidence; never reads another account."""
+    journal_file = _journal_file()
     if not os.path.exists(journal_file):
-        return by_inst
+        return []
     try:
         with open(journal_file, "r", encoding="utf-8") as f:
-            for rec in json.load(f):
-                inst = str(rec.get("name") or rec.get("inst") or "")
-                if inst:
-                    by_inst.setdefault(inst, []).append(rec)
+            raw = json.load(f)
     except Exception as e:
         log_msg(f"读取 signal_journal 异常: {e}")
-    return by_inst
+        return []
+    if not isinstance(raw, list):
+        return []
+    return [rec for rec in raw if isinstance(rec, dict)]
 
 
-def _match_snapshot(journal_by_inst, inst, open_time):
-    """按开仓时间就近匹配（不晚于开仓时间的最后一条）开仓快照。"""
-    candidates = journal_by_inst.get(inst) or []
-    if not candidates or not open_time:
-        return None
-    best = None
-    for rec in candidates:
-        if str(rec.get("entryTime") or "") <= str(open_time):
-            if best is None or str(rec.get("entryTime") or "") > str(best.get("entryTime") or ""):
-                best = rec
-    if best is None and candidates:
-        best = candidates[0]
-    return (best or {}).get("snapshot")
+
+
+def _closed_net_pnl(trade: Dict[str, Any]) -> float:
+    if "net_pnl" in trade and trade.get("net_pnl") is not None and trade.get("net_pnl") != "":
+        return float(trade.get("net_pnl") or 0.0)
+    return float(trade.get("pnl", 0.0) or 0.0)
 
 
 def load_closed_trades():
-    account_init_file = os.path.join(DATA_DIR, "account_initial_state.json")
+    if _ledger_incomplete():
+        log_msg("台账不完整，跳过自进化归因")
+        return []
+
     reset_time_str = "1970-01-01 00:00:00"
-    if os.path.exists(account_init_file):
+    if LEDGER_JSON_FILE != _LEDGER_DEFAULT:
+        account_init_file = os.path.join(DATA_DIR, "account_initial_state.json")
+        if os.path.exists(account_init_file):
+            try:
+                with open(account_init_file, "r", encoding="utf-8") as f:
+                    acc_init = json.load(f)
+                    reset_time_str = acc_init.get("reset_time", "1970-01-01 00:00:00")
+            except Exception:
+                pass
+    else:
         try:
-            with open(account_init_file, "r", encoding="utf-8") as f:
-                acc_init = json.load(f)
-                reset_time_str = acc_init.get("reset_time", "1970-01-01 00:00:00")
+            from r20_backend.account_baseline import load_account_baseline
+            reset_time_str = load_account_baseline().get("reset_time", "1970-01-01 00:00:00")
         except Exception:
             pass
 
-    journal_by_inst = load_signal_journal()
+    journal_records = load_signal_journal()
     closed_trades = []
-    if os.path.exists(LEDGER_JSON_FILE):
+    path = _ledger_file()
+    if os.path.exists(path):
         try:
-            with open(LEDGER_JSON_FILE, "r", encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 t_list = json.load(f)
                 for t in t_list:
-                    if t.get("status") == "holding":
+                    if not isinstance(t, dict) or t.get("status") != "closed":
                         continue
-                    
+
                     c_time = str(t.get("close_time") or t.get("time") or "")
                     if c_time and c_time < reset_time_str:
                         continue
@@ -174,11 +223,42 @@ def load_closed_trades():
                     inst = str(t.get("inst") or t.get("name") or "OTHER")
                     if inst not in TARGET_INSTRUMENTS:
                         continue
-                    pnl = float(t.get("pnl", 0.0) or 0.0)
-                    gross = float(t.get("gross_pnl", pnl) or pnl)
+                    net = _closed_net_pnl(t)
+                    gross = float(t.get("gross_pnl", net) or net)
                     fee = abs(float(t.get("fee", 0.0) or 0.0))
                     strat = str(t.get("strategy") or "⚡ 趋势")
                     reason = str(t.get("exit_reason") or t.get("remark") or "")
+                    snapshot = t.get("signal_snapshot")
+                    if not isinstance(snapshot, dict):
+                        snapshot = t.get("entry_snapshot") if isinstance(t.get("entry_snapshot"), dict) else None
+                    source = t.get("snapshot_source")
+                    scale_ins = t.get("scale_in_snapshots") if isinstance(t.get("scale_in_snapshots"), list) else []
+                    policy_version = t.get("policy_version") or ""
+                    policy_hash = t.get("policy_hash") or ""
+                    pos_raw = t.get("posSide") or t.get("side")
+                    pos_key = str(pos_raw or "").strip().lower()
+                    pos_side = pos_key if pos_key in {"long", "short"} else ""
+                    if snapshot is None:
+                        inst_id = str(t.get("instId") or "").strip()
+                        if not inst_id and inst and inst != "OTHER":
+                            inst_id = f"{inst}-USDT-SWAP"
+                        matched = match_journal_entry_evidence(
+                            journal_records,
+                            inst_id=inst_id,
+                            pos_side=pos_raw,
+                            entry_order_ids=t.get("entryOrderIds"),
+                        )
+                        if matched:
+                            snap = matched.get("signal_snapshot")
+                            snapshot = snap if isinstance(snap, dict) else None
+                            source = matched.get("snapshot_source")
+                            scale_ins = matched.get("scale_in_snapshots") or []
+                            if matched.get("strategy"):
+                                strat = matched["strategy"]
+                            if matched.get("policy_version") not in (None, ""):
+                                policy_version = matched["policy_version"]
+                            if matched.get("policy_hash") not in (None, ""):
+                                policy_hash = matched["policy_hash"]
 
                     closed_trades.append({
                         "inst": inst,
@@ -188,9 +268,14 @@ def load_closed_trades():
                         "margin": t.get("margin", "--"),
                         "gross_pnl": round(gross, 2),
                         "fee": round(fee, 2),
-                        "net_pnl": round(pnl, 2),
+                        "net_pnl": round(net, 2),
                         "exit_reason": reason,
-                        "entry_snapshot": t.get("signal_snapshot") or _match_snapshot(journal_by_inst, inst, t.get("open_time")),
+                        "entry_snapshot": snapshot,
+                        "snapshot_source": source,
+                        "scale_in_snapshots": scale_ins,
+                        "policy_version": policy_version,
+                        "policy_hash": policy_hash,
+                        "posSide": pos_side if pos_side in {"long", "short"} else "",
                     })
         except Exception as e:
             log_msg(f"读取交易台账异常: {e}")
@@ -233,7 +318,8 @@ def call_llm_evolution_review(closed_trades: List[Dict[str, Any]], existing_memo
         return {}
 
     tz_bj = datetime.timezone(datetime.timedelta(hours=8))
-    now_bj_str = timestamp_str or datetime.datetime.now(tz_bj).strftime("%Y-%m-%d %H:%M:%S (北京时间)")
+    now_bj_str = timestamp_str or datetime.datetime.now(tz_bj).strftime("%Y-%m-%d %H:%M:%S") + " (北京时间)"
+
 
     total = len(closed_trades)
     wins = [t for t in closed_trades if t["net_pnl"] > 0]
@@ -392,20 +478,35 @@ def run_self_evolution(force: bool = False):
     timestamp_str = now_bj.strftime("%Y-%m-%d %H:%M:%S")
     log_msg(f"🧬 启动 R20 AI 大脑自进化认知复盘与实战心法提炼 (v{__version__} Crypto Focus)...")
 
+    if _ledger_incomplete():
+        log_msg("台账不完整，拒绝用残缺历史覆盖心法归因")
+        report_path = _report_file()
+        if os.path.exists(report_path):
+            try:
+                with open(report_path, "r", encoding="utf-8") as f:
+                    previous = json.load(f)
+                previous["incomplete_ledger"] = True
+                return previous
+            except Exception:
+                pass
+        return {"incomplete_ledger": True, "memory_preserved": True, "core_lessons": [], "change_status": "NO_CHANGE"}
+
     closed_trades = load_closed_trades()
     total_trades = len(closed_trades)
     ledger_revision = hashlib.sha256(
         json.dumps(closed_trades, sort_keys=True, ensure_ascii=False).encode("utf-8")
     ).hexdigest()
-    if not force and os.path.exists(REPORT_JSON_FILE):
+    report_path = _report_file()
+    if not force and os.path.exists(report_path):
         try:
-            with open(REPORT_JSON_FILE, "r", encoding="utf-8") as f:
+            with open(report_path, "r", encoding="utf-8") as f:
                 previous_report = json.load(f)
             if previous_report.get("ledger_revision") == ledger_revision:
                 log_msg("No new closed-trade evidence; keeping the current adaptive configuration")
                 return previous_report
         except Exception:
             pass
+
 
     # 1. Base Stats
     win_trades = [t for t in closed_trades if t["net_pnl"] > 0]
@@ -505,7 +606,7 @@ def run_self_evolution(force: bool = False):
         "llm_error": str(llm_review.get("__llm_error__") or ""),
     }
 
-    atomic_write_json(REPORT_JSON_FILE, report_payload)
+    atomic_write_json(_report_file(), report_payload)
 
     log_msg(f"🧬 自进化认知复盘完成 | 状态={change_status} | 当前保留 {len(long_term_memory)} 条启发式长期记忆")
     try:

@@ -69,6 +69,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'evolution', name: 'admin-evolution', component: () => import('../views/admin/EvolutionPage.vue') },
       { path: 'interceptors', name: 'admin-interceptors', component: () => import('../views/admin/InterceptorsPage.vue') },
       { path: 'risk', name: 'admin-risk', component: () => import('../views/admin/RiskPage.vue') },
+      { path: 'news', name: 'admin-news', component: () => import('../views/admin/NewsPage.vue') },
       { path: 'policy', name: 'admin-policy', component: () => import('../views/admin/PolicySnapshotPage.vue') },
       { path: 'agents', name: 'admin-agents', component: () => import('../views/admin/AgentsPage.vue') },
       { path: 'backup', name: 'admin-backup', component: () => import('../views/admin/BackupPage.vue') },
@@ -127,7 +128,7 @@ router.afterEach((to) => {
     isNoIndex = true
     const adminLabels: Record<string, string> = {
       'admin-overview': '运行总览',
-      'admin-security': 'OKX 账户与标的池',
+      'admin-security': '账户与标的池',
       'admin-council': '模型委员会',
       'admin-policy': '策略版本快照',
       'admin-llm': '模型连接与供应商',

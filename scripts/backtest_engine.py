@@ -3,9 +3,10 @@
 R20 Quantum Multi-Asset Backtesting & Statistical Verification Engine (backtest_engine.py)
 ------------------------------------------------------------------------------------------
 Features:
-- Multi-Asset Portfolio Backtesting (Simultaneous 6 Instruments)
+- Multi-Asset Portfolio Backtesting (current instrument_pool universe)
 - Single Asset Isolation Backtesting
-- OKX Real Public Candles Synchronous Ingestion
+- Public candle ingestion (no fabricated substitutes)
+- Independent MA crossover reference strategy (not LLM/Council live replay)
 - Realistic PnL, Fees (Taker 0.05%, Maker 0.02%), Slippage (0.02%)
 - Equity Curve History for Mini-chart Rendering
 - Trade-by-Trade Execution Audit Log
@@ -19,24 +20,52 @@ import argparse
 import datetime
 import json
 import math
-import os
 import sys
-import urllib.request
+
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
+
+try:
+    from scripts.instrument_pool import load_instruments as load_pool_instruments
+except ImportError:
+    from instrument_pool import load_instruments as load_pool_instruments
 
 WORKSPACE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = WORKSPACE_DIR / "data"
 
-DEFAULT_SYMBOLS = [
-    "BTC-USDT-SWAP",
-    "ETH-USDT-SWAP",
-    "SOL-USDT-SWAP",
-    "DOGE-USDT-SWAP",
-    "SUI-USDT-SWAP",
-    "ASTER-USDT-SWAP",
-]
+MIN_CANDLE_BARS = 20
+STRATEGY_ID = "independent_ma_reference"
+
+
+class MarketDataError(Exception):
+    """Missing, illegal, or insufficient market data. Never a cue to fabricate candles."""
+
+    def __init__(self, message: str, symbol: Optional[str] = None, code: str = "missing"):
+        super().__init__(message)
+        self.symbol = symbol
+        self.code = code
+
+
+def default_symbols() -> List[str]:
+    """Reuse the current instrument_pool; no hardcoded six-asset ASTER/LINK split."""
+    symbols: List[str] = []
+    seen = set()
+    for item in load_pool_instruments() or []:
+        inst_id = str((item or {}).get("instId") or "").strip()
+        if inst_id and inst_id not in seen:
+            seen.add(inst_id)
+            symbols.append(inst_id)
+    if not symbols:
+        raise MarketDataError("instrument pool is empty", code="empty_pool")
+    return symbols
+
+
+def _strategy_fields() -> Dict[str, Any]:
+    return {
+        "strategy": STRATEGY_ID,
+        "llm_or_council_replay": False,
+    }
 
 
 @dataclass
@@ -75,33 +104,94 @@ class BacktestSummary:
     recent_trades: List[Dict[str, Any]] = field(default_factory=list)
 
 
-def fetch_okx_candles(inst_id: str, bar: str = "1H", limit: int = 100) -> List[Dict[str, Any]]:
-    """Fetch live historical K-line candles directly from OKX public market endpoint."""
-    url = f"https://www.okx.com/api/v5/market/candles?instId={inst_id}&bar={bar}&limit={limit}"
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+def validate_candle_series(candles: Any, symbol: str, min_bars: int = MIN_CANDLE_BARS) -> List[Dict[str, Any]]:
+    """Reject missing, illegal, or short series. Never invent replacements."""
+    if candles is None:
+        raise MarketDataError(f"no candles for {symbol}", symbol=symbol, code="missing")
+    if not isinstance(candles, list):
+        raise MarketDataError(f"illegal candle payload for {symbol}", symbol=symbol, code="invalid")
+    if not candles:
+        raise MarketDataError(f"missing candles for {symbol}", symbol=symbol, code="missing")
+    validated: List[Dict[str, Any]] = []
+    for idx, raw in enumerate(candles):
+        if not isinstance(raw, dict):
+            raise MarketDataError(f"illegal candle row {idx} for {symbol}", symbol=symbol, code="invalid")
+        try:
+            o = float(raw["open"])
+            h = float(raw["high"])
+            l = float(raw["low"])
+            c = float(raw["close"])
+            volume = float(raw.get("volume", 0.0) or 0.0)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise MarketDataError(
+                f"illegal candle fields at {idx} for {symbol}: {exc}",
+                symbol=symbol,
+                code="invalid",
+            ) from exc
+        if not all(math.isfinite(v) for v in (o, h, l, c, volume)):
+            raise MarketDataError(f"non-finite OHLC at {idx} for {symbol}", symbol=symbol, code="invalid")
+        if min(o, h, l, c) <= 0.0:
+            raise MarketDataError(f"non-positive OHLC at {idx} for {symbol}", symbol=symbol, code="invalid")
+        if h < l or h < o or h < c or l > o or l > c:
+            raise MarketDataError(f"inconsistent OHLC at {idx} for {symbol}", symbol=symbol, code="invalid")
+        row = dict(raw)
+        row["symbol"] = str(raw.get("symbol") or symbol)
+        row["open"] = o
+        row["high"] = h
+        row["low"] = l
+        row["close"] = c
+        row["volume"] = volume
+        validated.append(row)
+    if len(validated) < min_bars:
+        raise MarketDataError(
+            f"insufficient candles for {symbol}: {len(validated)} < {min_bars}",
+            symbol=symbol,
+            code="insufficient",
+        )
+    return validated
+
+
+def _parse_okx_candle_row(row: Any, inst_id: str) -> Dict[str, Any]:
+    if not isinstance(row, (list, tuple)) or len(row) < 5:
+        raise MarketDataError(f"illegal OKX candle row for {inst_id}", symbol=inst_id, code="invalid")
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            if data.get("code") == "0" and data.get("data"):
-                raw = list(reversed(data["data"]))
-                candles = []
-                for c in raw:
-                    ts_ms = int(c[0])
-                    dt_str = datetime.datetime.fromtimestamp(ts_ms / 1000.0, tz=datetime.timezone(datetime.timedelta(hours=8))).strftime("%m-%d %H:%M")
-                    candles.append({
-                        "symbol": inst_id,
-                        "timestamp": dt_str,
-                        "ts_ms": ts_ms,
-                        "open": float(c[1]),
-                        "high": float(c[2]),
-                        "low": float(c[3]),
-                        "close": float(c[4]),
-                        "volume": float(c[5]) if len(c) > 5 else 0.0,
-                    })
-                return candles
+        ts_ms = int(row[0])
+        o = float(row[1])
+        h = float(row[2])
+        l = float(row[3])
+        c = float(row[4])
+        volume = float(row[5]) if len(row) > 5 else 0.0
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise MarketDataError(f"illegal OKX candle values for {inst_id}", symbol=inst_id, code="invalid") from exc
+    if not all(math.isfinite(v) for v in (float(ts_ms), o, h, l, c, volume)):
+        raise MarketDataError(f"non-finite OKX candle for {inst_id}", symbol=inst_id, code="invalid")
+    if min(o, h, l, c) <= 0.0 or h < l or h < o or h < c or l > o or l > c:
+        raise MarketDataError(f"inconsistent OKX OHLC for {inst_id}", symbol=inst_id, code="invalid")
+    dt_str = datetime.datetime.fromtimestamp(
+        ts_ms / 1000.0, tz=datetime.timezone(datetime.timedelta(hours=8))
+    ).strftime("%m-%d %H:%M")
+    return {
+        "symbol": inst_id,
+        "timestamp": dt_str,
+        "ts_ms": ts_ms,
+        "open": o,
+        "high": h,
+        "low": l,
+        "close": c,
+        "volume": volume,
+    }
+
+
+def fetch_okx_candles(inst_id: str, bar: str = "1H", limit: int = 100) -> List[Dict[str, Any]]:
+    """Fetch historical K-line candles from the selected exchange. Never fabricates samples."""
+    try:
+        from r20_exchange.runtime import get_exchange
+        raw = get_exchange().candles(inst_id, bar=bar, limit=limit)
     except Exception as exc:
-        print(f"Failed to fetch OKX public candles for {inst_id}: {exc}")
-    return []
+        raise MarketDataError(f"failed to fetch candles for {inst_id}: {exc}", symbol=inst_id, code="missing") from exc
+    if not isinstance(raw, list) or not raw:
+        raise MarketDataError(f"missing candles for {inst_id}", symbol=inst_id, code="missing")
+    return [_parse_okx_candle_row(row, inst_id) for row in reversed(raw)]
 
 
 class BacktestEngine:
@@ -126,7 +216,7 @@ class BacktestEngine:
 
     def run(self, candle_series: List[Dict[str, Any]], signals: Optional[List[Dict[str, Any]]] = None) -> BacktestSummary:
         symbol = candle_series[0].get("symbol", "PORTFOLIO") if candle_series else "UNKNOWN"
-        if len(candle_series) < 20:
+        if len(candle_series) < MIN_CANDLE_BARS:
             return BacktestSummary(
                 symbol=symbol,
                 total_trades=0,
@@ -353,116 +443,184 @@ class BacktestEngine:
         )
 
 
-def run_full_portfolio_backtest(bar: str = "1H", limit: int = 100, capital_per_asset: float = 10000.0) -> Dict[str, Any]:
+def _now_beijing() -> str:
+    return datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S") + " (北京时间)"
+
+
+
+def _incomplete_report(
+    bar: str,
+    limit: int,
+    symbols: List[str],
+    errors: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {
+        "status": "incomplete",
+        "updated_at": _now_beijing(),
+        "bar": bar,
+        "limit": limit,
+        "active_symbols": list(symbols),
+        "errors": errors,
+    }
+    payload.update(_strategy_fields())
+    return payload
+
+
+def run_full_portfolio_backtest(
+    bar: str = "1H",
+    limit: int = 100,
+    capital_per_asset: float = 10000.0,
+    symbols: Optional[List[str]] = None,
+    candle_loader: Optional[Callable[..., List[Dict[str, Any]]]] = None,
+) -> Dict[str, Any]:
     """
-    Runs multi-asset backtesting across all TARGET_INSTRUMENTS.
-    Aggregates into both individual asset summaries and a combined Portfolio performance.
+    Run the independent MA reference backtest across the given (or current pool) symbols.
+    Missing/illegal/insufficient market data yields a structured incomplete payload,
+    never synthetic candles or a successful portfolio return.
     """
-    symbols = DEFAULT_SYMBOLS
-    asset_results = {}
-    combined_trades = []
-    total_initial = capital_per_asset * len(symbols)
+    loader = candle_loader or fetch_okx_candles
+    try:
+        resolved = list(symbols) if symbols is not None else default_symbols()
+    except MarketDataError as exc:
+        return _incomplete_report(bar, limit, [], [{"symbol": exc.symbol, "code": exc.code, "message": str(exc)}])
+
+    if not resolved:
+        return _incomplete_report(
+            bar,
+            limit,
+            [],
+            [{"symbol": None, "code": "empty_pool", "message": "no backtest symbols"}],
+        )
+
+    errors: List[Dict[str, Any]] = []
+    series_by_symbol: Dict[str, List[Dict[str, Any]]] = {}
+    for sym in resolved:
+        try:
+            raw = loader(sym, bar=bar, limit=limit)
+            series_by_symbol[sym] = validate_candle_series(raw, sym, min_bars=MIN_CANDLE_BARS)
+        except MarketDataError as exc:
+            errors.append({"symbol": exc.symbol or sym, "code": exc.code, "message": str(exc)})
+        except Exception as exc:
+            errors.append({"symbol": sym, "code": "missing", "message": str(exc)})
+
+    if errors:
+        return _incomplete_report(bar, limit, resolved, errors)
+
+    asset_results: Dict[str, Any] = {}
+    combined_trades: List[Dict[str, Any]] = []
+    total_initial = capital_per_asset * len(resolved)
     total_final = 0.0
     total_gatekeeper_filtered = 0
 
-    for sym in symbols:
-        candles = fetch_okx_candles(sym, bar=bar, limit=limit)
-        if not candles:
-            # Fallback synthetic series
-            base_p = 100.0 if "SOL" in sym else (2500.0 if "ETH" in sym else (80000.0 if "BTC" in sym else 1.0))
-            candles = []
-            for i in range(100):
-                delta = math.sin(i / 8.0) * (base_p * 0.02) + (i * base_p * 0.001)
-                c = base_p + delta
-                candles.append({
-                    "symbol": sym,
-                    "timestamp": f"09-{10 + (i // 24):02d} {i % 24:02d}:00",
-                    "ts_ms": i * 3600000,
-                    "open": c - (base_p * 0.002),
-                    "high": c + (base_p * 0.005),
-                    "low": c - (base_p * 0.004),
-                    "close": c,
-                    "volume": 1000.0,
-                })
-
+    for sym in resolved:
         engine = BacktestEngine(initial_capital=capital_per_asset)
-        summary = engine.run(candles)
+        summary = engine.run(series_by_symbol[sym])
         asset_results[sym] = asdict(summary)
         total_final += summary.final_equity
         total_gatekeeper_filtered += summary.gatekeeper_filtered_count
         combined_trades.extend(summary.recent_trades)
 
-    # Portfolio combined performance
     comb_trades_total = sum(res["total_trades"] for res in asset_results.values())
     comb_win_total = sum(res["winning_trades"] for res in asset_results.values())
     comb_loss_total = sum(res["losing_trades"] for res in asset_results.values())
     comb_win_rate = (comb_win_total / comb_trades_total * 100) if comb_trades_total > 0 else 0.0
-    comb_return = ((total_final - total_initial) / total_initial) * 100
+    comb_return = ((total_final - total_initial) / total_initial) * 100 if total_initial else 0.0
+    n_assets = len(resolved)
 
-    sharpe_avg = sum(res["sharpe_ratio"] for res in asset_results.values()) / len(symbols)
-    max_dd_avg = max(res["max_drawdown_pct"] for res in asset_results.values())
-
+    first_symbol = resolved[0]
     portfolio_summary = {
-        "symbol": "ALL_PORTFOLIO (6大主流币全组合)",
+        "symbol": f"ALL_PORTFOLIO ({n_assets} instruments)",
         "total_trades": comb_trades_total,
         "winning_trades": comb_win_total,
         "losing_trades": comb_loss_total,
         "win_rate_pct": round(comb_win_rate, 1),
-        "profit_factor": round(sum(res["profit_factor"] for res in asset_results.values()) / len(symbols), 2),
+        "profit_factor": round(sum(res["profit_factor"] for res in asset_results.values()) / n_assets, 2),
         "initial_equity": round(total_initial, 2),
         "final_equity": round(total_final, 2),
         "total_return_pct": round(comb_return, 2),
-        "max_drawdown_pct": round(max_dd_avg, 2),
-        "sharpe_ratio": round(sharpe_avg, 2),
-        "sortino_ratio": round(sum(res["sortino_ratio"] for res in asset_results.values()) / len(symbols), 2),
-        "calmar_ratio": round(sum(res["calmar_ratio"] for res in asset_results.values()) / len(symbols), 2),
-        "avg_r_multiple": round(sum(res["avg_r_multiple"] for res in asset_results.values()) / len(symbols), 2),
+        "max_drawdown_pct": round(max(res["max_drawdown_pct"] for res in asset_results.values()), 2),
+        "sharpe_ratio": round(sum(res["sharpe_ratio"] for res in asset_results.values()) / n_assets, 2),
+        "sortino_ratio": round(sum(res["sortino_ratio"] for res in asset_results.values()) / n_assets, 2),
+        "calmar_ratio": round(sum(res["calmar_ratio"] for res in asset_results.values()) / n_assets, 2),
+        "avg_r_multiple": round(sum(res["avg_r_multiple"] for res in asset_results.values()) / n_assets, 2),
         "gatekeeper_filtered_count": total_gatekeeper_filtered,
-        "equity_curve": asset_results.get("BTC-USDT-SWAP", {}).get("equity_curve", []),
+        "equity_curve": asset_results.get(first_symbol, {}).get("equity_curve", []),
         "recent_trades": combined_trades[:15],
     }
 
-    full_payload = {
-        "updated_at": datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S (北京时间)"),
+    payload: Dict[str, Any] = {
+        "status": "ok",
+        "updated_at": _now_beijing(),
         "bar": bar,
         "limit": limit,
         "portfolio": portfolio_summary,
         "by_symbol": asset_results,
-        "active_symbols": symbols,
+        "active_symbols": resolved,
     }
-    return full_payload
+    payload.update(_strategy_fields())
+    return payload
 
 
-def main():
-    parser = argparse.ArgumentParser(description="R20 Multi-Asset Quantitative Backtesting & Statistical Engine")
-    parser.add_argument("--symbol", default="ALL", help="Symbol or 'ALL' for portfolio")
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="R20 independent MA reference backtest (not LLM/Council live replay)"
+    )
+    parser.add_argument("--symbol", default="ALL", help="Symbol or 'ALL' for current instrument_pool")
     parser.add_argument("--bar", default="1H", help="Candle bar: 15m, 1H, 4H")
     parser.add_argument("--limit", type=int, default=100, help="Candle count")
     parser.add_argument("--capital", type=float, default=10000.0, help="Initial capital per asset")
     parser.add_argument("--output", default="data/backtest_report.json", help="Path to output json")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
-    print(f"Executing quantitative backtest (mode={args.symbol}, bar={args.bar}, limit={args.limit}, capital={args.capital})...")
-    report = run_full_portfolio_backtest(bar=args.bar, limit=args.limit, capital_per_asset=args.capital)
+    print(
+        f"Executing independent MA reference backtest "
+        f"(mode={args.symbol}, bar={args.bar}, limit={args.limit}, capital={args.capital}; "
+        f"not LLM/Council live replay)..."
+    )
+
+    requested: Optional[List[str]] = None
+    if args.symbol and str(args.symbol).upper() != "ALL":
+        requested = [str(args.symbol).strip()]
+
+    try:
+        report = run_full_portfolio_backtest(
+            bar=args.bar,
+            limit=args.limit,
+            capital_per_asset=args.capital,
+            symbols=requested,
+        )
+    except Exception as exc:
+        print(f"Backtest failed: {exc}", file=sys.stderr)
+        return 1
+
+    if report.get("status") != "ok":
+        errors = report.get("errors") or []
+        print("Backtest incomplete; refusing to write a successful report.", file=sys.stderr)
+        for item in errors:
+            print(f"  {item.get('symbol')}: {item.get('code')} {item.get('message')}", file=sys.stderr)
+        return 1
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(report, f, ensure_ascii=False, indent=2)
+    with open(output_path, "w", encoding="utf-8") as handle:
+        json.dump(report, handle, ensure_ascii=False, indent=2)
 
     p = report["portfolio"]
+    universe = ", ".join(report.get("active_symbols") or [])
     print("\n==========================================================================")
-    print("      R20 QUANTUM TRADER 6-ASSET PORTFOLIO BACKTEST ATTRIBUTION REPORT    ")
+    print("      R20 INDEPENDENT MA REFERENCE BACKTEST (NOT LLM/COUNCIL REPLAY)      ")
     print("==========================================================================")
-    print(f" Portfolio Mode       : 6大主力标的对齐组合 (BTC, ETH, SOL, DOGE, SUI, ASTER)")
-    print(f" Backtest Range       : OKX 官方实时最新 {args.limit} 根 {args.bar} K线序列")
+    print(f" Strategy             : independent MA crossover reference")
+    print(f" Universe             : {universe}")
+    print(f" Backtest Range       : public candles {args.limit} x {args.bar}")
     print(f" Total Return         : {p['total_return_pct']}% (总净值: ${p['final_equity']:,.2f})")
     print(f" Win Rate             : {p['win_rate_pct']}% ({p['winning_trades']}胜 / {p['losing_trades']}负, 共{p['total_trades']}单)")
     print(f" Sharpe / Sortino     : {p['sharpe_ratio']} / {p['sortino_ratio']}")
     print(f" Max Drawdown         : {p['max_drawdown_pct']}% | Calmar: {p['calmar_ratio']}")
     print(f" Gatekeeper Blocked   : {p['gatekeeper_filtered_count']} 次物理过滤 (Fail-Closed防割肉)")
     print("==========================================================================\n")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

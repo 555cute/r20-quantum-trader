@@ -22,6 +22,7 @@ import {
   Users,
   ShieldCheck,
   ShieldAlert,
+  Newspaper,
   RefreshCw,
   LogOut,
   ExternalLink,
@@ -57,6 +58,7 @@ const navGroups = computed(() => [
       { id: 'evolution', label: t('admin.evolutionConfig', '自进化配置'), icon: Sparkles },
       { id: 'interceptors', label: t('admin.interceptors', '物理拦截插件'), icon: ShieldCheck },
       { id: 'risk', label: t('admin.riskControl', '风控管理'), icon: ShieldAlert },
+      { id: 'news', label: t('admin.newsSources', '新闻来源'), icon: Newspaper },
       { id: 'council', label: t('admin.councilSettings', '模型委员会'), icon: Users },
       { id: 'policy', label: t('admin.policySnapshots', '策略版本快照'), icon: Layers },
       { id: 'llm', label: t('admin.llmConnections', '模型连接'), icon: Cpu },
@@ -67,7 +69,7 @@ const navGroups = computed(() => [
   {
     label: t('admin.tradingGateway'),
     items: [
-      { id: 'security', label: t('admin.accountInstruments', 'OKX 账户与标的池'), icon: Wallet },
+      { id: 'security', label: t('admin.accountInstruments', '账户与标的池'), icon: Wallet },
       { id: 'gateway', label: t('admin.gatewayJobs', '任务网关'), icon: RefreshCw },
       { id: 'notify', label: t('admin.notifications', '消息通知'), icon: Radio },
       { id: 'backup', label: t('admin.backups', '备份与还原'), icon: FileCode },
@@ -143,6 +145,7 @@ const prefetchViews = () => {
     () => import('../views/admin/NotifyPage.vue'),
     () => import('../views/admin/PromptStudioPage.vue'),
     () => import('../views/admin/EvolutionPage.vue'),
+    () => import('../views/admin/NewsPage.vue'),
     () => import('../views/admin/InterceptorsPage.vue'),
     () => import('../views/admin/DecisionsPage.vue'),
     () => import('../views/admin/GatewayPage.vue'),
