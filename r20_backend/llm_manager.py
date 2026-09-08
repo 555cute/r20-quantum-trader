@@ -77,14 +77,18 @@ def _detect_reasoning_type(model_id: str) -> str:
 def _detect_capabilities(model_id: str) -> List[str]:
     m = model_id.lower()
     caps = ["chat"]
-    # 视觉能力只信任显式多模态信号。历史版本把 "flash" 当视觉关键词，
-    # 导致 deepseek-v4-flash / glm-5.3-flash / qwen3.8-flash 等纯文本模型
-    # 被误标 vision；gemini/claude/gpt 家族本就有自己的家族关键词。
-    vision_substrings = ["vision", "image", "omni", "multimodal", "vl-", "-vl", "_vl", ".vl",
-                         "gpt-4o", "gpt-5", "gpt-6", "gemini", "claude", "grok", "muse"]
-    vision_tokens = {"vl", "4v", "5v", "6v", "vln"}
+    # 视觉能力按「显式多模态标记 ∪ 家族默认」判定，而非靠 flash 这类词——
+    # 历史版本把 "flash" 当视觉关键词，会误标 deepseek-v4-flash 等纯文本模型。
+    # 该网关下 qwen / glm / gemini / claude / gpt / grok 家族的新式模型普遍多模态，
+    # 归为视觉家族；deepseek 归纯文本家族，除非名字带显式 vision 标记。
+    vision_markers = ["vision", "image", "omni", "multimodal", "vl-", "-vl", "_vl", ".vl"]
+    vision_families = ["gemini", "claude", "gpt-4o", "gpt-5", "gpt-6", "grok", "muse", "qwen", "glm"]
+    text_only_families = ["deepseek"]
     tokens = {t for t in re.split(r"[^a-z0-9]+", m) if t}
-    if any(k in m for k in vision_substrings) or (tokens & vision_tokens):
+    has_vision_marker = any(k in m for k in vision_markers) or bool(tokens & {"vl", "4v", "5v", "6v"})
+    in_vision_family = any(f in m for f in vision_families)
+    in_text_family = any(f in m for f in text_only_families)
+    if has_vision_marker or (in_vision_family and not in_text_family):
         caps.append("vision")
     if not ("-r1-distill" in m or "-thinking" in m):
         caps.append("tools")

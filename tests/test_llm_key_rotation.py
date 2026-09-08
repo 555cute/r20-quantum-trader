@@ -40,15 +40,25 @@ class CapabilityDetectionTests(unittest.TestCase):
         from r20_backend.llm_manager import _detect_capabilities
         self.detect = _detect_capabilities
 
-    def test_text_models_are_not_marked_vision(self):
-        for mid in ("deepseek-v4-flash", "glm-5.3-flash", "qwen3.8-flash", "deepseek-r1",
-                    "llama-3.1-70b-instruct", "kimi-k2"):
+    def test_text_only_family_not_marked_vision(self):
+        # deepseek 家族默认纯文本：即便名字含 flash 也不视觉
+        for mid in ("deepseek-v4-flash", "deepseek-r1", "deepseek-v3"):
             self.assertNotIn("vision", self.detect(mid), f"纯文本模型被误标视觉: {mid}")
+        # 未知家族且无显式视觉标记 → 保守不标视觉
+        for mid in ("llama-3.1-70b-instruct", "kimi-k2", "mistral-large"):
+            self.assertNotIn("vision", self.detect(mid), f"无视觉信号却误标: {mid}")
 
-    def test_explicit_vision_models_are_detected(self):
-        for mid in ("deepseek-v4-flash-vision-exp", "qwen3-vl-plus", "glm-4v", "gemini-2.5-flash",
-                    "gpt-4o-mini", "claude-sonnet-4", "kimi-latest-vl"):
-            self.assertIn("vision", self.detect(mid), f"视觉模型漏标: {mid}")
+    def test_vision_family_models_detected(self):
+        # 用户确认：该网关下 qwen / glm 的 flash 系列是视觉模型（家族感知，不靠 flash 词）
+        for mid in ("qwen3.8-flash", "glm-5.3-flash", "gemini-3.8-flash-high",
+                    "gpt-4o-mini", "claude-sonnet-4", "grok-4"):
+            self.assertIn("vision", self.detect(mid), f"视觉家族模型漏标: {mid}")
+
+    def test_explicit_vision_marker_overrides_text_family(self):
+        # deepseek 是文本家族，但带显式 vision 标记的变体仍算视觉
+        self.assertIn("vision", self.detect("deepseek-v4-flash-vision-exp"))
+        self.assertIn("vision", self.detect("qwen3-vl-plus"))
+        self.assertIn("vision", self.detect("glm-4v"))
 
     def test_vl_substring_inside_word_is_not_vision(self):
         self.assertNotIn("vision", self.detect("revlove-large"))
@@ -132,7 +142,7 @@ class LlmCredentialRotationTests(unittest.TestCase):
         config = self.lm.init_llm_config()
         model = next(m for m in config["models"] if m["id"] == "glm-5.3-flash")
         self.assertEqual(model["api_key"], "sk-OLD-KEY", "读取时应从供应商注入当前键")
-        self.assertNotIn("vision", model["capabilities"], "glm-5.3-flash 不应被误标视觉")
+        self.assertIn("vision", model["capabilities"], "glm 家族默认视觉（用户确认 glm-5.3-flash 为视觉模型）")
 
     def test_global_config_sync_updates_active_provider(self):
         """全局设置页改密钥（PUT /admin/config）必须同步到激活模型所属供应商。"""
