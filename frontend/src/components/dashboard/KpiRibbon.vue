@@ -57,12 +57,12 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="card grid grid-cols-2 gap-y-1 py-1 md:grid-cols-3 xl:grid-cols-6">
+  <div class="card grid grid-cols-2 gap-2 p-2 md:grid-cols-3 xl:grid-cols-6 xl:gap-0 xl:p-0">
     <BaseStat
       :label="t('dash.matrix.kpi.equity')"
       :value="equity"
       :hint="t('dash.matrix.kpi.equityTip')"
-      class="border-line-1 max-xl:border-e max-md:border-b xl:border-e"
+     
     >
       <template #extra>
         <span class="num text-xs font-semibold" :class="todayNet >= 0 ? 'up' : 'down'">
@@ -78,7 +78,7 @@ onMounted(async () => {
       :delta="todayTrades ? `${todayTrades} ${t('common.unitCount')} · ${todayWinRate}%` : undefined"
       :delta-tone="todayNet >= 0 ? 'up' : 'down'"
       :hint="t('dash.matrix.kpi.todayTip')"
-      class="border-line-1 max-xl:border-e max-md:border-b xl:border-e"
+     
     />
 
     <BaseStat
@@ -87,14 +87,14 @@ onMounted(async () => {
       :delta="store.positions.length ? `(${fmtPct(floatRoi)})` : '--'"
       :delta-tone="floatPnl >= 0 ? 'up' : 'down'"
       :hint="t('dash.matrix.kpi.floatTip')"
-      class="border-line-1 max-md:border-b xl:border-e"
+     
     />
 
     <BaseStat
       :label="t('dash.matrix.kpi.ls')"
       :value="`${longCount} / ${shortCount}`"
       hint="L / S"
-      class="border-line-1 max-md:border-b max-lg:border-e xl:border-e"
+     
     />
 
     <BaseStat
@@ -103,7 +103,7 @@ onMounted(async () => {
       :delta="posMargin > 0 ? `${fmtNum(posMargin, 0)} U` : undefined"
       delta-tone="muted"
       :hint="t('dash.matrix.kpi.marginTip')"
-      class="border-line-1 max-md:border-b max-lg:border-e xl:border-e"
+     
     />
 
     <BaseStat

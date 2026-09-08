@@ -7,14 +7,12 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   PanelLeftClose, PanelLeftOpen, Menu, X, LogOut, MonitorPlay,
-  Sun, Moon, Command, Eye,
+  Sun, Moon,
 } from 'lucide-vue-next';
 import { useAuthStore } from '../stores/auth';
 import { useTheme } from '../composables/useTheme';
 import { useI18n } from '../composables/useI18n';
-import { useUi } from '../composables/useUi';
 import { useLocalStorage } from '../composables/useLocalStorage';
-import { useHotkeys } from '../composables/useHotkeys';
 import { adminGroups } from '../config/nav';
 import { APP_VERSION, APP_NAME } from '../config/version';
 
@@ -23,9 +21,6 @@ const router = useRouter();
 const auth = useAuthStore();
 const { theme, toggleTheme, cvd, toggleCvd } = useTheme();
 const { t } = useI18n();
-const { cmdkOpen, peekOpen } = useUi();
-
-useHotkeys({ 'mod+k': { handler: () => (cmdkOpen.value = true), allowInInput: true } });
 
 const collapsed = useLocalStorage('r20_admin_sidebar', false);
 const drawerOpen = ref(false);
@@ -165,12 +160,6 @@ watch(() => route.path, () => (drawerOpen.value = false));
           </p>
         </div>
         <div class="ms-auto flex items-center gap-1">
-          <button class="btn btn-quiet btn-icon hidden sm:inline-flex" :title="t('nav.actions.search')" @click="cmdkOpen = true">
-            <Command class="h-4 w-4" />
-          </button>
-          <button class="btn btn-quiet btn-icon" :title="t('nav.actions.promptPeek')" @click="peekOpen = true">
-            <Eye class="h-4 w-4" />
-          </button>
           <button
             class="btn h-8 px-2 text-2xs"
             :class="cvd ? 'btn-primary' : 'btn-ghost'"

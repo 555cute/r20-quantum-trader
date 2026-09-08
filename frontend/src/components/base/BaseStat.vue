@@ -21,7 +21,7 @@ const toneVar = {
 </script>
 
 <template>
-  <div class="flex min-w-0 flex-col justify-center gap-0.5 overflow-hidden px-4 py-2.5" :title="hint">
+  <div class="kpi-cell flex min-w-0 flex-col justify-center gap-0.5 overflow-hidden px-4 py-2.5" :title="hint">
     <span class="t-label truncate">{{ label }}</span>
     <div class="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0">
       <span class="num truncate text-lg font-bold leading-tight xl:text-xl" style="color: var(--ink-strong)">{{ value }}</span>

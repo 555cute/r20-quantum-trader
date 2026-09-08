@@ -360,6 +360,20 @@ tr:hover .row-actions, .row-actions:focus-within { opacity: 1; }
 .link { color: var(--accent); cursor: pointer; }
 .link:hover { text-decoration: underline; }
 
+/* —— KPI 带单元：移动端独立小卡，xl 起单行分隔线（解决断点换列后线条错位）—— */
+.kpi-cell {
+  background-color: var(--surface-1);
+  border-radius: 8px;
+}
+@media (min-width: 1280px) {
+  .kpi-cell {
+    background-color: transparent;
+    border-radius: 0;
+    border-inline-end: 1px solid var(--line-1);
+  }
+  .kpi-cell:last-child { border-inline-end: none; }
+}
+
 /* —— 空态 / 骨架 —— */
 .empty {
   display: flex;

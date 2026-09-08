@@ -97,23 +97,23 @@ function dirOf(side: string): 'long' | 'short' {
     </PageHead>
 
     <!-- 汇总带 -->
-    <div class="card grid grid-cols-2 gap-y-1 py-1 md:grid-cols-3 xl:grid-cols-6">
-      <BaseStat :label="t('dash.ledger.summary.total')" :value="fmtNum(filtered.length, 0)" class="border-line-1 max-xl:border-e max-md:border-b xl:border-e" />
+    <div class="card grid grid-cols-2 gap-2 p-2 md:grid-cols-3 xl:grid-cols-6 xl:gap-0 xl:p-0">
+      <BaseStat :label="t('dash.ledger.summary.total')" :value="fmtNum(filtered.length, 0)" />
       <BaseStat
         :label="t('dash.ledger.summary.winRate')"
         :value="winRate != null ? fmtNum(winRate, 1) + '%' : '--'"
         :delta="`${wins} / ${filtered.length}`"
         delta-tone="muted"
-        class="border-line-1 max-xl:border-e max-md:border-b xl:border-e"
+       
       />
       <BaseStat
         :label="t('dash.ledger.summary.pf')"
         :value="perf.profit_factor != null ? fmtNum(perf.profit_factor, 2) : '--'"
         :hint="t('dash.ledger.summary.tipPf')"
-        class="border-line-1 max-md:border-b xl:border-e"
+       
       />
-      <BaseStat :label="t('dash.ledger.summary.net')" :value="fmtSigned(netSum)" :delta-tone="netSum >= 0 ? 'up' : 'down'" class="border-line-1 max-md:border-b max-lg:border-e xl:border-e" />
-      <BaseStat :label="t('dash.ledger.summary.fees')" :value="`-${fmtNum(feeSum, 2)}`" delta-tone="muted" class="border-line-1 max-md:border-b max-lg:border-e xl:border-e" />
+      <BaseStat :label="t('dash.ledger.summary.net')" :value="fmtSigned(netSum)" :delta-tone="netSum >= 0 ? 'up' : 'down'" />
+      <BaseStat :label="t('dash.ledger.summary.fees')" :value="`-${fmtNum(feeSum, 2)}`" delta-tone="muted" />
       <BaseStat
         v-if="best"
         :label="t('dash.ledger.summary.best')"

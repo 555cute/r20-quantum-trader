@@ -32,8 +32,8 @@ const updated = computed(() => store.lastUpdated);
       <span class="dot" :class="engine.dot" />
       {{ engine.label }}
     </span>
-    <span class="chip hidden lg:inline-flex">{{ t('dash.shell.cycle', undefined, { n: 15 }) }}</span>
-    <span v-if="updated" class="chip hidden lg:inline-flex">
+    <span class="chip hidden md:inline-flex">{{ t('dash.shell.cycle', undefined, { n: 15 }) }}</span>
+    <span v-if="updated" class="chip hidden md:inline-flex">
       <span class="t-faint">{{ t('dash.shell.updatedLabel') }}</span>
       <TimeAgo :time="updated" />
     </span>

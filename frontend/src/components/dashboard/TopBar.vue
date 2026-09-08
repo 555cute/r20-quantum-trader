@@ -2,7 +2,7 @@
 /** 前台顶栏：品牌 / 5 tab / 决策透视 / ⌘K / 主题 / 偏好弹层 */
 import { computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { Moon, Sun, Search, Eye } from 'lucide-vue-next';
+import { Moon, Sun, Eye } from 'lucide-vue-next';
 import { publicTabs } from '../../config/nav';
 import { useI18n } from '../../composables/useI18n';
 import { useTheme } from '../../composables/useTheme';
@@ -14,7 +14,7 @@ const route = useRoute();
 const router = useRouter();
 const { t } = useI18n();
 const { theme, toggleTheme } = useTheme();
-const { cmdkOpen, peekOpen, aboutOpen } = useUi();
+const { peekOpen, aboutOpen } = useUi();
 
 const isDark = computed(() => theme.value === 'dark');
 const activeKey = computed(() => (route.meta?.tab as string) || 'trading');
@@ -68,14 +68,6 @@ function go(path: string) {
       <div class="ms-auto flex items-center gap-1 md:ms-0">
         <button class="btn btn-quiet btn-icon" :title="t('nav.actions.promptPeek')" @click="peekOpen = true">
           <Eye class="h-4 w-4" />
-        </button>
-        <button
-          class="btn btn-quiet h-8 hidden items-center gap-2 px-2.5 sm:flex"
-          :title="t('nav.actions.search')"
-          @click="cmdkOpen = true"
-        >
-          <Search class="h-4 w-4" />
-          <kbd>⌘K</kbd>
         </button>
         <button class="btn btn-quiet btn-icon" :title="t('dash.shell.settings.theme')" @click="toggleTheme">
           <Sun v-if="isDark" class="h-4 w-4" />

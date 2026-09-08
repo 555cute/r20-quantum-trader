@@ -49,22 +49,22 @@ const md = computed(() => (store.data as any)?.ai_trading_memory_md || '');
     <PageHead :title="t('dash.evolution.title')" :desc="t('dash.evolution.desc')" />
 
     <!-- 复盘 HUD -->
-    <div class="card grid grid-cols-2 gap-y-1 py-1 md:grid-cols-5">
+    <div class="card grid grid-cols-2 gap-2 p-2 md:grid-cols-5 xl:gap-0 xl:p-0">
       <BaseStat
         :label="t('dash.evolution.hud.at')"
         :value="review.timestamp ? review.timestamp.slice(5, 16) : '--'"
-        class="border-line-1 max-md:border-b max-xl:border-e"
+       
       />
       <BaseStat
         :label="t('dash.evolution.hud.sample')"
         :value="review.total_trades != null ? `${fmtNum(review.total_trades, 0)} ${t('common.unitCount')}` : '--'"
-        class="border-line-1 max-md:border-b max-xl:border-e"
+       
       />
       <BaseStat
         :label="t('dash.evolution.hud.winRate')"
         :value="review.win_rate != null ? fmtNum(review.win_rate, 1) + '%' : '--'"
         :delta-tone="(review.win_rate ?? 0) >= 50 ? 'up' : 'down'"
-        class="border-line-1 max-md:border-b max-xl:border-e"
+       
       />
       <BaseStat
         :label="t('dash.evolution.hud.pf')"
@@ -72,7 +72,7 @@ const md = computed(() => (store.data as any)?.ai_trading_memory_md || '');
         :delta="(review.profit_factor ?? 0) >= 1 ? t('common.ge') + ' 1' : undefined"
         :delta-tone="(review.profit_factor ?? 0) >= 1 ? 'up' : 'down'"
         :hint="t('dash.ledger.summary.tipPf')"
-        class="border-line-1 max-md:border-b xl:border-e"
+       
       />
       <BaseStat :label="t('dash.evolution.hud.status')" value="">
         <template #extra>

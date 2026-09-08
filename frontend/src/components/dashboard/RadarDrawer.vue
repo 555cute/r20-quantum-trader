@@ -62,7 +62,7 @@ function dirOf(a: string): 'long' | 'short' | 'flat' {
     <div v-else-if="tab === 'quotes'" class="space-y-4">
       <div v-if="posMgmt.length">
         <p class="t-label mb-1.5">{{ t('dash.radar.detail.verdict') }} · position_management</p>
-        <div class="card overflow-hidden">
+        <div class="card overflow-x-auto">
           <table class="table">
             <thead>
               <tr>
@@ -86,7 +86,7 @@ function dirOf(a: string): 'long' | 'short' | 'flat' {
 
       <div v-if="opps.length">
         <p class="t-label mb-1.5">{{ t('dash.radar.detail.quotes') }} · top_opportunities</p>
-        <div class="card overflow-hidden">
+        <div class="card overflow-x-auto">
           <table class="table">
             <thead>
               <tr>

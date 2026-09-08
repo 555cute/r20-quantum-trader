@@ -85,8 +85,10 @@ const isDark = computed(() => theme.value === 'dark')
 
 /* P4: mobile hides the always-on legend to stop multi-line overlay on narrow screens;
    desktop keeps it (data always readable). Re-applied when crossing the 640px breakpoint. */
-function legendRule(): 'always' | 'none' {
-  return typeof window !== 'undefined' && window.innerWidth < 640 ? 'none' : 'always'
+function legendRule(): 'hover' | 'click' {
+  // 桌面：悬停图表才显示指标数值，不再常驻遮挡 K 线
+  // 移动：点按 K 线显示数值（tap 即 click）
+  return typeof window !== 'undefined' && window.innerWidth < 640 ? 'click' : 'hover'
 }
 
 /* P1: resolve design-token value at render time — chart follows theme & CVD switches */
@@ -182,7 +184,6 @@ const mainIndicators: IndicatorOption[] = [
   { key: 'EMA', name: 'EMA', label: 'EMA', desc: '指数均线 (12, 26, 50)', color: '#38BDF8', defaultParams: [12, 26, 50], isSub: false },
   { key: 'BOLL', name: 'BOLL', label: 'BOLL', desc: '布林带轨道 (20, 2)', color: '#818CF8', defaultParams: [20, 2], isSub: false },
   { key: 'SAR', name: 'SAR', label: 'SAR', desc: '抛物线转向', color: '#EC4899', isSub: false },
-  { key: 'BBI', name: 'BBI', label: 'BBI', desc: '多空多均线综合', color: '#10B981', isSub: false },
 ]
 
 // 副图独立窗格指标 (Sub Panes)
@@ -203,7 +204,6 @@ const activeIndicators = ref<Record<string, boolean>>({
   EMA: false,
   BOLL: false,
   SAR: false,
-  BBI: false,
   MACD: false,
   RSI: false,
   KDJ: false,
@@ -1140,7 +1140,7 @@ onUnmounted(() => {
             <ChevronDown class="h-3 w-3 transition-transform" :class="showIndicatorMenu && 'rotate-180'" />
           </button>
           <Transition name="pop">
-            <div v-if="showIndicatorMenu" class="float-panel absolute right-0 top-9 z-50 w-72 p-3">
+            <div v-if="showIndicatorMenu" class="float-panel absolute right-0 top-9 z-50 max-h-[65vh] w-72 max-w-[calc(100vw-24px)] overflow-y-auto p-3">
               <p class="t-label mb-2">{{ t('dash.matrix.chart.indicatorHint') }}</p>
               <p class="t-label mb-1.5">{{ t('dash.matrix.chart.overlays') }}</p>
               <div class="mb-3 grid grid-cols-2 gap-1.5">
