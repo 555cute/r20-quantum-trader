@@ -69,6 +69,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'evolution', name: 'admin-evolution', component: () => import('../views/admin/EvolutionPage.vue') },
       { path: 'interceptors', name: 'admin-interceptors', component: () => import('../views/admin/InterceptorsPage.vue') },
       { path: 'risk', name: 'admin-risk', component: () => import('../views/admin/RiskPage.vue') },
+      { path: 'news', name: 'admin-news', component: () => import('../views/admin/NewsPage.vue') },
       { path: 'policy', name: 'admin-policy', component: () => import('../views/admin/PolicySnapshotPage.vue') },
       { path: 'agents', name: 'admin-agents', component: () => import('../views/admin/AgentsPage.vue') },
       { path: 'backup', name: 'admin-backup', component: () => import('../views/admin/BackupPage.vue') },

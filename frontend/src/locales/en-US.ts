@@ -215,6 +215,7 @@ export const enUS = {
     accountInstruments: 'Accounts & Instruments',
     interceptors: 'Risk Interceptors',
     riskControl: 'Risk Control',
+    newsSources: 'News Sources',
     gatewayJobs: 'Gateway Jobs',
     systemAdmin: 'System Admin',
     securityAuth: 'Security & Auth',

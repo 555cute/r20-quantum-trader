@@ -215,6 +215,7 @@ export const zhCN = {
     accountInstruments: '账户与标的池',
     interceptors: '物理拦截插件',
     riskControl: '风控管理',
+    newsSources: '新闻来源',
     gatewayJobs: '网关任务状态',
     systemAdmin: '系统管理',
     securityAuth: '系统安全与授权',
