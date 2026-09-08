@@ -265,6 +265,10 @@ class CouncilResetRoleRequest(BaseModel):
     role_id: str
 
 
+class CouncilImportRequest(BaseModel):
+    payload: dict[str, Any]
+
+
 class CouncilTestRequest(BaseModel):
     mock_market_prompt: str | None = None
 
@@ -1535,6 +1539,29 @@ def admin_reset_council_role(payload: CouncilResetRoleRequest, x_r20_session: st
     saved = reset_role_template(payload.role_id)
     audit_record("council.role.reset", "success", {"actor": actor["username"], "role_id": payload.role_id})
     return {"status": "ok", "role_id": payload.role_id, "config": saved}
+
+
+@app.get("/api/v1/admin/council/export")
+def admin_export_council_config(x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
+    require_admin_header(x_r20_session=x_r20_session)
+    from r20_backend.council_manager import export_council_config
+    return export_council_config()
+
+
+@app.post("/api/v1/admin/council/import")
+def admin_import_council_config(payload: CouncilImportRequest, x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
+    actor = require_superadmin(x_r20_session)
+    from r20_backend.council_manager import import_council_config
+    try:
+        result = import_council_config(payload.payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    audit_record("council.config.import", "success", {
+        "actor": actor["username"],
+        "roles": result.get("roles"),
+        "backup_file": result.get("backup_file"),
+    })
+    return {"status": "ok", **result}
 
 
 @app.post("/api/v1/admin/council/test")

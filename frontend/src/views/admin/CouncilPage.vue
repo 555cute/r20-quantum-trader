@@ -21,6 +21,8 @@ import {
   ToggleLeft,
   ToggleRight,
   Sliders,
+  Download,
+  Upload,
 } from 'lucide-vue-next'
 
 const { api } = useApi()
@@ -123,6 +125,69 @@ async function saveConfig() {
     bannerMsg.value = { text: `保存失败: ${e.message}`, type: 'err' }
   } finally {
     saving.value = false
+  }
+}
+
+// ===== 投委会配置导入 / 导出（对齐提示词工坊策略包体验） =====
+const importVisible = ref(false)
+const importRawJson = ref('')
+const importFileError = ref('')
+const importing = ref(false)
+
+async function exportConfig() {
+  try {
+    const res = await api('/api/v1/admin/council/export')
+    const blob = new Blob([JSON.stringify(res, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `r20-council-config-${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+    bannerMsg.value = { text: '✅ 投委会配置已导出为 JSON 包（含全部席位提示词与议事规则）', type: 'ok' }
+  } catch (e: any) {
+    bannerMsg.value = { text: `导出失败：${e.message}`, type: 'err' }
+  }
+}
+
+function pickImportFile(ev: Event) {
+  const file = (ev.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = () => {
+    importRawJson.value = String(reader.result || '')
+    importFileError.value = ''
+  }
+  reader.onerror = () => { importFileError.value = '文件读取失败，请重试或直接粘贴 JSON 内容' }
+  reader.readAsText(file)
+}
+
+async function doImportConfig() {
+  importFileError.value = ''
+  let payload: any
+  try {
+    payload = JSON.parse(importRawJson.value)
+  } catch {
+    importFileError.value = 'JSON 格式不合法，请检查导出包内容'
+    return
+  }
+  importing.value = true
+  try {
+    const res = await api('/api/v1/admin/council/import', {
+      method: 'POST',
+      body: JSON.stringify({ payload }),
+    })
+    await loadData()
+    importVisible.value = false
+    importRawJson.value = ''
+    bannerMsg.value = {
+      text: `✅ 投委会配置导入成功：席位 ${(res.roles || []).join(' / ')}${res.backup_file ? `；原配置已自动备份为 ${res.backup_file}` : ''}`,
+      type: 'ok',
+    }
+  } catch (e: any) {
+    importFileError.value = `导入失败：${e.message}`
+  } finally {
+    importing.value = false
   }
 }
 
@@ -288,6 +353,68 @@ onMounted(loadData)
           >
             <Play class="w-3.5 h-3.5" :class="{ 'animate-spin': testing }" />
             <span>{{ testing ? '现场辩论中...' : '现场辩论测试' }}</span>
+          </button>
+
+          <!-- Export / Import Buttons -->
+          <button
+            @click="exportConfig"
+            :disabled="!auth.isSuperadmin"
+            class="btn-admin-secondary disabled:opacity-40"
+            title="导出当前投委会席位、提示词与议事规则为 JSON 包"
+          >
+            <Download class="w-3.5 h-3.5" />
+            <span>导出配置</span>
+          </button>
+          <button
+            @click="auth.isSuperadmin && (importVisible = !importVisible)"
+            :disabled="!auth.isSuperadmin"
+            class="btn-admin-secondary disabled:opacity-40"
+            title="导入投委会配置 JSON 包（导入前自动备份当前配置）"
+          >
+            <Upload class="w-3.5 h-3.5" />
+            <span>导入配置</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Import Panel -->
+      <div
+        v-if="importVisible"
+        class="rounded-lg border p-3 space-y-2"
+        style="border-color: var(--border-admin); background: rgba(255, 255, 255, 0.02);"
+      >
+        <p class="text-[11px]" style="color: var(--text-muted);">
+          选择 r20-council-config JSON 导出包，或直接粘贴其内容。导入前当前配置将自动备份（保留最近 10 份）；席位绑定的模型 ID 按导入包原样恢复，若本机无同名模型请导入后在席位卡片重新绑定。
+        </p>
+        <input
+          type="file"
+          accept="application/json,.json"
+          @change="pickImportFile"
+          class="text-[11px]"
+          style="color: var(--text-muted);"
+        />
+        <textarea
+          v-model="importRawJson"
+          rows="8"
+          placeholder='粘贴导出包 JSON：{"format":"r20-council-config","version":1,"config":{...}}'
+          class="w-full font-mono text-[11px] rounded p-2 bg-transparent border"
+          style="border-color: var(--border-admin); color: var(--text-admin);"
+        ></textarea>
+        <p v-if="importFileError" class="text-[11px]" style="color: var(--color-down);">{{ importFileError }}</p>
+        <div class="flex gap-2">
+          <button
+            @click="doImportConfig"
+            :disabled="importing || !importRawJson.trim()"
+            class="btn-admin-primary disabled:opacity-40"
+          >
+            <Upload class="w-3.5 h-3.5" />
+            <span>{{ importing ? '导入中...' : '确认导入' }}</span>
+          </button>
+          <button
+            @click="importVisible = false; importRawJson = ''; importFileError = ''"
+            class="btn-admin-secondary"
+          >
+            <span>取消</span>
           </button>
         </div>
       </div>
