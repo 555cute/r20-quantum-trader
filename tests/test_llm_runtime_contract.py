@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import json
+import socket
 import tempfile
 import unittest
 import urllib.error
@@ -302,6 +303,35 @@ class LlmRuntimeContractTests(unittest.TestCase):
         self.assertIn("incomplete", captured["error_type"])
         self.assertNotIn("sys", json.dumps(captured))
         self.assertNotIn("user", json.dumps(captured))
+
+    def test_timeout_retries_share_one_budget(self):
+        now = [0.0]
+        timeouts = []
+
+        def fake_perf_counter():
+            return now[0]
+
+        def fake_urlopen(_req, timeout=None):
+            timeouts.append(timeout)
+            now[0] += float(timeout or 0)
+            raise socket.timeout()
+
+        def fake_sleep(seconds):
+            now[0] += seconds
+
+        with patch.object(llm_manager, "get_active_llm_runtime", return_value=_runtime()), \
+             patch("urllib.request.urlopen", side_effect=fake_urlopen), \
+             patch("r20_backend.llm_manager.time.perf_counter", side_effect=fake_perf_counter), \
+             patch("r20_backend.llm_manager.time.sleep", side_effect=fake_sleep):
+            with self.assertRaises(TimeoutError) as ctx:
+                llm_manager.execute_llm_request(
+                    messages=[{"role": "user", "content": "hi"}],
+                    timeout=5.0,
+                )
+        self.assertEqual(len(timeouts), 1)
+        self.assertAlmostEqual(timeouts[0], 5.0, places=2)
+        self.assertIn("5s", str(ctx.exception))
+
 
 
 if __name__ == "__main__":

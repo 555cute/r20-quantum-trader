@@ -1589,9 +1589,24 @@ def execute_llm_request(
 
     resp_handle = None
     last_exc: Exception | None = None
+    request_deadline = t0 + effective_timeout
+
+    def _remaining() -> float:
+        return request_deadline - time.perf_counter()
+
+    def _sleep_for_retry(attempt: int) -> bool:
+        remaining = _remaining()
+        if remaining <= 0.05:
+            return False
+        time.sleep(min(2.0 * (attempt + 1), remaining - 0.05))
+        return _remaining() > 0.05
+
     for attempt in range(3):
+        remaining = _remaining()
+        if remaining <= 0.05:
+            break
         try:
-            resp_handle = urllib.request.urlopen(req, timeout=effective_timeout)
+            resp_handle = urllib.request.urlopen(req, timeout=remaining)
             break
         except urllib.error.HTTPError as exc:
             err_b = ""
@@ -1601,8 +1616,7 @@ def execute_llm_request(
                 pass
             last_exc = exc
 
-            if _is_transient(exc.code, err_b) and attempt < 2:
-                time.sleep(2.0 * (attempt + 1))
+            if _is_transient(exc.code, err_b) and attempt < 2 and _sleep_for_retry(attempt):
                 continue
             excerpt = _safe_error_excerpt(err_b)
             detail = f"：{excerpt}" if excerpt else ""
@@ -1613,8 +1627,7 @@ def execute_llm_request(
             ) from None
         except (TimeoutError, socket.timeout) as exc:
             last_exc = exc
-            if attempt < 2:
-                time.sleep(2.0 * (attempt + 1))
+            if attempt < 2 and _sleep_for_retry(attempt):
                 continue
             raise TimeoutError(
                 f"LLM 推演超时（已达到思考上限时间 {effective_timeout:.0f}s）：模型思考链过长未在时限内完成响应，可前往后台 AI 模型设置中调大思考上限时间"
@@ -1622,14 +1635,17 @@ def execute_llm_request(
         except urllib.error.URLError as exc:
             last_exc = exc
             if isinstance(getattr(exc, "reason", None), (socket.timeout, TimeoutError)):
-                if attempt < 2:
-                    time.sleep(2.0 * (attempt + 1))
+                if attempt < 2 and _sleep_for_retry(attempt):
                     continue
                 raise TimeoutError(
                     f"LLM 推演超时（已达到思考上限时间 {effective_timeout:.0f}s）：模型思考链过长未在时限内完成响应，可前往后台 AI 模型设置中调大思考上限时间"
                 ) from exc
             raise
     if resp_handle is None:
+        if isinstance(last_exc, (TimeoutError, socket.timeout)):
+            raise TimeoutError(
+                f"LLM 推演超时（已达到思考上限时间 {effective_timeout:.0f}s）：模型思考链过长未在时限内完成响应，可前往后台 AI 模型设置中调大思考上限时间"
+            ) from last_exc
         raise last_exc if last_exc is not None else RuntimeError("LLM 请求未获得响应")
 
     with resp_handle as resp:
