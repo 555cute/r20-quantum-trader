@@ -41,7 +41,7 @@ SCOPE_PATHS = {
     "tests": ("tests",),
     "recovery_guide": ("RECOVERY_GUIDE.md",),
     "agent_profile": ("SOUL.md", "PROFILE.md", "AGENTS.md", "MEMORY.md"),
-    "root_configs": ("README.md", "requirements.txt", "pyproject.toml", "docker-compose.yml", "Dockerfile", ".gitignore"),
+    "root_configs": ("README.md", "requirements.txt", "pyproject.toml", ".gitignore"),
 }
 
 

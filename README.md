@@ -238,7 +238,7 @@ v7.6.0 起，全部执行层硬风控参数从 py 源码中彻底剥离，收敛
 
 ## 🚀 极速部署指南
 
-### 方式 A：源码直接部署 (Python 3.10+ / Node.js 18+)
+### 源码直接部署 (Python 3.10+ / Node.js 18+)
 
 #### 1. 克隆代码与配置环境变量
 ```bash
@@ -263,20 +263,6 @@ cd ..
 # 3. 一键启动后端控制面与交易主脑
 python -m uvicorn r20_backend.app:app --host 0.0.0.0 --port 8080
 # 或者直接运行一键启动脚本: ./start.sh
-```
-
----
-
-### 方式 B：Docker / Docker-Compose 容器化一键启动 (推荐)
-
-无需在宿主机配置复杂的 Python 和 Node.js 环境，秒级交付：
-
-```bash
-# 1. 配置环境变量
-cp env.example .env
-
-# 2. 一键构建并启动多阶段容器
-docker compose up -d --build
 ```
 
 ---
