@@ -1,10 +1,36 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useDashboardStore } from '../stores/dashboard'
 import { useI18n } from '../composables/useI18n'
 import { Wallet, TrendingUp, Zap, ShieldCheck } from 'lucide-vue-next'
 
 const store = useDashboardStore()
+
+/* P4: 7-14d equity sparkline (daily data, fetch once) */
+const eqSeries = ref<number[]>([])
+onMounted(async () => {
+  try {
+    const r = await fetch('/api/v1/equity_history?days=14')
+    const d = await r.json()
+    eqSeries.value = (d.days || []).map((x: any) => Number(x.equity)).filter((n: number) => !isNaN(n))
+  } catch { /* sparkline optional */ }
+})
+const sparkPoints = computed(() => {
+  const v = eqSeries.value
+  if (v.length < 2) return ''
+  const min = Math.min(...v), max = Math.max(...v), span = (max - min) || 1
+  return v.map((x, i) => `${(1 + (i / (v.length - 1)) * 46).toFixed(1)},${(15 - ((x - min) / span) * 13).toFixed(1)}`).join(' ')
+})
+const sparkColor = computed(() => {
+  const v = eqSeries.value
+  if (v.length < 2) return 'var(--text-muted)'
+  return v[v.length - 1] >= v[0] ? 'var(--color-up)' : 'var(--color-down)'
+})
+const sparkTitle = computed(() => {
+  const v = eqSeries.value
+  if (v.length < 2) return ''
+  return `${v[0].toFixed(0)} → ${v[v.length - 1].toFixed(0)} USDT (14d)`
+})
 const { t } = useI18n()
 const account = computed(() => store.data?.account || {})
 const today = computed(() => store.data?.today_stats || {})
@@ -102,6 +128,9 @@ const ocoProtectedRatio = computed(() => {
         class="text-[11px] font-mono font-bold num-tabular"
         :style="{ color: Number(todayNet) > 0 ? 'var(--color-up)' : Number(todayNet) < 0 ? 'var(--color-down)' : 'var(--text-muted)' }"
       >{{ Number(todayNet) > 0 ? '▲' : Number(todayNet) < 0 ? '▼' : '·' }} {{ Number(todayNet) >= 0 ? '+' : '' }}{{ todayNet }} {{ t('nav.today') }}</span>
+      <svg v-if="sparkPoints" width="48" height="16" viewBox="0 0 48 16" class="shrink-0" :title="sparkTitle" aria-hidden="true">
+        <polyline :points="sparkPoints" fill="none" :stroke="sparkColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" />
+      </svg>
     </div>
 
     <!-- 2. Today realized -->

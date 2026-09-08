@@ -123,13 +123,11 @@ function confTier(item: any) {
               <span class="font-mono font-black text-sm tracking-wide truncate" style="color: var(--text-main);">
                 {{ item.name }}
               </span>
-              <span class="text-[11px] font-mono px-1 py-0.2 rounded border shrink-0 font-bold" style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--text-muted);">
-                SWAP
-              </span>
+
             </div>
             <div class="text-right font-mono shrink-0">
-              <div class="text-xs font-black num-tabular whitespace-nowrap" style="color: var(--text-main);">
-                ${{ item.price }}
+              <div class="text-[15px] leading-tight font-black num-tabular whitespace-nowrap" style="color: var(--text-main);">
+                {{ item.price }}
               </div>
               <div
                 class="text-[11px] font-bold font-mono flex items-center justify-end space-x-0.5 num-tabular whitespace-nowrap"

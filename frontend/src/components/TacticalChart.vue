@@ -1028,30 +1028,27 @@ onUnmounted(() => {
     class="flex flex-col border rounded-xl overflow-hidden shadow-xs transition-all select-none"
     style="background-color: var(--bg-card); border-color: var(--border-subtle);"
   >
-    <!-- Top Bar: 标的切换、周期选择与指标下拉工作台 -->
+    <!-- Ticker Info Bar: 实时价格、涨跌、ATR 与倒计时 -->
     <div
-      class="p-2 sm:p-3 border-b flex flex-wrap items-center justify-between gap-2"
-      style="border-color: var(--border-subtle);"
+      class="px-3 py-2 sm:px-4 sm:py-2.5 border-b flex flex-wrap items-center justify-between text-[11px] font-mono gap-x-3 gap-y-2"
+      style="border-color: var(--border-subtle); background-color: var(--bg-app);"
     >
-      <!-- 标的按钮组 -->
-      <div class="flex items-center space-x-1.5 overflow-x-auto max-w-full pb-0.5 sm:pb-0 scrollbar-none">
-        <button
-          v-for="sym in availableSymbols"
-          :key="sym"
-          @click="selectSymbol(sym)"
-          class="h-7 px-2.5 rounded-lg text-xs font-mono font-bold transition-all shrink-0 cursor-pointer flex items-center space-x-1"
-          :style="currentSymbol === sym
-            ? { backgroundColor: 'var(--color-brand-bg)', color: 'var(--color-brand)', border: '1px solid var(--color-brand-border)' }
-            : { backgroundColor: 'var(--bg-badge)', color: 'var(--text-muted)', border: '1px solid transparent' }"
-        >
-          <span
-            v-if="store.positions.some(p => p.instId?.startsWith(sym) || p.name === sym)"
-            class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse mr-0.5"
-          ></span>
-          <span>{{ sym }}</span>
-        </button>
+      <div class="flex items-center space-x-2.5">
+        <span class="font-black text-xs sm:text-sm" style="color: var(--text-main);">{{ currentSymbol }}USDT {{ t('chart.swapPerp', '永续') }}</span>
+        <span class="font-black text-xs sm:text-sm num-tabular" style="color: var(--text-main);">
+          ${{ currentPrice >= 100 ? currentPrice.toFixed(1) : currentPrice.toFixed(4) }}
+        </span>
+        <span :class="liveChangePct >= 0 ? 'text-emerald-400' : 'text-rose-400'" class="text-[11px] font-bold">
+          {{ liveChangePct >= 0 ? '+' : '' }}{{ liveChangePct.toFixed(2) }}%
+        </span>
+        <span class="flex items-center space-x-1 pl-1">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span class="text-[11px] text-emerald-400 font-bold">{{ t('chart.liveStatus', '实时') }} 3s</span>
+        </span>
+        <span class="text-[11px]" style="color: var(--text-faint);">1H ATR: ${{ currentAtr.toFixed(1) }}</span>
       </div>
 
+      <div class="flex items-center flex-wrap gap-x-3 gap-y-1.5">
       <!-- 周期、指标下拉与试算工具 -->
       <div class="flex items-center space-x-1.5 sm:space-x-2 shrink-0 font-mono">
         <!-- 周期切换 -->
@@ -1173,31 +1170,10 @@ onUnmounted(() => {
           <RefreshCw class="w-3 h-3" :class="isLoading ? 'animate-spin' : ''" />
         </button>
       </div>
-    </div>
-
-    <!-- Ticker Info Bar: 实时价格、涨跌、ATR 与倒计时 -->
-    <div
-      class="px-3 py-1.5 sm:px-4 sm:py-2 border-b flex flex-wrap items-center justify-between text-[11px] font-mono gap-2"
-      style="border-color: var(--border-subtle); background-color: var(--bg-app);"
-    >
-      <div class="flex items-center space-x-2.5">
-        <span class="font-black text-xs sm:text-sm" style="color: var(--text-main);">{{ currentSymbol }}USDT {{ t('chart.swapPerp', '永续') }}</span>
-        <span class="font-black text-xs sm:text-sm num-tabular" style="color: var(--text-main);">
-          ${{ currentPrice >= 100 ? currentPrice.toFixed(1) : currentPrice.toFixed(4) }}
-        </span>
-        <span :class="liveChangePct >= 0 ? 'text-emerald-400' : 'text-rose-400'" class="text-[11px] font-bold">
-          {{ liveChangePct >= 0 ? '+' : '' }}{{ liveChangePct.toFixed(2) }}%
-        </span>
-        <span class="flex items-center space-x-1 pl-1">
-          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-          <span class="text-[11px] text-emerald-400 font-bold">{{ t('chart.liveStatus', '实时') }} 3s</span>
-        </span>
-        <span class="text-[11px]" style="color: var(--text-faint);">1H ATR: ${{ currentAtr.toFixed(1) }}</span>
-      </div>
-
-      <div class="flex items-center space-x-2 text-[11px] font-mono" style="color: var(--text-muted);">
-        <span>{{ t('chart.countdownLabel', 'K线结线倒计时') }}:</span>
-        <span class="font-bold text-amber-400 num-tabular">{{ candleCountdown }}</span>
+        <div class="flex items-center space-x-2 text-[11px] font-mono" style="color: var(--text-muted);">
+          <span>{{ t('chart.countdownLabel', 'K线结线倒计时') }}:</span>
+          <span class="font-bold text-amber-400 num-tabular">{{ candleCountdown }}</span>
+        </div>
       </div>
     </div>
 

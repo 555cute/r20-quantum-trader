@@ -101,7 +101,7 @@ async function handleLogin() {
               v-model="username"
               type="text"
               autocomplete="username"
-              class="w-full rounded-lg px-3.5 py-2.5 text-xs font-mono outline-none border transition-colors focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20"
+              class="w-full rounded-lg px-3.5 py-2.5 text-xs font-mono outline-none border transition-colors "
               style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);"
             />
           </div>
@@ -115,7 +115,7 @@ async function handleLogin() {
               type="password"
               autocomplete="current-password"
               :placeholder="t('admin.password')"
-              class="w-full rounded-lg px-3.5 py-2.5 text-xs font-mono outline-none border transition-colors focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20"
+              class="w-full rounded-lg px-3.5 py-2.5 text-xs font-mono outline-none border transition-colors "
               style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);"
               @keyup.enter="handleLogin"
             />
@@ -124,8 +124,8 @@ async function handleLogin() {
           <button
             @click="handleLogin"
             :disabled="loading"
-            class="w-full flex items-center justify-center space-x-2 font-mono font-bold text-xs py-2.5 rounded-lg border transition-all cursor-pointer shadow-xs disabled:opacity-50 disabled:cursor-not-allowed mt-2 hover:opacity-90"
-            style="background-color: var(--text-main); border-color: var(--text-main); color: var(--bg-app);"
+            class="w-full flex items-center justify-center space-x-2 font-mono font-bold text-xs py-2.5 rounded-lg border-0 transition-all cursor-pointer shadow-xs disabled:opacity-50 disabled:cursor-not-allowed mt-2 hover:opacity-90"
+            style="background-color: var(--color-brand); border-color: var(--color-brand); color: #FFFFFF;"
           >
             <LogIn v-if="!loading" class="w-3.5 h-3.5" />
             <RefreshCw v-else class="w-3.5 h-3.5 animate-spin" />
@@ -134,9 +134,8 @@ async function handleLogin() {
         </div>
 
         <p class="mt-4 text-[11px] font-mono leading-relaxed" style="color: var(--text-faint);">
-          {{ isEn ? 'Default account: admin. Automatically locks for 15 minutes after 5 consecutive failures. All login attempts and IPs are permanently recorded in audit logs.' : '默认账号为 admin；连续失败 5 次会自动临时锁定 15 分钟。所有登录动作与 IP 将持久化记录于操作审计日志中。' }}
-        </p>
-      </div>
+          {{ isEn ? '5 consecutive failures lock for 15 min. All attempts are audit-logged.' : '连续失败 5 次锁定 15 分钟；全部登录行为计入审计日志。' }}
+        </p>      </div>
     </div>
 
     <!-- Bottom Footer -->
