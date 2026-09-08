@@ -20,6 +20,12 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import ai_factor_trader as aft  # noqa: E402
+from tests.risk_test_env import pin_baseline_risk_env  # noqa: E402
+
+
+def setUpModule():
+    # 断言的是基线风控语义；生产 .env 挂进取/均衡套件时不得污染本文件
+    pin_baseline_risk_env()
 
 
 class QuantizeSizeTests(unittest.TestCase):

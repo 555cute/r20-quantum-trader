@@ -1455,7 +1455,10 @@ def admin_toggle_llm_provider(provider_id: str, payload: LLMProviderToggleReques
 @app.delete("/api/v1/admin/llm/providers/{provider_id}/models")
 def admin_clear_llm_provider_models(provider_id: str, x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
     actor = require_superadmin(x_r20_session)
-    cleared = clear_provider_models(provider_id)
+    try:
+        cleared = clear_provider_models(provider_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not cleared:
         raise HTTPException(status_code=404, detail="未找到该供应商")
     audit_record("llm.provider.clear_models", "success", {"actor": actor["username"], "provider_id": provider_id})

@@ -322,6 +322,58 @@ class LLMMultiProviderTests(unittest.TestCase):
         del_p = self.client.delete("/api/v1/admin/llm/providers/testprov", headers=headers)
         self.assertTrue(del_p.json()["deleted"])
 
+    def test_provider_deletion_persists_and_guards_active(self):
+        """回归：默认供应商删除后不得被 DEFAULT_PROVIDERS 复活；激活模型所在供应商受保护。"""
+        headers = self.login()
+        cfg = llm_manager.load_llm_config()
+        active = cfg["active_model_id"]
+        owner = next((m["provider_id"] for m in cfg["models"] if m["id"] == active), "")
+
+        # 1. 删除一个不持有激活模型的默认供应商 → 重读不复活
+        victim = next(pid for pid in ("gemini", "claude", "openai") if pid != owner)
+        r = self.client.delete(f"/api/v1/admin/llm/providers/{victim}", headers=headers)
+        self.assertEqual(r.status_code, 200, r.text)
+        ids_after = [p["id"] for p in llm_manager.load_llm_config()["providers"]]
+        self.assertNotIn(victim, ids_after)
+        ids_again = [p["id"] for p in self.client.get("/api/v1/admin/llm/providers", headers=headers).json()["providers"]]
+        self.assertNotIn(victim, ids_again)
+
+        # 2. 持有激活模型的供应商：删除与清空模型都必须 400，且 active 不变
+        r2 = self.client.delete(f"/api/v1/admin/llm/providers/{owner}", headers=headers)
+        self.assertEqual(r2.status_code, 400)
+        r3 = self.client.delete(f"/api/v1/admin/llm/providers/{owner}/models", headers=headers)
+        self.assertEqual(r3.status_code, 400)
+        self.assertEqual(llm_manager.load_llm_config()["active_model_id"], active)
+
+        # 3. 删除供应商级联清理顶层扁平模型，不留幽灵
+        self.client.post("/api/v1/admin/llm/providers", headers=headers, json={
+            "id": "cascadeprov", "name": "Cascade", "base_url": "https://c.io/v1", "api_key": "sk-c",
+        })
+        llm_manager.upsert_model("cascadeprov", {"id": "cascade-m1"})
+        self.assertTrue(any(m["id"] == "cascade-m1" for m in llm_manager.load_llm_config()["models"]))
+        r4 = self.client.delete("/api/v1/admin/llm/providers/cascadeprov", headers=headers)
+        self.assertEqual(r4.status_code, 200, r4.text)
+        cfg4 = llm_manager.load_llm_config()
+        self.assertNotIn("cascadeprov", [p["id"] for p in cfg4["providers"]])
+        self.assertFalse(any(m.get("provider_id") == "cascadeprov" for m in cfg4["models"]))
+
+        # 4. 播种标记落盘：老配置（无标记）升级时默认项合并一次，此后删除永久生效
+        raw = json.loads(llm_manager.LLM_CONFIG_FILE.read_text())
+        raw.pop("defaults_seeded", None)
+        raw["providers"] = [p for p in raw["providers"] if p.get("id") != victim]
+        llm_manager._atomic_write_json(llm_manager.LLM_CONFIG_FILE, raw)
+        ids_upgrade = [p["id"] for p in llm_manager.init_llm_config()["providers"]]
+        self.assertIn(victim, ids_upgrade)  # 无标记 → 视为首次，播种一次
+        self.assertTrue(llm_manager.LLM_CONFIG_FILE.exists())
+        self.assertTrue(json.loads(llm_manager.LLM_CONFIG_FILE.read_text())["defaults_seeded"])
+        self.assertTrue(llm_manager.delete_provider(victim))
+        self.assertNotIn(victim, [p["id"] for p in llm_manager.init_llm_config()["providers"]])
+
+        # 5. openai 的 enabled 不再被每次加载强制打开
+        llm_manager.toggle_provider("openai", enabled=False)
+        openai_flags = [p["enabled"] for p in llm_manager.init_llm_config()["providers"] if p["id"] == "openai"]
+        self.assertEqual(openai_flags, [False])
+
     def test_llm_thinking_timeout_settings_and_update(self):
         headers = self.login()
         # 1. Initial config contains thinking_timeout

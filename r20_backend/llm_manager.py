@@ -200,11 +200,24 @@ def init_llm_config() -> Dict[str, Any]:
     existing_providers = data.get("providers", [])
     merged_providers: List[Dict[str, Any]] = []
 
-    for dp in DEFAULT_PROVIDERS:
-        pid = dp["id"]
-        found = next((p for p in existing_providers if p.get("id") == pid), None)
-        if found:
-            p_obj = dict(dp)
+    # 默认供应商只在「首次播种」时注入。播种完成后配置里落下 defaults_seeded 标记，
+    # 此后用户删除的默认供应商绝不复活；openai 的 enabled 也只在播种时强制打开，
+    # 之后尊重用户自己的开关。老配置文件（无标记）视为首次：合并一次并落标记，升级无感。
+    seed_defaults = not data.get("defaults_seeded")
+    default_by_id = {dp["id"]: dp for dp in DEFAULT_PROVIDERS}
+    # (ignore legacy hardcoded providers from older versions)
+    legacy_ids = {
+        "siliconflow", "openrouter", "kelivoin", "tensdaq", "deepseek",
+        "alhubmix", "suixiang", "dashscope", "zhipu", "grok", "volcengine"
+    }
+
+    for found in existing_providers:
+        pid = found.get("id")
+        if not pid or pid in legacy_ids:
+            continue
+        dp = default_by_id.get(pid)
+        if dp:
+            p_obj = copy.deepcopy(dp)
             p_obj.update(found)
             # Never overwrite models with global defaults if provider was already configured
             if "models" in found:
@@ -214,29 +227,25 @@ def init_llm_config() -> Dict[str, Any]:
                     p_obj["api_key"] = cur_key
                 if not p_obj.get("base_url"):
                     p_obj["base_url"] = cur_url
-                p_obj["enabled"] = True
+                if seed_defaults:
+                    p_obj["enabled"] = True
             merged_providers.append(p_obj)
         else:
+            merged_providers.append(found)
+
+    if seed_defaults:
+        have_ids = {p.get("id") for p in merged_providers}
+        for dp in DEFAULT_PROVIDERS:
+            if dp["id"] in have_ids:
+                continue
             p_obj = copy.deepcopy(dp)
-            if pid == "openai":
+            if dp["id"] == "openai":
                 if cur_key:
                     p_obj["api_key"] = cur_key
                 if cur_url:
                     p_obj["base_url"] = cur_url
                 p_obj["enabled"] = True
             merged_providers.append(p_obj)
-
-    # Any custom provider added by user (ignore legacy hardcoded providers from older versions)
-    legacy_ids = {
-        "siliconflow", "openrouter", "kelivoin", "tensdaq", "deepseek",
-        "alhubmix", "suixiang", "dashscope", "zhipu", "grok", "volcengine"
-    }
-    for ep in existing_providers:
-        epid = ep.get("id")
-        if epid in legacy_ids:
-            continue
-        if not any(dp["id"] == epid for dp in DEFAULT_PROVIDERS):
-            merged_providers.append(ep)
 
     active_m_id = data.get("active_model_id") or cur_model or ""
     active_effort = data.get("active_reasoning_effort") or cur_effort or "high"
@@ -304,6 +313,7 @@ def init_llm_config() -> Dict[str, Any]:
 
     config = {
         "version": "3.1",
+        "defaults_seeded": True,
         "active_model_id": active_m_id,
         "active_reasoning_effort": active_effort,
         "thinking_timeout": thinking_timeout,
@@ -871,6 +881,11 @@ def clear_provider_models(provider_id: str) -> bool:
     p = next((x for x in providers if x["id"] == provider_id), None)
     if not p:
         return False
+    active_mid = config.get("active_model_id", "")
+    if any(m.get("id") == active_mid for m in p.get("models", [])):
+        raise ValueError(
+            f"供应商 {provider_id} 名下挂着当前激活模型 {active_mid}；请先切换主脑模型再清空。"
+        )
     p["models"] = []
     config["models"] = [m for m in config.get("models", []) if m.get("provider_id") != provider_id]
     _atomic_write_json(LLM_CONFIG_FILE, config)
@@ -878,13 +893,26 @@ def clear_provider_models(provider_id: str) -> bool:
 
 
 def delete_provider(provider_id: str) -> bool:
-    """Delete a provider definition."""
+    """Delete a provider definition (cascades to its models).
+
+    保护：名下挂着当前激活模型（或顶层仍有其模型）的供应商不可删除，
+    避免主脑 active_model_id 悬空或顶层残留幽灵模型。
+    """
     config = init_llm_config()
     providers = config.get("providers", [])
-    filtered = [p for p in providers if p["id"] != provider_id]
-    if len(filtered) == len(providers):
+    target = next((p for p in providers if p.get("id") == provider_id), None)
+    if not target:
         return False
-    config["providers"] = filtered
+    active_mid = config.get("active_model_id", "")
+    if any(m.get("id") == active_mid for m in target.get("models", [])):
+        raise ValueError(
+            f"供应商 {provider_id} 名下挂着当前激活模型 {active_mid}；请先切换主脑模型再删除。"
+        )
+    config["providers"] = [p for p in providers if p.get("id") != provider_id]
+    # 级联：顶层扁平列表里属于该供应商的模型一并移除，避免幽灵模型
+    config["models"] = [
+        m for m in config.get("models", []) if m.get("provider_id") != provider_id
+    ]
     _atomic_write_json(LLM_CONFIG_FILE, config)
     return True
 

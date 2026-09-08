@@ -15,6 +15,12 @@ if scripts_dir not in sys.path:
     sys.path.insert(0, scripts_dir)
 
 import scripts.instrument_pool as ip
+from tests.risk_test_env import pin_baseline_risk_env
+
+
+def setUpModule():
+    # PoolCapacity 断言同向上限=3（基线）；隔离生产 .env 当前套件值
+    pin_baseline_risk_env()
 
 
 class InstrumentPoolUniverseTests(unittest.TestCase):
