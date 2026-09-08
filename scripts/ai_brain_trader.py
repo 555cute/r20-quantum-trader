@@ -711,11 +711,19 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
     if ns_data.get("sentiment_stale"):
         macro_env += "（旧情绪缓存，不能视为当前市场结论）"
     for n in ns_data.get("latest_news", []):
-        stale_note = "旧缓存，未验证最新状态" if n.get("stale") else "公开资讯"
+        if n.get("stale"):
+            evidence = "旧缓存，未验证最新状态"
+        else:
+            authority = str(n.get("authority") or "")
+            if authority == "media" or (not authority and n.get("source") == "okx"):
+                evidence = "媒体参考/未交叉验证，不得单独形成交易结论"
+            else:
+                evidence = "官方公告/已验证源"
         news_briefs.append(
-            f"- [{n.get('time', '')}] [{n.get('source_name', '')} / {stale_note}] "
+            f"- [{n.get('time', '')}] [{n.get('source_name', '')} / {evidence}] "
             f"{n.get('title', '')} ({n.get('summary', '')[:80]})"
         )
+
     news_text = "\n".join(news_briefs) if news_briefs else "无可验证新闻输入；不得据此推断市场平稳或不存在事件风险"
 
     avail_balance_str = f"{usdt_available:.2f} USDT" if usdt_available is not None and usdt_available >= 0 else "[MISSING_CONTEXT:account_balance]"

@@ -163,6 +163,42 @@ class NewsConfigApiTests(unittest.TestCase):
                 self.assertIn(f"{source}_NEWS_{index:02d}", prompt)
             self.assertNotIn(f"{source}_NEWS_03", prompt)
 
+
+    def test_prompt_labels_media_as_unverified_reference(self):
+        from scripts import ai_brain_trader as brain, evolution_shield, prompt_library
+        self.cache.write_text(json.dumps({
+            "source_news": {
+                "binance": [
+                    {"id": "binance:off", "source": "binance", "source_name": "币安情报中心",
+                     "title": "OFFICIAL_HEADLINE", "summary": "", "time": "2026-09-09 12:00:00",
+                     "stale": False, "authority": "official", "published_at": 20},
+                    {"id": "binance:rss", "source": "binance", "source_name": "币安情报中心",
+                     "title": "MEDIA_HEADLINE", "summary": "rss", "time": "2026-09-09 11:00:00",
+                     "stale": False, "authority": "media", "published_at": 10},
+                ],
+            },
+            "source_status": {"okx": {"status": "disabled"}, "binance": {"status": "ok"}},
+            "macro_sentiment": "无可验证情绪数据",
+        }), encoding="utf-8")
+        self.client.put("/api/v1/admin/news/config", headers=self.root_headers, json={"sources": ["binance"]})
+        with patch.object(brain, "NEWS_SENTIMENT_FILE", str(self.cache)), \
+             patch.object(brain, "AI_MEMORY_MD_FILE", str(self.root / "memory.md")), \
+             patch.object(brain, "AI_MEMORY_FILE", str(self.root / "memory.json")), \
+             patch.object(evolution_shield, "STRUCTURED_MEMORY_FILE", self.root / "structured.json"), \
+             patch.object(brain, "active_profile", return_value=prompt_library.resolve_profile(prompt_library.PRESETS["stable"])):
+            prompt = brain.construct_full_market_prompt([], "0", [], usdt_available=100)
+        self.assertIn("OFFICIAL_HEADLINE", prompt)
+        self.assertIn("MEDIA_HEADLINE", prompt)
+        self.assertIn("官方公告/已验证源", prompt)
+        self.assertIn("媒体参考/未交叉验证，不得单独形成交易结论", prompt)
+        official_line = next(line for line in prompt.splitlines() if "OFFICIAL_HEADLINE" in line)
+        media_line = next(line for line in prompt.splitlines() if "MEDIA_HEADLINE" in line)
+        self.assertIn("官方公告/已验证源", official_line)
+        self.assertNotIn("不得单独形成交易结论", official_line)
+        self.assertIn("媒体参考/未交叉验证，不得单独形成交易结论", media_line)
+
+
+
     def test_sparse_source_releases_unused_quota_without_fabricating_items(self):
         rows = [{"id": f"okx:{index}", "source": "okx", "published_at": 100-index} for index in range(20)]
         rows.append({"id": "binance:only", "source": "binance", "published_at": 1})
