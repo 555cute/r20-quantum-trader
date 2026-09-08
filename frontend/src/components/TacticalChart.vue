@@ -78,6 +78,12 @@ const store = useDashboardStore()
 const { theme, cvd } = useTheme()
 const isDark = computed(() => theme.value === 'dark')
 
+/* P4: mobile hides the always-on legend to stop multi-line overlay on narrow screens;
+   desktop keeps it (data always readable). Re-applied when crossing the 640px breakpoint. */
+function legendRule(): 'always' | 'none' {
+  return typeof window !== 'undefined' && window.innerWidth < 640 ? 'none' : 'always'
+}
+
 /* P1: resolve design-token value at render time — chart follows theme & CVD switches */
 function tok(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#888888'
@@ -477,7 +483,7 @@ function getChartStyles(): DeepPartial<Styles> {
         },
       },
       tooltip: {
-        showRule: 'follow_cross',
+        showRule: legendRule(),
         showType: 'standard',
         text: {
           size: 11,
@@ -488,7 +494,7 @@ function getChartStyles(): DeepPartial<Styles> {
     },
     indicator: {
       tooltip: {
-        showRule: 'follow_cross',
+        showRule: legendRule(),
         showType: 'standard',
       },
       ohlc: {
@@ -977,6 +983,18 @@ function copySimulationSummary() {
 watch([isDark, cvd], () => {
   klineChart?.setStyles(getChartStyles())
 })
+
+/* re-apply legend rule only when crossing the mobile breakpoint (cheap) */
+let lastMobile = typeof window !== 'undefined' && window.innerWidth < 640
+function onLegendBreakpoint() {
+  const m = window.innerWidth < 640
+  if (m !== lastMobile) {
+    lastMobile = m
+    klineChart?.setStyles(getChartStyles())
+  }
+}
+onMounted(() => window.addEventListener('resize', onLegendBreakpoint))
+onUnmounted(() => window.removeEventListener('resize', onLegendBreakpoint))
 
 watch(() => props.symbol, (newSym) => {
   if (newSym && newSym.toUpperCase() !== currentSymbol.value) {
