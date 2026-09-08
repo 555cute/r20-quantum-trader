@@ -302,6 +302,11 @@ cp env.example .env
 docker compose up -d
 ```
 
+未设置 `R20_SETUP_TOKEN` / `R20_ADMIN_TOKEN`（或仍是示例占位符）时，首次启动会各生成一次并打印到容器日志：`R20_SETUP_TOKEN` 是 `admin` 初始登录密码（不写盘，建号成功后从进程环境清除）；`R20_ADMIN_TOKEN` 是 `X-R20-Admin-Token` 管理头，写入 `./data/config/.env`。该头可在已有账号后调用 overview 等管理 API，不能登录控制台、不能当登录密码、不能做用户管理或 `require_superadmin` 操作。已有值后不会再生成或打印。显式配置的 setup token 不会被改写。
+
+
+
+
 指定版本：`R20_IMAGE=ghcr.io/cnlimiter/r20-quantum-trader:latest docker compose up -d`。离线复用已拉取镜像：`R20_PULL_POLICY=missing docker compose up -d`。
 
 

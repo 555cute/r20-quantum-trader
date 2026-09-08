@@ -38,7 +38,9 @@ npm --prefix frontend ci
 npm --prefix frontend run build
 ```
 
-Set a random `R20_SETUP_TOKEN` before first startup. When no administrator exists, the setup token initializes the `admin` account password. Existing accounts authenticate with a server-side session; the setup token is not a permanent bypass. Configure a permanent password through the admin console.
+If `R20_SETUP_TOKEN` and `R20_ADMIN_TOKEN` are empty (or the example placeholder), first boot generates both and prints them once to logs. The setup token is the `admin` login password and is not written to disk. The admin token is the `X-R20-Admin-Token` header for control-plane API calls after accounts exist; it is stored in the persisted env file. It cannot log into the console, manage users, or pass `require_superadmin`. Existing accounts authenticate with a server-side session. Set a permanent password in the admin console.
+
+
 
 OKX supports separate LIVE/DEMO API keys or local CLI OAuth. Never grant withdrawal permission. Both static-key groups must match their selected environment. The `.env` example defaults to demo. The strategy path and optional OKX news enrichment require the official CLI.
 
