@@ -1,4 +1,6 @@
+import json
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -9,7 +11,6 @@ from scripts.evolution_shield import (
     audit_proposed_lesson,
     toggle_lesson,
     rollback_to_baseline,
-    add_safe_lesson,
 )
 
 
@@ -72,6 +73,76 @@ class EvolutionShieldTests(unittest.TestCase):
         toggled_back = toggle_lesson(first_id, expected_version=shield.read_memory_snapshot()["version"])
         self.assertTrue(toggled_back["enabled"])
 
+    def _write_structured(self, lessons):
+        path = shield.STRUCTURED_MEMORY_FILE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({
+            "schema_version": 1,
+            "revision": "testhash",
+            "lessons": lessons,
+        }), encoding="utf-8")
+        return path
+
+    def test_public_projection_missing_is_uninitialized(self):
+        projection = shield.project_public_trading_memory()
+        self.assertEqual(projection["status"], "uninitialized")
+        self.assertEqual(projection["markdown"], "")
+        self.assertFalse(shield.STRUCTURED_MEMORY_FILE.exists())
+
+    def test_public_projection_legacy_markdown_ready_without_authority(self):
+        shield.AI_MEMORY_MD_FILE.parent.mkdir(parents=True, exist_ok=True)
+        shield.AI_MEMORY_MD_FILE.write_text("- usable legacy heuristic\n", encoding="utf-8")
+        projection = shield.project_public_trading_memory(shield.AI_MEMORY_MD_FILE)
+        self.assertEqual(projection["status"], "ready")
+        self.assertIn("usable legacy heuristic", projection["markdown"])
+
+    def test_public_projection_empty_authority_does_not_revive_markdown(self):
+        self._write_structured([])
+        shield.AI_MEMORY_MD_FILE.write_text("- OLD LEGACY MIRROR\n", encoding="utf-8")
+        before = shield.STRUCTURED_MEMORY_FILE.read_bytes()
+        projection = shield.project_public_trading_memory(shield.AI_MEMORY_MD_FILE)
+        self.assertEqual(projection["status"], "empty")
+        self.assertEqual(projection["markdown"], "")
+        self.assertNotIn("OLD LEGACY", projection["markdown"])
+        self.assertEqual(shield.STRUCTURED_MEMORY_FILE.read_bytes(), before)
+
+    def test_public_projection_disabled_and_expired_do_not_revive_markdown(self):
+        expired_at = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        self._write_structured([
+            {"id": "lesson_off", "rule_text": "disabled heuristic", "enabled": False},
+            {
+                "id": "lesson_old",
+                "rule_text": "expired heuristic",
+                "enabled": True,
+                "created_at": expired_at,
+                "ttl_days": 1,
+                "is_baseline": False,
+            },
+        ])
+        shield.AI_MEMORY_MD_FILE.write_text("- OLD LEGACY MIRROR\n", encoding="utf-8")
+        projection = shield.project_public_trading_memory(shield.AI_MEMORY_MD_FILE)
+        self.assertEqual(projection["status"], "empty")
+        self.assertEqual(projection["markdown"], "")
+        self.assertNotIn("OLD LEGACY", projection["markdown"])
+
+    def test_public_projection_corrupt_is_unavailable_without_mutation(self):
+        shield.STRUCTURED_MEMORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        shield.STRUCTURED_MEMORY_FILE.write_text("{", encoding="utf-8")
+        shield.AI_MEMORY_MD_FILE.write_text("- OLD LEGACY MIRROR\n", encoding="utf-8")
+        before = shield.STRUCTURED_MEMORY_FILE.read_bytes()
+        projection = shield.project_public_trading_memory(shield.AI_MEMORY_MD_FILE)
+        self.assertEqual(projection["status"], "unavailable")
+        self.assertEqual(projection["markdown"], "")
+        self.assertNotIn("damaged", projection["markdown"])
+        self.assertEqual(shield.STRUCTURED_MEMORY_FILE.read_bytes(), before)
+
+    def test_public_projection_ready_structured(self):
+        self._write_structured([
+            {"id": "lesson_live", "rule_text": "active injectable heuristic", "enabled": True},
+        ])
+        projection = shield.project_public_trading_memory()
+        self.assertEqual(projection["status"], "ready")
+        self.assertIn("active injectable heuristic", projection["markdown"])
 
 if __name__ == "__main__":
     unittest.main()

@@ -46,29 +46,50 @@ FACTOR_LIBRARY_FILE = os.path.join(DATA_DIR, "factor_library_snapshot.json")
 AI_MEMORY_MD_FILE = os.path.join(DATA_DIR, "AI_TRADING_MEMORY.md")
 
 
+_MEMORY_STATUSES = frozenset({"ready", "uninitialized", "empty", "unavailable"})
+
+
+def load_trading_memory_payload() -> tuple[str, str]:
+    """Public markdown plus status. Never mutates files or leaks exception text."""
+    try:
+        from scripts.evolution_shield import project_public_trading_memory
+        projection = project_public_trading_memory(
+            AI_MEMORY_MD_FILE,
+            os.path.join(DATA_DIR, "ai_trading_memory.json"),
+        )
+    except Exception:
+        return "", "unavailable"
+    if not isinstance(projection, dict):
+        return "", "unavailable"
+    status = projection.get("status")
+    markdown = projection.get("markdown")
+    if status not in _MEMORY_STATUSES or not isinstance(markdown, str):
+        return "", "unavailable"
+    if status == "ready" and markdown.strip():
+        note = _memory_freshness_note()
+        if note:
+            markdown = markdown + note
+        return markdown, "ready"
+    if status == "ready":
+        return "", "empty"
+    return "", status
+
+
 def load_trading_memory_md() -> str:
     """Render the live heuristic memory library.
 
     The structured store (data/structured_trading_memory.json) is the single
     authority written by the self-evolution engine; the legacy markdown file is
-    only a fallback. Reading the file alone freezes the homepage panel on the
-    last hand-edited snapshot while the engine keeps revising lessons.
+    only a fallback when that authority is missing.
     """
-    rendered = ""
-    try:
-        from scripts.evolution_shield import render_trading_memory
-        rendered = render_trading_memory(AI_MEMORY_MD_FILE, os.path.join(DATA_DIR, "ai_trading_memory.json")) or ""
-    except Exception:
-        rendered = ""
-    if rendered.strip():
-        return rendered + _memory_freshness_note()
-    if os.path.exists(AI_MEMORY_MD_FILE):
-        try:
-            with open(AI_MEMORY_MD_FILE, "r", encoding="utf-8") as f:
-                return f.read()
-        except Exception:
-            return ""
-    return ""
+    return load_trading_memory_payload()[0]
+
+
+def _apply_trading_memory(payload: dict) -> dict:
+    markdown, status = load_trading_memory_payload()
+    payload["ai_trading_memory_md"] = markdown
+    payload["ai_trading_memory_status"] = status
+    return payload
 
 
 def _memory_freshness_note() -> str:
@@ -441,11 +462,8 @@ def _inject_local_data_into_stale(stale, positions, timestamp_full):
         except Exception:
             pass
 
-    # AI trading memory — structured store first, legacy markdown as fallback
-    try:
-        stale["ai_trading_memory_md"] = load_trading_memory_md()
-    except Exception:
-        pass
+    # AI trading memory is local and independent of exchange-cache success.
+    _apply_trading_memory(stale)
 
     # Log lines — local file
     if os.path.exists(LOG_FILE):
@@ -762,13 +780,15 @@ def update_cache_cycle():
             CACHE_DATA = _stamp_runtime(stale, env)
             LAST_CACHE_TIME = time.time()
             return
-        CACHE_DATA = _stamp_runtime({
+        offline = {
             "timestamp": timestamp_full,
             "data_health": {"status": "OFFLINE", "partial": True, "errors": source_errors},
             "account": {}, "today_stats": {}, "performance": {},
             "positions_summary": {"total": 0, "max_positions": len(load_instruments()), "items": []},
             "factors": [], "trades": [], "logs": [], "snapshots": [],
-        }, env)
+        }
+        _apply_trading_memory(offline)
+        CACHE_DATA = _stamp_runtime(offline, env)
         LAST_CACHE_TIME = time.time()
         return
 
@@ -1201,7 +1221,6 @@ def update_cache_cycle():
         except Exception:
             pass
 
-    ai_memory_md_content = load_trading_memory_md()
 
     ai_last_prompt_text = ""
     if os.path.exists(prompt_file()):
@@ -1286,7 +1305,6 @@ def update_cache_cycle():
         },
         "adaptive_config": adaptive_cfg,
         "review": review_data,
-        "ai_trading_memory_md": ai_memory_md_content,
         "ai_last_prompt": ai_last_prompt_text,
         "snapshots": snapshots_list,
         "state_snapshot": state_data,
@@ -1312,6 +1330,7 @@ def update_cache_cycle():
             "reasoning_effort": os.getenv("LLM_REASONING_EFFORT", "high"),
             "api_format": "openai_chat",
         }
+    _apply_trading_memory(CACHE_DATA)
     _stamp_runtime(CACHE_DATA, env)
     persist_dashboard_cache(CACHE_DATA)
     LAST_CACHE_TIME = time.time()
@@ -1321,21 +1340,24 @@ def serve_cached_dashboard():
     payload = CACHE_DATA or {}
     news_data = load_news_snapshot(NEWS_SENTIMENT_FILE)
     if payload:
-        return _stamp_runtime({**payload, "news_intelligence": news_data}, env)
-    return _stamp_runtime({
-        "timestamp": datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S") + " (北京时间)",
+        out = {**payload, "news_intelligence": news_data}
+    else:
+        out = {
+            "timestamp": datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S") + " (北京时间)",
 
-        "data_health": {"status": "IDLE", "partial": True, "errors": ["account refresh required"]},
-        "account": {},
-        "today_stats": {},
-        "performance": {},
-        "positions_summary": {"total": 0, "items": []},
-        "factors": [],
-        "trades": [],
-        "logs": [],
-        "snapshots": [],
-        "news_intelligence": news_data,
-    }, env)
+            "data_health": {"status": "IDLE", "partial": True, "errors": ["account refresh required"]},
+            "account": {},
+            "today_stats": {},
+            "performance": {},
+            "positions_summary": {"total": 0, "items": []},
+            "factors": [],
+            "trades": [],
+            "logs": [],
+            "snapshots": [],
+            "news_intelligence": news_data,
+        }
+    _apply_trading_memory(out)
+    return _stamp_runtime(out, env)
 
 
 def refresh_account_snapshot():

@@ -106,6 +106,8 @@ export interface LLMRuntime {
   api_format: string
 }
 
+export type TradingMemoryStatus = 'ready' | 'uninitialized' | 'empty' | 'unavailable'
+
 export interface DashboardResponse {
   timestamp: string
   is_stale: boolean
@@ -131,5 +133,6 @@ export interface DashboardResponse {
   news_intelligence?: any[]
   review?: any
   ai_trading_memory_md?: string
+  ai_trading_memory_status?: TradingMemoryStatus
   factor_library?: any
 }

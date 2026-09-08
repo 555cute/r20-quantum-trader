@@ -5,7 +5,7 @@ import type { DashboardResponse, InstrumentFactor, PositionItem, PendingOrderIte
 export const useDashboardStore = defineStore('dashboard', () => {
   const activeTab = ref<'trading' | 'factors' | 'news' | 'lab' | 'history'>('trading')
   const data = ref<DashboardResponse | null>(null)
-  const loading = ref<boolean>(false)
+  const loading = ref<boolean>(true)
   const isRefreshing = ref<boolean>(false)
   const error = ref<string | null>(null)
   const lastUpdated = ref<Date | null>(null)
@@ -89,7 +89,9 @@ export const useDashboardStore = defineStore('dashboard', () => {
 
   // Actions
   async function fetchDashboard(silent = false) {
-    if (!silent) {
+    if (!silent && data.value == null) {
+      loading.value = true
+    } else if (!silent) {
       isRefreshing.value = true
     }
     try {
@@ -106,13 +108,13 @@ export const useDashboardStore = defineStore('dashboard', () => {
       lastUpdated.value = new Date()
       isConnected.value = true
       error.value = null
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('[DashboardStore] fetch failed:', err)
-      error.value = err.message || '获取数据失败'
+      error.value = err instanceof Error ? err.message : '获取数据失败'
       isConnected.value = false
     } finally {
       loading.value = false
-      if (!silent) {
+      if (!silent && data.value != null) {
         setTimeout(() => {
           isRefreshing.value = false
         }, 300)

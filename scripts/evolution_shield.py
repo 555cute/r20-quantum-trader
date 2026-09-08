@@ -240,6 +240,63 @@ def render_trading_memory(legacy_md=None, legacy_json=None):
     return "======================= 【R20 启发式实战认知与长期记忆】 =======================\n" + text
 
 
+
+def _format_public_memory(text: str) -> str:
+    banner = "======================= 【R20 启发式实战认知与长期记忆】 ======================="
+    stripped = str(text).strip("\n")
+    if not stripped.strip():
+        return ""
+    if stripped.startswith(banner):
+        return stripped
+    return banner + "\n" + stripped
+
+
+def project_public_trading_memory(legacy_md=None, legacy_json=None):
+    """Pure read-only public projection. Never mutates or returns exception text."""
+    unavailable = {"status": "unavailable", "markdown": ""}
+    uninitialized = {"status": "uninitialized", "markdown": ""}
+    try:
+        snapshot = read_memory_snapshot()
+    except MemoryCorruptError:
+        return unavailable
+    except (OSError, ValueError, TypeError, UnicodeError):
+        return unavailable
+
+    if snapshot["exists"]:
+        try:
+            body = render_lessons(snapshot["lessons"])
+        except (TypeError, ValueError, KeyError):
+            return unavailable
+        if not str(body).strip():
+            return {"status": "empty", "markdown": ""}
+        return {"status": "ready", "markdown": _format_public_memory(body)}
+
+    md_path = Path(legacy_md) if legacy_md is not None else AI_MEMORY_MD_FILE
+    try:
+        text = md_path.read_text(encoding="utf-8") if md_path.is_file() else ""
+    except OSError:
+        return unavailable
+    if str(text).strip():
+        return {"status": "ready", "markdown": _format_public_memory(text)}
+
+    if legacy_json is None:
+        return uninitialized
+    json_path = Path(legacy_json)
+    if not json_path.is_file():
+        return uninitialized
+    try:
+        payload = json.loads(json_path.read_text(encoding="utf-8"))
+        texts = payload.get("core_lessons", [])
+        if not isinstance(texts, list) or not all(isinstance(t, str) for t in texts):
+            return unavailable
+        joined = "\n".join(f"- {t}" for t in texts if str(t).strip())
+        if not joined.strip():
+            return uninitialized
+        return {"status": "ready", "markdown": _format_public_memory(joined)}
+    except (OSError, ValueError, TypeError, UnicodeError, KeyError):
+        return unavailable
+
+
 def sync_markdown_mirror() -> bool:
     """Refresh the derived AI_TRADING_MEMORY.md mirror from the structured authority.
 

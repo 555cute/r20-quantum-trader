@@ -5,11 +5,12 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
 import dashboard.app as dashboard
-
+from scripts import evolution_shield as shield
 
 class DashboardPersistentCacheTests(unittest.TestCase):
     def setUp(self):
@@ -108,6 +109,88 @@ class DashboardPersistentCacheTests(unittest.TestCase):
             dashboard._BOUND_IDENTITY = None
 
 
+class DashboardPublicMemoryTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        data = Path(self.temp.name) / "data"
+        data.mkdir()
+        self.data = data
+        self.structured = data / "structured_trading_memory.json"
+        self.md = data / "AI_TRADING_MEMORY.md"
+        self.legacy_json = data / "ai_trading_memory.json"
+        self.patches = [
+            patch.object(dashboard, "DATA_DIR", str(data)),
+            patch.object(dashboard, "AI_MEMORY_MD_FILE", str(self.md)),
+            patch.object(dashboard, "NEWS_SENTIMENT_FILE", str(data / "news_sentiment.json")),
+            patch.object(shield, "DATA_DIR", data),
+            patch.object(shield, "STRUCTURED_MEMORY_FILE", self.structured),
+            patch.object(shield, "AI_MEMORY_MD_FILE", self.md),
+        ]
+        for item in self.patches:
+            item.start()
+            self.addCleanup(item.stop)
+        self.addCleanup(self.temp.cleanup)
+
+    def _serve(self, cache=None):
+        env = SimpleNamespace(exchange="okx", mode="demo", identity="okx:demo:mem")
+        with patch.object(dashboard, "bind_account_scope", return_value=env), \
+             patch.object(dashboard, "load_news_snapshot", return_value={"latest_news": []}):
+            previous = dashboard.CACHE_DATA
+            dashboard.CACHE_DATA = {} if cache is None else cache
+            try:
+                return dashboard.serve_cached_dashboard()
+            finally:
+                dashboard.CACHE_DATA = previous
+
+    def _write_structured(self, lessons):
+        self.structured.write_text(json.dumps({
+            "schema_version": 1,
+            "revision": "dashhash",
+            "lessons": lessons,
+        }), encoding="utf-8")
+
+    def test_idle_serve_exposes_uninitialized_without_loading_markdown(self):
+        payload = self._serve()
+        self.assertEqual(payload["ai_trading_memory_status"], "uninitialized")
+        self.assertEqual(payload["ai_trading_memory_md"], "")
+        dumped = json.dumps(payload)
+        self.assertNotIn("Traceback", dumped)
+
+    def test_empty_authority_does_not_revive_stale_markdown_on_stale_inject(self):
+        self._write_structured([])
+        self.md.write_text("- OLD LEGACY MIRROR\n", encoding="utf-8")
+        stale = {"account": {"total_eq": 4100}, "positions_summary": {"items": []}, "factors": []}
+        dashboard._inject_local_data_into_stale(stale, [], "2026-09-08 12:00:00 (北京时间)")
+        self.assertEqual(stale["ai_trading_memory_status"], "empty")
+        self.assertEqual(stale["ai_trading_memory_md"], "")
+        self.assertNotIn("OLD LEGACY", stale["ai_trading_memory_md"])
+
+    def test_corrupt_authority_is_unavailable_without_exception_text(self):
+        self.structured.write_text("{", encoding="utf-8")
+        self.md.write_text("- OLD LEGACY MIRROR\n", encoding="utf-8")
+        before = self.structured.read_bytes()
+        payload = self._serve({"account": {"total_eq": 1.0}})
+        self.assertEqual(payload["ai_trading_memory_status"], "unavailable")
+        self.assertEqual(payload["ai_trading_memory_md"], "")
+        dumped = json.dumps(payload)
+        self.assertNotIn("damaged", dumped)
+        self.assertNotIn("MemoryCorrupt", dumped)
+        self.assertNotIn("Traceback", dumped)
+        self.assertEqual(self.structured.read_bytes(), before)
+
+    def test_missing_authority_legacy_markdown_ready_on_offline_payload(self):
+        self.md.write_text("- usable legacy heuristic\n", encoding="utf-8")
+        offline = {"account": {}, "data_health": {"status": "OFFLINE"}}
+        dashboard._apply_trading_memory(offline)
+        self.assertEqual(offline["ai_trading_memory_status"], "ready")
+        self.assertIn("usable legacy heuristic", offline["ai_trading_memory_md"])
+
+    def test_projector_exception_becomes_unavailable_without_leak(self):
+        with patch.object(shield, "project_public_trading_memory", side_effect=RuntimeError("secret boom")):
+            markdown, status = dashboard.load_trading_memory_payload()
+        self.assertEqual(status, "unavailable")
+        self.assertEqual(markdown, "")
+        self.assertNotIn("secret boom", markdown)
 
 if __name__ == "__main__":
     unittest.main()
