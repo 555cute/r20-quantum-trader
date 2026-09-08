@@ -70,6 +70,9 @@ class PersistedEnvFileTests(unittest.TestCase):
         cls.okx_runtime = okx_runtime
         cls.runtime = runtime
 
+    def setUp(self):
+        self.runtime.unfreeze_environment()
+
     def tearDown(self):
         self.runtime.unfreeze_environment()
 
@@ -146,7 +149,18 @@ class PersistedEnvFileTests(unittest.TestCase):
                     "R20_NOTIFY_QQ_ENABLED": "1",
                 })
                 self.assertEqual(env_file_path(root), env_path)
-                with patch.dict(os.environ, {"R20_EXCHANGE": "okx", "R20_BINANCE_ENV": "live", "R20_NOTIFY_QQ_ENABLED": "0"}, clear=False):
+                with patch.dict(os.environ, {
+                    "R20_EXCHANGE": "okx",
+                    "R20_BINANCE_ENV": "live",
+                    "R20_NOTIFY_QQ_ENABLED": "0",
+                    "BINANCE_DEMO_API_KEY": "",
+                    "BINANCE_DEMO_SECRET_KEY": "",
+                    "BINANCE_LIVE_API_KEY": "",
+                    "BINANCE_LIVE_SECRET_KEY": "",
+                    "OKX_API_KEY": "",
+                    "OKX_SECRET_KEY": "",
+                    "OKX_PASSPHRASE": "",
+                }, clear=False):
                     self.assertEqual(self.okx_runtime._load_dotenv()["R20_EXCHANGE"], "binance")
                     selected = self.runtime.selected_environment()
                     self.assertEqual(selected.exchange, "binance")
@@ -154,6 +168,7 @@ class PersistedEnvFileTests(unittest.TestCase):
                     self.assertFalse(selected.configured)
                     self.assertEqual(self.notifications._env()["R20_NOTIFY_QQ_ENABLED"], "1")
                     self.assertEqual(self.notifications._env()["R20_EXCHANGE"], "binance")
+
 
 
 if __name__ == "__main__":
