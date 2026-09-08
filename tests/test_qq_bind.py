@@ -20,6 +20,9 @@ class QqBindTests(unittest.TestCase):
     def setUp(self):
         qq_bind._TASKS.clear()
         qq_bind._CAPTURE_SESSIONS.clear()
+        self._daemon = patch("r20_backend.qq_bind.ensure_qq_gateway_daemon_running")
+        self.ensure_daemon = self._daemon.start()
+        self.addCleanup(self._daemon.stop)
 
     def test_decrypt_roundtrip_matches_connector_layout(self):
         key = base64.b64encode(os.urandom(32)).decode()
@@ -44,6 +47,7 @@ class QqBindTests(unittest.TestCase):
         self.assertIn("&_wv=2", task["connect_url"])
         key = base64.b64decode(post.call_args[0][1]["key"])
         self.assertEqual(len(key), 32)
+        self.ensure_daemon.assert_called()
 
     def test_poll_bound_persists_credentials_without_plaintext_leak(self):
         with patch("r20_backend.qq_bind._post_qq", return_value={"task_id": "t-9"}):
@@ -64,6 +68,7 @@ class QqBindTests(unittest.TestCase):
         self.assertEqual(second["app_id"], "100456789")
         self.assertEqual(second["openid"], "OPENID-USER")
         persist.assert_called_once_with("100456789", "topsecret-value", "OPENID-USER")
+        self.ensure_daemon.assert_called()
         # the public view must never contain the secret material
         self.assertNotIn("topsecret-value", json.dumps(second))
         self.assertNotIn("bot_encrypt_secret", json.dumps(second))
@@ -83,6 +88,7 @@ class QqBindTests(unittest.TestCase):
         self.assertEqual(res["status"], "awaiting_message")
         self.assertEqual(res["capture_id"], "cap-auto-1")
         persist.assert_called_once_with("1905549905", "my-secret", "")
+        self.ensure_daemon.assert_called()
         start_cap.assert_called_once_with("1905549905", "my-secret", timeout=90)
 
     def test_start_and_poll_openid_capture(self):
