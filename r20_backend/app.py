@@ -662,15 +662,13 @@ def top_sitemap_xml() -> Response:
     return Response(content="""<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://www.r20.cn/</loc><priority>1.0</priority></url><url><loc>https://www.r20.cn/factors</loc><priority>0.9</priority></url><url><loc>https://www.r20.cn/news</loc><priority>0.8</priority></url><url><loc>https://www.r20.cn/lab</loc><priority>0.8</priority></url><url><loc>https://www.r20.cn/history</loc><priority>0.8</priority></url><url><loc>https://www.r20.cn/docs</loc><priority>0.9</priority></url></urlset>""", media_type="application/xml")
 
 
-@app.api_route("/trading", methods=["GET", "HEAD"], include_in_schema=False)
-@app.api_route("/factors", methods=["GET", "HEAD"], include_in_schema=False)
-@app.api_route("/news", methods=["GET", "HEAD"], include_in_schema=False)
-@app.api_route("/lab", methods=["GET", "HEAD"], include_in_schema=False)
-@app.api_route("/history", methods=["GET", "HEAD"], include_in_schema=False)
 @app.get("/docs/images/{img_name}", include_in_schema=False)
 def docs_image(img_name: str) -> FileResponse:
     """站内文档配图本地同源托管：避免国内无 VPN 时 raw.githubusercontent.com 外链加载失败。
-    必须注册在 /docs/{subpath:path} SPA catch 之前，否则被返回成 index.html。"""
+    必须注册在 /docs/{subpath:path} SPA catch 之前，否则被返回成 index.html。
+    注意：本函数只挂 /docs/images/{img_name} 一条路由。若把 /trading 等无 {img_name}
+    路径参数的 SPA 页面路由堆叠装饰到本函数上，FastAPI 会把 img_name 当作必填 query
+    参数，导致刷新非主页时返回 422 Field required（v7.6.1 引入的回归）。"""
     docs_dir = (ROOT / "docs" / "images").resolve()
     if "/" in img_name or "\\" in img_name or ".." in img_name or not img_name.lower().endswith(".png"):
         raise HTTPException(status_code=404, detail="not found")
@@ -681,6 +679,11 @@ def docs_image(img_name: str) -> FileResponse:
                         headers={"Cache-Control": "public, max-age=86400, s-maxage=604800"})
 
 
+@app.api_route("/trading", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route("/factors", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route("/news", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route("/lab", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route("/history", methods=["GET", "HEAD"], include_in_schema=False)
 @app.api_route("/docs", methods=["GET", "HEAD"], include_in_schema=False)
 @app.api_route("/docs/{subpath:path}", methods=["GET", "HEAD"], include_in_schema=False)
 def public_tab_spa_page(subpath: str = "") -> FileResponse:

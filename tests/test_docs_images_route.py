@@ -28,6 +28,15 @@ class DocsImagesRouteTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertIn("text/html", resp.headers["content-type"])
 
+    def test_spa_subpages_never_require_img_name_query(self):
+        # v7.6.1 回归：/trading 等页面路由曾被堆叠装饰到 docs_image 上，
+        # 刷新非主页时 FastAPI 把 img_name 当必填 query 参数返回 422。
+        for path in ("/trading", "/factors", "/news", "/lab", "/history", "/docs"):
+            resp = self.client.get(path)
+            self.assertEqual(resp.status_code, 200, f"{path}: {resp.text[:200]}")
+            self.assertIn("text/html", resp.headers["content-type"], path)
+            self.assertNotIn("img_name", resp.text[:500], path)
+
     def test_path_traversal_and_non_png_never_leak_files(self):
         for bad in ("/docs/images/..%2f..%2f.env", "/docs/images/../../.env",
                     "/docs/images/app.py", "/docs/images/nope.png"):
