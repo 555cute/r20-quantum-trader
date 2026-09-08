@@ -15,6 +15,7 @@ export const enRadar = {
     raw: 'Raw record',
     adopted: 'Adopted: {role}',
     noQuotes: 'Single-model decision this cycle — no advisor quotes',
+    plan: 'Plan (margin·lev)',
     noIntercept: 'All actions passed physical interceptors',
     intercepted: 'Blocked',
     passed: 'Passed',

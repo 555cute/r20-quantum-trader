@@ -21,6 +21,7 @@ export const zhRadar = {
     raw: '原始记录',
     adopted: '采纳：{role}',
     noQuotes: '本周期为单模型直连决策，无参谋报价',
+    plan: '计划（保证金·杠杆）',
     noIntercept: '全部动作通过物理拦截校验',
     intercepted: '被拦截',
     passed: '放行',

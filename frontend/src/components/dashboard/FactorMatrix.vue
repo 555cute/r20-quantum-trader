@@ -32,6 +32,11 @@ function regimeOf(f: any): string {
   if (r.includes('range')) return t('dash.matrix.matrix.regime.range');
   return '';
 }
+/** 多空比（OKX 前5%大户口径；缺失或 N/A 显示 --） */
+function lsOf(f: any): string {
+  const v = Number(f.lsRatio);
+  return Number.isFinite(v) && v > 0 ? v.toFixed(2) : '--';
+}
 function openDetail(f: any) {
   detail.value = f;
 }
@@ -61,7 +66,7 @@ function openDetail(f: any) {
             <th class="col-num" :title="t('dash.matrix.matrix.col.vel') + ' · ' + t('dash.matrix.matrix.velTip')">v (1H)</th>
             <th class="col-num" :title="t('dash.matrix.matrix.col.acc') + ' · ' + t('dash.matrix.matrix.accTip')">a (1H)</th>
             <th class="col-num" :title="t('dash.matrix.matrix.adxTip')">ADX</th>
-            <th class="col-num" :title="t('dash.matrix.matrix.smartTip')">{{ t('dash.matrix.matrix.col.smart') }}</th>
+            <th class="col-num" :title="t('dash.matrix.matrix.lsTip')">{{ t('dash.matrix.matrix.col.ls') }}</th>
             <th>{{ t('dash.matrix.matrix.col.decision') }}</th>
           </tr>
         </thead>
@@ -79,11 +84,11 @@ function openDetail(f: any) {
             <td class="col-num" :class="dirClass(f.calculus?.velocity_1h)">{{ fmtNum(f.calculus?.velocity_1h, 3) }}</td>
             <td class="col-num" :class="dirClass(f.calculus?.accel_1h)">{{ fmtNum(f.calculus?.accel_1h, 4) }}</td>
             <td class="col-num" :style="{ color: (f.adx_1h ?? 0) < 18 ? 'var(--ink-3)' : 'var(--ink-1)' }">{{ fmtNum(f.adx_1h, 1) }}</td>
-            <td class="col-num">{{ f.smart_money?.weighted_long_pct != null ? fmtNum(f.smart_money.weighted_long_pct, 1) + '%' : '--' }}</td>
+            <td class="col-num">{{ lsOf(f) }}</td>
             <td>
               <div class="flex items-center gap-1.5">
                 <span class="dir" :class="actionMeta(actionOf(f)).cls">{{ actionMeta(actionOf(f)).label }}</span>
-                <ConfBadge :value="f.decision?.confidence" />
+                <ConfBadge v-if="actionOf(f) !== 'WAIT'" :value="f.decision?.confidence" />
               </div>
             </td>
           </tr>

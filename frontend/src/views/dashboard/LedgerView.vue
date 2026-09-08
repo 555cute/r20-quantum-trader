@@ -130,7 +130,7 @@ function dirOf(side: string): 'long' | 'short' {
           v-model="fStatus"
           :options="[
             { value: 'all', label: t('common.all') },
-            { value: 'closed', label: t('dash.ledger.filters.results.win') + '/' + t('dash.ledger.filters.results.loss') },
+            { value: 'closed', label: t('dash.ledger.status.closed') },
             { value: 'holding', label: t('status.running') },
           ]"
         />
@@ -146,8 +146,8 @@ function dirOf(side: string): 'long' | 'short' {
           v-model="fResult"
           :options="[
             { value: 'all', label: t('common.all') },
-            { value: 'win', label: t('dash.ledger.filters.result') + ' +', },
-            { value: 'loss', label: t('dash.ledger.filters.result') + ' −' },
+            { value: 'win', label: t('dash.ledger.filters.results.win') },
+            { value: 'loss', label: t('dash.ledger.filters.results.loss') },
           ]"
         />
         <select v-model="fInst" class="field field-sm w-auto ms-auto" @change="page = 1">

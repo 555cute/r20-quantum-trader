@@ -93,21 +93,6 @@ export function fmtHM(input: Date | string | number | null | undefined): string 
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-/** 相对时间：刚刚 / 12 秒前 / 3 分钟前 / 2 小时前 / 3 天前 */
-export function fmtAgo(input: Date | string | number, now = Date.now()): string {
-  const t = new Date(input).getTime();
-  if (!Number.isFinite(t)) return '--';
-  const diff = Math.max(0, now - t);
-  const s = Math.floor(diff / 1000);
-  if (s < 5) return '刚刚';
-  if (s < 60) return `${s} 秒前`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m} 分钟前`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h} 小时前`;
-  return `${Math.floor(h / 24)} 天前`;
-}
-
 /** 置信度 → 档位（未校准概率不展示裸数字，悬停/详情给原值） */
 export function confTier(v: number | null | undefined): { tier: 'high' | 'mid' | 'low'; label: string } | null {
   const n = Number(v);

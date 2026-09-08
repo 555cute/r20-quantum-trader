@@ -63,7 +63,7 @@ function symOf(x: { instId?: string; name?: string }): string {
             <th class="col-num">{{ t('dash.matrix.positions.col.mark') }}</th>
             <th class="col-num">{{ t('dash.matrix.positions.col.lev') }}</th>
             <th class="col-num">{{ t('dash.matrix.positions.col.pnl') }}</th>
-            <th class="col-num">{{ t('dash.matrix.positions.col.sl') }} / {{ t('dash.matrix.positions.col.tp') }}</th>
+            <th class="col-num hidden 2xl:table-cell">{{ t('dash.matrix.positions.col.sl') }} / {{ t('dash.matrix.positions.col.tp') }}</th>
             <th class="text-center">{{ t('dash.matrix.positions.col.oco') }}</th>
           </tr>
         </thead>
@@ -89,7 +89,7 @@ function symOf(x: { instId?: string; name?: string }): string {
               {{ arrow(posPnl(p)) }} {{ fmtSigned(posPnl(p)) }}
               <span class="t-faint block text-2xs">{{ fmtPct(posRoi(p)) }}</span>
             </td>
-            <td class="col-num t-faint">
+            <td class="col-num t-faint hidden 2xl:table-cell">
               <span class="down">{{ fmtPrice(p.exchangeSl ?? p.displayStop) }}</span>
               <span class="mx-1">/</span>
               <span class="up">{{ fmtPrice(p.exchangeTp ?? p.displayTakeProfit) }}</span>

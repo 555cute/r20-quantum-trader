@@ -32,7 +32,7 @@ function dayOf(c: any): string {
   const d = timeOf(c);
   const today = new Date();
   const sameDay = d.toDateString() === today.toDateString();
-  return sameDay ? t('dash.news.feed.grouped.today') : d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
+  return sameDay ? t('dash.news.feed.grouped.today') : d.toLocaleDateString(undefined, { month: '2-digit', day: '2-digit' });
 }
 /** 按日期分组，保持组内最新在前 */
 const grouped = computed(() => {

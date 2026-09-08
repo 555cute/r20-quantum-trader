@@ -52,9 +52,9 @@ function dirOf(a: string): 'long' | 'short' | 'flat' {
     <div v-if="tab === 'macro'" class="space-y-3">
       <div class="card-flat p-3.5 text-sm leading-relaxed" style="color: var(--ink-1)">
         {{ c.macro_assessment || '--' }}
-      </div>
-      <div v-if="c.ai_last_prompt" class="t-faint text-xs">
-        {{ t('dash.shell.peek.chars', undefined, { n: (c.ai_last_prompt || '').length }) }}
+        <p v-if="c.ai_last_prompt" class="num t-faint mt-3 border-t pt-2 text-xs" style="border-color: var(--line-1)">
+          {{ t('dash.shell.peek.chars', undefined, { n: (c.ai_last_prompt || '').length }) }} · {{ t('dash.shell.peek.title') }}
+        </p>
       </div>
     </div>
 
@@ -64,12 +64,20 @@ function dirOf(a: string): 'long' | 'short' | 'flat' {
         <p class="t-label mb-1.5">{{ t('dash.radar.detail.verdict') }} · position_management</p>
         <div class="card overflow-hidden">
           <table class="table">
+            <thead>
+              <tr>
+                <th>{{ t('dash.matrix.positions.col.symbol') }}</th>
+                <th>{{ t('dash.radar.col.action') }}</th>
+                <th class="col-num">{{ t('dash.matrix.positions.col.sl') }}</th>
+                <th>{{ t('dash.matrix.matrix.reason') }}</th>
+              </tr>
+            </thead>
             <tbody>
               <tr v-for="(m, i) in posMgmt" :key="'pm' + i">
                 <td class="num font-semibold">{{ String(m.instId || '').split('-')[0] }}</td>
                 <td><DirTag :dir="dirOf(m.action)" /></td>
                 <td class="col-num t-faint">{{ m.suggested_sl_price ? fmtPrice(m.suggested_sl_price) : '--' }}</td>
-                <td class="text-xs leading-relaxed" style="color: var(--ink-2); white-space: normal">{{ m.reason }}</td>
+                <td class="max-w-[300px] truncate text-xs" style="color: var(--ink-2)" :title="m.reason">{{ m.reason }}</td>
               </tr>
             </tbody>
           </table>
@@ -84,7 +92,7 @@ function dirOf(a: string): 'long' | 'short' | 'flat' {
               <tr>
                 <th>{{ t('dash.matrix.positions.col.symbol') }}</th>
                 <th>{{ t('dash.radar.col.action') }}</th>
-                <th class="col-num">{{ t('dash.matrix.orders.col.price') }}</th>
+                <th class="col-num">{{ t('dash.radar.detail.plan') }}</th>
                 <th class="col-num">R:R</th>
                 <th>{{ t('dash.matrix.matrix.col.conf') }}</th>
               </tr>

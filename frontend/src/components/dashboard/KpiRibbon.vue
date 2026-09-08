@@ -93,7 +93,6 @@ onMounted(async () => {
     <BaseStat
       :label="t('dash.matrix.kpi.ls')"
       :value="`${longCount} / ${shortCount}`"
-      :delta="store.positions.length ? undefined : t('dash.matrix.positions.empty')"
       hint="L / S"
       class="border-line-1 max-md:border-b max-lg:border-e xl:border-e"
     />

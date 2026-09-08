@@ -43,9 +43,9 @@ const calculus = computed(() => [
   row('ATR%', fmtPct(f.value.atr_pct, 2, false), ''),
 ]);
 const smart = computed(() => [
-  row(t('dash.matrix.matrix.col.smart'), f.value.smart_money?.weighted_long_pct != null ? fmtNum(f.value.smart_money.weighted_long_pct, 1) + '%' : '--'),
-  row(t('dash.news.smart.netFlow'), f.value.smart_money?.net_flow_usdt != null ? fmtNum(f.value.smart_money.net_flow_usdt, 0) + ' U' : '--', dirClass(f.value.smart_money?.net_flow_usdt)),
-  row(t('dash.news.smart.winRate'), f.value.smart_money?.top_win_rate != null ? f.value.smart_money.top_win_rate + '%' : '--'),
+  row(t('dash.matrix.matrix.col.ls'), f.value.lsRatio != null && f.value.lsRatio !== 'N/A' ? Number(f.value.lsRatio).toFixed(2) : '--'),
+  row('Funding', f.value.fundingRate != null ? fmtPct(Number(f.value.fundingRate) * 100, 4) : '--'),
+  row('OI', f.value.oiUsd != null ? fmtNum(Number(f.value.oiUsd) / 1e6, 1) + 'M' : '--'),
 ]);
 </script>
 
@@ -109,7 +109,7 @@ const smart = computed(() => [
       </div>
 
       <div class="card-flat p-3">
-        <p class="t-label mb-2">{{ t('dash.news.smart.title') }}</p>
+        <p class="t-label mb-2">{{ t('dash.news.smart.title') }} · OKX</p>
         <dl class="grid grid-cols-3 gap-2 text-center">
           <div v-for="r in smart" :key="r.label">
             <dt class="t-label truncate">{{ r.label }}</dt>
