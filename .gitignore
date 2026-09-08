@@ -132,3 +132,7 @@ linux_do_post_draft.html
 linux_do_promo_card*.html
 *_TODO.md
 state/
+
+# 推广文案与历史归档：仅本地保留，永不入库
+promo_local/
+.archive/
