@@ -149,7 +149,10 @@ const availableEffortOptions = computed(() => {
     { value: 'high', label: '高 (high)' },
     { value: 'medium', label: '中 (medium)' },
     { value: 'low', label: '低 (low)' },
+    { value: 'minimal', label: '极简 (minimal)' },
     { value: 'none', label: '关闭 (none)' },
+    // 后端 STANDARD_REASONING_EFFORTS 含 auto/minimal：缺了会让已存 "auto" 的模型在下拉框中无法回显
+    { value: 'auto', label: '自动 (auto)' },
   ]
   if (supportsExtreme) {
     options.unshift(

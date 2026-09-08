@@ -265,7 +265,9 @@ class LLMModelUpsertRequest(BaseModel):
     api_key: str | None = None
     api_format: str = "openai_chat"
     reasoning_type: str = "auto"
-    default_effort: str = "high"
+    # 默认值必须为 None：若给 "high"，exclude_none dump 恒含此键，
+    # upsert_model 的 `default_effort or reasoning_effort` 短路会劫持用户显式选择的强度
+    default_effort: str | None = None
     reasoning_effort: str | None = None
     capabilities: list[str] | None = None
     context_length: int | None = None
@@ -817,7 +819,10 @@ def top_sitemap_xml() -> Response:
 @app.get("/docs/images/{img_name}", include_in_schema=False)
 def docs_image(img_name: str) -> FileResponse:
     """站内文档配图本地同源托管：避免国内无 VPN 时 raw.githubusercontent.com 外链加载失败。
-    必须注册在 /docs/{subpath:path} SPA catch 之前，否则被返回成 index.html。"""
+    必须注册在 /docs/{subpath:path} SPA catch 之前，否则被返回成 index.html。
+    注意：本函数只挂 /docs/images/{img_name} 一条路由。若把 /trading 等无 {img_name}
+    路径参数的 SPA 页面路由堆叠装饰到本函数上，FastAPI 会把 img_name 当作必填 query
+    参数，导致刷新非主页时返回 422 Field required（v7.6.1 引入的回归）。"""
     docs_dir = (ROOT / "docs" / "images").resolve()
     if "/" in img_name or "\\" in img_name or ".." in img_name or not img_name.lower().endswith(".png"):
         raise HTTPException(status_code=404, detail="not found")

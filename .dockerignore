@@ -1,5 +1,7 @@
+# Version control and development caches
 .git
 .github
+.gitignore
 **/.venv
 **/venv
 **/__pycache__
@@ -7,20 +9,57 @@
 **/.pytest_cache
 **/node_modules
 frontend/dist
+
+# Credentials
 .env
 .env.*
 .okx/
 .bypy/
-logs/
-backups/
+credentials.yaml
 *.pid
 *.log
 *.enc
+history.db*
+
+# Runtime state is mounted, not packaged. Keep only public seed files.
 data/*
 !data/.gitkeep
 !data/prompt_library.json
+logs/
+backups/
+checkpoints/
+state/
+sessions/
+tool_results/
+media/
+
+# Local promotion, archives and agent state
+promo_local/
+.archive/
+chats.json
+jobs.json
+skill.json
+skills-lock.json
+agent.json
+agent/
+skills/
+memory/
+mem_agent/
+mem_metadata/
+mem_session/
+digest/
+
+# Files not needed by the runtime image
+Dockerfile
+docker-compose*.yml
 tests/
 deploy/
 *.md
+fix_*.py
+*_patch.py
+premium_ui.py
+light_theme_refactor.py
+refine_body.py
+ui_patch.py
 .idea/
 .vscode/

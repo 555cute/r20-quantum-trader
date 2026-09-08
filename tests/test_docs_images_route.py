@@ -30,6 +30,7 @@ class DocsImagesRouteTests(unittest.TestCase):
                     self.assertEqual(resp.status_code, 200)
                     self.assertIn("text/html", resp.headers["content-type"])
 
+
     def test_path_traversal_and_non_png_never_leak_files(self):
         for bad in ("/docs/images/..%2f..%2f.env", "/docs/images/../../.env",
                     "/docs/images/app.py", "/docs/images/nope.png"):
