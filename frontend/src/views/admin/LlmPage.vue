@@ -180,6 +180,22 @@ const filteredProviders = computed(() => {
   )
 })
 
+// Effective output cap matches get_active_llm_runtime: active_model_id in cfg.models, else global.
+// Saved cfg only — not selectedProvider, modelForm, or unsaved maxOutputTokensInput.
+const activeOutputCap = computed(() => {
+  const globalCap = Number(cfg.value?.max_output_tokens) || 4096
+  const activeId = cfg.value?.active_model_id
+  const target = (cfg.value?.models || []).find((m: any) => m?.id === activeId)
+  const modelMax = target?.max_output_tokens
+  if (modelMax != null && modelMax !== '') {
+    const parsed = Number(modelMax)
+    if (Number.isFinite(parsed) && parsed >= 1) {
+      return { tokens: parsed, label: '模型覆盖' }
+    }
+  }
+  return { tokens: globalCap, label: '全局继承' }
+})
+
 // ----------------- Provider Actions -----------------
 function openAddProviderModal() {
   selectedProvider.value = { id: '', name: '新建自定义供应商', is_new: true }
@@ -655,7 +671,8 @@ onMounted(() => {
             </div>
             <div class="text-[10px] flex items-center space-x-1" style="color: var(--text-muted);">
               <span>输出上限:</span>
-              <span class="font-bold text-blue-400">{{ cfg?.max_output_tokens || 4096 }} tok</span>
+              <span class="font-bold text-blue-400">{{ activeOutputCap.tokens }} tok</span>
+              <span style="color: var(--text-faint);">{{ activeOutputCap.label }}</span>
             </div>
           </div>
 
