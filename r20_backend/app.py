@@ -235,7 +235,9 @@ class LLMModelUpsertRequest(BaseModel):
     api_key: str | None = None
     api_format: str = "openai_chat"
     reasoning_type: str = "auto"
-    default_effort: str = "high"
+    # 默认值必须为 None：若给 "high"，exclude_none dump 恒含此键，
+    # upsert_model 的 `default_effort or reasoning_effort` 短路会劫持用户显式选择的强度
+    default_effort: str | None = None
     reasoning_effort: str | None = None
     capabilities: list[str] | None = None
     context_length: int | None = None

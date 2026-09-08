@@ -67,6 +67,10 @@ def _detect_reasoning_type(model_id: str) -> str:
         or "claude-3-7" in m
         or "claude-3.7" in m
         or "qwq" in m
+        # qwen3 全系（qwen3.x、qwen-3.x、qwen3-vl 等）为思考模型：
+        # 旧规则把所有含 "qwen" 的模型判为 none，导致 qwen3.x 的
+        # reasoning_effort 参数在运行时被静默丢弃（2026-09 用户反馈）。
+        or "qwen3" in m or "qwen-3" in m
     ):
         return "standard_effort"
     if "chat" in m or "gpt-4o" in m or "gpt-3" in m or "qwen" in m or "llama" in m:
@@ -1012,6 +1016,8 @@ def fetch_remote_models(
                         "description": desc,
                         "api_format": detected_format,
                         "reasoning_type": detected_rtype,
+                        # 与 upsert_model 存储键统一为 reasoning_effort；default_effort 仅保留兼容读
+                        "reasoning_effort": default_effort,
                         "default_effort": default_effort,
                     })
 
@@ -1166,6 +1172,7 @@ def build_request_spec(
             or m_lower.startswith(("o1", "o3", "o4"))
             or "reasoner" in m_lower
             or "-r1" in m_lower
+            or "qwen3" in m_lower or "qwen-3" in m_lower or "qwq" in m_lower
         )
         if not is_reasoning_model:
             if temperature is not None:
@@ -1175,7 +1182,7 @@ def build_request_spec(
                 payload["temperature"] = temperature
 
         # Standard reasoning effort parameter (supports max, xhigh, high, medium, low, minimal, none)
-        if rtype == "standard_effort" or (rtype == "auto" and ("gemini" in m_lower or m_lower.startswith(("o1", "o3", "o4", "gpt-5", "gpt-6")) or "gpt-5" in m_lower or "gpt-6" in m_lower)):
+        if rtype == "standard_effort" or (rtype == "auto" and ("gemini" in m_lower or "qwen3" in m_lower or "qwen-3" in m_lower or "qwq" in m_lower or m_lower.startswith(("o1", "o3", "o4", "gpt-5", "gpt-6")) or "gpt-5" in m_lower or "gpt-6" in m_lower)):
             if effort in ("max", "xhigh", "high", "medium", "low", "minimal"):
                 payload["reasoning_effort"] = effort
             elif effort == "none" and ("gemini" in m_lower or "gpt" in m_lower):
