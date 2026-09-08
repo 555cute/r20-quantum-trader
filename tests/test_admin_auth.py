@@ -5,7 +5,8 @@ import unittest
 from pathlib import Path
 import sqlite3
 
-from r20_backend.admin_auth import AdminAuthStore
+from r20_backend.admin_auth import AdminAuthStore, PLACEHOLDER_SETUP_TOKEN, resolve_bootstrap_tokens
+
 
 
 class AdminAuthTests(unittest.TestCase):
@@ -68,6 +69,65 @@ class AdminAuthTests(unittest.TestCase):
             self.store.login("operator", "OperatorPassword123")
         self.store.unlock_user(user["id"])
         self.assertEqual(self.store.login("operator", "OperatorPassword123")["user"]["username"], "operator")
+
+    def test_resolve_both_missing_mints_distinct_setup_and_admin(self):
+        seq = iter(["SetupTokenA1xxxx12", "AdminTokenB2xxxx12"])
+        setup, admin, generated = resolve_bootstrap_tokens("", "", has_users=False, generate=lambda: next(seq))
+        self.assertEqual(setup, "SetupTokenA1xxxx12")
+        self.assertEqual(admin, "AdminTokenB2xxxx12")
+        self.assertNotEqual(setup, admin)
+        self.assertEqual(generated, {"R20_SETUP_TOKEN": setup, "R20_ADMIN_TOKEN": admin})
+
+    def test_resolve_keeps_preset_setup_and_mints_admin(self):
+        setup, admin, generated = resolve_bootstrap_tokens(
+            "PresetSetupToken1", "", has_users=False, generate=lambda: "MintedAdminToken1"
+        )
+        self.assertEqual(setup, "PresetSetupToken1")
+        self.assertEqual(admin, "MintedAdminToken1")
+        self.assertEqual(generated, {"R20_ADMIN_TOKEN": admin})
+
+    def test_resolve_keeps_preset_admin_and_mints_setup(self):
+        setup, admin, generated = resolve_bootstrap_tokens(
+            "", "PresetAdminToken1", has_users=False, generate=lambda: "MintedSetupToken1"
+        )
+        self.assertEqual(setup, "MintedSetupToken1")
+        self.assertEqual(admin, "PresetAdminToken1")
+        self.assertEqual(generated, {"R20_SETUP_TOKEN": setup})
+
+    def test_placeholder_setup_token_is_treated_as_missing(self):
+        setup, admin, generated = resolve_bootstrap_tokens(
+            PLACEHOLDER_SETUP_TOKEN, "PresetAdminToken1", has_users=False, generate=lambda: "MintedSetupToken1"
+        )
+        self.assertEqual(setup, "MintedSetupToken1")
+        self.assertEqual(admin, "PresetAdminToken1")
+        self.assertNotIn(PLACEHOLDER_SETUP_TOKEN, generated.values())
+
+    def test_existing_users_mint_admin_token_only(self):
+        setup, admin, generated = resolve_bootstrap_tokens("", "", has_users=True, generate=lambda: "MintedAdminToken1")
+        self.assertEqual(setup, "")
+        self.assertEqual(admin, "MintedAdminToken1")
+        self.assertEqual(generated, {"R20_ADMIN_TOKEN": admin})
+
+    def test_existing_users_with_tokens_mint_nothing(self):
+        setup, admin, generated = resolve_bootstrap_tokens(
+            "ExistingSetup1", "ExistingAdmin1", has_users=True, generate=lambda: "SHOULD_NOT"
+        )
+        self.assertEqual((setup, admin, generated), ("ExistingSetup1", "ExistingAdmin1", {}))
+
+    def test_generated_admin_token_is_not_the_login_password(self):
+        setup, admin, generated = resolve_bootstrap_tokens(
+            "", "", has_users=False, generate=iter(["SetupPassword123", "AdminApiToken123"]).__next__
+        )
+        self.assertEqual(generated["R20_SETUP_TOKEN"], "SetupPassword123")
+        self.assertEqual(generated["R20_ADMIN_TOKEN"], "AdminApiToken123")
+        self.assertTrue(self.store.initialize_from_legacy(setup))
+        self.assertEqual(self.store.login("admin", "SetupPassword123")["user"]["username"], "admin")
+        with self.assertRaises(PermissionError):
+            self.store.login("admin", "AdminApiToken123")
+
+
+
+
 
     def test_invalid_password_policy(self):
         with self.assertRaises(ValueError):

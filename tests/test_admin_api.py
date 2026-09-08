@@ -1,6 +1,8 @@
 """Administrator API RBAC tests using an isolated auth database."""
 from __future__ import annotations
+import os
 import tempfile
+
 import unittest
 from pathlib import Path
 
@@ -52,9 +54,27 @@ class AdminApiTests(unittest.TestCase):
         versions={item["name"]:item["version"] for item in about.json()["components"]}
         self.assertEqual(versions["FastAPI Control Plane"], __version__)
 
-    def test_legacy_header_disabled_after_initialization(self):
-        response = self.client.get("/api/v1/admin/overview", headers={"X-R20-Admin-Token": "InitialAdmin123456"})
-        self.assertEqual(response.status_code, 401)
+    def test_admin_token_header_after_users_exist(self):
+        original = app_module.settings.admin_token
+        original_env = os.environ.get("R20_ADMIN_TOKEN")
+        os.environ["R20_ADMIN_TOKEN"] = "ServiceAdminToken123"
+        app_module.settings.admin_token = "ServiceAdminToken123"
+        try:
+            allowed = self.client.get("/api/v1/admin/overview", headers={"X-R20-Admin-Token": "ServiceAdminToken123"})
+            self.assertEqual(allowed.status_code, 200, allowed.text)
+            password = self.client.get("/api/v1/admin/overview", headers={"X-R20-Admin-Token": "InitialAdmin123456"})
+            self.assertEqual(password.status_code, 403)
+            me = self.client.get("/api/v1/admin/auth/me", headers={"X-R20-Admin-Token": "ServiceAdminToken123"})
+            self.assertEqual(me.status_code, 401)
+            users = self.client.get("/api/v1/admin/users", headers={"X-R20-Admin-Token": "ServiceAdminToken123"})
+            self.assertEqual(users.status_code, 401)
+        finally:
+            app_module.settings.admin_token = original
+            if original_env is None:
+                os.environ.pop("R20_ADMIN_TOKEN", None)
+            else:
+                os.environ["R20_ADMIN_TOKEN"] = original_env
+
 
     def test_vue_console_endpoints_require_session_and_return_data(self):
         headers = self.login("admin", "InitialAdmin123456")

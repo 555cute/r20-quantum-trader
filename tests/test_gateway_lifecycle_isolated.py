@@ -24,8 +24,11 @@ class GatewayLifespanTests(unittest.IsolatedAsyncioTestCase):
             "asynccontextmanager": asynccontextmanager, "FastAPI": object, "os": os,
             "refresh_settings": Mock(), "admin_auth": Mock(),
             "settings": types.SimpleNamespace(admin_token="", setup_token=""),
+            "resolve_bootstrap_tokens": lambda setup, admin, has_users=False, generate=None: (setup or "", admin or "", {}),
+            "update_env": Mock(),
             "start_gateway_supervisor": start, "stop_gateway_supervisor": stop,
         }
+
         exec(compile(ast.Module(body=[function], type_ignores=[]), str(source), "exec"), namespace)
         with patch.dict(os.environ, {"R20_GATEWAY_WORKER_ENABLED": "0"}), patch.dict(sys.modules, {"dashboard.app": dashboard}):
             async with namespace["lifespan"](object()):
@@ -44,8 +47,11 @@ class GatewayLifespanTests(unittest.IsolatedAsyncioTestCase):
             "asynccontextmanager": asynccontextmanager, "FastAPI": object, "os": os,
             "refresh_settings": Mock(), "admin_auth": Mock(),
             "settings": types.SimpleNamespace(admin_token="", setup_token=""),
+            "resolve_bootstrap_tokens": lambda setup, admin, has_users=False, generate=None: (setup or "", admin or "", {}),
+            "update_env": Mock(),
             "start_gateway_supervisor": start, "stop_gateway_supervisor": stop,
         }
+
         exec(compile(ast.Module(body=[function], type_ignores=[]), str(source), "exec"), namespace)
         with patch.dict(os.environ, {"R20_GATEWAY_WORKER_ENABLED": "1"}), patch.dict(sys.modules, {"dashboard.app": dashboard}):
             with self.assertRaisesRegex(RuntimeError, "application failure"):
