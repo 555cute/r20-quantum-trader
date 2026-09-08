@@ -359,10 +359,10 @@ onUnmounted(() => {
               <span class="font-bold" style="color: var(--color-brand);">点击图片放大</span>
             </div>
             <img
-              src="https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v760_council_board.png"
+              :src="'/docs/images/v760_council_board.png'"
               alt="对冲基金投委会决策中枢"
               class="w-full rounded-xl cursor-zoom-in group-hover:opacity-95 transition-opacity"
-              @click="zoomImage = 'https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v760_council_board.png'"
+              @click="zoomImage = '/docs/images/v760_council_board.png'"
             />
           </div>
         </section>
@@ -400,10 +400,10 @@ onUnmounted(() => {
               <span class="font-bold" style="color: var(--color-brand);">点击图片放大</span>
             </div>
             <img
-              src="https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v760_policy_snapshot.png"
+              :src="'/docs/images/v760_policy_snapshot.png'"
               alt="策略大一统版本快照控制台"
               class="w-full rounded-xl cursor-zoom-in group-hover:opacity-95 transition-opacity"
-              @click="zoomImage = 'https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v760_policy_snapshot.png'"
+              @click="zoomImage = '/docs/images/v760_policy_snapshot.png'"
             />
           </div>
         </section>
@@ -466,10 +466,10 @@ onUnmounted(() => {
               <span class="font-bold" style="color: var(--color-brand);">点击图片放大</span>
             </div>
             <img
-              src="https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v760_prompt_studio.png"
+              :src="'/docs/images/v760_prompt_studio.png'"
               alt="提示词策略工作室"
               class="w-full rounded-xl cursor-zoom-in group-hover:opacity-95 transition-opacity"
-              @click="zoomImage = 'https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v760_prompt_studio.png'"
+              @click="zoomImage = '/docs/images/v760_prompt_studio.png'"
             />
           </div>
         </section>
@@ -526,10 +526,10 @@ onUnmounted(() => {
               <span class="font-bold" style="color: var(--color-brand);">点击图片放大</span>
             </div>
             <img
-              src="https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v760_interceptors_failclosed.png"
+              :src="'/docs/images/v760_interceptors_failclosed.png'"
               alt="物理拦截插件中心"
               class="w-full rounded-xl cursor-zoom-in group-hover:opacity-95 transition-opacity"
-              @click="zoomImage = 'https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v760_interceptors_failclosed.png'"
+              @click="zoomImage = '/docs/images/v760_interceptors_failclosed.png'"
             />
           </div>
         </section>
@@ -590,10 +590,10 @@ onUnmounted(() => {
               <span class="font-bold" style="color: var(--color-brand);">点击图片放大</span>
             </div>
             <img
-              src="https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v760_risk_control.png"
+              :src="'/docs/images/v760_risk_control.png'"
               alt="执行层风控管理中心"
               class="w-full rounded-xl cursor-zoom-in group-hover:opacity-95 transition-opacity"
-              @click="zoomImage = 'https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v760_risk_control.png'"
+              @click="zoomImage = '/docs/images/v760_risk_control.png'"
             />
           </div>
         </section>
@@ -626,10 +626,10 @@ onUnmounted(() => {
               <span class="font-bold" style="color: var(--color-brand);">点击图片放大</span>
             </div>
             <img
-              src="https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v760_llm_hub.png"
+              :src="'/docs/images/v760_llm_hub.png'"
               alt="模型连接控制台"
               class="w-full rounded-xl cursor-zoom-in group-hover:opacity-95 transition-opacity"
-              @click="zoomImage = 'https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v760_llm_hub.png'"
+              @click="zoomImage = '/docs/images/v760_llm_hub.png'"
             />
           </div>
         </section>
@@ -658,10 +658,10 @@ onUnmounted(() => {
               <span class="font-bold" style="color: var(--color-brand);">点击图片放大</span>
             </div>
             <img
-              src="https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v760_self_evolution.png"
+              :src="'/docs/images/v760_self_evolution.png'"
               alt="自进化配置与实战心法面板"
               class="w-full rounded-xl cursor-zoom-in group-hover:opacity-95 transition-opacity"
-              @click="zoomImage = 'https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v760_self_evolution.png'"
+              @click="zoomImage = '/docs/images/v760_self_evolution.png'"
             />
           </div>
         </section>

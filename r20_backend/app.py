@@ -667,6 +667,20 @@ def top_sitemap_xml() -> Response:
 @app.api_route("/news", methods=["GET", "HEAD"], include_in_schema=False)
 @app.api_route("/lab", methods=["GET", "HEAD"], include_in_schema=False)
 @app.api_route("/history", methods=["GET", "HEAD"], include_in_schema=False)
+@app.get("/docs/images/{img_name}", include_in_schema=False)
+def docs_image(img_name: str) -> FileResponse:
+    """站内文档配图本地同源托管：避免国内无 VPN 时 raw.githubusercontent.com 外链加载失败。
+    必须注册在 /docs/{subpath:path} SPA catch 之前，否则被返回成 index.html。"""
+    docs_dir = (ROOT / "docs" / "images").resolve()
+    if "/" in img_name or "\\" in img_name or ".." in img_name or not img_name.lower().endswith(".png"):
+        raise HTTPException(status_code=404, detail="not found")
+    fp = (docs_dir / img_name).resolve()
+    if not str(fp).startswith(str(docs_dir)) or not fp.is_file():
+        raise HTTPException(status_code=404, detail="not found")
+    return FileResponse(str(fp), media_type="image/png",
+                        headers={"Cache-Control": "public, max-age=86400, s-maxage=604800"})
+
+
 @app.api_route("/docs", methods=["GET", "HEAD"], include_in_schema=False)
 @app.api_route("/docs/{subpath:path}", methods=["GET", "HEAD"], include_in_schema=False)
 def public_tab_spa_page(subpath: str = "") -> FileResponse:
