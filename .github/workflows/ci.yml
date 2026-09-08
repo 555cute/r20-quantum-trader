@@ -1,6 +1,8 @@
 name: CI Test Pipeline
 
 on:
+  push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
   workflow_call:
