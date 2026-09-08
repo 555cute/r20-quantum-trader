@@ -43,7 +43,7 @@ from r20_backend.notifications import _env as notification_env, diagnose_channel
 from r20_backend.audit import recent as recent_audit, record as audit_record
 from r20_backend.client_ip import client_ip as resolve_client_ip, user_agent as resolve_user_agent
 from r20_backend import login_guard
-from r20_backend.admin_auth import AdminAuthStore
+from r20_backend.admin_auth import AdminAuthStore, resolve_bootstrap_tokens
 from r20_backend.backup_store import (
     create_job as create_backup_job, delete_job as delete_backup_job, export_job as export_backup_job,
     get_job as get_backup_job, import_job as import_backup_job, list_jobs as list_backup_jobs,
@@ -90,7 +90,28 @@ REQUEST_SESSION: ContextVar[str] = ContextVar("r20_admin_session", default="")
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     refresh_settings()
-    admin_auth.initialize_from_legacy(settings.admin_token or settings.setup_token)
+    setup, admin, generated_tokens = resolve_bootstrap_tokens(
+        settings.setup_token,
+        settings.admin_token,
+        has_users=admin_auth.has_users(),
+    )
+    settings.setup_token = setup
+    settings.admin_token = admin
+    if generated_tokens.get("R20_SETUP_TOKEN"):
+        os.environ["R20_SETUP_TOKEN"] = setup
+        print(f"[R20] generated R20_SETUP_TOKEN (initial admin password): {setup}", flush=True)
+    if generated_tokens.get("R20_ADMIN_TOKEN"):
+        os.environ["R20_ADMIN_TOKEN"] = admin
+        print(f"[R20] generated R20_ADMIN_TOKEN (X-R20-Admin-Token): {admin}", flush=True)
+        if os.getenv("R20_TESTING", "").lower() not in {"1", "true", "yes"}:
+            update_env({"R20_ADMIN_TOKEN": admin})
+    if admin_auth.initialize_from_legacy(settings.setup_token) and generated_tokens.get("R20_SETUP_TOKEN"):
+        os.environ.pop("R20_SETUP_TOKEN", None)
+        settings.setup_token = ""
+
+
+
+
     gateway_enabled = os.getenv("R20_GATEWAY_WORKER_ENABLED", "1").lower() in {"1", "true", "yes"}
     dashboard_enabled = os.getenv("R20_DASHBOARD_WORKER_ENABLED", "1").lower() in {"1", "true", "yes"}
     if gateway_enabled:
@@ -489,9 +510,9 @@ class MemoryUpdateAllRequest(BaseModel):
 
 
 def require_admin_token(token: str) -> None:
-    expected = settings.admin_token or settings.setup_token
+    expected = (settings.admin_token or "").strip()
     if not expected:
-        raise HTTPException(status_code=503, detail="后台尚未设置 R20_SETUP_TOKEN 或 R20_ADMIN_TOKEN")
+        raise HTTPException(status_code=503, detail="后台尚未设置 R20_ADMIN_TOKEN")
     if not hmac.compare_digest(token, expected):
         raise HTTPException(status_code=403, detail="管理员令牌无效")
 
@@ -500,9 +521,9 @@ def current_admin(x_r20_session: str | None = None, x_r20_admin_token: str | Non
     user = admin_auth.validate_session(x_r20_session or "")
     if user:
         return user
-    if x_r20_admin_token and not admin_auth.has_users():
+    if x_r20_admin_token:
         require_admin_token(x_r20_admin_token)
-        return {"id": 0, "username": "legacy-token", "role": "legacy", "enabled": 1}
+        return {"id": 0, "username": "admin-token", "role": "token", "enabled": 1}
     raise HTTPException(status_code=401, detail="管理员会话已失效，请重新登录")
 
 
@@ -875,8 +896,9 @@ def admin_logout(request: Request, x_r20_session: str | None = Header(default=No
 @app.get("/api/v1/admin/auth/me")
 def admin_me(x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
     user = current_admin(x_r20_session, None)
-    if user.get("role") == "legacy":
+    if user.get("role") in {"legacy", "token"}:
         raise HTTPException(status_code=401, detail="请使用管理员账号密码登录")
+
     return {"user": user}
 
 
