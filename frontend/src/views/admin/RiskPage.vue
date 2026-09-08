@@ -1,6 +1,9 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useApi } from '../../composables/useApi'
+import PageHeader from '../../components/admin/PageHeader.vue'
+import SaveBar from '../../components/admin/SaveBar.vue'
+import DangerZone from '../../components/admin/DangerZone.vue'
 import {
   ShieldAlert,
   Save,
@@ -20,6 +23,8 @@ const { api } = useApi()
 const loading = ref(true)
 const busy = ref<'save' | 'reset' | ''>('')
 const bannerMsg = ref<{ text: string; type: 'ok' | 'err' | 'warn' } | null>(null)
+const bannerSeq = ref(0)
+watch(bannerMsg, () => { bannerSeq.value++ })
 
 const schema = ref<{ groups: any[]; params: any[] } | null>(null)
 const suites = ref<any[]>([])
@@ -122,7 +127,6 @@ function revertOne(p: any) {
   disp[p.key] = toDisplay(p, p.default)
 }
 
-const resetConfirm = ref('')
 
 async function saveChanges() {
   if (!dirtyKeys.value.length) return
@@ -141,7 +145,6 @@ async function saveChanges() {
     for (const k of dirtyKeys.value) values[k] = draft[k]
     const res = await api('/api/v1/admin/risk', { method: 'POST', body: JSON.stringify({ values }) })
     syncFromServer(res.values)
-    resetConfirm.value = ''
     bannerMsg.value = { text: `已保存 ${res.updated.length} 项修改 ✓ ${res.effect}`, type: 'ok' }
   } catch (e: any) {
     bannerMsg.value = { text: `保存失败: ${e.message}`, type: 'err' }
@@ -151,16 +154,11 @@ async function saveChanges() {
 }
 
 async function resetAll() {
-  if (resetConfirm.value.trim().toUpperCase() !== 'RESET RISK') {
-    bannerMsg.value = { text: '确认短语必须精确为：RESET RISK', type: 'err' }
-    return
-  }
   busy.value = 'reset'
   bannerMsg.value = null
   try {
-    const res = await api('/api/v1/admin/risk/reset', { method: 'POST', body: JSON.stringify({ confirmation: resetConfirm.value }) })
+    const res = await api('/api/v1/admin/risk/reset', { method: 'POST', body: JSON.stringify({ confirmation: 'RESET RISK' }) })
     syncFromServer(res.values)
-    resetConfirm.value = ''
     bannerMsg.value = { text: `已恢复代码默认基线 ✓ ${res.effect}`, type: 'ok' }
   } catch (e: any) {
     bannerMsg.value = { text: `重置失败: ${e.message}`, type: 'err' }
@@ -174,25 +172,16 @@ onMounted(loadData)
 
 <template>
   <div class="space-y-4 max-w-[1400px] mx-auto pb-24">
-    <!-- Header -->
-    <div class="panel-banner-compact">
-      <div class="flex items-center space-x-2.5">
-        <div class="panel-banner-icon">
-          <ShieldAlert class="w-3.5 h-3.5" />
-        </div>
-        <div>
-          <h1 class="text-xs sm:text-[13px] font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
-            执行层风控管理 (Fail-Closed Hard Risk Gates)
-          </h1>
-          <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);">
-            仓位敞口 · 单笔风险 · 止损熔断 · 金字塔加仓 —— 全部硬门禁集中配置
-          </p>
-        </div>
-      </div>
-      <span class="badge-lever">
-        {{ dirtyKeys.length ? `${dirtyKeys.length} 项待保存` : '与线上口径一致' }}
-      </span>
-    </div>
+    <PageHeader
+      title="执行层风控管理 (Fail-Closed Hard Risk Gates)"
+      description="仓位敞口 · 单笔风险 · 止损熔断 · 金字塔加仓 —— 全部硬门禁集中配置"
+    >
+      <template #actions>
+        <span class="badge-lever">
+          {{ dirtyKeys.length ? `${dirtyKeys.length} 项待保存` : '与线上口径一致' }}
+        </span>
+      </template>
+    </PageHeader>
 
     <!-- Effect banner -->
     <div class="p-3 rounded-lg text-[11px] font-mono border flex items-start gap-2" style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-muted);">
@@ -203,18 +192,12 @@ onMounted(loadData)
       </div>
     </div>
 
-    <!-- Banner -->
-    <div
-      v-if="bannerMsg"
-      class="p-3 rounded-lg text-xs font-mono border"
-      :class="bannerMsg.type === 'ok' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : bannerMsg.type === 'warn' ? 'bg-amber-500/10 border-amber-500/20 text-amber-400' : 'bg-rose-500/10 border-rose-500/20 text-rose-400'"
-    >
-      <div class="flex items-center gap-2">
-        <CheckCircle2 v-if="bannerMsg.type === 'ok'" class="w-4 h-4 shrink-0" />
-        <AlertCircle v-else class="w-4 h-4 shrink-0" />
-        <span>{{ bannerMsg.text }}</span>
-      </div>
-    </div>
+    <SaveBar
+      :type="bannerMsg?.type || 'ok'"
+      :text="bannerMsg?.text || ''"
+      :nonce="bannerSeq"
+      @dismiss="bannerMsg = null"
+    />
 
     <div v-if="loading" class="flex items-center justify-center py-24">
       <Loader2 class="w-6 h-6 animate-spin" style="color: var(--text-muted);" />
@@ -309,27 +292,14 @@ onMounted(loadData)
         </div>
       </div>
 
-      <!-- Danger zone: reset -->
-      <div class="rounded-xl border p-4" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
-        <h2 class="text-xs font-black font-mono uppercase tracking-wide mb-1" style="color: var(--text-main);">恢复出厂基线</h2>
-        <p class="text-[11px] font-mono mb-3" style="color: var(--text-muted);">清除全部自定义覆盖值，执行层回退到代码默认基线。需输入确认短语。</p>
-        <div class="flex flex-col sm:flex-row gap-2 sm:items-center">
-          <input
-            v-model="resetConfirm"
-            placeholder="输入 RESET RISK"
-            class="flex-1 rounded-lg px-3 py-2 text-xs font-mono outline-none border"
-            style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);"
-          />
-          <button
-            @click="resetAll"
-            :disabled="busy !== '' || !resetConfirm"
-            class="px-4 py-2 rounded-lg text-xs font-mono font-bold border border-rose-500/30 text-rose-400 hover:bg-rose-500/10 disabled:opacity-40 transition-colors flex items-center gap-1.5"
-          >
-            <RotateCcw class="w-3.5 h-3.5" />
-            {{ busy === 'reset' ? '重置中…' : '全部恢复默认' }}
-          </button>
-        </div>
-      </div>
+      <!-- Danger zone: reset (P2 shared component) -->
+      <DangerZone
+        title="恢复出厂基线"
+        description="清除全部自定义覆盖值，执行层回退到代码默认基线；覆盖值本身不可恢复。"
+        confirm-phrase="RESET RISK"
+        :action-label="busy === 'reset' ? '重置中…' : '全部恢复默认'"
+        @confirm="resetAll"
+      />
     </template>
 
     <!-- Sticky save bar -->
