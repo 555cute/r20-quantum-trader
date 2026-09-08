@@ -69,6 +69,28 @@ Binance has no equivalent atomic OKX OCO attachment here. Protection consists of
 
 Binance closed-position history is reconstructed from available user fills, not invented from a balance delta. The audit scan is bounded by the API's recent history window (up to 90 days), and previously saved older closed cycles are retained. Incomplete windows, changing inventory or unsupported non-USDT fee conversion are reported as incomplete rather than attributed to a fabricated trade. Historical leverage/margin/ROI that cannot be established stays unknown. The dashboard's bill endpoint is a bounded recent view, not an all-time statement.
 
+### Binance strategy feedback loop
+
+The selected adapter supplies candles, tickers, instrument filters, funding rates (`premiumIndex`), open interest, the global account long/short ratio, and taker buy/sell volumes. Funding is expressed in percent. Binance BASE taker volumes are converted to estimated USDT notional at the current mark price before entering the strategy's USDT fields; this is not an exact historical turnover measurement. Missing auxiliary statistics remain unavailable, not neutral zero. OKX-only SmartMoney and optional OKX CLI news are not Binance execution data.
+
+Risk configuration is loaded from `R20_ENV_FILE`, including the persisted Docker `data/config/.env`. The final model prompt always includes the live risk budget, even when an older profile omits its placeholder. Single-asset and daily-loss budgets include both ratio and absolute caps. The BASE execution path caps leverage and per-order margin, then sizes against the actual submitted limit/stop prices, exchange minimums, and the remaining asset budget. It never silently rescales a DEMO quote after sizing. The control plane and trader share `data/.ai_factor_trader.lock`; the trader acquires it before freezing the selected account.
+
+Accepted orders write an account-scoped `signal_journal.json` entry with `status: submitted`, the exchange order ID, instrument, direction, policy identifiers, and the pre-order factor snapshot. This is not a fill or realized PnL. Binance closed-cycle reconstruction retains `entryOrderIds` from actual opening fills. Ledger sync joins those IDs with the same account/instrument/direction to attach entry and scale-in evidence. Snapshots first observed on a later position poll are observations, not reconstructed entry evidence.
+
+Evolution consumes only `status: closed` ledger rows and their net realized PnL after commission. Missing entry IDs or snapshots stay unknown; there is no nearest-time/name fallback, no cross-account journal borrowing, and incomplete history blocks learning. Funding bills remain separate from the per-cycle realized-plus-commission result. Older verified snapshots survive subsequent history refreshes; OKX histories without verified entry-order linkage are not assigned Binance evidence.
+
+### Configurable news sources
+
+Use **Admin → News Sources** (`/admin/news`) to select OKX aggregated news, Binance official announcements, both, or neither. The default remains OKX for existing deployments. Superadmins can save; other administrators can inspect status. Saving does not perform a network request or change the trading venue/credentials. **Collect now** explicitly requests the saved public sources; otherwise the existing scheduled news job performs the next collection.
+
+Deployment setting: `R20_NEWS_SOURCES=okx`, `binance`, `okx,binance`, or an empty value to disable all sources. Admin changes persist in `R20_ENV_FILE` (Docker: `data/config/.env`) and override the startup environment. Disabling a source immediately filters its cached content from the prompt, public dashboard and sentiment cache API, without waiting for account polling.
+
+Binance collection uses the public website CMS endpoint at `https://www.binance.com/bapi/composite/v1/public/cms/article/list/query`. Categories include new listings, latest news/rule changes, delistings, maintenance and API updates; promotional activities and airdrops are excluded. Records include the official title, publication time, category and original link. No article body, translation, bullish/bearish score or coin association is invented. This website interface is not a versioned trading-API availability guarantee: connectivity failures, throttling or challenge pages are reported as source errors.
+
+Sources have independent bounded requests and per-source caches. A failed source can show its previous records as stale without hiding a healthy source; a successful empty result is distinct from failure. Old cached headlines do not retrigger the news circuit breaker, and stale OKX sentiment is not used as a live factor score. Binance announcements enter the strategy's optional news context; adding this source does not introduce an automatic listing/delisting trade or liquidation rule. Turning news off does not disable price/risk controls or prematurely clear an already active circuit breaker.
+
+Mixed-source selection reserves up to three records per enabled source before filling the remaining slots by publication time; the final selected list is still newest-first. The dashboard has ten slots and the model news context has six, each selected independently with the same rule. Thus frequent OKX updates cannot crowd all Binance announcements out of either surface. A source with fewer records releases unused slots; no placeholder news is created.
+
 ## Choose exactly one Gateway owner
 
 ### Backend-owned: local process or Docker
