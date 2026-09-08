@@ -297,6 +297,24 @@ async function clearCurrentProviderModels() {
   }
 }
 
+async function removeProvider() {
+  const p = selectedProvider.value
+  if (!p || p.is_new) return
+  const n = p.models_count ?? p.models?.length ?? 0
+  const warn = n > 0 ? `\n其名下 ${n} 个模型将一并删除！` : ''
+  if (!confirm(`确定要删除供应商「${p.name}」吗？${warn}\n（若它挂着当前主脑激活模型，需先切换模型）`)) return
+  try {
+    await api(`/api/v1/admin/llm/providers/${encodeURIComponent(p.id)}`, {
+      method: 'DELETE',
+    })
+    alert(`供应商 ${p.name} 已删除`)
+    goBackToList()
+    await loadConfig()
+  } catch (err: any) {
+    alert(err.message)
+  }
+}
+
 // ----------------- Remote Fetch -----------------
 function openFetchDialog() {
   if (!selectedProvider.value) return
@@ -983,7 +1001,17 @@ onMounted(() => {
         </div>
 
         <!-- Save Button -->
-        <div class="pt-3 pb-16 flex justify-end">
+        <div class="pt-3 pb-16 flex items-center justify-between">
+          <button
+            v-if="!selectedProvider.is_new"
+            @click="removeProvider"
+            class="flex items-center space-x-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer border"
+            style="color: #F87171; border-color: rgba(239, 68, 68, 0.3); background-color: rgba(239, 68, 68, 0.06);"
+          >
+            <Trash2 class="w-3.5 h-3.5" />
+            <span>删除供应商</span>
+          </button>
+          <span v-else></span>
           <button
             @click="saveProviderConfig"
             class="px-6 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs btn-primary-text"

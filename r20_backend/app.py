@@ -73,8 +73,7 @@ from r20_backend.llm_manager import (
     test_llm_connection,
     fetch_remote_models,
     init_llm_providers,
-    _atomic_write_json,
-    LLM_PROVIDERS_FILE,
+    save_llm_config,
 )
 from scripts.prompt_library import (
     PRESETS, TEMPLATE_KEYS, active_profile, activate_profile, all_profiles, apply_module_layout,
@@ -820,6 +819,20 @@ def top_sitemap_xml() -> Response:
 @app.api_route("/news", methods=["GET", "HEAD"], include_in_schema=False)
 @app.api_route("/lab", methods=["GET", "HEAD"], include_in_schema=False)
 @app.api_route("/history", methods=["GET", "HEAD"], include_in_schema=False)
+@app.get("/docs/images/{img_name}", include_in_schema=False)
+def docs_image(img_name: str) -> FileResponse:
+    """站内文档配图本地同源托管：避免国内无 VPN 时 raw.githubusercontent.com 外链加载失败。
+    必须注册在 /docs/{subpath:path} SPA catch 之前，否则被返回成 index.html。"""
+    docs_dir = (ROOT / "docs" / "images").resolve()
+    if "/" in img_name or "\\" in img_name or ".." in img_name or not img_name.lower().endswith(".png"):
+        raise HTTPException(status_code=404, detail="not found")
+    fp = (docs_dir / img_name).resolve()
+    if not str(fp).startswith(str(docs_dir)) or not fp.is_file():
+        raise HTTPException(status_code=404, detail="not found")
+    return FileResponse(str(fp), media_type="image/png",
+                        headers={"Cache-Control": "public, max-age=86400, s-maxage=604800"})
+
+
 @app.api_route("/docs", methods=["GET", "HEAD"], include_in_schema=False)
 @app.api_route("/docs/{subpath:path}", methods=["GET", "HEAD"], include_in_schema=False)
 def public_tab_spa_page(subpath: str = "") -> FileResponse:
@@ -1419,17 +1432,36 @@ def update_admin_config(payload: AdminConfigUpdate, x_r20_admin_token: str | Non
     if any(k.startswith("llm_") for k in data):
         try:
             cfg = init_llm_providers()
-            active_p = next((p for p in cfg.get("providers", []) if p["id"] == cfg.get("active_provider_id")), None)
+            # 激活供应商必须从 active_model_id 反查——配置结构里从来没有
+            # active_provider_id 这个键，旧写法令整段同步静默失效：
+            # 用户在全局设置里换密钥 → 供应商与模型仍持旧键 → 全部模型连不上。
+            active_mid = cfg.get("active_model_id", "")
+            active_model = next((m for m in cfg.get("models", []) if m.get("id") == active_mid), None)
+            active_pid = (active_model or {}).get("provider_id")
+            active_p = next((p for p in cfg.get("providers", []) if p.get("id") == active_pid), None) if active_pid else None
+            dirty = False
             if active_p:
                 if "llm_base_url" in data and data["llm_base_url"]:
                     active_p["base_url"] = data["llm_base_url"].rstrip("/")
+                    dirty = True
                 if "llm_api_key" in data and data["llm_api_key"]:
                     active_p["api_key"] = data["llm_api_key"]
-                if "llm_model" in data and data["llm_model"]:
-                    cfg["active_model_id"] = data["llm_model"]
-                if "llm_reasoning_effort" in data and data["llm_reasoning_effort"]:
-                    cfg["active_reasoning_effort"] = data["llm_reasoning_effort"]
-                _atomic_write_json(LLM_PROVIDERS_FILE, cfg)
+                    dirty = True
+            if "llm_model" in data and data["llm_model"]:
+                cfg["active_model_id"] = data["llm_model"]
+                dirty = True
+            if "llm_reasoning_effort" in data and data["llm_reasoning_effort"]:
+                cfg["active_reasoning_effort"] = data["llm_reasoning_effort"]
+                dirty = True
+            if dirty:
+                # 供应商凭据变更后，同步刷新其名下模型的扁平快照（与 upsert_provider 同口径）
+                if active_p:
+                    for mm in cfg.get("models", []):
+                        if mm.get("provider_id") == active_p.get("id"):
+                            mm["base_url"] = active_p.get("base_url", mm.get("base_url", ""))
+                            if active_p.get("api_key"):
+                                mm["api_key"] = active_p["api_key"]
+                save_llm_config(cfg)
         except Exception:
             pass
     audit_fields = sorted(k for k in data.keys() if k not in _SECRET_CONFIG_KEYS)
@@ -1599,7 +1631,10 @@ def admin_toggle_llm_provider(provider_id: str, payload: LLMProviderToggleReques
 @app.delete("/api/v1/admin/llm/providers/{provider_id}/models")
 def admin_clear_llm_provider_models(provider_id: str, x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
     actor = require_superadmin(x_r20_session)
-    cleared = clear_provider_models(provider_id)
+    try:
+        cleared = clear_provider_models(provider_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not cleared:
         raise HTTPException(status_code=404, detail="未找到该供应商")
     audit_record("llm.provider.clear_models", "success", {"actor": actor["username"], "provider_id": provider_id})

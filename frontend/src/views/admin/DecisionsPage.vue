@@ -23,12 +23,30 @@ async function loadDecisions() {
   }
 }
 
+// 条目起点：[YYYY-MM-DD HH:MM:SS] 或 uvicorn 的 INFO:/ERROR: 等；其余行视为上一条目的延续，
+// 反转时以「条目」为单位，多行条目（如 traceback、npm 提示续行）内部顺序保持不乱。
+const ENTRY_START = /^(\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]|(INFO|WARNING|ERROR|CRITICAL|DEBUG)[:\s])/
+
+function reverseLogEntries(raw: string): string {
+  const lines = raw.split('\n')
+  const entries: string[][] = []
+  for (const line of lines) {
+    if (entries.length === 0 || ENTRY_START.test(line)) {
+      entries.push([line])
+    } else {
+      entries[entries.length - 1].push(line)
+    }
+  }
+  return entries.reverse().map(e => e.join('\n')).join('\n')
+}
+
 async function fetchLogStream(type: 'trader' | 'backend' | 'scheduler') {
   activeLogTab.value = type
   logLoading.value = true
   try {
     const res = await api(`/api/v1/admin/logs?source=${type}&lines=100`)
-    logContent.value = res.content || res.lines?.join('\n') || '无实时日志'
+    const raw: string = res.content || res.lines?.join('\n') || ''
+    logContent.value = raw ? reverseLogEntries(raw) : '无实时日志'
   } catch (e: any) {
     logContent.value = `获取日志失败: ${e.message}`
   } finally {
@@ -59,6 +77,7 @@ onMounted(() => {
         <div class="flex items-center space-x-2">
           <Terminal class="w-4 h-4 text-purple-400" />
           <h2 class="text-xs font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">系统实时日志流</h2>
+          <span class="text-[9px] font-mono px-1.5 py-0.5 rounded border font-bold" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-faint);">最新在前</span>
         </div>
         <!-- Log Selector Tabs -->
         <div class="flex flex-wrap gap-1 p-1 rounded-lg border" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">

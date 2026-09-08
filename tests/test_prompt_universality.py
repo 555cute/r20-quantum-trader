@@ -17,6 +17,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from tests.risk_test_env import pin_baseline_risk_env  # noqa: E402
+
+
+def setUpModule():
+    # risk_budget 渲染断言锁定基线（5% 日亏/2% 单笔）；隔离生产 .env 当前套件值
+    pin_baseline_risk_env()
+
 # 绝对法币金额：数字或区间 + U/USDT
 _ABS_MONEY = re.compile(r"(?<![\d.%])\d{2,5}(?:\.\d+)?\s*(?:~|～|至|-)\s*\d{2,5}(?:\.\d+)?\s*(?:USDT|U)\b|(?<![\d.])\d{3,5}\s*(?:USDT|U)\b")
 # 允许出现绝对金额的位置：自适应风险预算自身的示例文案、以及带「可用余额」前缀的举例

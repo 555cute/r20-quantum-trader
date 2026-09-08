@@ -17,7 +17,7 @@ const store = useDashboardStore()
           系统巡检日志流 (15分钟周期)
         </h2>
       </div>
-      <span class="text-xs font-mono" style="color: var(--text-faint);">实时滚动</span>
+      <span class="text-xs font-mono" style="color: var(--text-faint);">最新在前</span>
     </div>
 
     <div

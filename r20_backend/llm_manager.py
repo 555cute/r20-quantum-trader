@@ -77,7 +77,18 @@ def _detect_reasoning_type(model_id: str) -> str:
 def _detect_capabilities(model_id: str) -> List[str]:
     m = model_id.lower()
     caps = ["chat"]
-    if any(k in m for k in ["vision", "image", "flash", "gpt-4o", "gpt-5", "gpt-6", "gemini", "claude", "grok", "muse", "vl", "omni", "multimodal"]):
+    # 视觉能力按「显式多模态标记 ∪ 家族默认」判定，而非靠 flash 这类词——
+    # 历史版本把 "flash" 当视觉关键词，会误标 deepseek-v4-flash 等纯文本模型。
+    # 该网关下 qwen / glm / gemini / claude / gpt / grok 家族的新式模型普遍多模态，
+    # 归为视觉家族；deepseek 归纯文本家族，除非名字带显式 vision 标记。
+    vision_markers = ["vision", "image", "omni", "multimodal", "vl-", "-vl", "_vl", ".vl"]
+    vision_families = ["gemini", "claude", "gpt-4o", "gpt-5", "gpt-6", "grok", "muse", "qwen", "glm"]
+    text_only_families = ["deepseek"]
+    tokens = {t for t in re.split(r"[^a-z0-9]+", m) if t}
+    has_vision_marker = any(k in m for k in vision_markers) or bool(tokens & {"vl", "4v", "5v", "6v"})
+    in_vision_family = any(f in m for f in vision_families)
+    in_text_family = any(f in m for f in text_only_families)
+    if has_vision_marker or (in_vision_family and not in_text_family):
         caps.append("vision")
     if not ("-r1-distill" in m or "-thinking" in m):
         caps.append("tools")
@@ -189,11 +200,24 @@ def init_llm_config() -> Dict[str, Any]:
     existing_providers = data.get("providers", [])
     merged_providers: List[Dict[str, Any]] = []
 
-    for dp in DEFAULT_PROVIDERS:
-        pid = dp["id"]
-        found = next((p for p in existing_providers if p.get("id") == pid), None)
-        if found:
-            p_obj = dict(dp)
+    # 默认供应商只在「首次播种」时注入。播种完成后配置里落下 defaults_seeded 标记，
+    # 此后用户删除的默认供应商绝不复活；openai 的 enabled 也只在播种时强制打开，
+    # 之后尊重用户自己的开关。老配置文件（无标记）视为首次：合并一次并落标记，升级无感。
+    seed_defaults = not data.get("defaults_seeded")
+    default_by_id = {dp["id"]: dp for dp in DEFAULT_PROVIDERS}
+    # (ignore legacy hardcoded providers from older versions)
+    legacy_ids = {
+        "siliconflow", "openrouter", "kelivoin", "tensdaq", "deepseek",
+        "alhubmix", "suixiang", "dashscope", "zhipu", "grok", "volcengine"
+    }
+
+    for found in existing_providers:
+        pid = found.get("id")
+        if not pid or pid in legacy_ids:
+            continue
+        dp = default_by_id.get(pid)
+        if dp:
+            p_obj = copy.deepcopy(dp)
             p_obj.update(found)
             # Never overwrite models with global defaults if provider was already configured
             if "models" in found:
@@ -203,29 +227,25 @@ def init_llm_config() -> Dict[str, Any]:
                     p_obj["api_key"] = cur_key
                 if not p_obj.get("base_url"):
                     p_obj["base_url"] = cur_url
-                p_obj["enabled"] = True
+                if seed_defaults:
+                    p_obj["enabled"] = True
             merged_providers.append(p_obj)
         else:
+            merged_providers.append(found)
+
+    if seed_defaults:
+        have_ids = {p.get("id") for p in merged_providers}
+        for dp in DEFAULT_PROVIDERS:
+            if dp["id"] in have_ids:
+                continue
             p_obj = copy.deepcopy(dp)
-            if pid == "openai":
+            if dp["id"] == "openai":
                 if cur_key:
                     p_obj["api_key"] = cur_key
                 if cur_url:
                     p_obj["base_url"] = cur_url
                 p_obj["enabled"] = True
             merged_providers.append(p_obj)
-
-    # Any custom provider added by user (ignore legacy hardcoded providers from older versions)
-    legacy_ids = {
-        "siliconflow", "openrouter", "kelivoin", "tensdaq", "deepseek",
-        "alhubmix", "suixiang", "dashscope", "zhipu", "grok", "volcengine"
-    }
-    for ep in existing_providers:
-        epid = ep.get("id")
-        if epid in legacy_ids:
-            continue
-        if not any(dp["id"] == epid for dp in DEFAULT_PROVIDERS):
-            merged_providers.append(ep)
 
     active_m_id = data.get("active_model_id") or cur_model or ""
     active_effort = data.get("active_reasoning_effort") or cur_effort or "high"
@@ -260,13 +280,32 @@ def init_llm_config() -> Dict[str, Any]:
             }
 
     # Preserve any custom models that were added by user or tests
+    prov_by_id = {p.get("id"): p for p in merged_providers}
     for m in data.get("models", []):
         mid = m.get("id")
         if mid:
             if mid in models_map:
-                models_map[mid].update(m)
+                fresh = models_map[mid]
+                merged = dict(m)
+                # 供应商凭据是唯一权威源：历史快照键/地址不得覆盖供应商当前值
+                if fresh.get("api_key"):
+                    merged["api_key"] = fresh["api_key"]
+                if fresh.get("base_url"):
+                    merged["base_url"] = fresh["base_url"]
+                fresh.update(merged)
             else:
-                models_map[mid] = m
+                entry = dict(m)
+                prov = prov_by_id.get(entry.get("provider_id"))
+                if prov:
+                    # 顶层扁平模型同样按 provider_id 重挂供应商当前凭据——
+                    # 否则轮换密钥后旧快照键永久粘住，模型必须删掉重加才能恢复
+                    if prov.get("api_key"):
+                        entry["api_key"] = prov["api_key"]
+                    if prov.get("base_url"):
+                        entry["base_url"] = prov["base_url"]
+                    if not entry.get("api_format"):
+                        entry["api_format"] = prov.get("api_format", "openai_chat")
+                models_map[mid] = entry
 
     flat_models = list(models_map.values())
     if not any(m["id"] == active_m_id for m in flat_models) and flat_models:
@@ -274,6 +313,7 @@ def init_llm_config() -> Dict[str, Any]:
 
     config = {
         "version": "3.1",
+        "defaults_seeded": True,
         "active_model_id": active_m_id,
         "active_reasoning_effort": active_effort,
         "thinking_timeout": thinking_timeout,
@@ -287,6 +327,11 @@ def init_llm_config() -> Dict[str, Any]:
 # Backwards compatibility alias for app.py
 LLM_PROVIDERS_FILE = LLM_CONFIG_FILE
 init_llm_providers = init_llm_config
+
+
+def save_llm_config(config: Dict[str, Any]) -> None:
+    """唯一配置写入口：调用时解析 LLM_CONFIG_FILE 模块全局，测试沙箱 patch 必然生效。"""
+    _atomic_write_json(LLM_CONFIG_FILE, config)
 
 
 def load_llm_config(mask_keys: bool = True) -> Dict[str, Any]:
@@ -613,8 +658,8 @@ def upsert_model(provider_id: str, model_data: Dict[str, Any]) -> Dict[str, Any]
     if prov:
         if not base_url:
             base_url = prov.get("base_url", "")
-        if not api_key and prov.get("api_key"):
-            api_key = prov.get("api_key", "")
+        # 不再把供应商密钥快照进模型条目：密钥唯一存放处是供应商，
+        # 读取时由 init_llm_config 合并注入；轮换密钥即刻对全部模型生效
         if not provider_name:
             provider_name = prov.get("name", "自定义")
         if not provider_id:
@@ -781,6 +826,35 @@ def upsert_provider(provider_data: Dict[str, Any]) -> Dict[str, Any]:
             "description": desc,
             "models": [],
         })
+
+    # ── 凭据轮换联动：供应商是密钥唯一权威源 ──
+    # 1) 刷新该供应商下扁平缓存中的历史快照键/地址，杜绝旧键粘住导致"改完密钥模型全连不上"；
+    # 2) 激活模型属于该供应商时，把新凭据回写全局 .env 与密钥库，交易引擎运行时同步对齐。
+    if existing:
+        affected = [m for m in config.get("models", []) if m.get("provider_id") == pid]
+        for mm in affected:
+            mm["base_url"] = base_url
+            if api_key:
+                mm["api_key"] = api_key
+        active_mid = config.get("active_model_id", "")
+        if affected and any(mm.get("id") == active_mid for mm in affected):
+            try:
+                from .settings_store import update_env
+                from .config import refresh_settings
+                try:
+                    from r20_gateway.secrets import save_secrets
+                except ImportError:
+                    save_secrets = None
+                env_values = {"LLM_BASE_URL": base_url}
+                if api_key:
+                    env_values["LLM_API_KEY"] = api_key
+                    if save_secrets:
+                        save_secrets({"LLM_API_KEY": api_key})
+                update_env(env_values)
+                refresh_settings()
+            except Exception:
+                pass
+
     _atomic_write_json(LLM_CONFIG_FILE, config)
     return {"id": pid, "name": name, "base_url": base_url}
 
@@ -807,6 +881,11 @@ def clear_provider_models(provider_id: str) -> bool:
     p = next((x for x in providers if x["id"] == provider_id), None)
     if not p:
         return False
+    active_mid = config.get("active_model_id", "")
+    if any(m.get("id") == active_mid for m in p.get("models", [])):
+        raise ValueError(
+            f"供应商 {provider_id} 名下挂着当前激活模型 {active_mid}；请先切换主脑模型再清空。"
+        )
     p["models"] = []
     config["models"] = [m for m in config.get("models", []) if m.get("provider_id") != provider_id]
     _atomic_write_json(LLM_CONFIG_FILE, config)
@@ -814,13 +893,26 @@ def clear_provider_models(provider_id: str) -> bool:
 
 
 def delete_provider(provider_id: str) -> bool:
-    """Delete a provider definition."""
+    """Delete a provider definition (cascades to its models).
+
+    保护：名下挂着当前激活模型（或顶层仍有其模型）的供应商不可删除，
+    避免主脑 active_model_id 悬空或顶层残留幽灵模型。
+    """
     config = init_llm_config()
     providers = config.get("providers", [])
-    filtered = [p for p in providers if p["id"] != provider_id]
-    if len(filtered) == len(providers):
+    target = next((p for p in providers if p.get("id") == provider_id), None)
+    if not target:
         return False
-    config["providers"] = filtered
+    active_mid = config.get("active_model_id", "")
+    if any(m.get("id") == active_mid for m in target.get("models", [])):
+        raise ValueError(
+            f"供应商 {provider_id} 名下挂着当前激活模型 {active_mid}；请先切换主脑模型再删除。"
+        )
+    config["providers"] = [p for p in providers if p.get("id") != provider_id]
+    # 级联：顶层扁平列表里属于该供应商的模型一并移除，避免幽灵模型
+    config["models"] = [
+        m for m in config.get("models", []) if m.get("provider_id") != provider_id
+    ]
     _atomic_write_json(LLM_CONFIG_FILE, config)
     return True
 
