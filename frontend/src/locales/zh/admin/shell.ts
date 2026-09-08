@@ -1,0 +1,48 @@
+/** 控制台壳层与共享语汇 */
+export const zhAdminShell = {
+  brand: '控制台',
+  collapse: '收起导航',
+  expand: '展开导航',
+  breadcrumbRoot: '控制台',
+  unsaved: '未保存',
+  saveBar: {
+    dirty: '本页有 {n} 处修改尚未保存',
+    save: '保存修改',
+    revert: '放弃修改',
+    saving: '保存中…',
+    saved: '已保存',
+    failed: '保存失败：{msg}',
+  },
+  section: {
+    required: '必填',
+    invalidNumber: '请输入数字',
+    range: '取值范围 {min} ~ {max}',
+  },
+  danger: {
+    title: '危险操作区',
+    desc: '以下操作直接影响生产交易链路或数据完整性，执行前请确认风险',
+    confirmHint: '输入 {phrase} 解锁',
+  },
+  table: {
+    search: '搜索…',
+    sort: '排序',
+    actions: '操作',
+  },
+  common: {
+    testOk: '测试通过',
+    testFailed: '测试失败',
+    applyOk: '已应用',
+    hotReload: '热生效',
+    restartNeeded: '需重启生效',
+    lastRun: '上次运行 {t}',
+    nextRun: '下次运行 {t}',
+    enabledCount: '{n} 启用',
+    selectModel: '选择模型',
+    selectPlaceholder: '请选择…',
+    inputPlaceholder: '请输入…',
+    addOk: '已新增',
+    deleteTitle: '删除{what}',
+    deleteDesc: '{what}「{name}」将被删除，此操作不可撤销。',
+    deleted: '已删除',
+  },
+};

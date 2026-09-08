@@ -1,0 +1,37 @@
+/** 舆情情报：多空温度带 + 快讯流 + 聪明钱 */
+export const zhNews = {
+  title: '舆情情报',
+  desc: '全网快讯与大户筹码流向——AI 决策的"消息面"输入，此处白盒透视',
+  band: {
+    title: '市场多空温度',
+    desc: '基于全量快讯情绪与聪明钱流向的合成读数',
+    bull: '偏多',
+    bear: '偏空',
+    neutral: '均衡',
+    score: '{n} / 100',
+    sample: '样本 {n} 条',
+    cold: '冰点',
+    hot: '过热',
+  },
+  feed: {
+    title: '快讯流',
+    empty: '暂无快讯输入',
+    bias: { bull: '利多', bear: '利空', neutral: '中性' },
+    source: '来源',
+    impact: '影响',
+    impacts: { high: '高', mid: '中', low: '低' },
+    grouped: { today: '今天', earlier: '更早' },
+    ago: '{t}',
+    watchSymbol: '关联 {sym}',
+  },
+  smart: {
+    title: '聪明钱筹码',
+    desc: 'OKX 前 5% 大户持仓与流向',
+    longPct: '多头占比',
+    netFlow: '净流入',
+    winRate: '大户胜率',
+    ratio: '多空比',
+    empty: '暂无聪明钱数据',
+    updated: '更新 {t}',
+  },
+};

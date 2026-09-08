@@ -1,0 +1,5 @@
+/* R20 新设计系统入口：Tailwind 4 + tokens + base + components */
+@import 'tailwindcss';
+@import './tokens.css';
+@import './base.css';
+@import './components.css';

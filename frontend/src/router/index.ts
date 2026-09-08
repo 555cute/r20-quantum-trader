@@ -1,53 +1,19 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 
+/**
+ * 路由表：path 与后端钉扎路由严格一致（SEO/CF 缓存/test_docs_images_route）。
+ * 前台 6 条 path 全部映射 DashboardLayout，meta.tab 区分视图。
+ */
 const routes: RouteRecordRaw[] = [
-  {
-    path: '/',
-    name: 'dashboard',
-    component: () => import('../views/DashboardView.vue'),
-    meta: { isPublic: true },
-  },
-  {
-    path: '/trading',
-    name: 'dashboard-trading',
-    component: () => import('../views/DashboardView.vue'),
-    meta: { isPublic: true, tab: 'trading' },
-  },
-  {
-    path: '/factors',
-    name: 'dashboard-factors',
-    component: () => import('../views/DashboardView.vue'),
-    meta: { isPublic: true, tab: 'factors' },
-  },
-  {
-    path: '/news',
-    name: 'dashboard-news',
-    component: () => import('../views/DashboardView.vue'),
-    meta: { isPublic: true, tab: 'news' },
-  },
-  {
-    path: '/lab',
-    name: 'dashboard-lab',
-    component: () => import('../views/DashboardView.vue'),
-    meta: { isPublic: true, tab: 'lab' },
-  },
-  {
-    path: '/history',
-    name: 'dashboard-history',
-    component: () => import('../views/DashboardView.vue'),
-    meta: { isPublic: true, tab: 'history' },
-  },
-  {
-    path: '/docs',
-    name: 'docs',
-    component: () => import('../views/DocsView.vue'),
-    meta: { isPublic: true },
-  },
-  {
-    path: '/doc',
-    redirect: '/docs',
-  },
+  { path: '/', name: 'dashboard', component: () => import('../layouts/DashboardLayout.vue'), meta: { isPublic: true } },
+  { path: '/trading', name: 'dashboard-trading', component: () => import('../layouts/DashboardLayout.vue'), meta: { isPublic: true, tab: 'trading' } },
+  { path: '/factors', name: 'dashboard-factors', component: () => import('../layouts/DashboardLayout.vue'), meta: { isPublic: true, tab: 'factors' } },
+  { path: '/news', name: 'dashboard-news', component: () => import('../layouts/DashboardLayout.vue'), meta: { isPublic: true, tab: 'news' } },
+  { path: '/lab', name: 'dashboard-lab', component: () => import('../layouts/DashboardLayout.vue'), meta: { isPublic: true, tab: 'lab' } },
+  { path: '/history', name: 'dashboard-history', component: () => import('../layouts/DashboardLayout.vue'), meta: { isPublic: true, tab: 'history' } },
+  { path: '/docs', name: 'docs', component: () => import('../views/DocsView.vue'), meta: { isPublic: true } },
+  { path: '/doc', redirect: '/docs' },
   {
     path: '/admin',
     component: () => import('../views/AdminLayout.vue'),
@@ -108,45 +74,26 @@ router.beforeEach(async (to) => {
   }
 })
 
+/* SEO 标题：中文为主（与后端钉扎测试与 CF 缓存语义一致），后台 noindex */
+const PUBLIC_TITLES: Record<string, string> = {
+  '/': 'R20量子交易系统 | 机构级加密货币波段量化终端 & AI交易主脑',
+  '/trading': '实盘矩阵 | R20量子交易系统',
+  '/factors': 'AI 推演 · 决策审计 | R20量子交易系统',
+  '/news': '舆情情报 · 聪明钱 | R20量子交易系统',
+  '/lab': '自进化 · 认知中枢 | R20量子交易系统',
+  '/history': '交易台账 · 生命周期 | R20量子交易系统',
+  '/docs': '官方文档 | R20量子交易系统',
+}
+
 router.afterEach((to) => {
-  // Dynamic SEO Title & Meta Management
-  let title = 'R20 Quantum Trader | 机构级加密货币波段量化终端 & AI交易主脑'
+  let title = 'R20 量子交易系统'
   let isNoIndex = false
 
-  if (to.path === '/docs' || to.path.startsWith('/docs/')) {
-    title = '官方开发与使用指南 | R20 Quantum Trader 文档中心'
-  } else if (to.path === '/factors') {
-    title = '多因子动能矩阵 | R20 Quantum Trader'
-  } else if (to.path === '/news') {
-    title = '全网舆情与聪明钱雷达 | R20 Quantum Trader'
-  } else if (to.path === '/lab') {
-    title = 'AI 策略自进化认知中枢 | R20 Quantum Trader'
-  } else if (to.path === '/history') {
-    title = '实盘交易台账与复盘审计 | R20 Quantum Trader'
-  } else if (to.path.startsWith('/admin')) {
+  if (to.path.startsWith('/admin')) {
     isNoIndex = true
-    const adminLabels: Record<string, string> = {
-      'admin-overview': '运行总览',
-      'admin-security': 'OKX 账户与标的池',
-      'admin-council': '模型委员会',
-      'admin-policy': '策略版本快照',
-      'admin-llm': '模型连接与供应商',
-      'admin-notify': '消息通知中心',
-      'admin-promptlib': '提示词策略方案',
-      'admin-evolution': '自进化认知配置',
-      'admin-interceptors': '物理拦截插件中心',
-      'admin-agents': '受管 Worker 运行单元',
-      'admin-gateway': '任务网关与调度计划',
-      'admin-decisions': '决策日志与审计流',
-      'admin-backup': '备份与还原',
-      'admin-plugins': '系统插件',
-      'admin-audit': '操作审计记录',
-      'admin-adminsys': '管理员与密码',
-      'admin-about': '版本与运行栈',
-      'admin-login': '管理登录',
-    }
-    const label = (to.name && adminLabels[to.name as string]) || '控制台'
-    title = `${label} · R20 CONTROL`
+    title = '管理控制台 · R20'
+  } else if (PUBLIC_TITLES[to.path]) {
+    title = PUBLIC_TITLES[to.path]
   }
 
   document.title = title
@@ -161,7 +108,7 @@ router.afterEach((to) => {
     }
     robotsMeta.content = 'noindex, nofollow, noarchive'
   } else if (robotsMeta) {
-    robotsMeta.content = 'index, follow, max-image-preview:large'
+    robotsMeta.content = 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1'
   }
 })
 

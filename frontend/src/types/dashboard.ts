@@ -19,29 +19,50 @@ export interface PositionItem {
   instId: string
   name: string
   side: 'long' | 'short'
+  posSide?: string
   pos: string
   lever: string
   margin: string
+  margin_usdt?: number
   margin_source?: string
+  notional_usdt?: number
   avgPx: string
   last: string
+  markPx?: number | string
   upl: string
   uplRatio: string
+  roi_pct?: number
+  liqPx?: string | number
+  bePx?: string | number
+  trailingSl?: number
+  exchangeSl?: number
+  exchangeTp?: number
   displayStop?: number
-  takeProfitPx?: number
+  displayTakeProfit?: number
   cloud_oco_verified?: boolean
+  protectionStatus?: string
+  protectionCoveragePct?: number
+  slTriggerPx?: number | string
+  tpTriggerPx?: number | string
+  stageDesc?: string
+  strategyTag?: string
 }
 
 export interface PendingOrderItem {
   ordId: string
   instId: string
   name: string
+  inst?: string
   side: 'buy' | 'sell'
+  side_raw?: string
   posSide: 'long' | 'short'
   px: string
   sz: string
   state: string
   cTime: string
+  time?: string
+  sl_px?: number
+  tp_px?: number
   tpTriggerPx?: string
   slTriggerPx?: string
 }
@@ -58,6 +79,21 @@ export interface InstrumentFactor {
   rsi: number
   macd_hist: number
   trend_direction: string
+  action?: string
+  confidence?: number
+  leverage?: number
+  margin_usdt?: number
+  entry_price?: number
+  take_profit_price?: number
+  stop_loss_price?: number
+  risk_reward_ratio?: string
+  reason?: string
+  fundingRate?: number
+  oiUsd?: number
+  lsRatio?: number
+  market_regime?: string
+  c_1h_ret?: number
+  atr_pct?: number
   adx_1h?: number
   calculus?: {
     velocity_1h?: number
@@ -124,4 +160,8 @@ export interface DashboardResponse {
   review?: any
   ai_trading_memory_md?: string
   factor_library?: any
+  ai_brain_history?: any[]
+  data_health?: any
+  state_snapshot?: any
+  [key: string]: any
 }
