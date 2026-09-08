@@ -234,7 +234,7 @@ class LLMTestRequest(BaseModel):
     base_url: str | None = None
     api_key: str | None = None
     api_format: str = "openai_chat"
-    reasoning_effort: str = Field(default="auto", pattern=r"^(low|medium|high|minimal|none|auto)$")
+    reasoning_effort: str = Field(default="auto", pattern=r"^(low|medium|high|minimal|none|auto|max|xhigh)$")
     reasoning_type: str = "auto"
 
 

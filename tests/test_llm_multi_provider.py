@@ -165,6 +165,29 @@ class LLMMultiProviderTests(unittest.TestCase):
         self.assertTrue(deleted)
 
     @patch("urllib.request.urlopen")
+    def test_connection_api_accepts_saved_extreme_reasoning_efforts(self, mock_urlopen):
+        headers = self.login()
+        response = MagicMock()
+        response.getcode.return_value = 200
+        response.read.return_value = b'{"status":"completed","output_text":"PONG"}'
+        mock_urlopen.return_value.__enter__.return_value = response
+        with patch.object(app_module, "audit_record"):
+            for effort in ("max", "xhigh"):
+                with self.subTest(effort=effort):
+                    result = self.client.post("/api/v1/admin/llm/test", headers=headers, json={
+                        "model": "gpt-5", "base_url": "https://example.test/v1",
+                        "api_format": "openai_responses", "reasoning_effort": effort,
+                    })
+                    self.assertEqual(result.status_code, 200, result.text)
+                    self.assertTrue(result.json()["ok"])
+                    outbound = json.loads(mock_urlopen.call_args[0][0].data)
+                    self.assertEqual(outbound["reasoning"]["effort"], effort)
+            invalid = self.client.post("/api/v1/admin/llm/test", headers=headers, json={
+                "model": "gpt-5", "reasoning_effort": "unrecognized-effort",
+            })
+            self.assertEqual(invalid.status_code, 422)
+
+    @patch("urllib.request.urlopen")
     def test_connection_test_claude_messages(self, mock_urlopen):
         mock_response = MagicMock()
         mock_response.getcode.return_value = 200
