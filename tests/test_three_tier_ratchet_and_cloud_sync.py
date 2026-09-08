@@ -24,6 +24,18 @@ class ThreeTierRatchetAndCloudSyncTests(unittest.TestCase):
     # (v7.6 环境重构)，旧注入会让测试绿而生产 NameError(09-08 事故根因)。
     # 本套测试直接调用 sync_cloud_algo_stop，任何对已删除全局的复活引用都会在此炸出 NameError。
 
+    def setUp(self):
+        # 封闭性隔离(09-08 事故)：manage_position_tp_and_trailing 每周期真实调用
+        # ensure_cloud_position_protection → okx CLI，曾把 sz=2 的 ETH 垃圾 OCO 打进
+        # demo 账户，且测试通过与否取决于该残留单的死活(11:38 绿、12:00 红)。
+        # 一律 mock，测试永不触碰真实交易所。
+        patcher = patch(
+            "scripts.ai_factor_trader.ensure_cloud_position_protection",
+            return_value=(True, "mocked: cloud OCO coverage verified"),
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_sync_cloud_algo_stop_success_and_idempotence(self):
         with patch("scripts.ai_factor_trader.run_json_cmd") as mock_cmd:
             # 1. When existing algo already matches new_sl, do not issue redundant amend
