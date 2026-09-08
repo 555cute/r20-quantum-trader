@@ -1081,8 +1081,10 @@ def sync_cloud_algo_stop(inst_id: str, pos_side: str, new_sl: float, reason: str
     Ensures that once a position reaches Breakeven (Tier 1) or Profit-Lock (Tier 2),
     the cloud trigger order is immediately amended without waiting for the 15-minute LLM cycle.
     """
-    if SIMULATED_TRADING:
-        return True
+    # 修复(2026-09-08)：v7.6 环境重构删除了旧全局 SIMULATED_TRADING，此处残留引用导致
+    # NameError，连续 4 个交易周期崩溃(09-08 18:30~19:15 BJ)。DEMO/LIVE 统一尝试云端
+    # amend：价格一致时幂等跳过；失败仅返回 False，调用方忽略返回值、由本地棘轮兜底，
+    # 与 execute_ai_position_management 内联云端止损上移行为保持一致(演示盘与实盘同构)。
     try:
         algo_orders = run_json_cmd(okx_private_command(f"okx swap algo orders --instId {inst_id} --json")) or []
         live_algo = next((o for o in algo_orders if o.get("state") == "live" and o.get("posSide") == pos_side and o.get("slTriggerPx")), None)

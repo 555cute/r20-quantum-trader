@@ -20,8 +20,9 @@ import scripts.ai_factor_trader as aft
 
 
 class ThreeTierRatchetAndCloudSyncTests(unittest.TestCase):
-    def setUp(self):
-        aft.SIMULATED_TRADING = False
+    # 注意：勿再向 aft 注入 SIMULATED_TRADING 全局——生产代码已删除该变量
+    # (v7.6 环境重构)，旧注入会让测试绿而生产 NameError(09-08 事故根因)。
+    # 本套测试直接调用 sync_cloud_algo_stop，任何对已删除全局的复活引用都会在此炸出 NameError。
 
     def test_sync_cloud_algo_stop_success_and_idempotence(self):
         with patch("scripts.ai_factor_trader.run_json_cmd") as mock_cmd:
