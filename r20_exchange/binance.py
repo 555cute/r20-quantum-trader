@@ -171,6 +171,7 @@ class BinanceExchange:
         signed: bool = False,
         mutate: bool = False,
         client_id: str = "",
+        retry_429: bool = True,
     ) -> Any:
         method = method.upper()
         payload: dict[str, str] = {}
@@ -208,6 +209,17 @@ class BinanceExchange:
                 raise UncertainSubmission(message, client_id) from exc
             raise RuntimeError(message) from exc
         status = int(getattr(response, "status_code", 0) or 0)
+        if status == 429 and not signed and not mutate and retry_429:
+            retry_after = getattr(response, "headers", {}) or {}
+            raw_wait = retry_after.get("Retry-After") or retry_after.get("retry-after") or 1
+            try:
+                delay = min(5.0, max(0.2, float(raw_wait)))
+            except (TypeError, ValueError):
+                delay = 1.0
+            time.sleep(delay)
+            return self._request(
+                method, path, params, signed=False, mutate=False, client_id=client_id, retry_429=False
+            )
         if 300 <= status < 400:
             raise RuntimeError("Binance redirected; refusing to follow credentials")
         body = getattr(response, "text", "") or ""
@@ -668,24 +680,29 @@ class BinanceExchange:
         return result
 
     def candles(self, inst_id: str, bar: str = "15m", limit: int = 100) -> list[list[str]]:
-        symbol = _to_symbol(inst_id)
-        rows = self._public(
-            "/fapi/v1/klines",
-            {"symbol": symbol, "interval": self._interval(bar), "limit": min(int(limit), 1500)},
-        )
-        if not isinstance(rows, list):
-            raise RuntimeError("Binance candles unavailable")
-        now = int(time.time() * 1000)
-        result: list[list[str]] = []
-        for row in rows:
-            if not isinstance(row, list) or len(row) < 8:
-                continue
-            close_time = int(row[6])
-            confirm = "0" if close_time > now else "1"
-            quote = str(row[7])
-            result.append([str(row[0]), str(row[1]), str(row[2]), str(row[3]), str(row[4]), str(row[5]), quote, quote, confirm])
-        result.reverse()
-        return result
+        from r20_exchange.candle_cache import get_or_fetch
+
+        def load(pull: int) -> list[list[str]]:
+            symbol = _to_symbol(inst_id)
+            rows = self._public(
+                "/fapi/v1/klines",
+                {"symbol": symbol, "interval": self._interval(bar), "limit": min(int(pull), 1500)},
+            )
+            if not isinstance(rows, list):
+                raise RuntimeError("Binance candles unavailable")
+            now = int(time.time() * 1000)
+            result: list[list[str]] = []
+            for row in rows:
+                if not isinstance(row, list) or len(row) < 8:
+                    continue
+                close_time = int(row[6])
+                confirm = "0" if close_time > now else "1"
+                quote = str(row[7])
+                result.append([str(row[0]), str(row[1]), str(row[2]), str(row[3]), str(row[4]), str(row[5]), quote, quote, confirm])
+            result.reverse()
+            return result
+
+        return get_or_fetch(self._base_url(), inst_id, bar, limit, load)
 
     def orderbook(self, inst_id: str, sz: int = 5) -> dict[str, Any]:
         symbol = _to_symbol(inst_id)

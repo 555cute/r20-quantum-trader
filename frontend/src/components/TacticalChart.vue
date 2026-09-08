@@ -702,7 +702,7 @@ function initChart() {
     getBars: async ({ callback }) => {
       try {
         const res = await fetch(
-          `/api/v1/market/${currentInstId.value}/candles?bar=${currentPeriod.value}&limit=150&_t=${Date.now()}`,
+          `/api/v1/market/${currentInstId.value}/candles?bar=${currentPeriod.value}&limit=99`,
           { cache: 'no-store' }
         )
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -863,7 +863,7 @@ async function loadCandles(silent = false, resetTime = false) {
 
   try {
     const res = await fetch(
-      `/api/v1/market/${currentInstId.value}/candles?bar=${currentPeriod.value}&limit=150&_t=${Date.now()}`,
+      `/api/v1/market/${currentInstId.value}/candles?bar=${currentPeriod.value}&limit=99`,
       { cache: 'no-store' }
     )
     if (!res.ok) throw new Error(`HTTP ${res.status}`)

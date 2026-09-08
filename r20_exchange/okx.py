@@ -90,8 +90,13 @@ class OKXExchange:
         return {row["instId"]: row for row in self._public("/api/v5/market/tickers", {"instType": "SWAP"}) if str(row.get("instId", "")).endswith("-USDT-SWAP")}
 
     def candles(self, inst_id: str, bar: str = "15m", limit: int = 100) -> list[list[str]]:
-        rows = self._public("/api/v5/market/candles", {"instId": inst_id, "bar": bar, "limit": min(int(limit), 300)})
-        return [[str(v) for v in row[:5]] + [str(row[6]), str(row[7]), str(row[7]), str(row[8])] for row in rows if len(row) >= 9]
+        from r20_exchange.candle_cache import get_or_fetch
+
+        def load(pull: int) -> list[list[str]]:
+            rows = self._public("/api/v5/market/candles", {"instId": inst_id, "bar": bar, "limit": min(int(pull), 300)})
+            return [[str(v) for v in row[:5]] + [str(row[6]), str(row[7]), str(row[7]), str(row[8])] for row in rows if len(row) >= 9]
+
+        return get_or_fetch(str(getattr(self.env, "base_url", "") or "okx"), inst_id, bar, limit, load, min_pull=80, max_pull=300)
 
     def orderbook(self, inst_id: str, sz: int = 5) -> dict[str, Any]:
         rows = self._public("/api/v5/market/books", {"instId": inst_id, "sz": sz})

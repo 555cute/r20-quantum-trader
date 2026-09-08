@@ -801,5 +801,49 @@ class BinanceExchangeTests(unittest.TestCase):
         self.assertEqual(rows[0]["entryOrderIds"], ["8", "10"])
         self.assertNotIn("11", rows[0]["entryOrderIds"])
 
+    def test_candles_cache_does_not_leak_across_demo_and_live(self):
+        from r20_exchange.candle_cache import clear
+        clear()
+        now = 1_700_000_000_000
+
+        def kline(close: str):
+            return [now, "1", "2", "0.5", close, "10", now + 1000, "15"]
+
+        demo_session = FakeSession()
+        live_session = FakeSession()
+        demo_session.on("GET", "/fapi/v1/klines", [kline("101")])
+        live_session.on("GET", "/fapi/v1/klines", [kline("202")])
+        demo = BinanceExchange(FakeEnv("demo"), session=demo_session)
+        live = BinanceExchange(FakeEnv("live"), session=live_session)
+        demo_rows = demo.candles(INST, "15m", 24)
+        live_rows = live.candles(INST, "15m", 24)
+        self.assertEqual(demo_rows[0][4], "101")
+        self.assertEqual(live_rows[0][4], "202")
+        self.assertEqual(len(_calls(demo_session, "GET", "/fapi/v1/klines")), 1)
+        demo.candles(INST, "15m", 24)
+        self.assertEqual(len(_calls(demo_session, "GET", "/fapi/v1/klines")), 1)
+
+    def test_public_klines_retries_once_on_429(self):
+        from r20_exchange.candle_cache import clear
+        clear()
+        now = 1_700_000_000_000
+        state = {"n": 0}
+
+        def handler(call):
+            state["n"] += 1
+            if state["n"] == 1:
+                resp = FakeResponse({"code": -1003, "msg": "too many"}, status_code=429)
+                resp.headers["Retry-After"] = "0.2"
+                return resp
+            return [[now, "1", "2", "0.5", "9", "10", now + 1000, "15"]]
+
+        self.session.on("GET", "/fapi/v1/klines", handler)
+        with patch("r20_exchange.binance.time.sleep", return_value=None) as slept:
+            rows = self._exchange().candles(INST, "15m", 24)
+        self.assertEqual(rows[0][4], "9")
+        self.assertEqual(state["n"], 2)
+        slept.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
