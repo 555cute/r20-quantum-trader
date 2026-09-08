@@ -23,12 +23,10 @@ class LLMMultiProviderTests(unittest.TestCase):
         # Isolate LLM config files across both modules
         self.orig_models_file = llm_manager.LLM_CONFIG_FILE
         self.orig_legacy_file = llm_manager.LEGACY_PROVIDERS_FILE
-        self.orig_app_providers_file = app_module.LLM_PROVIDERS_FILE
         test_file = self.temp_path / "llm_models.json"
         llm_manager.LLM_CONFIG_FILE = test_file
         llm_manager.LLM_PROVIDERS_FILE = test_file
         llm_manager.LEGACY_PROVIDERS_FILE = self.temp_path / "non_existent_legacy.json"
-        app_module.LLM_PROVIDERS_FILE = test_file
 
         # Isolate admin auth
         self.orig_auth = app_module.admin_auth
@@ -49,7 +47,6 @@ class LLMMultiProviderTests(unittest.TestCase):
         llm_manager.LLM_CONFIG_FILE = self.orig_models_file
         llm_manager.LLM_PROVIDERS_FILE = self.orig_models_file
         llm_manager.LEGACY_PROVIDERS_FILE = self.orig_legacy_file
-        app_module.LLM_PROVIDERS_FILE = self.orig_app_providers_file
         app_module.admin_auth = self.orig_auth
         self.temp.cleanup()
 
