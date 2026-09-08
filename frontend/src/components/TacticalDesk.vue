@@ -130,7 +130,7 @@ const allProtected = computed(() =>
           <Activity class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
           <span>{{ t('desk.activePositions') }}</span>
           <span
-            class="px-1.5 py-0.2 2xl:px-2 rounded-full text-[10px] 2xl:text-xs font-mono font-bold"
+            class="px-1.5 py-0.2 2xl:px-2 rounded-full text-[11px] 2xl:text-xs font-mono font-bold"
             :style="activeTab === 'positions'
               ? { backgroundColor: 'var(--text-main)', color: 'var(--bg-card)' }
               : { backgroundColor: 'var(--bg-badge)', color: 'var(--text-muted)' }"
@@ -150,7 +150,7 @@ const allProtected = computed(() =>
           <Clock class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
           <span>{{ t('desk.pendingOrders') }}</span>
           <span
-            class="px-1.5 py-0.2 2xl:px-2 rounded-full text-[10px] 2xl:text-xs font-mono font-bold"
+            class="px-1.5 py-0.2 2xl:px-2 rounded-full text-[11px] 2xl:text-xs font-mono font-bold"
             :style="activeTab === 'orders'
               ? { backgroundColor: 'var(--text-main)', color: 'var(--bg-card)' }
               : { backgroundColor: 'var(--bg-badge)', color: 'var(--text-muted)' }"
@@ -285,7 +285,7 @@ const allProtected = computed(() =>
 
               <!-- 持仓量 -->
               <td class="py-3 px-4 2xl:px-6 2xl:py-3.5 font-bold num-tabular" style="color: var(--text-main);">
-                {{ pos.pos }} <span class="text-[10px] 2xl:text-xs font-normal" style="color: var(--text-faint);">张</span>
+                {{ pos.pos }} <span class="text-[11px] 2xl:text-xs font-normal" style="color: var(--text-faint);">张</span>
               </td>
 
               <!-- 开仓均价 -->
@@ -300,7 +300,7 @@ const allProtected = computed(() =>
 
               <!-- 实际保证金 -->
               <td class="py-3 px-4 2xl:px-6 2xl:py-3.5 font-mono num-tabular" style="color: var(--text-main);">
-                ${{ fmt2(pos.margin_usdt ?? pos.margin) }} <span class="text-[10px] 2xl:text-xs" style="color: var(--text-faint);">U</span>
+                ${{ fmt2(pos.margin_usdt ?? pos.margin) }} <span class="text-[11px] 2xl:text-xs" style="color: var(--text-faint);">U</span>
               </td>
 
               <!-- 云端止损防线 -->
@@ -325,7 +325,7 @@ const allProtected = computed(() =>
                   {{ Number(pos.upl) >= 0 ? '+' : '' }}{{ fmt2(pos.upl) }} U
                 </div>
                 <div
-                  class="text-[10px] 2xl:text-xs font-bold font-mono num-tabular"
+                  class="text-[11px] 2xl:text-xs font-bold font-mono num-tabular"
                   :style="{ color: Number(pos.uplRatio ?? pos.roi) >= 0 ? 'var(--color-up)' : 'var(--color-down)' }"
                 >
                   {{ Number(pos.uplRatio ?? pos.roi) >= 0 ? '+' : '' }}{{ fmt2(pos.uplRatio ?? pos.roi) }}%

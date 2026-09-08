@@ -159,7 +159,7 @@ const quickNav = [
           <div class="text-xl sm:text-2xl 2xl:text-3xl font-black font-mono tracking-tight" style="color: var(--color-up);">
             ONLINE
           </div>
-          <div class="text-[10px] 2xl:text-[11px] font-mono mt-1" style="color: var(--text-faint);">
+          <div class="text-[11px] 2xl:text-[11px] font-mono mt-1" style="color: var(--text-faint);">
             PID {{ runtime.service?.pid || '--' }} · FastAPI V5
           </div>
         </div>
@@ -181,7 +181,7 @@ const quickNav = [
           <div class="text-xl sm:text-2xl 2xl:text-3xl font-black font-mono tracking-tight num-tabular" style="color: var(--text-main);">
             {{ duration(runtime.service?.uptime_seconds) }}
           </div>
-          <div class="text-[10px] 2xl:text-[11px] font-mono mt-1" style="color: var(--text-faint);">
+          <div class="text-[11px] 2xl:text-[11px] font-mono mt-1" style="color: var(--text-faint);">
             已运行秒数 {{ runtime.service?.uptime_seconds || 0 }}s
           </div>
         </div>
@@ -204,7 +204,7 @@ const quickNav = [
           <div class="text-sm sm:text-base 2xl:text-lg font-black font-mono truncate" style="color: var(--text-main);" :title="runtime.llm_runtime?.model || runtime.llm_runtime?.name || '未配置模型'">
             {{ runtime.llm_runtime?.model || runtime.llm_runtime?.name || '未配置模型' }}
           </div>
-          <div class="text-[10px] 2xl:text-[11px] font-mono mt-1 flex items-center space-x-1.5" style="color: var(--text-faint);">
+          <div class="text-[11px] 2xl:text-[11px] font-mono mt-1 flex items-center space-x-1.5" style="color: var(--text-faint);">
             <span>{{ runtime.llm_runtime?.provider_name || '未配置供应商' }}</span>
             <span>·</span>
             <span>推理思考: {{ (runtime.llm_runtime?.reasoning_effort || '未设置').toString().toUpperCase() }}</span>
@@ -230,7 +230,7 @@ const quickNav = [
           <div class="text-xl sm:text-2xl 2xl:text-3xl font-black font-mono tracking-tight" style="color: var(--color-brand);">
             {{ runtime.credentials?.simulated_trading ? 'DEMO' : 'LIVE' }}
           </div>
-          <div class="text-[10px] 2xl:text-[11px] font-mono mt-1 flex items-center space-x-1" style="color: var(--text-faint);">
+          <div class="text-[11px] 2xl:text-[11px] font-mono mt-1 flex items-center space-x-1" style="color: var(--text-faint);">
             <span :class="runtime.credentials?.okx_configured ? 'text-emerald-400' : 'text-amber-400'">
               ● {{ runtime.credentials?.okx_configured ? 'API 凭证就绪' : '模拟环境就绪' }}
             </span>
@@ -260,7 +260,7 @@ const quickNav = [
               <div class="text-xs 2xl:text-sm font-black font-mono group-hover:text-blue-500 transition-colors" style="color: var(--text-main);">
                 {{ nav.label }}
               </div>
-              <div class="text-[10px] 2xl:text-[11px] font-mono truncate" style="color: var(--text-faint);">
+              <div class="text-[11px] 2xl:text-[11px] font-mono truncate" style="color: var(--text-faint);">
                 {{ nav.desc }}
               </div>
             </div>
@@ -306,7 +306,7 @@ const quickNav = [
                   <div class="flex items-center space-x-2">
                     <span class="font-black text-sm" style="color: var(--text-main);">{{ d.instId }}</span>
                     <span
-                      class="px-2 py-0.5 rounded-[3px] text-[10px] font-mono font-bold border"
+                      class="px-2 py-0.5 rounded-[3px] text-[11px] font-mono font-bold border"
                       :style="{
                         backgroundColor: d.action?.includes('BUY') ? 'var(--color-up-bg)' : d.action?.includes('SELL') ? 'var(--color-down-bg)' : 'var(--bg-badge)',
                         borderColor: d.action?.includes('BUY') ? 'var(--color-up-border)' : d.action?.includes('SELL') ? 'var(--color-down-border)' : 'var(--border-subtle)',
@@ -315,11 +315,11 @@ const quickNav = [
                     >
                       {{ d.action || '观望 HOLD' }}
                     </span>
-                    <span v-if="d.confidence" class="text-[10px]" style="color: var(--text-faint);">
+                    <span v-if="d.confidence" class="text-[11px]" style="color: var(--text-faint);">
                       置信度 {{ Math.round(d.confidence * 100) }}%
                     </span>
                   </div>
-                  <div class="text-[10px]" style="color: var(--text-faint);">
+                  <div class="text-[11px]" style="color: var(--text-faint);">
                     {{ d.timestamp ? d.timestamp.substring(11, 19) : '--' }}
                   </div>
                 </div>
@@ -348,7 +348,7 @@ const quickNav = [
                 </h2>
               </div>
               <span
-                class="px-2 py-0.5 rounded text-[10px] font-mono font-bold border"
+                class="px-2 py-0.5 rounded text-[11px] font-mono font-bold border"
                 :style="{
                   backgroundColor: dataHealthOverall === 'LIVE' ? 'var(--color-up-bg)' : 'var(--color-down-bg)',
                   borderColor: dataHealthOverall === 'LIVE' ? 'var(--color-up-border)' : 'var(--color-down-border)',
@@ -361,7 +361,7 @@ const quickNav = [
 
             <table class="w-full text-left font-mono text-xs border-collapse">
               <thead>
-                <tr class="border-b text-[10px] uppercase" style="border-color: var(--border-subtle); color: var(--text-faint);">
+                <tr class="border-b text-[11px] uppercase" style="border-color: var(--border-subtle); color: var(--text-faint);">
                   <th class="pb-2 font-medium">通道来源</th>
                   <th class="pb-2 font-medium">状态</th>
                   <th class="pb-2 font-medium">更新延时</th>
@@ -379,7 +379,7 @@ const quickNav = [
                   </td>
                   <td class="py-2.5">
                     <span
-                      class="px-2 py-0.5 rounded-[3px] text-[10px] font-mono font-bold border inline-flex items-center space-x-1"
+                      class="px-2 py-0.5 rounded-[3px] text-[11px] font-mono font-bold border inline-flex items-center space-x-1"
                       :style="{
                         backgroundColor: x.fresh ? 'var(--color-up-bg)' : 'var(--color-down-bg)',
                         borderColor: x.fresh ? 'var(--color-up-border)' : 'var(--color-down-border)',
@@ -416,7 +416,7 @@ const quickNav = [
               生产环境核心安全配置
             </h2>
           </div>
-          <span class="text-[10px] font-mono" style="color: var(--text-faint);">敏感 Key 已脱敏防泄露保护</span>
+          <span class="text-[11px] font-mono" style="color: var(--text-faint);">敏感 Key 已脱敏防泄露保护</span>
         </div>
 
         <div v-if="runtime.configuration && Object.keys(runtime.configuration).length" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
@@ -426,7 +426,7 @@ const quickNav = [
             class="rounded-lg border p-3 font-mono transition-colors"
             style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);"
           >
-            <div class="text-[10px] uppercase truncate font-medium" style="color: var(--text-faint);">{{ k }}</div>
+            <div class="text-[11px] uppercase truncate font-medium" style="color: var(--text-faint);">{{ k }}</div>
             <div class="text-xs font-bold truncate mt-1.5" style="color: var(--text-main);" :title="String(v)">{{ v || '未配置' }}</div>
           </div>
         </div>

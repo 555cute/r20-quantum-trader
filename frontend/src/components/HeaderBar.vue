@@ -69,7 +69,7 @@ const tabs = computed(() => [
         </div>
         <button
           @click="store.showAboutModal = true"
-          class="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold border transition-colors cursor-pointer whitespace-nowrap"
+          class="px-1.5 py-0.2 rounded text-[11px] font-mono font-bold border transition-colors cursor-pointer whitespace-nowrap"
           style="background-color: var(--bg-card-subtle); color: var(--text-muted); border-color: var(--border-subtle);"
           :title="OFFICIAL_NOTICE"
         >
@@ -82,7 +82,7 @@ const tabs = computed(() => [
         ></span>
         <span
           v-if="store.isStale"
-          class="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold border animate-pulse"
+          class="px-1.5 py-0.2 rounded text-[11px] font-mono font-bold border animate-pulse"
           style="background-color: var(--color-warn-bg); color: var(--color-warn); border-color: var(--color-warn-border);"
         >
           {{ t('nav.stale') }}
@@ -119,7 +119,7 @@ const tabs = computed(() => [
         >
           <Clock class="w-3 h-3" style="color: var(--text-faint);" />
           <span class="num-tabular font-medium">{{ currentTime }}</span>
-          <span class="text-[9px] font-bold opacity-60">UTC+8</span>
+          <span class="text-[11px] font-bold opacity-60">UTC+8</span>
         </div>
 
         <!-- 🌐 Global Language Switcher Capsule -->

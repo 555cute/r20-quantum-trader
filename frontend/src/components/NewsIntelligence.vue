@@ -49,14 +49,14 @@ function importanceCn(imp: string) {
             </h2>
             <span
               v-if="isStaleFeed"
-              class="hidden md:inline-flex items-center space-x-1 text-[10px] 2xl:text-[11px] font-mono px-2 py-0.5 rounded-[4px] border"
+              class="hidden md:inline-flex items-center space-x-1 text-[11px] 2xl:text-[11px] font-mono px-2 py-0.5 rounded-[4px] border"
               style="background-color: var(--color-warn-bg); border-color: var(--color-warn-border); color: var(--color-warn);"
               title="上游资讯源本轮抓取失败，页面展示的是最近一次成功的缓存内容"
             >
               <span class="w-1.5 h-1.5 rounded-full" style="background-color: var(--color-warn);"></span>
               <span>数据源延迟 · 展示缓存</span>
             </span>
-            <span v-else class="hidden md:inline-flex items-center space-x-1 text-[10px] 2xl:text-[11px] font-mono px-2 py-0.5 rounded-[4px] border" style="background-color: var(--color-up-bg); border-color: var(--color-up-border); color: var(--color-up);">
+            <span v-else class="hidden md:inline-flex items-center space-x-1 text-[11px] 2xl:text-[11px] font-mono px-2 py-0.5 rounded-[4px] border" style="background-color: var(--color-up-bg); border-color: var(--color-up-border); color: var(--color-up);">
               <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
               <span>错峰自动更新中</span>
             </span>
@@ -113,7 +113,7 @@ function importanceCn(imp: string) {
       >
         <div class="flex items-center justify-between mb-1.5">
           <span class="text-xs 2xl:text-sm font-black font-mono" style="color: var(--text-main);">{{ ccy }}</span>
-          <span class="px-1.5 py-0.2 rounded text-[10px] 2xl:text-xs font-mono font-bold border" :style="labelClass(s.label)">
+          <span class="px-1.5 py-0.2 rounded text-[11px] 2xl:text-xs font-mono font-bold border" :style="labelClass(s.label)">
             {{ labelCn(s.label) }}
           </span>
         </div>
@@ -121,7 +121,7 @@ function importanceCn(imp: string) {
           <span style="color: var(--color-up);">多 {{ s.bullish_ratio || s.bullish_pct || '--' }}</span>
           <span style="color: var(--color-down);">空 {{ s.bearish_ratio || s.bearish_pct || '--' }}</span>
         </div>
-        <div class="flex items-center justify-between text-[10px] 2xl:text-[11px] font-mono mt-1 pt-1 border-t" style="border-color: var(--border-subtle);">
+        <div class="flex items-center justify-between text-[11px] 2xl:text-[11px] font-mono mt-1 pt-1 border-t" style="border-color: var(--border-subtle);">
           <span style="color: var(--text-faint);">提及 {{ (s.mentions ?? 0).toLocaleString() }}</span>
           <span v-if="s.long_short_ratio" class="font-bold text-blue-400">比率 {{ s.long_short_ratio }}</span>
         </div>
@@ -152,7 +152,7 @@ function importanceCn(imp: string) {
                 {{ item.title }}
               </span>
             </div>
-            <span class="text-[10px] 2xl:text-xs font-mono shrink-0" style="color: var(--text-faint);">
+            <span class="text-[11px] 2xl:text-xs font-mono shrink-0" style="color: var(--text-faint);">
               {{ item.time }}
             </span>
           </div>

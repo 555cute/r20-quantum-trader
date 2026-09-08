@@ -32,12 +32,12 @@ onMounted(load)
 <template>
   <div class="space-y-4">
     <div class="flex items-center justify-between">
-      <p class="text-xs text-[#707E94] font-mono">受管 Worker 存活、密文库状态与大模型调用遥测。</p>
-      <span class="text-[10px] font-mono text-blue-400 bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20">策略配置 · 3/3</span>
+      <p class="text-xs text-[var(--text-faint)] font-mono">受管 Worker 存活、密文库状态与大模型调用遥测。</p>
+      <span class="text-[11px] font-mono text-blue-400 bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20">策略配置 · 3/3</span>
     </div>
 
     <div v-if="errText" class="p-3 rounded-lg text-xs font-mono bg-rose-500/10 border border-rose-500/20 text-rose-400">{{ errText }}</div>
-    <div v-if="loading" class="py-12 text-center text-xs font-mono text-[#707E94]"><RefreshCw class="w-5 h-5 animate-spin inline mr-1.5 text-blue-400" />正在加载运行单元...</div>
+    <div v-if="loading" class="py-12 text-center text-xs font-mono text-[var(--text-faint)]"><RefreshCw class="w-5 h-5 animate-spin inline mr-1.5 text-blue-400" />正在加载运行单元...</div>
 
     <template v-else-if="data">
       <!-- Agents -->
@@ -84,9 +84,9 @@ onMounted(load)
           <div class="flex items-center space-x-2 mb-3"><Cpu class="w-4 h-4 text-purple-400" /><h2 class="text-xs font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">模型调用遥测 (最近 50 次)</h2></div>
           <div class="text-[11px] font-mono mb-3 p-2.5 rounded-lg border leading-relaxed" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-muted);">{{ data.prompt_policy }}</div>
           <div class="grid grid-cols-3 gap-2.5 mb-3 text-center">
-            <div class="rounded-lg border p-2" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);"><div class="text-[10px] font-mono" style="color: var(--text-faint);">总调用量</div><div class="text-sm font-bold font-mono num-tabular mt-0.5" style="color: var(--text-main);">{{ data.model_stats?.total_calls ?? '--' }}</div></div>
-            <div class="rounded-lg border p-2" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);"><div class="text-[10px] font-mono" style="color: var(--text-faint);">调用成功率</div><div class="text-sm font-bold num-tabular mt-0.5" :class="(data.model_stats?.total_calls ?? 0) > 0 && (data.model_stats?.successful_calls ?? 0) < (data.model_stats?.total_calls ?? 0) ? 'text-amber-500' : 'text-emerald-500'">{{ (data.model_stats?.total_calls ?? 0) > 0 ? Math.round(100 * (data.model_stats?.successful_calls ?? 0) / data.model_stats.total_calls) + '%' : '--' }}</div></div>
-            <div class="rounded-lg border p-2" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);"><div class="text-[10px] font-mono" style="color: var(--text-faint);">平均时延</div><div class="text-sm font-bold font-mono num-tabular mt-0.5" style="color: var(--text-main);">{{ data.model_stats?.avg_duration_ms ? Math.round(data.model_stats.avg_duration_ms) + 'ms' : '--' }}</div></div>
+            <div class="rounded-lg border p-2" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);"><div class="text-[11px] font-mono" style="color: var(--text-faint);">总调用量</div><div class="text-sm font-bold font-mono num-tabular mt-0.5" style="color: var(--text-main);">{{ data.model_stats?.total_calls ?? '--' }}</div></div>
+            <div class="rounded-lg border p-2" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);"><div class="text-[11px] font-mono" style="color: var(--text-faint);">调用成功率</div><div class="text-sm font-bold num-tabular mt-0.5" :class="(data.model_stats?.total_calls ?? 0) > 0 && (data.model_stats?.successful_calls ?? 0) < (data.model_stats?.total_calls ?? 0) ? 'text-amber-500' : 'text-emerald-500'">{{ (data.model_stats?.total_calls ?? 0) > 0 ? Math.round(100 * (data.model_stats?.successful_calls ?? 0) / data.model_stats.total_calls) + '%' : '--' }}</div></div>
+            <div class="rounded-lg border p-2" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);"><div class="text-[11px] font-mono" style="color: var(--text-faint);">平均时延</div><div class="text-sm font-bold font-mono num-tabular mt-0.5" style="color: var(--text-main);">{{ data.model_stats?.avg_duration_ms ? Math.round(data.model_stats.avg_duration_ms) + 'ms' : '--' }}</div></div>
           </div>
           <div class="table-scroll-container max-h-60 overflow-y-auto rounded-lg border" style="border-color: var(--border-subtle);">
             <table class="w-full text-left text-xs font-mono whitespace-nowrap">

@@ -178,7 +178,7 @@ const showAboutModal = ref(false)
     <div
       v-if="isNavigating"
       class="fixed top-0 left-0 right-0 h-[2.5px] z-50 animate-pulse transition-opacity"
-      style="background: linear-gradient(90deg, #3B82F6, #10B981, #6366F1);"
+      style="background: linear-gradient(90deg, var(--color-info), var(--color-up), var(--chart-5));"
     ></div>
 
     <!-- Mobile Drawer Overlay -->
@@ -202,7 +202,7 @@ const showAboutModal = ref(false)
             <div class="text-xs font-black tracking-wide font-mono" style="color: var(--text-main);">R20 CONTROL</div>
             <button
               @click="showAboutModal = true; mobileDrawerOpen = false"
-              class="text-[10px] font-mono transition-colors cursor-pointer text-left block"
+              class="text-[11px] font-mono transition-colors cursor-pointer text-left block"
               style="color: var(--color-brand);"
             >
               {{ APP_VERSION }}
@@ -223,7 +223,7 @@ const showAboutModal = ref(false)
       <nav class="flex-1 overflow-y-auto p-3 space-y-3">
         <div v-for="group in navGroups" :key="group.label">
           <div
-            class="text-[10px] font-mono font-bold uppercase tracking-wider px-2.5 py-1 mb-1"
+            class="text-[11px] font-mono font-bold uppercase tracking-wider px-2.5 py-1 mb-1"
             style="color: var(--text-faint);"
           >
             {{ group.label }}
@@ -253,7 +253,7 @@ const showAboutModal = ref(false)
       <div class="p-3 border-t flex items-center justify-between" style="border-color: var(--border-subtle); background-color: var(--bg-card);">
         <div class="flex items-center space-x-2 min-w-0">
           <div
-            class="w-6 h-6 rounded-md border flex items-center justify-center font-bold text-[10px]"
+            class="w-6 h-6 rounded-md border flex items-center justify-center font-bold text-[11px]"
             style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--color-brand);"
           >
             {{ auth.user?.username?.charAt(0).toUpperCase() || 'A' }}
@@ -290,7 +290,7 @@ const showAboutModal = ref(false)
             </div>
             <button
               @click="showAboutModal = true"
-              class="text-[10px] font-mono transition-colors cursor-pointer text-left block"
+              class="text-[11px] font-mono transition-colors cursor-pointer text-left block"
               style="color: var(--color-brand);"
               title="点击查看开源主仓信息"
             >
@@ -306,7 +306,7 @@ const showAboutModal = ref(false)
       <nav class="overflow-y-auto overflow-x-hidden flex-1 py-2 px-2.5 space-y-1">
         <div v-for="group in navGroups" :key="group.label" class="mb-4.5">
           <div
-            class="text-[10px] font-mono font-bold uppercase tracking-wider px-2.5 py-1.5 mb-1 flex items-center justify-between"
+            class="text-[11px] font-mono font-bold uppercase tracking-wider px-2.5 py-1.5 mb-1 flex items-center justify-between"
             style="color: var(--text-faint);"
           >
             <span>{{ group.label }}</span>
@@ -336,14 +336,14 @@ const showAboutModal = ref(false)
       >
         <div class="flex items-center space-x-2 min-w-0">
           <div
-            class="w-6 h-6 rounded-md border flex items-center justify-center font-bold text-[10px]"
+            class="w-6 h-6 rounded-md border flex items-center justify-center font-bold text-[11px]"
             style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--color-brand);"
           >
             {{ auth.user?.username?.charAt(0).toUpperCase() || 'A' }}
           </div>
           <div class="truncate">
             <div class="font-bold truncate text-[11px]" style="color: var(--text-main);">{{ auth.user?.username || 'admin' }}</div>
-            <div class="text-[9px] capitalize" style="color: var(--text-faint);">{{ auth.user?.role || 'superadmin' }}</div>
+            <div class="text-[11px] capitalize" style="color: var(--text-faint);">{{ auth.user?.role || 'superadmin' }}</div>
           </div>
         </div>
         <button

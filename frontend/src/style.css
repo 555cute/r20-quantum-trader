@@ -7,42 +7,69 @@
 :root,
 :root.dark,
 :root[data-theme="dark"] {
-  --bg-app: #0A0B0E;
-  --bg-header: rgba(14, 15, 18, 0.96);
-  --bg-card: #121317;
-  --bg-card-subtle: #17181E;
-  --bg-card-hover: #1E2028;
-  --bg-input: #0E0F13;
-  --bg-badge: #1C1E26;
+  /* P0 色板升级：Binance 实测值系（canvas→card→elevated 台阶分层，边框=再上一级表面） */
+  --bg-app: #0B0E11;
+  --bg-header: rgba(11, 14, 17, 0.96);
+  --bg-card: #1E2329;
+  --bg-card-subtle: #171B21;
+  --bg-card-hover: #2B3139;
+  --bg-input: #0B0E11;
+  --bg-badge: #2B3139;
+  --bg-overlay: rgba(2, 4, 6, 0.72);
 
-  --border-subtle: #242630;
-  --border-medium: #343746;
-  --border-strong: #4F5468;
+  --border-subtle: #2B3139;
+  --border-medium: #39404B;
+  --border-strong: #4A5262;
 
-  --text-main: #F3F4F6;
-  --text-muted: #9CA3AF;
-  /* 原 #6B7280 在卡片底仅 3.84:1，小字号下不达 WCAG AA(4.5:1)，PC 端反馈"看不清"的主因之一 */
-  --text-faint: #8B93A5;
+  --text-strong: #FFFFFF; /* 仅限关键数字/标题 */
+  --text-main: #EAECEF;
+  --text-muted: #929AA5;
+  --text-faint: #707A8A; /* 列头/说明专用，禁用于正文 */
+  --ring: rgba(146, 154, 165, 0.35);
 
   /* Dark Titanium / Silver sheen */
   --color-brand: #F3F4F6;
   --color-brand-bg: rgba(255, 255, 255, 0.08);
   --color-brand-border: rgba(255, 255, 255, 0.16);
 
-  --color-up: #10B981;
-  --color-up-bg: rgba(16, 185, 129, 0.12);
-  --color-up-border: rgba(16, 185, 129, 0.28);
+  /* 涨跌色=Binance 实测值（暗底提亮降饱和，L55-72% 区间） */
+  --color-up: #0ECB81;
+  --color-up-bg: rgba(14, 203, 129, 0.12);
+  --color-up-border: rgba(14, 203, 129, 0.28);
 
-  --color-down: #F43F5E;
-  --color-down-bg: rgba(244, 63, 94, 0.12);
-  --color-down-border: rgba(244, 63, 94, 0.28);
+  --color-down: #F6465D;
+  --color-down-bg: rgba(246, 70, 93, 0.12);
+  --color-down-border: rgba(246, 70, 93, 0.28);
 
-  --color-warn: #F59E0B;
-  --color-warn-bg: rgba(245, 158, 11, 0.12);
-  --color-warn-border: rgba(245, 158, 11, 0.28);
+  --color-warn: #F0B90B;
+  --color-warn-bg: rgba(240, 185, 11, 0.12);
+  --color-warn-border: rgba(240, 185, 11, 0.28);
+
+  --color-info: #4C8FFF;
+  --color-info-bg: rgba(76, 143, 255, 0.12);
+  --color-info-border: rgba(76, 143, 255, 0.28);
+
+  /* 图表序列色（chart-first：多序列只用这组，禁临场调色） */
+  --chart-1: #0ECB81;
+  --chart-2: #F6465D;
+  --chart-3: #F0B90B;
+  --chart-4: #4C8FFF;
+  --chart-5: #A78BFA;
 
   --shadow-card: 0 4px 20px -2px rgba(0, 0, 0, 0.5);
   --shadow-float: 0 20px 35px -8px rgba(0, 0, 0, 0.7);
+}
+
+/* 色盲友好模式（Wong 板 + Bloomberg 蓝红先例；开关 UI 属 P3，token 层先行） */
+:root[data-cvd="true"] {
+  --color-up: #56B4E9;
+  --color-up-bg: rgba(86, 180, 233, 0.14);
+  --color-up-border: rgba(86, 180, 233, 0.32);
+  --color-down: #D55E00;
+  --color-down-bg: rgba(213, 94, 0, 0.14);
+  --color-down-border: rgba(213, 94, 0, 0.32);
+  --chart-1: #56B4E9;
+  --chart-2: #D55E00;
 }
 
 :root[data-theme="light"] {
@@ -53,21 +80,25 @@
   --bg-card-hover: #E2E8F0;
   --bg-input: #FFFFFF;
   --bg-badge: #F1F5F9;
+  --bg-overlay: rgba(15, 23, 42, 0.45);
   
   --border-subtle: #E2E8F0;
   --border-medium: #CBD5E1;
   --border-strong: #94A3B8;
 
+  --text-strong: #0B1220;
   --text-main: #0F172A;
   --text-muted: #475569;
   /* 原 #94A3B8 在白底仅 2.56:1，严重不达 WCAG AA，浅色模式下几乎不可读 */
   --text-faint: #5B6472;
+  --ring: rgba(71, 85, 105, 0.35);
 
   /* Neutral Titanium / Obsidian brand styling */
   --color-brand: #0F172A;
   --color-brand-bg: #F1F5F9;
   --color-brand-border: #CBD5E1;
 
+  /* 浅底语义色保持加深一档（AntD 原则：强调色随背景调整，白底 #0ECB81 仅 2.6:1 不达 AA） */
   --color-up: #059669;
   --color-up-bg: rgba(16, 185, 129, 0.08);
   --color-up-border: rgba(16, 185, 129, 0.25);
@@ -80,8 +111,27 @@
   --color-warn-bg: rgba(217, 119, 6, 0.08);
   --color-warn-border: rgba(217, 119, 6, 0.25);
 
+  --color-info: #2563EB;
+  --color-info-bg: rgba(37, 99, 235, 0.08);
+  --color-info-border: rgba(37, 99, 235, 0.25);
+
+  --chart-1: #059669;
+  --chart-2: #E11D48;
+  --chart-3: #D97706;
+  --chart-4: #2563EB;
+  --chart-5: #7C3AED;
+
   --shadow-card: 0 1px 3px 0 rgba(15, 23, 42, 0.04), 0 1px 2px -1px rgba(15, 23, 42, 0.03);
   --shadow-float: 0 10px 25px -5px rgba(15, 23, 42, 0.08), 0 8px 10px -6px rgba(15, 23, 42, 0.04);
+}
+
+:root[data-theme="light"][data-cvd="true"] {
+  --color-up: #0072B2;
+  --color-up-bg: rgba(0, 114, 178, 0.08);
+  --color-up-border: rgba(0, 114, 178, 0.25);
+  --color-down: #B34700;
+  --color-down-bg: rgba(179, 71, 0, 0.08);
+  --color-down-border: rgba(179, 71, 0, 0.25);
 }
 
 /* =========================================================================
@@ -100,10 +150,13 @@ body {
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
-/* Financial Monospace Numbers */
-.num-tabular {
-  font-variant-numeric: tabular-nums;
+/* Financial Monospace Numbers — P0: 全局推广，实时跳动数字（价格/PnL/计时）禁止比例字体横抖 */
+.num-tabular, .tnum {
+  font-variant-numeric: tabular-nums slashed-zero;
   letter-spacing: -0.015em;
+}
+.font-mono, code, kbd {
+  font-variant-numeric: tabular-nums slashed-zero;
 }
 
 /* =========================================================================

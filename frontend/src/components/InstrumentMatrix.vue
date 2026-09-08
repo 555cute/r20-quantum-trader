@@ -77,7 +77,7 @@ function getActionLabel(action?: string) {
           <span class="text-[11px] font-bold font-mono uppercase tracking-wider" style="color: var(--color-brand);">
             {{ t('tabs.macroOverview') }}
           </span>
-          <span class="text-[10px] font-mono" style="color: var(--text-faint);">
+          <span class="text-[11px] font-mono" style="color: var(--text-faint);">
             {{ store.data?.timestamp ? String(store.data.timestamp).slice(11, 19) : '' }}
           </span>
         </div>
@@ -95,7 +95,7 @@ function getActionLabel(action?: string) {
           {{ store.factors.length ? `${store.factors.length} ${t('matrix.radarTitle')}` : t('matrix.radarTitle') }}
         </h2>
       </div>
-      <span class="text-[10px] font-mono" style="color: var(--text-faint);">
+      <span class="text-[11px] font-mono" style="color: var(--text-faint);">
         {{ t('matrix.subTitle') }}
       </span>
     </div>
@@ -116,7 +116,7 @@ function getActionLabel(action?: string) {
               <span class="font-mono font-black text-sm tracking-wide truncate" style="color: var(--text-main);">
                 {{ item.name }}
               </span>
-              <span class="text-[9px] font-mono px-1 py-0.2 rounded border shrink-0 font-bold" style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--text-muted);">
+              <span class="text-[11px] font-mono px-1 py-0.2 rounded border shrink-0 font-bold" style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--text-muted);">
                 SWAP
               </span>
             </div>
@@ -125,7 +125,7 @@ function getActionLabel(action?: string) {
                 ${{ item.price }}
               </div>
               <div
-                class="text-[10px] font-bold font-mono flex items-center justify-end space-x-0.5 num-tabular whitespace-nowrap"
+                class="text-[11px] font-bold font-mono flex items-center justify-end space-x-0.5 num-tabular whitespace-nowrap"
                 :style="{ color: item.chg24h >= 0 ? 'var(--color-up)' : 'var(--color-down)' }"
               >
                 <TrendingUp v-if="item.chg24h >= 0" class="w-2.5 h-2.5 shrink-0" />
@@ -137,11 +137,11 @@ function getActionLabel(action?: string) {
 
           <!-- Calculus Telemetry Grid -->
           <div
-            class="calculus-telemetry-grid grid grid-cols-4 gap-1 my-2 py-1.5 px-2 rounded-lg border text-[10px] font-mono"
+            class="calculus-telemetry-grid grid grid-cols-4 gap-1 my-2 py-1.5 px-2 rounded-lg border text-[11px] font-mono"
             style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);"
           >
             <div class="min-w-0 text-center">
-              <div class="metric-label text-[8px] uppercase truncate" style="color: var(--text-muted);">{{ t('matrix.velocity') }}</div>
+              <div class="metric-label text-[11px] uppercase truncate" style="color: var(--text-muted);">{{ t('matrix.velocity') }}</div>
               <div
                 class="font-bold num-tabular truncate mt-0.5"
                 :style="{ color: (item.calculus?.velocity_1h ?? 0) >= 0 ? 'var(--color-up)' : 'var(--color-down)' }"
@@ -150,19 +150,19 @@ function getActionLabel(action?: string) {
               </div>
             </div>
             <div class="min-w-0 text-center">
-              <div class="metric-label text-[8px] uppercase truncate" style="color: var(--text-muted);">{{ t('matrix.acceleration') }}</div>
+              <div class="metric-label text-[11px] uppercase truncate" style="color: var(--text-muted);">{{ t('matrix.acceleration') }}</div>
               <div class="font-bold num-tabular truncate mt-0.5" style="color: var(--text-main);">
                 {{ item.calculus?.accel_1h ?? '--' }}
               </div>
             </div>
             <div class="min-w-0 text-center">
-              <div class="metric-label text-[8px] uppercase truncate" style="color: var(--text-muted);">Jerk j</div>
+              <div class="metric-label text-[11px] uppercase truncate" style="color: var(--text-muted);">Jerk j</div>
               <div class="font-bold num-tabular truncate mt-0.5" style="color: var(--text-muted);">
                 {{ item.calculus?.jerk_1h ?? '--' }}
               </div>
             </div>
             <div class="min-w-0 text-center">
-              <div class="metric-label text-[8px] uppercase truncate" style="color: var(--text-muted);">ADX</div>
+              <div class="metric-label text-[11px] uppercase truncate" style="color: var(--text-muted);">ADX</div>
               <div class="font-bold num-tabular truncate mt-0.5" style="color: var(--color-brand);">
                 {{ item.adx_1h ?? '--' }}
               </div>
@@ -170,7 +170,7 @@ function getActionLabel(action?: string) {
           </div>
 
           <!-- Microstructure Flow -->
-          <div class="flex items-center justify-between text-[10px] font-mono mb-2 px-0.5 gap-1" style="color: var(--text-muted);">
+          <div class="flex items-center justify-between text-[11px] font-mono mb-2 px-0.5 gap-1" style="color: var(--text-muted);">
             <span class="truncate">{{ t('matrix.smartMoney') }}: <strong class="num-tabular" style="color: var(--text-main);">{{ item.smart_money?.weighted_long_pct ?? 50 }}%</strong></span>
             <span class="truncate text-right">Net: <strong class="num-tabular" style="color: var(--text-main);">{{ item.smart_money?.net_flow_usdt ?? '0 U' }}</strong></span>
           </div>
@@ -180,13 +180,13 @@ function getActionLabel(action?: string) {
         <div class="pt-2 border-t" style="border-color: var(--border-subtle);">
           <div class="flex items-center justify-between gap-1.5">
             <span
-              class="px-2 py-0.5 rounded text-[10px] font-bold font-mono border whitespace-nowrap shrink-0"
+              class="px-2 py-0.5 rounded text-[11px] font-bold font-mono border whitespace-nowrap shrink-0"
               :style="getActionStyle(item.decision?.action || item.action)"
             >
               {{ getActionLabel(item.decision?.action || item.action) }}
             </span>
             <div class="flex items-center space-x-1 text-xs font-mono font-bold shrink-0" style="color: var(--text-muted);">
-              <span class="text-[10px] font-medium" style="color: var(--text-muted);">Conf:</span>
+              <span class="text-[11px] font-medium" style="color: var(--text-muted);">Conf:</span>
               <span class="num-tabular font-bold" style="color: var(--text-main);">{{ item.decision?.confidence || item.confidence || 0 }}%</span>
               <ArrowUpRight class="w-3.5 h-3.5 opacity-60 group-hover:opacity-100 transition-opacity" />
             </div>

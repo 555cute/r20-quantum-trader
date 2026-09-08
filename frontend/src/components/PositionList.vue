@@ -119,7 +119,7 @@ const poolCapacity = computed(() => Math.max(store.factors?.length || 0, 1))
 
             <!-- 持仓量 -->
             <td class="py-3 px-3.5 font-bold num-tabular" style="color: var(--text-main);">
-              {{ pos.pos }} <span class="text-[10px] font-normal" style="color: var(--text-faint);">张</span>
+              {{ pos.pos }} <span class="text-[11px] font-normal" style="color: var(--text-faint);">张</span>
             </td>
 
             <!-- 开仓均价 -->
@@ -134,7 +134,7 @@ const poolCapacity = computed(() => Math.max(store.factors?.length || 0, 1))
 
             <!-- 实际保证金 -->
             <td class="py-3 px-3.5 font-mono num-tabular" style="color: var(--text-main);">
-              ${{ fmt2(pos.margin_usdt ?? pos.margin) }} <span class="text-[10px]" style="color: var(--text-faint);">U</span>
+              ${{ fmt2(pos.margin_usdt ?? pos.margin) }} <span class="text-[11px]" style="color: var(--text-faint);">U</span>
             </td>
 
             <!-- 云端止损防线 -->
@@ -161,7 +161,7 @@ const poolCapacity = computed(() => Math.max(store.factors?.length || 0, 1))
                 {{ Number(pos.upl) >= 0 ? '+' : '' }}{{ fmt2(pos.upl) }} U
               </div>
               <div
-                class="text-[10px] font-bold font-mono num-tabular"
+                class="text-[11px] font-bold font-mono num-tabular"
                 :style="{ color: Number(pos.uplRatio ?? pos.roi) >= 0 ? 'var(--color-up)' : 'var(--color-down)' }"
               >
                 {{ Number(pos.uplRatio ?? pos.roi) >= 0 ? '+' : '' }}{{ fmt2(pos.uplRatio ?? pos.roi) }}%

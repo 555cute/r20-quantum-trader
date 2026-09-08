@@ -28,7 +28,7 @@ onMounted(load)
     <div class="flex items-center justify-between">
       <p class="text-xs font-mono" style="color: var(--text-muted);">内置插件健康状态；实盘控制面仅允许随仓库审计过的内置插件。</p>
       <span
-        class="text-[10px] font-mono px-2 py-1 rounded border font-bold"
+        class="text-[11px] font-mono px-2 py-1 rounded border font-bold"
         style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);"
       >
         策略配置 · 2/3
@@ -67,11 +67,11 @@ onMounted(load)
               <tr v-for="p in data.plugins" :key="p.plugin_id" class="border-b last:border-b-0 hover:bg-[var(--bg-card-hover)] transition-colors" style="border-color: var(--border-subtle);">
                 <td class="py-2.5 px-3 font-bold" style="color: var(--text-main);">
                   {{ p.name }}
-                  <div class="text-[9px] font-normal" style="color: var(--text-faint);">{{ p.plugin_id }}</div>
+                  <div class="text-[11px] font-normal" style="color: var(--text-faint);">{{ p.plugin_id }}</div>
                 </td>
                 <td class="py-2.5 px-3" style="color: var(--text-muted);">{{ p.plugin_type }}</td>
                 <td class="py-2.5 px-3 num-tabular" style="color: var(--text-faint);">{{ p.version }}</td>
-                <td class="py-2.5 px-3 text-[10px]" style="color: var(--text-muted);">{{ (p.permissions || []).join(', ') }}</td>
+                <td class="py-2.5 px-3 text-[11px]" style="color: var(--text-muted);">{{ (p.permissions || []).join(', ') }}</td>
                 <td class="py-2.5 px-3" style="color: var(--text-faint);">{{ p.enabled_key || '默认启用' }}</td>
                 <td class="py-2.5 px-3 font-bold" :class="p.health === 'healthy' ? 'text-emerald-500' : 'text-amber-500'">
                   {{ p.health === 'healthy' ? '正常' : p.health === 'disabled' ? '已禁用' : p.health }}

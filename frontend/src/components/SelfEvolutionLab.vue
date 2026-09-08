@@ -33,7 +33,7 @@ const overwriteReason = computed(() => review.value?.memory_overwrites_reason ||
               {{ t('lab.labTitle') }}
             </h2>
             <span
-              class="text-[10px] font-mono px-2 py-0.5 rounded border font-bold"
+              class="text-[11px] font-mono px-2 py-0.5 rounded border font-bold"
               :class="changeStatus === 'EVOLVED' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' : 'text-amber-400 bg-amber-500/10 border-amber-500/30'"
             >
               {{ t('lab.status') }}: {{ changeStatus }}
@@ -95,7 +95,7 @@ const overwriteReason = computed(() => review.value?.memory_overwrites_reason ||
               </h3>
             </div>
             <span
-              class="text-[10px] font-mono px-2 py-0.5 rounded border font-bold text-emerald-400"
+              class="text-[11px] font-mono px-2 py-0.5 rounded border font-bold text-emerald-400"
               style="background-color: var(--bg-badge); border-color: var(--border-subtle);"
             >
               {{ t('lab.memoryBadge') }}
@@ -128,7 +128,7 @@ const overwriteReason = computed(() => review.value?.memory_overwrites_reason ||
               </h3>
             </div>
             <span
-              class="text-[10px] font-mono px-2 py-0.5 rounded border font-bold"
+              class="text-[11px] font-mono px-2 py-0.5 rounded border font-bold"
               style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--text-muted);"
             >
               PF: {{ profitFactor }}
@@ -137,7 +137,7 @@ const overwriteReason = computed(() => review.value?.memory_overwrites_reason ||
 
           <!-- 决策理由 -->
           <div v-if="overwriteReason" class="p-3 rounded-lg border text-xs font-mono leading-relaxed" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
-            <div class="text-[10px] uppercase mb-1 font-bold text-amber-400">{{ t('lab.verdictReason') }}</div>
+            <div class="text-[11px] uppercase mb-1 font-bold text-amber-400">{{ t('lab.verdictReason') }}</div>
             <p class="text-xs font-sans leading-relaxed" style="color: var(--text-main);">
               {{ overwriteReason }}
             </p>
@@ -145,7 +145,7 @@ const overwriteReason = computed(() => review.value?.memory_overwrites_reason ||
 
           <!-- 诊断洞察列表 -->
           <div class="space-y-2">
-            <div class="text-[10px] font-mono uppercase font-bold" style="color: var(--text-faint);">
+            <div class="text-[11px] font-mono uppercase font-bold" style="color: var(--text-faint);">
               {{ t('lab.diagnosisInsights') }} ({{ insights.length }})
             </div>
             <div class="space-y-1.5 max-h-[220px] overflow-y-auto pr-1">
@@ -168,7 +168,7 @@ const overwriteReason = computed(() => review.value?.memory_overwrites_reason ||
 
           <!-- 执行行动清单 -->
           <div v-if="actionsTaken.length > 0" class="space-y-1.5 pt-1">
-            <div class="text-[10px] font-mono uppercase font-bold" style="color: var(--text-faint);">
+            <div class="text-[11px] font-mono uppercase font-bold" style="color: var(--text-faint);">
               {{ t('lab.actionsTaken') }} ({{ actionsTaken.length }})
             </div>
             <div class="space-y-1">
