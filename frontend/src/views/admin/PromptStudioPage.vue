@@ -1,5 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted , watch} from 'vue'
+import { useI18n } from '../../composables/useI18n'
+import PageHeader from '../../components/admin/PageHeader.vue'
+const { t } = useI18n()
+import SaveBar from '../../components/admin/SaveBar.vue'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
 import {
@@ -14,6 +18,8 @@ const auth = useAuthStore()
 const lib = ref<any>(null)
 const loading = ref(true)
 const bannerMsg = ref<{ text: string; type: 'ok' | 'err' | 'warn' } | null>(null)
+const bannerSeq = ref(0)
+watch(bannerMsg, () => { bannerSeq.value++ })
 
 const selectedProfileId = ref<string>('')
 const activePipeline = ref<'trading_system' | 'trading_user'>('trading_system')
@@ -340,6 +346,8 @@ onMounted(loadLib)
 </script>
 
 <template>
+
+    <PageHeader :title="t('admin.nPrompt')" :description="t('admin.promptDesc')" />
   <div class="space-y-4 font-mono text-xs">
     <!-- Header Summary & Plaza Gateway -->
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-1">
@@ -414,14 +422,12 @@ onMounted(loadLib)
     </div>
 
     <!-- Alert / Banner Message -->
-    <div
-      v-if="bannerMsg"
-      class="p-3 rounded-lg text-xs font-mono border transition-all"
-      :class="bannerMsg.type === 'ok' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : bannerMsg.type === 'warn' ? 'bg-amber-500/10 border-amber-500/20 text-amber-400' : 'bg-rose-500/10 border-rose-500/20 text-rose-400'"
-    >
-      {{ bannerMsg.text }}
-    </div>
-
+    <SaveBar
+          :type="bannerMsg?.type || 'ok'"
+          :text="bannerMsg?.text || ''"
+          :nonce="bannerSeq"
+          @dismiss="bannerMsg = null"
+        />
     <!-- Loading State -->
     <div v-if="loading" class="py-12 text-center text-xs font-mono" style="color: var(--text-muted);">正在加载提示词策略库...</div>
 

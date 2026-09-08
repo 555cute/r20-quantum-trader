@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useI18n } from '../../composables/useI18n'
+const { t } = useI18n()
 import { useApi } from '../../composables/useApi'
 import { Scroll, RefreshCw, Search } from 'lucide-vue-next'
 
@@ -65,7 +67,7 @@ onMounted(load)
         <div class="flex items-center space-x-2">
           <Scroll class="w-4 h-4 text-purple-400" />
           <h2 class="text-xs font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
-            安全与操作审计流水 ({{ filtered().length }} 条)
+            {{ t('admin.nAudit') }} ({{ filtered().length }} {{ t('admin.auditEntries') }})
           </h2>
         </div>
         <span class="text-[11px] font-mono" style="color: var(--text-faint);">点击任意行穿透查看原始参数 JSON</span>

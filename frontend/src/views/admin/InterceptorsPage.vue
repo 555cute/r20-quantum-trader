@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted , watch} from 'vue'
+import { useI18n } from '../../composables/useI18n'
+import SaveBar from '../../components/admin/SaveBar.vue'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
 import {
@@ -10,10 +12,13 @@ import {
 
 const { api } = useApi()
 const auth = useAuthStore()
+const { t } = useI18n()
 
 const plugins = ref<any[]>([])
 const loading = ref(true)
 const bannerMsg = ref<{ text: string; type: 'ok' | 'err' | 'warn' } | null>(null)
+const bannerSeq = ref(0)
+watch(bannerMsg, () => { bannerSeq.value++ })
 
 // Code Editor Modal State
 const editorVisible = ref(false)
@@ -220,11 +225,9 @@ onMounted(loadPlugins)
         </div>
         <div>
           <h1 class="text-xs sm:text-[13px] font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
-            物理拦截插件配置中心
+            {{ t('admin.nInterceptors') }}
           </h1>
-          <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);">
-            交易决策发出前必须通过 Python 物理拦截插件管线 (Fail-Closed)
-          </p>
+          <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);"> 物理拦截插件配置中心 —— 交易决策发出前必须通过 Python 物理拦截插件管线 (Fail-Closed) </p>
         </div>
       </div>
       <div class="flex items-center space-x-2">
@@ -251,18 +254,12 @@ onMounted(loadPlugins)
     </div>
 
     <!-- Alert / Banner Message -->
-    <div
-      v-if="bannerMsg"
-      class="p-3 rounded-lg text-xs font-mono border transition-all"
-      :style="bannerMsg.type === 'ok'
-        ? { backgroundColor: 'var(--color-up-bg)', borderColor: 'var(--color-up-border)', color: 'var(--color-up)' }
-        : bannerMsg.type === 'warn'
-        ? { backgroundColor: 'var(--color-warn-bg)', borderColor: 'var(--color-warn-border)', color: 'var(--color-warn)' }
-        : { backgroundColor: 'var(--color-down-bg)', borderColor: 'var(--color-down-border)', color: 'var(--color-down)' }"
-    >
-      {{ bannerMsg.text }}
-    </div>
-
+    <SaveBar
+          :type="bannerMsg?.type || 'ok'"
+          :text="bannerMsg?.text || ''"
+          :nonce="bannerSeq"
+          @dismiss="bannerMsg = null"
+        />
     <!-- Loading State -->
     <div v-if="loading" class="py-12 text-center text-xs font-mono" style="color: var(--text-muted);">正在扫描加载物理拦截插件...</div>
 

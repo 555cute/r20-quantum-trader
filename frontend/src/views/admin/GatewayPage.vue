@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted , watch} from 'vue'
+import { useI18n } from '../../composables/useI18n'
+const { t } = useI18n()
+import SaveBar from '../../components/admin/SaveBar.vue'
 import { useApi } from '../../composables/useApi'
 import { Zap, RefreshCw, RotateCcw, Server, Clock, AlertTriangle } from 'lucide-vue-next'
 
@@ -8,6 +11,8 @@ const gw = ref<any>(null)
 const exchangeRt = ref<any>(null)
 const loading = ref(true)
 const bannerMsg = ref<{ text: string; type: 'ok' | 'err' } | null>(null)
+const bannerSeq = ref(0)
+watch(bannerMsg, () => { bannerSeq.value++ })
 
 const deliveredCount = computed(() => (gw.value?.stats?.delivered ?? 0) + (gw.value?.stats?.accepted ?? 0))
 const deliveryTotal = computed(() => Object.values(gw.value?.stats || {}).reduce((a: number, b: any) => a + Number(b || 0), 0))
@@ -81,8 +86,12 @@ onMounted(load)
       <span class="text-[11px] font-mono text-blue-400 bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20">日常运行 · 4/4</span>
     </div>
 
-    <div v-if="bannerMsg" class="p-3 rounded-lg text-xs font-mono border" :class="bannerMsg.type === 'ok' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-rose-500/10 border-rose-500/20 text-rose-400'">{{ bannerMsg.text }}</div>
-
+    <SaveBar
+          :type="bannerMsg?.type || 'ok'"
+          :text="bannerMsg?.text || ''"
+          :nonce="bannerSeq"
+          @dismiss="bannerMsg = null"
+        />
     <div v-if="loading" class="py-12 text-center text-xs font-mono text-[var(--text-faint)]"><RefreshCw class="w-5 h-5 animate-spin inline mr-1.5 text-blue-400" />正在加载网关状态...</div>
 
     <template v-else-if="gw">
@@ -113,7 +122,8 @@ onMounted(load)
       <!-- Scheduler Jobs -->
       <div v-if="gw.scheduler?.jobs?.length" class="rounded-xl border overflow-hidden shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
         <div class="px-4 py-3 border-b flex items-center justify-between" style="border-color: var(--border-subtle); background-color: var(--bg-card-subtle);">
-          <h2 class="text-xs font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">本地调度计划（北京时间）</h2>
+          <h2 class="text-xs font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">{{ t('admin.nGateway') }}</h2>
+        <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);"> 本地调度计划（北京时间） </p>
           <span class="text-[11px] font-mono" style="color: var(--text-faint);">{{ gw.scheduler.jobs.length }} 个受管定时作业</span>
         </div>
         <div class="table-scroll-container">

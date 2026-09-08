@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { useI18n } from '../../composables/useI18n'
+const { t } = useI18n()
 import { useApi } from '../../composables/useApi'
 import PageHeader from '../../components/admin/PageHeader.vue'
 import SaveBar from '../../components/admin/SaveBar.vue'
@@ -173,8 +175,8 @@ onMounted(loadData)
 <template>
   <div class="space-y-4 max-w-[1400px] mx-auto pb-24">
     <PageHeader
-      title="执行层风控管理 (Fail-Closed Hard Risk Gates)"
-      description="仓位敞口 · 单笔风险 · 止损熔断 · 金字塔加仓 —— 全部硬门禁集中配置"
+      :title="t('admin.nRisk')"
+      description="执行层风控管理 (Fail-Closed Hard Risk Gates) —— 仓位敞口 · 单笔风险 · 止损熔断 · 金字塔加仓，全部硬门禁集中配置"
     >
       <template #actions>
         <span class="badge-lever">

@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted , watch} from 'vue'
+import { useI18n } from '../../composables/useI18n'
+import SaveBar from '../../components/admin/SaveBar.vue'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
 import {
@@ -25,10 +27,13 @@ import {
 
 const { api } = useApi()
 const auth = useAuthStore()
+const { t } = useI18n()
 
 const loading = ref(true)
 const busy = ref<'save' | 'run' | 'add' | 'delete' | 'toggle' | 'rollback' | ''>('')
 const bannerMsg = ref<{ text: string; type: 'ok' | 'err' | 'warn' } | null>(null)
+const bannerSeq = ref(0)
+watch(bannerMsg, () => { bannerSeq.value++ })
 
 // Pipelines state (evolution_system & evolution_user)
 const activeTab = ref<'settings' | 'evolution_system' | 'evolution_user'>('settings')
@@ -248,11 +253,9 @@ onMounted(loadData)
         </div>
         <div>
           <h1 class="text-xs sm:text-[13px] font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
-            AI 策略自进化认知中枢与白盒防污染护栏 (Evolution Shield)
+            {{ t('admin.nEvolution') }}
           </h1>
-          <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);">
-            离群噪点剔除、宪法级防偏见红线、心法生命周期衰减与白盒启停管理
-          </p>
+          <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);"> AI 策略自进化认知中枢与白盒防污染护栏 (Evolution Shield) —— 离群噪点剔除、宪法级防偏见红线、心法生命周期衰减与白盒启停管理 </p>
         </div>
       </div>
       <span class="badge-lever">
@@ -261,18 +264,12 @@ onMounted(loadData)
     </div>
 
     <!-- Banner -->
-    <div
-      v-if="bannerMsg"
-      class="p-3 rounded-lg text-xs font-mono border"
-      :class="bannerMsg.type === 'ok' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-rose-500/10 border-rose-500/20 text-rose-400'"
-    >
-      <div class="flex items-center gap-2">
-        <CheckCircle2 v-if="bannerMsg.type === 'ok'" class="w-4 h-4 shrink-0" />
-        <AlertCircle v-else class="w-4 h-4 shrink-0" />
-        <span>{{ bannerMsg.text }}</span>
-      </div>
-    </div>
-
+    <SaveBar
+          :type="bannerMsg?.type || 'ok'"
+          :text="bannerMsg?.text || ''"
+          :nonce="bannerSeq"
+          @dismiss="bannerMsg = null"
+        />
     <!-- Navigation Tabs -->
     <div class="flex flex-wrap items-center justify-between gap-3 p-1.5 rounded-xl border" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
       <div class="flex flex-wrap gap-1">

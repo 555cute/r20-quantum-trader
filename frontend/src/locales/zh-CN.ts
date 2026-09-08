@@ -287,6 +287,8 @@ export const zhCN = {
     nAdminSys: '账号与更新',
     nAbout: '关于',
     dzUnlock: '输入 {phrase} 以解锁',
+    auditEntries: '条',
+    promptDesc: '提示词模块组装、语义插槽与策略方案包 —— 决策语料单一事实源',
     controlHealthy: '控制面正常',
     expandSidebar: '展开侧栏',
     collapseSidebar: '收起为图标模式',

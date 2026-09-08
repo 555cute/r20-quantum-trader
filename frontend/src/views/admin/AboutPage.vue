@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useI18n } from '../../composables/useI18n'
+const { t } = useI18n()
 import { useApi } from '../../composables/useApi'
 import { Info, GitBranch, Download, RefreshCw, CheckCircle2, AlertTriangle, ShieldCheck, Terminal } from 'lucide-vue-next'
 
@@ -96,7 +98,7 @@ onMounted(() => {
           <div class="flex items-center justify-between pb-3 mb-3 border-b" style="border-color: var(--border-subtle);">
             <div class="flex items-center space-x-2">
               <Info class="w-4 h-4" style="color: var(--color-brand);" />
-              <h2 class="text-sm font-bold" style="color: var(--text-main);">关于 R20</h2>
+              <h2 class="text-sm font-bold" style="color: var(--text-main);">{{ t('admin.nAbout') }}</h2>
             </div>
             <span class="text-[11px] px-2 py-0.5 rounded border font-bold" style="background-color: var(--color-up-bg); color: var(--color-up); border-color: var(--color-up-border);">OPEN SOURCE</span>
           </div>
@@ -232,7 +234,7 @@ onMounted(() => {
           <AlertTriangle class="w-5 h-5 text-amber-500 shrink-0" />
           <div>
             <h3 class="text-sm font-bold" style="color: var(--text-main);">确认更新 R20 系统</h3>
-            <p class="text-[11px]" style="color: var(--text-muted);">执行 fast-forward 拉取最新主分支代码</p>
+            <p class="text-[11px]" style="color: var(--text-muted);"> 关于 R20 —— 执行 fast-forward 拉取最新主分支代码 </p>
           </div>
         </div>
 

@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted , watch} from 'vue'
+import { useI18n } from '../../composables/useI18n'
+const { t } = useI18n()
+import SaveBar from '../../components/admin/SaveBar.vue'
 import { useApi } from '../../composables/useApi'
 import { MessageCircle, Zap, CheckCircle2, AlertCircle } from 'lucide-vue-next'
 
@@ -17,6 +20,8 @@ const enabledChannelsCount = computed(() => {
 })
 
 const bannerMsg = ref<{ type: 'ok' | 'warn' | 'error'; text: string } | null>(null)
+const bannerSeq = ref(0)
+watch(bannerMsg, () => { bannerSeq.value++ })
 let bannerTimer: any = null
 
 function showNotificationBanner(type: 'ok' | 'warn' | 'error', text: string) {
@@ -228,7 +233,7 @@ onMounted(() => {
 <template>
   <div class="space-y-4 max-w-[2048px] mx-auto">
     <div class="flex items-center justify-between">
-      <p class="text-xs font-mono" style="color: var(--text-muted);">逐通道配置、仅诊断、发送测试；最后统一保存投递时间。</p>
+      <p class="text-xs font-mono" style="color: var(--text-muted);"> QQ 官方应用 Bot —— 逐通道配置、仅诊断、发送测试；最后统一保存投递时间。 </p>
       <span
         class="text-[11px] font-mono px-2 py-1 rounded border font-bold"
         style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);"
@@ -238,18 +243,12 @@ onMounted(() => {
     </div>
 
     <!-- Alert / Banner Message -->
-    <div
-      v-if="bannerMsg"
-      class="p-3 rounded-lg text-xs font-mono border transition-all"
-      :style="bannerMsg.type === 'ok'
-        ? { backgroundColor: 'var(--color-up-bg)', borderColor: 'var(--color-up-border)', color: 'var(--color-up)' }
-        : bannerMsg.type === 'warn'
-        ? { backgroundColor: 'var(--color-warn-bg)', borderColor: 'var(--color-warn-border)', color: 'var(--color-warn)' }
-        : { backgroundColor: 'var(--color-down-bg)', borderColor: 'var(--color-down-border)', color: 'var(--color-down)' }"
-    >
-      {{ bannerMsg.text }}
-    </div>
-
+    <SaveBar
+          :type="bannerMsg?.type || 'ok'"
+          :text="bannerMsg?.text || ''"
+          :nonce="bannerSeq"
+          @dismiss="bannerMsg = null"
+        />
     <div v-if="loading" class="py-12 text-center text-xs font-mono" style="color: var(--text-muted);">正在加载通知配置...</div>
 
     <template v-else-if="config">
@@ -258,7 +257,7 @@ onMounted(() => {
         <div class="flex items-center justify-between mb-4">
           <div class="flex items-center space-x-2">
             <span class="inline-block w-2 h-2 rounded-full" :class="config.qq.enabled ? 'bg-emerald-500' : 'bg-zinc-500'"></span>
-            <h2 class="text-sm font-bold font-mono" style="color: var(--text-main);">QQ 官方应用 Bot</h2>
+            <h2 class="text-sm font-bold font-mono" style="color: var(--text-main);">{{ t('admin.nNotify') }}</h2>
           </div>
           <div class="flex items-center space-x-3">
             <button @click="startQqBind" class="px-2.5 py-1 rounded-lg text-xs font-mono font-bold cursor-pointer transition-all shadow-xs" style="background-color: var(--text-main); color: var(--bg-card);">扫码绑定</button>

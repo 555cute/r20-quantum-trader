@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useI18n } from '../../composables/useI18n'
+const { t } = useI18n()
 import { useApi } from '../../composables/useApi'
 import { Blocks, ShieldAlert, RefreshCw } from 'lucide-vue-next'
 
@@ -26,7 +28,7 @@ onMounted(load)
 <template>
   <div class="space-y-4 max-w-[2048px] mx-auto">
     <div class="flex items-center justify-between">
-      <p class="text-xs font-mono" style="color: var(--text-muted);">内置插件健康状态；实盘控制面仅允许随仓库审计过的内置插件。</p>
+      <p class="text-xs font-mono" style="color: var(--text-muted);"> 插件清单 —— 内置插件健康状态；实盘控制面仅允许随仓库审计过的内置插件。 </p>
       <span
         class="text-[11px] font-mono px-2 py-1 rounded border font-bold"
         style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);"
@@ -43,7 +45,7 @@ onMounted(load)
         <div class="flex items-center justify-between mb-3">
           <div class="flex items-center space-x-2">
             <Blocks class="w-4 h-4" style="color: var(--color-brand);" />
-            <h2 class="text-xs font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">插件清单</h2>
+            <h2 class="text-xs font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">{{ t('admin.nPlugins') }}</h2>
           </div>
           <button @click="load" class="flex items-center space-x-1 px-2.5 py-1 rounded-lg border text-[11px] font-mono cursor-pointer transition-all shadow-xs" style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-main);">
             <RefreshCw class="w-3 h-3" />

@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted , watch} from 'vue'
+import { useI18n } from '../../composables/useI18n'
+const { t } = useI18n()
+import SaveBar from '../../components/admin/SaveBar.vue'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
 import {
@@ -37,6 +40,8 @@ const snapshotData = ref<any>(null)
 const archives = ref<any[]>([])
 const errorMsg = ref<string | null>(null)
 const bannerMsg = ref<{ text: string; type: 'ok' | 'err' | 'warn' } | null>(null)
+const bannerSeq = ref(0)
+watch(bannerMsg, () => { bannerSeq.value++ })
 
 // Archive Dialog State
 const showArchiveModal = ref(false)
@@ -154,14 +159,12 @@ onMounted(() => {
 <template>
   <div class="space-y-4">
     <!-- Notice Banner -->
-    <div
-      v-if="bannerMsg"
-      class="p-3 rounded-xl text-xs font-mono border transition-all"
-      :class="bannerMsg.type === 'ok' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : bannerMsg.type === 'warn' ? 'bg-amber-500/10 border-amber-500/20 text-amber-400' : 'bg-rose-500/10 border-rose-500/20 text-rose-400'"
-    >
-      {{ bannerMsg.text }}
-    </div>
-
+    <SaveBar
+          :type="bannerMsg?.type || 'ok'"
+          :text="bannerMsg?.text || ''"
+          :nonce="bannerSeq"
+          @dismiss="bannerMsg = null"
+        />
     <!-- Header Control Station -->
     <div
       class="rounded-2xl border p-4 sm:p-5 2xl:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4"
@@ -177,7 +180,7 @@ onMounted(() => {
         <div>
           <div class="flex items-center space-x-2">
             <h2 class="text-sm 2xl:text-base font-bold font-mono" style="color: var(--text-main);">
-              策略大一统版本快照 (Policy Snapshot Workbench)
+              {{ t('admin.nPolicy') }}
             </h2>
             <span
               v-if="snapshotData?.policy_version"
@@ -187,9 +190,7 @@ onMounted(() => {
               {{ snapshotData.policy_version }}
             </span>
           </div>
-          <p class="text-xs 2xl:text-sm font-mono mt-0.5" style="color: var(--text-muted);">
-            四大策略单元（提示词、自进化、物理拦截、模型委员会）的不可变指纹聚合与具名归档/一键回滚。
-          </p>
+          <p class="text-xs 2xl:text-sm font-mono mt-0.5" style="color: var(--text-muted);"> 策略大一统版本快照 (Policy Snapshot Workbench) —— 四大策略单元（提示词、自进化、物理拦截、模型委员会）的不可变指纹聚合与具名归档/一键回滚。 </p>
         </div>
       </div>
 

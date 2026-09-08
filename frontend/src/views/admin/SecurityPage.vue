@@ -1,15 +1,20 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted , watch} from 'vue'
+import { useI18n } from '../../composables/useI18n'
+import SaveBar from '../../components/admin/SaveBar.vue'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
 import { ShieldAlert, Wallet, Save, Terminal, KeyRound, RefreshCw, Layers, Trash2, X, LogOut, Unlink } from 'lucide-vue-next'
 
 const { api } = useApi()
 const auth = useAuthStore()
+const { t } = useI18n()
 const config = ref<any>(null)
 const runtime = ref<any>(null)
 const loading = ref(true)
 const bannerMsg = ref<{ text: string; type: 'ok' | 'err' | 'warn' } | null>(null)
+const bannerSeq = ref(0)
+watch(bannerMsg, () => { bannerSeq.value++ })
 
 // ---- OAuth ----
 const oauthSite = ref('global')
@@ -330,11 +335,9 @@ onMounted(loadAll)
         </div>
         <div>
           <h1 class="text-xs sm:text-[13px] font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
-            OKX 账户连接与交易标的池
+            {{ t('admin.nSecurity') }}
           </h1>
-          <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);">
-            OKX 官方账户授权连接、实盘/模拟盘环境切换、初始本金基准与交易标的管理
-          </p>
+          <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);"> OKX 账户连接与交易标的池 —— OKX 官方账户授权连接、实盘/模拟盘环境切换、初始本金基准与交易标的管理 </p>
         </div>
       </div>
       <span class="badge-lever">
@@ -342,11 +345,12 @@ onMounted(loadAll)
       </span>
     </div>
 
-    <div v-if="bannerMsg" class="sticky top-[76px] z-40 p-3 rounded-lg text-xs font-mono flex items-center gap-2 border shadow-lg" :class="bannerMsg.type === 'ok' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : bannerMsg.type === 'warn' ? 'bg-amber-500/10 border-amber-500/20 text-amber-400' : 'bg-rose-500/10 border-rose-500/20 text-rose-400'">
-      <span>{{ bannerMsg.text }}</span>
-      <button @click="bannerMsg = null" class="ml-auto cursor-pointer"><X class="w-3.5 h-3.5" /></button>
-    </div>
-
+    <SaveBar
+          :type="bannerMsg?.type || 'ok'"
+          :text="bannerMsg?.text || ''"
+          :nonce="bannerSeq"
+          @dismiss="bannerMsg = null"
+        />
     <div v-if="loading" class="py-12 text-center text-xs font-mono" style="color: var(--text-muted);">正在加载...</div>
 
     <template v-else-if="config">

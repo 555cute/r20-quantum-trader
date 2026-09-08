@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useI18n } from '../../composables/useI18n'
 import { useRouter } from 'vue-router'
 import { useApi } from '../../composables/useApi'
 import { APP_VERSION } from '../../config/version'
@@ -20,6 +21,7 @@ import {
 } from 'lucide-vue-next'
 
 const router = useRouter()
+const { t } = useI18n()
 const { api } = useApi()
 const runtime = ref<any>(null)
 const loading = ref(true)
@@ -108,15 +110,13 @@ const quickNav = [
         <div>
           <div class="flex items-center space-x-2">
             <h1 class="text-xs sm:text-[13px] 2xl:text-sm font-black font-mono tracking-wide" style="color: var(--text-main);">
-              R20 QUANTUM CONTROL CENTER
+              {{ t('admin.nOverview') }}
             </h1>
             <span class="badge-lever">
               {{ APP_VERSION }}
             </span>
           </div>
-          <p class="text-[11px] 2xl:text-xs font-mono mt-0.5" style="color: var(--text-muted);">
-            交易引擎、微积分动力学、数据健康与物理拦截门禁全景监控
-          </p>
+          <p class="text-[11px] 2xl:text-xs font-mono mt-0.5" style="color: var(--text-muted);"> R20 QUANTUM CONTROL CENTER —— 交易引擎、微积分动力学、数据健康与物理拦截门禁全景监控 </p>
         </div>
       </div>
 
