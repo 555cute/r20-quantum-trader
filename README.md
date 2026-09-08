@@ -140,9 +140,11 @@ R20 量子交易系统由**前台双翼量化操盘终端**与**后台机构级�
 ![自进化认知实验室](docs/images/v760_self_evolution.png)
 
 - **实盘台账自动穿透**：实时统计复盘样本数、综合胜率、利润因子（PF），精准剖析多空双杀、手续费摩擦损耗与执行偏差；
-- **白盒黄金心法沉淀**：自动生成并动态维护 `AI_TRADING_MEMORY.md` 实战心法，注入主脑每一轮交易决策；
+- **白盒黄金心法沉淀**：以 `data/structured_trading_memory.json` 为权威存储，生成 `AI_TRADING_MEMORY.md` 展示投影；只把启用且未过期的心法注入交易决策；
 - **防污染护栏 (Evolution Shield)**：离群噪点剔除、宪法级防偏见红线；支持一键回滚至官方黄金基准；
 - **心法敏锐半衰期 (7~14天)**：动态评估历史心法时效，自动衰减并淘汰过期经验，杜绝因旧周期杂波导致过度拟合。
+
+Docker 镜像和源码都包含基准心法预设，但首次启动不会自动写入或启用。尚未初始化时，前台会显示明确空状态，并链接到管理后台「自进化」；由管理员显式初始化/回滚基准，或由成功的复盘生成。已存在但全部禁用/过期、读取失败与网络失败分别展示，不会永久停在「加载中」。
 
 ---
 
@@ -289,7 +291,7 @@ PowerShell 使用 `$env:R20_GATEWAY_WORKER_ENABLED="0"` 和 `$env:R20_DASHBOARD_
 
 ### 方式 B：Docker / Docker-Compose 容器化一键启动 (推荐)
 
-默认 `docker-compose.yml` **只拉取** GitHub Container Registry 镜像，不含本地 `build`，避免 `docker compose up` 误跑源码构建或混用远端旧 `latest`。镜像：[`ghcr.io/cnlimiter/r20-quantum-trader`](https://github.com/cnlimiter/r20-quantum-trader/pkgs/container/r20-quantum-trader)。`main` 推送和 `v*` 标签发布；`latest` 仅默认分支。首次发布默认为 private，公开仓库可在 Packages 页改为 public 后匿名拉取。私有包需 classic PAT（`read:packages`）：
+默认 `docker-compose.yml` **只拉取** GitHub Container Registry 镜像，不含本地 `build`，避免 `docker compose up` 误跑源码构建或混用远端旧 `latest`。镜像：[`ghcr.io/cnlimiter/r20-quantum-trader`](https://github.com/cnlimiter/r20-quantum-trader/pkgs/container/r20-quantum-trader)。默认分支推送、`v*` 标签和手动发布先通过 Linux/Windows、Python 3.11/3.12 测试及前端构建，再发布镜像；`latest` 仅跟随 GitHub 默认分支，不硬编码 `main`。首次发布默认为 private，公开仓库可在 Packages 页改为 public 后匿名拉取。私有包需 classic PAT（`read:packages`）：
 
 ```bash
 echo "$CR_PAT" | docker login ghcr.io -u USERNAME --password-stdin
@@ -307,7 +309,30 @@ docker compose up -d
 
 
 
-指定版本：`R20_IMAGE=ghcr.io/cnlimiter/r20-quantum-trader:latest docker compose up -d`。离线复用已拉取镜像：`R20_PULL_POLICY=missing docker compose up -d`。
+#### 已运行实例：一条命令更新，可回滚
+
+在 **Linux Docker 宿主机** 的现有 Compose 目录执行。仅安装了 Compose 的服务器，先从要部署的已审阅源码版本复制 `deploy/update_docker.py` 到该目录下的同名路径；脚本只依赖 Python 3 标准库与 Docker Compose v2，不需要安装应用依赖。不要覆盖服务器定制的 Compose、`.env`、DNS、端口或网络配置。
+
+```bash
+# 更新到默认分支最新通过 CI 的镜像；先拉取并解析 digest，再等待交易周期锁
+python3 deploy/update_docker.py update --image ghcr.io/cnlimiter/r20-quantum-trader:latest
+
+# 只读预检 / 查看当前版本、健康状态、回滚目标
+python3 deploy/update_docker.py update --image ghcr.io/cnlimiter/r20-quantum-trader:latest --dry-run
+python3 deploy/update_docker.py status
+
+# 使用本机保留的上一镜像回滚，不拉取、不回退业务数据
+python3 deploy/update_docker.py rollback
+```
+
+- 必须是已有的单实例服务，`/app/data` 使用可写 bind mount，镜像保留 `${R20_IMAGE:-...}`。命令不管理首次安装、远程 Docker context 或多副本更新。
+- 保留宿主机 Compose 及挂载目录，只修改启动 `.env` 的 `R20_IMAGE` 为解析后的不可变 digest；后台密钥/设置仍在 `data/config/.env`。部署历史记录于 `.r20-deploy-state.json`。
+- 更新前等待 `.ai_factor_trader.lock`；锁超时不替换容器。仅重建 R20 服务，等待健康检查，并校验镜像、挂载、DNS、端口与网络。检查到部署配置漂移会在更新前拒绝执行。
+- 普通更新失败自动恢复上一镜像并验证健康；Docker 命令超时则保留 `pending` 恢复记录，不盲目发起第二次重建。先检查 `status` 与 Docker 状态，确认先前操作已经结束后再执行 `rollback`。
+- 指定已核验版本可把 `--image` 改为 `仓库@sha256:...`；也支持镜像站 digest。`--no-pull` 仅使用本地镜像。`--project-dir` 指定部署目录，多个 `--file` 可保留原有 Compose overlay。不要清理仍需回滚的旧镜像；本命令不会 prune 镜像、删除卷或覆盖业务数据。
+- 后续本地修改流程：提交并推送默认分支 → 等待 **Docker Package** 成功 → 执行更新命令。服务器不自动追踪每次提交，避免未经确认重启交易进程。
+
+模型输出上限可在后台 LLM 设置中保存，默认 `4096`，也支持模型专属上限（留空继承全局）。Responses 使用 `max_output_tokens`；Chat 与 Claude 使用各自协议字段。输出截断、拒绝、空内容、HTTP 外层 JSON 和业务 JSON 错误分别记录；无效 JSON 不补全、不作为交易指令执行。大上下文和高思考强度下仍需按供应商能力设置上限，短探针成功不代表真实交易长提示词一定成功。
 
 
 

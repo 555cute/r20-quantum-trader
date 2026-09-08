@@ -90,6 +90,8 @@ backups/
 *_TODO.md
 R20_V600_PREVIEW_TODO.md
 .github_device_pending.json
+.r20-deploy-state.json
+.r20-deploy.lock
 
 # OS & Editor
 .DS_Store

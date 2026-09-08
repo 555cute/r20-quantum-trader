@@ -1,10 +1,12 @@
 name: CI Test Pipeline
 
 on:
-  push:
-    branches: [ main ]
   pull_request:
-    branches: [ main ]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -54,4 +56,4 @@ jobs:
           R20_OKX_ENV: demo
           R20_MANUAL_CLOSE_ENABLED: "0"
 
-        run: python -m unittest discover -s tests
+        run: python -m unittest discover -s tests -t . -p "test_*.py"
