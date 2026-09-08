@@ -140,3 +140,4 @@ state/
 # 推广文案与历史归档：仅本地保留，永不入库
 promo_local/
 .archive/
+plan_local/
