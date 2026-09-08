@@ -2,6 +2,7 @@
 import { useToast } from '../../composables/useToast'
 const toast = useToast()
 import { ref, computed, onMounted , watch} from 'vue'
+import PageHeader from '../../components/admin/PageHeader.vue'
 import { useI18n } from '../../composables/useI18n'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
@@ -237,22 +238,11 @@ onMounted(loadData)
 <template>
   <div class="space-y-4 max-w-[2048px] mx-auto">
     <!-- Header -->
-    <div class="panel-banner-compact">
-      <div class="flex items-center space-x-2.5">
-        <div class="panel-banner-icon">
-          <Brain class="w-3.5 h-3.5" />
-        </div>
-        <div>
-          <h1 class="text-xs sm:text-[13px] font-semibold" style="color: var(--ink-1);">
-            {{ t('nav.admin.evolution') }}
-          </h1>
-          <p class="text-[11px] mt-0.5" style="color: var(--ink-2);"> 穿透平仓台账自省归因，提炼心法注入下一轮决策；离群噪点剔除与半衰期淘汰 </p>
-        </div>
-      </div>
-      <span class="badge-lever">
-        白盒认知 · 防偏见护栏
-      </span>
-    </div>
+    <PageHeader :title="t('nav.admin.evolution')" description="穿透平仓台账自省归因，提炼心法注入下一轮决策；离群噪点剔除与半衰期淘汰">
+      <template #actions>
+        <span class="chip"><span class="dot dot-up" />白盒认知 · 防偏见护栏</span>
+      </template>
+    </PageHeader>
 
     <!-- Banner -->
     <!-- Navigation Tabs -->

@@ -2,6 +2,7 @@
 import { useToast } from '../../composables/useToast'
 const toast = useToast()
 import { ref, computed, onMounted , watch} from 'vue'
+import PageHeader from '../../components/admin/PageHeader.vue'
 import { useI18n } from '../../composables/useI18n'
 const { t } = useI18n()
 import { useApi } from '../../composables/useApi'
@@ -222,15 +223,11 @@ onMounted(() => {
 
 <template>
   <div class="space-y-4 max-w-[2048px] mx-auto">
-    <div class="flex items-center justify-between">
-      <p class="text-xs" style="color: var(--ink-2);"> QQ 官方应用 Bot：逐通道配置、仅诊断、发送测试；最后统一保存投递时间。 </p>
-      <span
-        class="text-[11px] px-2 py-1 rounded border font-bold"
-        style="background-color: var(--accent-bg); color: var(--accent); border-color: var(--accent-line);"
-      >
-        集成通道 · {{ enabledChannelsCount }}/4
-      </span>
-    </div>
+    <PageHeader :title="t('nav.admin.notify')" description="逐通道配置、诊断与发送测试，保存后统一生效">
+      <template #actions>
+        <span class="chip">集成通道 · <b class="num">{{ enabledChannelsCount }}/4</b></span>
+      </template>
+    </PageHeader>
 
     <!-- Alert / Banner Message -->
     <div v-if="loading" class="py-12 text-center text-xs" style="color: var(--ink-2);">正在加载通知配置...</div>

@@ -2,6 +2,7 @@
 import { useToast } from '../../composables/useToast'
 const toast = useToast()
 import { ref, onMounted , watch} from 'vue'
+import PageHeader from '../../components/admin/PageHeader.vue'
 import { useI18n } from '../../composables/useI18n'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
@@ -325,22 +326,11 @@ onMounted(loadAll)
 <template>
   <div class="space-y-4 text-xs">
     <!-- Header & Action Bar -->
-    <div class="panel-banner-compact">
-      <div class="flex items-center space-x-2.5">
-        <div class="panel-banner-icon">
-          <Wallet class="w-3.5 h-3.5" />
-        </div>
-        <div>
-          <h1 class="text-xs sm:text-[13px] font-semibold" style="color: var(--ink-1);">
-            {{ t('nav.admin.security') }}
-          </h1>
-          <p class="text-[11px] mt-0.5" style="color: var(--ink-2);"> OKX 账户连接与交易标的池：OKX 官方账户授权连接、实盘/模拟盘环境切换、初始本金基准与交易标的管理 </p>
-        </div>
-      </div>
-      <span class="badge-lever">
-        交易核心底座 · 2/4
-      </span>
-    </div>
+        <PageHeader :title="t('nav.admin.security')" description="OKX 官方授权连接、实盘/模拟盘环境切换、初始本金基准与交易标的池管理">
+      <template #actions>
+        <span class="chip">交易核心底座 · <b class="num">2/4</b></span>
+      </template>
+    </PageHeader>
     <div v-if="loading" class="py-12 text-center text-xs" style="color: var(--ink-2);">正在加载...</div>
 
     <template v-else-if="config">

@@ -163,9 +163,6 @@ watch(() => route.path, () => (drawerOpen.value = false));
           <p class="t-faint truncate text-2xs leading-tight">
             {{ t('admin.shell.breadcrumbRoot') }}<span v-if="currentMeta"> / {{ t(currentMeta.group.labelKey) }}</span>
           </p>
-          <h1 class="truncate text-sm font-semibold leading-tight" style="color: var(--ink-strong)">
-            {{ currentMeta ? t(currentMeta.item.labelKey) : t('admin.shell.breadcrumbRoot') }}
-          </h1>
         </div>
         <div class="ms-auto flex items-center gap-1">
           <button class="btn btn-quiet btn-icon hidden sm:inline-flex" :title="t('nav.actions.search')" @click="cmdkOpen = true">

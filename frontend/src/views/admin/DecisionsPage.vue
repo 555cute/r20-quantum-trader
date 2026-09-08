@@ -4,6 +4,7 @@ import { useI18n } from '../../composables/useI18n'
 const { t } = useI18n()
 import { useApi } from '../../composables/useApi'
 import { Terminal, RefreshCw } from 'lucide-vue-next'
+import PageHeader from '../../components/admin/PageHeader.vue'
 
 const { api } = useApi()
 const loading = ref(true)
@@ -63,15 +64,11 @@ onMounted(() => {
 
 <template>
   <div class="space-y-4 max-w-[2048px] mx-auto">
-    <div class="flex items-center justify-between">
-      <p class="text-xs" style="color: var(--ink-2);"> 系统实时日志流：核对 AI 宏观基调与逐币动作，并审查交易、后台与任务调度三路实时日志流。 </p>
-      <span
-        class="text-[11px] px-2 py-1 rounded border font-bold"
-        style="background-color: var(--accent-bg); color: var(--accent); border-color: var(--accent-line);"
-      >
-        日常运行 · 决策与审计
-      </span>
-    </div>
+    <PageHeader :title="t('nav.admin.decisions')" description="核对 AI 宏观基调与逐币动作，并审查交易、后台与任务调度三路实时日志流">
+      <template #actions>
+        <span class="chip"><span class="dot dot-live" />日常运行</span>
+      </template>
+    </PageHeader>
 
     <!-- 3-Way Log Streams -->
     <div class="rounded-xl border p-4 sm:p-5 shadow-xs transition-colors" style="background-color: var(--surface-2); border-color: var(--line-1);">

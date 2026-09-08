@@ -2,6 +2,7 @@
 import { useToast } from '../../composables/useToast'
 const toast = useToast()
 import { ref, onMounted , watch} from 'vue'
+import PageHeader from '../../components/admin/PageHeader.vue'
 import { useI18n } from '../../composables/useI18n'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
@@ -286,29 +287,10 @@ onMounted(loadData)
     <!-- 1. Top Control Station: Switch, Consensus Mode & Actions -->
     <div class="rounded-2xl border p-4 sm:p-5 shadow-xs space-y-4" style="background-color: var(--surface-2); border-color: var(--line-1);">
       <!-- Header row -->
-      <div class="panel-banner-compact">
-        <div class="flex items-center space-x-2.5">
-          <div class="panel-banner-icon">
-            <Users class="w-3.5 h-3.5" />
-          </div>
-          <div>
-            <div class="flex items-center space-x-2">
-              <h2 class="text-xs sm:text-[13px] font-semibold" style="color: var(--ink-1);">
-                {{ t('nav.admin.council') }}
-              </h2>
-              <span
-                class="badge-lever"
-                :style="councilConfig.enabled ? { backgroundColor: 'var(--up-bg)', color: 'var(--up)', borderColor: 'var(--up-line)' } : {}"
-              >
-                {{ councilConfig.enabled ? '● 投委会辩论' : '○ 单模型' }}
-              </span>
-            </div>
-            <p class="text-[11px] mt-0.5" style="color: var(--ink-2);"> 多交易员独立提案、交叉质询，首席仲裁官统筹资金与敞口后终审发单 </p>
-          </div>
-        </div>
-
-        <!-- Master Switch & Action Buttons -->
-        <div class="flex flex-wrap items-center gap-2 shrink-0">
+      <PageHeader :title="t('nav.admin.council')" description="多交易员独立提案、交叉质询，首席仲裁官统筹资金与敞口后终审发单">
+        <template #actions>
+        <div class="flex flex-wrap items-center justify-end gap-2">
+          <span class="chip"><span class="dot" :class="councilConfig.enabled ? 'dot-up' : ''" />{{ councilConfig.enabled ? '议事中' : '单模型直连' }}</span>
           <!-- Toggle Button -->
           <button
             type="button"
@@ -362,13 +344,14 @@ onMounted(loadData)
             <span>导入配置</span>
           </button>
         </div>
-      </div>
+        </template>
+      </PageHeader>
 
       <!-- Import Panel -->
       <div
         v-if="importVisible"
         class="rounded-lg border p-3 space-y-2"
-        style="border-color: var(--border-admin); background: rgba(255, 255, 255, 0.02);"
+        style="border-color: var(--line-1); background: rgba(255, 255, 255, 0.02);"
       >
         <p class="text-[11px]" style="color: var(--ink-2);">
           选择 r20-council-config JSON 导出包，或直接粘贴其内容。导入前当前配置将自动备份（保留最近 10 份）；席位绑定的模型 ID 按导入包原样恢复，若本机无同名模型请导入后在席位卡片重新绑定。
@@ -385,7 +368,7 @@ onMounted(loadData)
           rows="8"
           placeholder='粘贴导出包 JSON：{"format":"r20-council-config","version":1,"config":{...}}'
           class="w-full text-[11px] rounded p-2 bg-transparent border"
-          style="border-color: var(--border-admin); color: var(--text-admin);"
+          style="border-color: var(--line-1); color: var(--ink-1);"
         ></textarea>
         <p v-if="importFileError" class="text-[11px]" style="color: var(--down);">{{ importFileError }}</p>
         <div class="flex gap-2">

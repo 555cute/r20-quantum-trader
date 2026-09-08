@@ -2,6 +2,7 @@
 import { useToast } from '../../composables/useToast'
 const toast = useToast()
 import { ref, onMounted , watch} from 'vue'
+import PageHeader from '../../components/admin/PageHeader.vue'
 import { useI18n } from '../../composables/useI18n'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
@@ -213,18 +214,8 @@ onMounted(loadPlugins)
 <template>
   <div class="space-y-4 text-xs max-w-[2048px] mx-auto">
     <!-- Header & Action Bar -->
-    <div class="panel-banner-compact">
-      <div class="flex items-center space-x-2.5">
-        <div class="panel-banner-icon">
-          <ShieldCheck class="w-3.5 h-3.5" style="color: var(--up);" />
-        </div>
-        <div>
-          <h1 class="text-xs sm:text-[13px] font-semibold" style="color: var(--ink-1);">
-            {{ t('nav.admin.interceptors') }}
-          </h1>
-          <p class="text-[11px] mt-0.5" style="color: var(--ink-2);"> 物理拦截插件配置中心：交易决策发出前必须通过 Python 物理拦截插件管线 (Fail-Closed) </p>
-        </div>
-      </div>
+    <PageHeader :title="t('nav.admin.interceptors')" description="交易决策发出前必须逐层通过 Python 物理拦截管线，任何异常默认拒单">
+      <template #actions>
       <div class="flex items-center space-x-2">
         <button
           @click="runSandbox"
@@ -242,11 +233,10 @@ onMounted(loadPlugins)
           <Plus class="w-3.5 h-3.5" />
           <span>新建插件</span>
         </button>
-        <span class="badge-lever" style="color: var(--up); border-color: var(--up-line); background-color: var(--up-bg);">
-          FAIL-CLOSED 物理防线
-        </span>
+        <span class="chip"><span class="dot dot-up" />Fail-Closed 防线</span>
       </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <!-- Alert / Banner Message -->
     <!-- Loading State -->

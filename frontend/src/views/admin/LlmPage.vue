@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 
+import PageHeader from '../../components/admin/PageHeader.vue'
 import { useI18n } from '../../composables/useI18n'
 const { t } = useI18n()
 import { useApi } from '../../composables/useApi'
@@ -562,20 +563,8 @@ onMounted(() => {
     <!-- VIEW 1: 供应商列表页 (对应截图 1) -->
     <template v-if="currentView === 'list'">
       <!-- Top Title & Navigation Bar -->
-      <div class="panel-banner-compact">
-        <div class="flex items-center space-x-2.5">
-          <div class="panel-banner-icon">
-            <Cpu class="w-3.5 h-3.5" />
-          </div>
-          <div>
-            <h1 class="text-xs sm:text-[13px] font-semibold" style="color: var(--ink-1);">
-              {{ t('nav.admin.llm') }}
-            </h1>
-            <p class="text-[11px] mt-0.5" style="color: var(--ink-2);"> AI 模型供应商与直连矩阵：管理大模型渠道矩阵、思考强度与 API 密钥直连 </p>
-          </div>
-        </div>
-
-        <!-- Right Quick Actions -->
+      <PageHeader :title="t('nav.admin.llm')" description="管理大模型渠道矩阵、思考强度与 API 密钥直连">
+        <template #actions>
         <div class="flex items-center space-x-2">
           <button
             @click="openAddProviderModal"
@@ -594,7 +583,8 @@ onMounted(() => {
             <RefreshCw class="w-3.5 h-3.5" :class="loading ? 'animate-spin' : ''" />
           </button>
         </div>
-      </div>
+        </template>
+      </PageHeader>
 
       <!-- Global Reasoning & Thinking Timeout Configuration Card -->
       <div
