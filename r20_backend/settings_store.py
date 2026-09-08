@@ -40,6 +40,13 @@ MANAGED_KEYS = {
     "R20_MANUAL_CLOSE_ENABLED",
 }
 
+# 执行层风控参数（后台「风控管理页」写入，scripts/risk_constants.py 读取）
+try:
+    from scripts.risk_constants import RISK_ENV_KEYS as _RISK_ENV_KEYS
+    MANAGED_KEYS.update(_RISK_ENV_KEYS)
+except Exception:
+    pass
+
 
 def mask(value: str, visible: int = 4) -> str:
     if not value:

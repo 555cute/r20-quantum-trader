@@ -35,7 +35,7 @@ const savingCapital = ref(false)
 
 // ---- instruments ----
 const instruments = ref<any[]>([])
-const instLimits = ref<any>({ minimum: 1, maximum: 6 })
+const instLimits = ref<any>({ minimum: 1, maximum: 20 })
 const newInstId = ref('')
 
 // ---- positions & close ----

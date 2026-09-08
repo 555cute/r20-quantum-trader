@@ -102,23 +102,22 @@ const availableSymbols = computed(() => {
     })
   }
 
-  // 3. 提取全部监控池标的
-  if (Array.isArray(store.factorLibrary)) {
-    store.factorLibrary.forEach((f) => {
-      const sym = (f.instId?.replace('-USDT-SWAP', '').replace('-USDT', '') || '').toUpperCase()
+  // 3. 提取全部监控池标的（store.factors 才是 dashboard store 真实暴露的字段；
+  //    此前误写为 store.factorLibrary，恒为 undefined 导致动态标的整段被跳过，标签页永远只剩硬编码兜底）
+  if (Array.isArray(store.factors)) {
+    store.factors.forEach((f: any) => {
+      const sym = (f.name || f.instId?.replace('-USDT-SWAP', '').replace('-USDT', '') || '').toUpperCase()
       if (sym && !holdingSet.has(sym)) {
         otherSet.add(sym)
       }
     })
   }
 
-  // 兜底标的
-  const defaults = ['BTC', 'ETH', 'SOL', 'DOGE', 'SUI', 'ADA']
-  defaults.forEach((d) => {
-    if (!holdingSet.has(d) && !otherSet.has(d)) {
-      otherSet.add(d)
-    }
-  })
+  // 冷启动兜底：首轮 /api/all 尚未返回时先给一个确定存在的标的（后台校验 btc_required 保证 BTC 恒在池内），
+  // 不再伪造一份 6 币种清单——那会掩盖真实标的池并让扩容失效。
+  if (holdingSet.size === 0 && otherSet.size === 0) {
+    otherSet.add('BTC')
+  }
 
   // 持仓/挂单标的绝对排在最前面，其余监控标的紧随其后全部保留！
   return [...Array.from(holdingSet), ...Array.from(otherSet)]
@@ -193,16 +192,25 @@ const mountedPanes = new Map<string, string>()
 // 当前标的计算
 const currentInstId = computed(() => `${currentSymbol.value}-USDT-SWAP`)
 const factorItem = computed(() => {
-  if (!Array.isArray(store.factorLibrary)) return undefined
-  return store.factorLibrary.find(
-    (f) =>
+  if (!Array.isArray(store.factors)) return undefined
+  return store.factors.find(
+    (f: any) =>
       f.instId === currentInstId.value ||
       f.instId === `${currentSymbol.value}-USDT` ||
       f.instId?.startsWith(currentSymbol.value)
   )
 })
 
-const currentAtr = computed(() => Number(factorItem.value?.atr1h || 0))
+const currentAtr = computed(() => {
+  const it: any = factorItem.value || {}
+  const direct = Number(it.atr_1h || it.atr1h || 0)
+  if (direct > 0) return direct
+  // 退化路径：仅有百分比时用 价格×ATR% 还原，避免出现 $0.0
+  const pct = Number(it.atr_pct || it.atr_1h_pct || 0)
+  const px = Number(it.price || currentPrice.value || 0)
+  if (pct > 0 && px > 0) return (px * pct) / 100
+  return 0
+})
 // 涨跌幅：当前蜡烛价格相比其开盘价的实时变化百分比
 const liveChangePct = computed(() => {
   if (candles.value.length > 0) {
@@ -345,7 +353,10 @@ const riskRewardMetrics = computed(() => {
   const isAtrOptimal = atrMultiple >= 1.8 && atrMultiple <= 2.2
 
   const hasRealPosition = !!activePosition.value
-  let activeMargin = 100.0
+  // 未持仓时按「可用余额 × 20%」估算单笔保证金（与执行层 R20_MAX_MARGIN_EQUITY_RATIO 同口径），
+  // 不再写死 100U —— 那会让小资金账户看到与真实风险完全不符的预估盈亏。
+  const availEq = Number(store.account?.avail_eq || store.account?.total_eq || 0)
+  let activeMargin = availEq > 0 ? Math.round(availEq * 0.20 * 100) / 100 : 0
   let activeLeverage = 3.0
 
   if (hasRealPosition && activePosition.value) {

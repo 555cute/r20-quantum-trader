@@ -21,7 +21,8 @@
 
   --text-main: #F3F4F6;
   --text-muted: #9CA3AF;
-  --text-faint: #6B7280;
+  /* 原 #6B7280 在卡片底仅 3.84:1，小字号下不达 WCAG AA(4.5:1)，PC 端反馈"看不清"的主因之一 */
+  --text-faint: #8B93A5;
 
   /* Dark Titanium / Silver sheen */
   --color-brand: #F3F4F6;
@@ -59,7 +60,8 @@
 
   --text-main: #0F172A;
   --text-muted: #475569;
-  --text-faint: #94A3B8;
+  /* 原 #94A3B8 在白底仅 2.56:1，严重不达 WCAG AA，浅色模式下几乎不可读 */
+  --text-faint: #5B6472;
 
   /* Neutral Titanium / Obsidian brand styling */
   --color-brand: #0F172A;
@@ -687,3 +689,41 @@ td {
 }
 
 
+
+/* =========================================================================
+   PC 端可读性增强（v7.5.8）
+   全站有 518 处 8~11px 极小字号，在 1280px+ 桌面上明显偏小 —— 这是"字体看不清"的
+   第二个主因。这里只在桌面宽度抬升字号下限，移动端(<1280px)保持原有紧凑版式不变。
+   :not([class*="…:text-"]) 用于保护已自带响应式字号的 77 个元素，避免压掉它们的
+   既有 sm/md/lg/xl/2xl 断点设定（[class*="xl:text-"] 同时覆盖 2xl:text-）。
+   ========================================================================= */
+@media (min-width: 1280px) {
+  .text-\[8px\]:not([class*="sm:text-"]):not([class*="md:text-"]):not([class*="lg:text-"]):not([class*="xl:text-"]),
+  .text-\[9px\]:not([class*="sm:text-"]):not([class*="md:text-"]):not([class*="lg:text-"]):not([class*="xl:text-"]),
+  .text-\[10px\]:not([class*="sm:text-"]):not([class*="md:text-"]):not([class*="lg:text-"]):not([class*="xl:text-"]) {
+    font-size: 12px;
+    letter-spacing: 0.01em;
+  }
+  .text-\[11px\]:not([class*="sm:text-"]):not([class*="md:text-"]):not([class*="lg:text-"]):not([class*="xl:text-"]) {
+    font-size: 13px;
+  }
+}
+
+@media (min-width: 1600px) {
+  .text-\[8px\]:not([class*="sm:text-"]):not([class*="md:text-"]):not([class*="lg:text-"]):not([class*="xl:text-"]),
+  .text-\[9px\]:not([class*="sm:text-"]):not([class*="md:text-"]):not([class*="lg:text-"]):not([class*="xl:text-"]),
+  .text-\[10px\]:not([class*="sm:text-"]):not([class*="md:text-"]):not([class*="lg:text-"]):not([class*="xl:text-"]) {
+    font-size: 13px;
+  }
+  .text-\[11px\]:not([class*="sm:text-"]):not([class*="md:text-"]):not([class*="lg:text-"]):not([class*="xl:text-"]) {
+    font-size: 14px;
+  }
+}
+
+/* 数字与代码类文本统一走等宽字体并开启表格数字，避免行情跳动时字宽抖动 */
+.font-mono,
+code,
+pre {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}

@@ -25,10 +25,11 @@ const sections = [
   { id: 'policy_snapshot', title: '4. 策略版本快照控制台 (Policy Snapshot)', icon: Layers },
   { id: 'prompt_studio', title: '5. 提示词策略与语义变量插槽', icon: FileText },
   { id: 'interceptors', title: '6. Python 物理拦截插件 (Fail-Closed)', icon: ShieldCheck },
-  { id: 'llm_hub', title: '7. 模型连接与 API 协议支持', icon: Cpu },
-  { id: 'self_evolution', title: '8. 自进化认知与长期记忆闭环', icon: Brain },
-  { id: 'deployment', title: '9. 生产部署与多通道通知', icon: Server },
-  { id: 'faq', title: '10. 常见问题解答与风控底线 (FAQ)', icon: ShieldAlert },
+  { id: 'risk_control', title: '7. 执行层风控管理中心', icon: Lock },
+  { id: 'llm_hub', title: '8. 模型连接与 API 协议支持', icon: Cpu },
+  { id: 'self_evolution', title: '9. 自进化认知与长期记忆闭环', icon: Brain },
+  { id: 'deployment', title: '10. 生产部署与多通道通知', icon: Server },
+  { id: 'faq', title: '11. 常见问题解答与风控底线 (FAQ)', icon: ShieldAlert },
 ]
 
 function copyText(text: string, tag: string) {
@@ -217,7 +218,7 @@ onUnmounted(() => {
           </div>
 
           <p class="text-xs sm:text-sm leading-relaxed font-sans" style="color: var(--text-muted);">
-            <strong>R20量子交易系统 (R20 Quantum Trading System)</strong> 是一套专为高波动加密货币（Crypto）打造的<strong>机构级全自动波段量化决策与执行系统</strong>。系统依托 OKX 交易所官方 REST/WebSocket V5 生产 API 与 @okx_ai 官方交易底座，运行在严格的北京时间（UTC+8）自然日财务基准之上，聚焦 1H~4H 大级别顺势波段，以<strong>“胜率第一、宁缺毋滥、三位一体 Fail-Closed 物理硬防线”</strong>为最高风控宗旨。在 v7.5.0 全面集成本地化 TradingView 官方轻量引擎与视觉 LLM 友好型量价形态工作站。
+            <strong>R20量子交易系统 (R20 Quantum Trading System)</strong> 是一套专为高波动加密货币（Crypto）打造的<strong>机构级全自动波段量化决策与执行系统</strong>。系统依托 OKX 交易所官方 REST/WebSocket V5 生产 API 与 @okx_ai 官方交易底座，运行在严格的北京时间（UTC+8）自然日财务基准之上，聚焦 1H~4H 大级别顺势波段，以<strong>“胜率第一、宁缺毋滥、三位一体 Fail-Closed 物理硬防线”</strong>为最高风控宗旨。在 v7.5.0 全面集成本地化 TradingView 官方轻量引擎与视觉 LLM 友好型量价形态工作站；v7.6.0 里程碑将全部执行层硬风控阈值从源码剥离，升级为后台可视化「风控管理中心」与三套优质预设套件。
           </p>
 
           <!-- 4 Core Pillars Grid -->
@@ -358,10 +359,10 @@ onUnmounted(() => {
               <span class="font-bold" style="color: var(--color-brand);">点击图片放大</span>
             </div>
             <img
-              src="https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/admin_council.png"
+              src="https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v760_council_board.png"
               alt="对冲基金投委会决策中枢"
               class="w-full rounded-xl cursor-zoom-in group-hover:opacity-95 transition-opacity"
-              @click="zoomImage = 'https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/admin_council.png'"
+              @click="zoomImage = 'https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v760_council_board.png'"
             />
           </div>
         </section>
@@ -399,10 +400,10 @@ onUnmounted(() => {
               <span class="font-bold" style="color: var(--color-brand);">点击图片放大</span>
             </div>
             <img
-              src="https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/admin_policy_snapshot.png"
+              src="https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v760_policy_snapshot.png"
               alt="策略大一统版本快照控制台"
               class="w-full rounded-xl cursor-zoom-in group-hover:opacity-95 transition-opacity"
-              @click="zoomImage = 'https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/admin_policy_snapshot.png'"
+              @click="zoomImage = 'https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v760_policy_snapshot.png'"
             />
           </div>
         </section>
@@ -442,7 +443,7 @@ onUnmounted(() => {
                 <tr class="hover:bg-[var(--bg-card-hover)] transition-colors">
                   <td class="p-3 font-bold" style="color: var(--text-main);">&#123;&#123;market_matrix&#125;&#125;</td>
                   <td class="p-3" style="color: var(--text-main);">微积分数理</td>
-                  <td class="p-3" style="color: var(--text-muted);">注入 6 币种最新价、微积分动力学 (v/a/j)、1H ADX 与聪明钱净流</td>
+                  <td class="p-3" style="color: var(--text-muted);">注入标的池全部币种最新价、微积分动力学 (v/a/j/κ/Φ)、1H ADX 与聪明钱净流</td>
                 </tr>
                 <tr class="hover:bg-[var(--bg-card-hover)] transition-colors">
                   <td class="p-3 font-bold" style="color: var(--color-warn);">&#123;&#123;account_positions&#125;&#125;</td>
@@ -465,10 +466,10 @@ onUnmounted(() => {
               <span class="font-bold" style="color: var(--color-brand);">点击图片放大</span>
             </div>
             <img
-              src="https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/admin_prompt_studio.png"
+              src="https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v760_prompt_studio.png"
               alt="提示词策略工作室"
               class="w-full rounded-xl cursor-zoom-in group-hover:opacity-95 transition-opacity"
-              @click="zoomImage = 'https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/admin_prompt_studio.png'"
+              @click="zoomImage = 'https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v760_prompt_studio.png'"
             />
           </div>
         </section>
@@ -525,18 +526,82 @@ onUnmounted(() => {
               <span class="font-bold" style="color: var(--color-brand);">点击图片放大</span>
             </div>
             <img
-              src="https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/admin_interceptors.png"
+              src="https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v760_interceptors_failclosed.png"
               alt="物理拦截插件中心"
               class="w-full rounded-xl cursor-zoom-in group-hover:opacity-95 transition-opacity"
-              @click="zoomImage = 'https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/admin_interceptors.png'"
+              @click="zoomImage = 'https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v760_interceptors_failclosed.png'"
             />
           </div>
         </section>
 
-        <!-- 6. 模型连接与协议格式 -->
-        <section id="llm_hub" class="space-y-4 pt-6 border-t" style="border-color: var(--border-subtle);">
+<!-- 7. 执行层风控管理中心 -->
+        <section id="risk_control" class="space-y-4 pt-6 border-t" style="border-color: var(--border-subtle);">
           <div class="flex items-center space-x-2">
             <span class="px-2.5 py-0.5 rounded text-[11px] font-mono font-bold border" style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);">CHAPTER 06</span>
+            <h2 class="text-xl sm:text-2xl font-black tracking-wide" style="color: var(--text-main);">执行层风控管理中心 (Risk Control Center)</h2>
+          </div>
+
+          <p class="text-xs sm:text-sm leading-relaxed font-sans" style="color: var(--text-muted);">
+            v7.6.0 里程碑：全部执行层硬风控阈值从 py 源码中彻底剥离，收敛至后台「策略配置 → 风控管理」集中可视化配置。系统遵循 <strong>单一事实源 (Single Source of Truth)</strong> 架构——<code>scripts/risk_constants.py</code> 一处定义，交易执行引擎、核心风控底座、AI 主脑提示词与后台管理页四方同源联动，<strong>提示词口径永远等于代码口径</strong>；保存即写入 <code>.env</code>，交易引擎下一巡检周期（≤15 分钟）自动生效，无需重启。
+          </p>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            <div class="p-3.5 rounded-xl border space-y-1.5 shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
+              <div class="flex items-center justify-between">
+                <span class="font-bold text-xs font-mono" style="color: var(--text-main);">仓位与敞口</span>
+                <span class="px-2 py-0.2 rounded text-[9px] font-bold border" style="background-color: var(--color-up-bg); color: var(--color-up); border-color: var(--color-up-border);">6 项</span>
+              </div>
+              <p class="text-[11px]" style="color: var(--text-muted);">最高持仓数（0=自动跟随标的池）、同向持仓上限、单笔保证金占比硬顶、单标的累计保证金占比与绝对封顶、单笔杠杆上限。</p>
+            </div>
+            <div class="p-3.5 rounded-xl border space-y-1.5 shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
+              <div class="flex items-center justify-between">
+                <span class="font-bold text-xs font-mono" style="color: var(--text-main);">单笔风险门禁</span>
+                <span class="px-2 py-0.2 rounded text-[9px] font-bold border" style="background-color: var(--color-up-bg); color: var(--color-up); border-color: var(--color-up-border);">3 项</span>
+              </div>
+              <p class="text-[11px]" style="color: var(--text-muted);">单笔 1R 风险额占比、最小盈亏比 R:R 硬底线（Fail-Closed 物理拦截）、新开仓最低 AI 置信度门禁。</p>
+            </div>
+            <div class="p-3.5 rounded-xl border space-y-1.5 shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
+              <div class="flex items-center justify-between">
+                <span class="font-bold text-xs font-mono" style="color: var(--text-main);">止损与熔断</span>
+                <span class="px-2 py-0.2 rounded text-[9px] font-bold border" style="background-color: var(--color-up-bg); color: var(--color-up); border-color: var(--color-up-border);">5 项</span>
+              </div>
+              <p class="text-[11px]" style="color: var(--text-muted);">日亏熔断（余额比例+绝对金额双封顶取小）、最长持仓时间（时间止损）、横盘判定带宽（×ATR）、止损后同标的冷静期。</p>
+            </div>
+            <div class="p-3.5 rounded-xl border space-y-1.5 shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
+              <div class="flex items-center justify-between">
+                <span class="font-bold text-xs font-mono" style="color: var(--text-main);">金字塔加仓门禁</span>
+                <span class="px-2 py-0.2 rounded text-[9px] font-bold border" style="background-color: var(--color-up-bg); color: var(--color-up); border-color: var(--color-up-border);">3 项</span>
+              </div>
+              <p class="text-[11px]" style="color: var(--text-muted);">单标的最大加仓次数（0=彻底禁止）、加仓最小底仓浮盈率、加仓最低 AI 置信度。三重门禁缺一不可。</p>
+            </div>
+          </div>
+
+          <div class="p-4 rounded-xl border space-y-2 shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
+            <h3 class="text-sm font-bold" style="color: var(--text-main);">🎯 三套优质预设套件 · 一键应用</h3>
+            <p class="text-xs leading-relaxed" style="color: var(--text-muted);">
+              <strong>🛡️ 稳健防守</strong>（新账户/恶劣行情：4 仓、同向 2、保证金 10%、3x 杠杆、R:R≥2.5、置信度 85%、日亏 3% 熔断、禁止加仓）；<strong>⚖️ 均衡波段</strong>（推荐出厂基线：同向 3 仓、单笔保证金 20% 硬顶、8 小时时间止损、允许 1 次严格浮盈加仓）；<strong>🚀 进取猎手</strong>（单边趋势市：同向 4 仓、保证金 25%、7x 杠杆、置信度 72%、16 小时大波段、2 次金字塔加仓）。页面实时标记「当前生效」套件，应用后仍可逐项微调，单项一键还原，底部 RESET RISK 可整体回退代码基线。
+            </p>
+          </div>
+
+          <!-- Screenshot Card -->
+          <div class="rounded-2xl border p-2 sm:p-3 overflow-hidden shadow-xl group" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
+            <div class="text-[11px] font-mono px-2 py-1 flex items-center justify-between border-b mb-2" style="border-color: var(--border-subtle); color: var(--text-muted);">
+              <span>实机截图 · 执行层风控管理中心 (17 项硬风控可视化与三套优质预设一键应用)</span>
+              <span class="font-bold" style="color: var(--color-brand);">点击图片放大</span>
+            </div>
+            <img
+              src="https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v760_risk_control.png"
+              alt="执行层风控管理中心"
+              class="w-full rounded-xl cursor-zoom-in group-hover:opacity-95 transition-opacity"
+              @click="zoomImage = 'https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v760_risk_control.png'"
+            />
+          </div>
+        </section>
+
+                <!-- 8. 模型连接与协议格式 -->
+        <section id="llm_hub" class="space-y-4 pt-6 border-t" style="border-color: var(--border-subtle);">
+          <div class="flex items-center space-x-2">
+            <span class="px-2.5 py-0.5 rounded text-[11px] font-mono font-bold border" style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);">CHAPTER 07</span>
             <h2 class="text-xl sm:text-2xl font-black tracking-wide" style="color: var(--text-main);">模型连接与 API 协议支持</h2>
           </div>
 
@@ -561,10 +626,10 @@ onUnmounted(() => {
               <span class="font-bold" style="color: var(--color-brand);">点击图片放大</span>
             </div>
             <img
-              src="https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/admin_llm.png"
+              src="https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v760_llm_hub.png"
               alt="模型连接控制台"
               class="w-full rounded-xl cursor-zoom-in group-hover:opacity-95 transition-opacity"
-              @click="zoomImage = 'https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/admin_llm.png'"
+              @click="zoomImage = 'https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v760_llm_hub.png'"
             />
           </div>
         </section>
@@ -572,7 +637,7 @@ onUnmounted(() => {
         <!-- 7. 自进化认知与长期记忆闭环 -->
         <section id="self_evolution" class="space-y-4 pt-6 border-t" style="border-color: var(--border-subtle);">
           <div class="flex items-center space-x-2">
-            <span class="px-2.5 py-0.5 rounded text-[11px] font-mono font-bold border" style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);">CHAPTER 07</span>
+            <span class="px-2.5 py-0.5 rounded text-[11px] font-mono font-bold border" style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);">CHAPTER 08</span>
             <h2 class="text-xl sm:text-2xl font-black tracking-wide" style="color: var(--text-main);">自进化认知与长期记忆闭环 (每6小时复盘)</h2>
           </div>
 
@@ -593,10 +658,10 @@ onUnmounted(() => {
               <span class="font-bold" style="color: var(--color-brand);">点击图片放大</span>
             </div>
             <img
-              src="https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/admin_evolution.png"
+              src="https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v760_self_evolution.png"
               alt="自进化配置与实战心法面板"
               class="w-full rounded-xl cursor-zoom-in group-hover:opacity-95 transition-opacity"
-              @click="zoomImage = 'https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/admin_evolution.png'"
+              @click="zoomImage = 'https://raw.githubusercontent.com/555cute/r20-quantum-trader/main/docs/images/v760_self_evolution.png'"
             />
           </div>
         </section>
@@ -604,7 +669,7 @@ onUnmounted(() => {
         <!-- 8. 生产部署与多通道通知 -->
         <section id="deployment" class="space-y-4 pt-6 border-t" style="border-color: var(--border-subtle);">
           <div class="flex items-center space-x-2">
-            <span class="px-2.5 py-0.5 rounded text-[11px] font-mono font-bold border" style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);">CHAPTER 08</span>
+            <span class="px-2.5 py-0.5 rounded text-[11px] font-mono font-bold border" style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);">CHAPTER 09</span>
             <h2 class="text-xl sm:text-2xl font-black tracking-wide" style="color: var(--text-main);">生产部署与多通道通知告警</h2>
           </div>
 
@@ -642,7 +707,7 @@ pip install -r requirements.txt
         <!-- 9. 常见问题解答与风控底线 (FAQ) -->
         <section id="faq" class="space-y-4 pt-6 border-t" style="border-color: var(--border-subtle);">
           <div class="flex items-center space-x-2">
-            <span class="px-2.5 py-0.5 rounded text-[11px] font-mono font-bold border" style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);">CHAPTER 09</span>
+            <span class="px-2.5 py-0.5 rounded text-[11px] font-mono font-bold border" style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);">CHAPTER 10</span>
             <h2 class="text-xl sm:text-2xl font-black tracking-wide" style="color: var(--text-main);">常见问题解答与风控底线 (FAQ)</h2>
           </div>
 
@@ -650,7 +715,7 @@ pip install -r requirements.txt
             <div class="p-4 rounded-xl border space-y-2 shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
               <h3 class="text-sm font-bold" style="color: var(--text-main);">Q1: 为什么策略推演经常输出 WAIT？是系统出故障了吗？</h3>
               <p class="text-xs leading-relaxed" style="color: var(--text-muted);">
-                不是故障。在 R20 的量化哲学中，<strong>WAIT 是最核心、最高价值的风险防御决策</strong>。当 4H 趋势不明朗、1H ADX &lt; 18 处于横盘猴市、或置信度未达到 80% 及格线时，系统坚决选择空仓等待，杜绝因频繁无效交易损耗昂贵的手续费与资金费。
+                不是故障。在 R20 的量化哲学中，<strong>WAIT 是最核心、最高价值的风险防御决策</strong>。当 4H 趋势不明朗、1H ADX &lt; 18 处于横盘猴市、或置信度未达到风控管理页配置的最低开仓门禁（默认 80%）时，系统坚决选择空仓等待，杜绝因频繁无效交易损耗昂贵的手续费与资金费。
               </p>
             </div>
 
@@ -665,6 +730,13 @@ pip install -r requirements.txt
               <h3 class="text-sm font-bold" style="color: var(--text-main);">Q3: 如何将策略分享给他人，或从策略广场导入？</h3>
               <p class="text-xs leading-relaxed" style="color: var(--text-muted);">
                 在后台「提示词策略」页面点击「导出策略方案」即可下载标准 <code>.json</code> 策略包；在另一台服务器上点击「导入策略」，系统将自动校验 JSON 结构与变量合法性并即刻装载生效。
+              </p>
+            </div>
+
+            <div class="p-4 rounded-xl border space-y-2 shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
+              <h3 class="text-sm font-bold" style="color: var(--text-main);">Q4: 风控参数（持仓数、保证金占比、最长持仓时间等）在哪里修改？改完要重启吗？</h3>
+              <p class="text-xs leading-relaxed" style="color: var(--text-muted);">
+                在后台「策略配置 → 风控管理」页集中配置全部 17 项执行层硬风控，或直接一键应用稳健防守/均衡波段/进取猎手三套预设。保存即写入 <code>.env</code> 单一事实源，交易引擎在下一巡检周期（≤15 分钟）自动加载生效，<strong>无需重启</strong>；AI 主脑每轮收到的【本周期风险预算】小节会同步展示最新口径，越界数值由服务端物理拒绝并留痕审计。
               </p>
             </div>
           </div>

@@ -214,6 +214,7 @@ export const enUS = {
     tradingGateway: 'Trading & Gateway',
     accountInstruments: 'Accounts & Instruments',
     interceptors: 'Risk Interceptors',
+    riskControl: 'Risk Control',
     gatewayJobs: 'Gateway Jobs',
     systemAdmin: 'System Admin',
     securityAuth: 'Security & Auth',

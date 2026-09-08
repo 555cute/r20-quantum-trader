@@ -17,6 +17,10 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data"
+# 标的池容量上限：此前被硬编码为 6，导致后台「添加币种」在加第 7 个时被直接拒绝。
+# 现改为可配置；并发持仓上限由执行层按 len(池) 自动跟随，同向持仓上限仍独立固定(防 Beta 踩踏)。
+MAX_POOL_SIZE = int(os.getenv("R20_MAX_POOL_SIZE", "20"))
+MIN_POOL_SIZE = int(os.getenv("R20_MIN_POOL_SIZE", "1"))
 SCRIPTS_DIR = ROOT / "scripts"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(SCRIPTS_DIR))
@@ -34,8 +38,11 @@ from r20_exchange.runtime import get_exchange, selected_environment, state_path
 from r20_backend.backup_secrets import credential_status as backup_credential_status, save_credentials as save_backup_credentials
 from r20_backend.prompt_views import EVOLUTION_USER_TEMPLATE, TRADING_USER_TEMPLATE, rendered_snapshots
 from r20_backend.settings_store import mask, remove_env, update_env
+from r20_backend import risk_config
 from r20_backend.notifications import _env as notification_env, diagnose_channel, test_channel
 from r20_backend.audit import recent as recent_audit, record as audit_record
+from r20_backend.client_ip import client_ip as resolve_client_ip, user_agent as resolve_user_agent
+from r20_backend import login_guard
 from r20_backend.admin_auth import AdminAuthStore
 from r20_backend.backup_store import (
     create_job as create_backup_job, delete_job as delete_backup_job, export_job as export_backup_job,
@@ -825,23 +832,43 @@ def admin_auth_status() -> dict[str, Any]:
 
 @app.post("/api/v1/admin/login", include_in_schema=False)
 @app.post("/api/v1/admin/auth/login")
-def admin_login(payload: AdminLoginRequest) -> dict[str, Any]:
+def admin_login(request: Request, payload: AdminLoginRequest) -> dict[str, Any]:
+    ip = resolve_client_ip(request)
+    ua = resolve_user_agent(request)
+
+    # 按来源 IP 的登录限速：与「按账号 5 次失败锁定」互补，
+    # 攻击者轮换用户名或放慢速度时，仅账号维度的锁会被绕过。
+    allowed, retry_after = login_guard.check(ip)
+    if not allowed:
+        audit_record("admin.login", "rate_limited", {"username": payload.username, "ip": ip},
+                     ip=ip, user_agent=ua)
+        raise HTTPException(
+            status_code=429,
+            detail=f"该来源 IP 登录过于频繁，请 {retry_after} 秒后重试",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    login_guard.note_attempt(ip)
     try:
         result = admin_auth.login(payload.username, payload.password)
     except PermissionError as exc:
-        audit_record("admin.login", "failed", {"username": payload.username})
+        login_guard.note_failure(ip)
+        audit_record("admin.login", "failed", {"username": payload.username, "ip": ip},
+                     ip=ip, user_agent=ua)
         raise HTTPException(status_code=401, detail=str(exc)) from exc
-    audit_record("admin.login", "success", {"username": result["user"]["username"]})
+    audit_record("admin.login", "success", {"username": result["user"]["username"]},
+                 ip=ip, user_agent=ua)
     return result
 
 
 @app.post("/api/v1/admin/logout", include_in_schema=False)
 @app.post("/api/v1/admin/auth/logout")
-def admin_logout(x_r20_session: str | None = Header(default=None)) -> dict[str, Any]:
+def admin_logout(request: Request, x_r20_session: str | None = Header(default=None)) -> dict[str, Any]:
     user = admin_auth.validate_session(x_r20_session or "")
     admin_auth.logout(x_r20_session or "")
     if user:
-        audit_record("admin.logout", "success", {"username": user["username"]})
+        audit_record("admin.logout", "success", {"username": user["username"]},
+                     ip=resolve_client_ip(request), user_agent=resolve_user_agent(request))
     return {"logged_out": True}
 
 
@@ -1139,6 +1166,12 @@ def admin_config(x_r20_admin_token: str | None = Header(default=None)) -> dict[s
             "initial_capital": load_account_baseline()["initial_capital"],
             "initial_capital_reset_time": load_account_baseline()["reset_time"],
         },
+        # 登录防护可观测性：此前审计不记来源，异常登录量完全无法归因
+        "login_protection": {
+            **login_guard.stats(),
+            "trusted_proxies": os.getenv("R20_TRUSTED_PROXIES", "").strip() or "(默认私网/回环/Docker桥网)",
+            "audit_records_ip": True,
+        },
     }
 
 
@@ -1172,6 +1205,77 @@ def admin_exchange_runtime(x_r20_session: str | None = Header(default=None, alia
     refresh_settings()
     require_admin_header(x_r20_admin_token, x_r20_session)
     return _local_exchange_runtime()
+
+
+class RiskConfigUpdate(BaseModel):
+    values: dict[str, Any] = Field(default_factory=dict)
+    suite_id: str = ""
+
+
+class RiskResetRequest(BaseModel):
+    confirmation: str = ""
+
+
+@app.get("/api/v1/admin/risk")
+def admin_risk_get(x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
+    refresh_settings()
+    require_admin_header(x_r20_session=x_r20_session)
+    return {
+        "schema": risk_config.schema(),
+        "suites": risk_config.SUITES,
+        "values": risk_config.current_values(),
+        "effect": "交易引擎每 15 分钟一个巡检周期；子进程启动时重新读取 .env，保存后下一周期自动生效，无需重启后台。",
+    }
+
+
+@app.post("/api/v1/admin/risk")
+def admin_risk_update(payload: RiskConfigUpdate, x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
+    refresh_settings()
+    actor = require_superadmin(x_r20_session)
+    merged: dict[str, Any] = {}
+    if payload.suite_id:
+        try:
+            merged.update(risk_config.suite_values(payload.suite_id))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    merged.update(payload.values)  # 显式提交值优先于套件
+    if not merged:
+        raise HTTPException(status_code=400, detail="没有需要保存的修改")
+    before = risk_config.current_values()
+    try:
+        env_updates = risk_config.normalize(merged)
+    except ValueError as exc:
+        audit_record("risk.config.update", "failed", {"actor": actor["username"], "suite": payload.suite_id, "reason": str(exc)})
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    update_env(env_updates)
+    refresh_settings()
+    audit_record("risk.config.update", "success", {
+        "actor": actor["username"],
+        "suite": payload.suite_id or None,
+        "changed": {k: {"before": before.get(k), "after": float(v)} for k, v in env_updates.items()},
+    })
+    return {
+        "updated": sorted(env_updates.keys()),
+        "applied_suite": payload.suite_id or None,
+        "values": risk_config.current_values(),
+        "effect": "已写入 .env；下一交易巡检周期（≤15 分钟）起对新开仓/加仓/时间止损全面生效，AI 主脑提示词中的风控口径同步对齐。",
+    }
+
+
+@app.post("/api/v1/admin/risk/reset")
+def admin_risk_reset(payload: RiskResetRequest, x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
+    refresh_settings()
+    actor = require_superadmin(x_r20_session)
+    if payload.confirmation.strip().upper() != "RESET RISK":
+        raise HTTPException(status_code=400, detail="确认短语必须精确为：RESET RISK")
+    remove_env(set(risk_config.reset_keys()))
+    refresh_settings()
+    audit_record("risk.config.reset", "success", {"actor": actor["username"]})
+    return {
+        "reset": True,
+        "values": risk_config.current_values(),
+        "effect": "全部自定义风控覆盖值已清除，执行层回退到代码默认基线。",
+    }
 
 
 @app.get("/api/v1/admin/okx/runtime")
@@ -1891,7 +1995,7 @@ def admin_instruments(x_r20_admin_token: str | None = Header(default=None)) -> d
     active = set(trackers.keys()) if isinstance(trackers, dict) else set()
     return {
         "instruments": [{**item, "protected": item["instId"] == "BTC-USDT-SWAP", "has_tracker": item["instId"] in active or item["name"] in active} for item in load_instruments()],
-        "limits": {"minimum": 1, "maximum": 6, "btc_required": True},
+        "limits": {"minimum": MIN_POOL_SIZE, "maximum": MAX_POOL_SIZE, "btc_required": True},
     }
 
 
@@ -1903,8 +2007,8 @@ def add_admin_instrument(payload: InstrumentAddRequest, x_r20_admin_token: str |
     current = load_instruments()
     if any(item["instId"] == inst_id for item in current):
         raise HTTPException(status_code=409, detail="该币种已在交易池中")
-    if len(current) >= 6:
-        raise HTTPException(status_code=409, detail="交易池最多允许 6 个币种；请先删除一个无持仓币种")
+    if len(current) >= MAX_POOL_SIZE:
+        raise HTTPException(status_code=409, detail=f"交易池最多允许 {MAX_POOL_SIZE} 个币种；请先删除一个无持仓币种，或调整环境变量 R20_MAX_POOL_SIZE")
     try:
         matches = get_exchange().instruments(inst_id)
     except Exception as exc:
@@ -1930,8 +2034,8 @@ def delete_admin_instrument(inst_id: str, payload: InstrumentDeleteRequest, x_r2
     if inst_id == "BTC-USDT-SWAP":
         raise HTTPException(status_code=403, detail="BTC 是全局黑天鹅哨兵基准，不允许从交易池删除")
     current = load_instruments()
-    if len(current) <= 1:
-        raise HTTPException(status_code=409, detail="交易池至少保留 1 个币种")
+    if len(current) <= MIN_POOL_SIZE:
+        raise HTTPException(status_code=409, detail=f"交易池至少保留 {MIN_POOL_SIZE} 个币种")
     if not any(item["instId"] == inst_id for item in current):
         raise HTTPException(status_code=404, detail="该币种不在交易池中")
     trackers = read_json("position_trackers.json", {})

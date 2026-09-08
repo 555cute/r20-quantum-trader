@@ -214,6 +214,7 @@ export const zhCN = {
     tradingGateway: '交易与网关',
     accountInstruments: '账户与标的池',
     interceptors: '物理拦截插件',
+    riskControl: '风控管理',
     gatewayJobs: '网关任务状态',
     systemAdmin: '系统管理',
     securityAuth: '系统安全与授权',

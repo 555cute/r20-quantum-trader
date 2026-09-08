@@ -34,7 +34,7 @@ TEMPLATE_VARIABLES_METADATA = [
         "key": "market_matrix",
         "label": "标的行情数理矩阵",
         "category": "行情数据",
-        "description": "注入6币种K线、现价、盘口买卖价、聪明钱流向、1H三大数理基石硬证据(v/a/j/I/E/A/VaR)",
+        "description": "注入标的池全部币种K线、现价、盘口买卖价、聪明钱流向、1H三大数理基石硬证据(v/a/j/I/E/A/VaR)",
         "sample": "【BTC (BTC-USDT-SWAP)】| 现价: 77575 | 4H宏观大势=4H_MACRO_BULL\n- 1H三大数理基石硬证据: 1H:v=+0.08,a=+0.42...",
     },
     {
@@ -187,7 +187,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         "pipelines": {
             "trading_system": [
                 {"id": "custom-ts-style", "title": "全维度波段强化交易风格", "locked": False, "enabled": True, "source": "custom",
-                 "content": "【交易风格：全维度波段强化（概率论权重提升·强开单·高胜率·防割肉）】\n所有 P0 硬约束保持不变，不得把“稳健”解释为长期空仓。核心裁决由【概率论与期望值】优先定性：当条件延续/击穿概率具有优势且 R:R≥2.0 时果断进场！杜绝频繁随意割肉：止损给足 1.8~2.2x ATR 彻底隔绝杂波插针扫损；浮盈达 0.8R~1.0R 坚决启动保本移损锁死胜率，杜绝浮盈变亏损。多空对称顺势，形态契合时自信评定 78%~88% 积极开单进场！"},
+                 "content": "【交易风格：全维度波段强化（概率论权重提升·强开单·高胜率·防割肉）】\n所有 P0 硬约束保持不变，不得把“稳健”解释为长期空仓。核心裁决由【概率论与期望值】优先定性：当条件延续/击穿概率具有优势且 R:R 达执行层底线时果断进场！杜绝频繁随意割肉：止损给足 1.8~2.2x ATR 彻底隔绝杂波插针扫损；浮盈达保本条件坚决移损锁死胜率，杜绝浮盈变亏损。多空对称顺势，形态契合时自信评定 78%~88% 积极开单进场！"},
             ],
             "trading_user": [
                 {"id": "base-ts-time", "title": "当前决策时间戳与市场时效", "locked": True, "enabled": True, "source": "base",
@@ -200,11 +200,11 @@ PRESETS: dict[str, dict[str, Any]] = {
                  "content": "======================= 【在途未成交限价挂单 (Pending Maker Orders)】 =======================\n{{pending_orders}}"},
                 {"id": "base-ts-memory", "title": "R20 启发式实战认知与长期记忆", "locked": True, "enabled": True, "source": "base",
                  "content": "======================= 【R20 启发式实战认知与长期记忆】 =======================\n{{trading_memory}}"},
-                {"id": "base-ts-matrix", "title": "六币种原生行情、技术指标与筹码矩阵", "locked": True, "enabled": True, "source": "base",
-                 "content": "======================= 【六币种原生行情、技术指标与筹码矩阵】 =======================\n{{market_matrix}}"},
+                {"id": "base-ts-matrix", "title": "全标的池原生行情、技术指标与筹码矩阵", "locked": True, "enabled": True, "source": "base",
+                 "content": "======================= 【全标的池原生行情、技术指标与筹码矩阵】 =======================\n{{market_matrix}}"},
                 {"id": "base-ts-task", "title": "推演与决策任务", "locked": False, "enabled": True, "source": "base", "content": ""},
                 {"id": "custom-tu-style", "title": "全维度波段强化裁决偏好（概率论高权重·多空对称·高胜率·防割肉体系）", "locked": False, "enabled": True, "source": "custom",
-                 "content": "【全维度波段强化裁决偏好（概率论高权重·多空对称·高胜率·防割肉体系）】\n1. 概率论最高权重决策：优先根据条件延续概率 P续 与击穿概率 P破 的数学期望定价；P续 占优专注做多回踩，P破 占优专注承压做空；\n2. 强烈开单欲望：拒绝机械空仓观望，普通回抽优先作为限价入场定位，4H/1H 顺势多头找回踩低吸挂多，4H/1H 顺势空头找反弹承压挂空，箱体震荡边界双向高抛低吸；\n3. 彻底拒绝随意割肉：止损距离外扩给足 1.8x~2.2x 1H ATR 呼吸空间，隔绝 15M/5M 噪音假动作；\n4. 浮盈达 0.8R~1.0R 主动输出 UPDATE_SL 移至保本位，锁定胜率下限，杜绝盈利单回吐成亏损割肉；\n5. 形态确立且 R:R≥2.0 时，自信给出 78%~88% 置信度果断开单！"},
+                 "content": "【全维度波段强化裁决偏好（概率论高权重·多空对称·高胜率·防割肉体系）】\n1. 概率期望优先：P续/P破 差值 ≥ 15% 即方向定论，只做概率优势一侧的回踩/承压入场，逆势一侧一律放弃；\n2. 强开单欲望：拒绝机械空仓。4H/1H 顺势多头找回踩低吸挂多，顺势空头找反弹承压挂空，箱体边界双向高抛低吸，半山腰坚决 WAIT；\n3. 防割肉优先：止损一律给足 1.8~2.2x 1H ATR 呼吸空间；浮盈达保本条件果断 UPDATE_SL 移损，盈利单极值回吐超阈值主动落袋，绝不让赚钱单倒亏；\n4. 置信度标定：形态达标且空间充足果断给出 78~88，确保通过执行层门禁进场；仅当全部候选触发硬否决或优势不足时才全体 WAIT。"},
             ],
             "evolution_system": [
                 {"id": "custom-es-style", "title": "全维度波段复盘风格", "locked": False, "enabled": True, "source": "custom",

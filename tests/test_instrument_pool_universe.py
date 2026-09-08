@@ -96,5 +96,30 @@ class InstrumentPoolUniverseTests(unittest.TestCase):
             self.assertEqual(again[0]["base_qty"], 0.3)
 
 
+class PoolCapacityNotHardcodedTests(unittest.TestCase):
+    """后台曾把标的池上限硬编码为 6，加第 7 个币直接被 409 拒绝 —— 部署者反馈「扩容跑不起来」的真凶。"""
+
+    APP = Path(__file__).resolve().parent.parent / "r20_backend" / "app.py"
+    SEC = Path(__file__).resolve().parent.parent / "frontend" / "src" / "views" / "admin" / "SecurityPage.vue"
+
+    def test_backend_uses_configurable_pool_cap(self):
+        src = self.APP.read_text(encoding="utf-8")
+        self.assertIn('os.getenv("R20_MAX_POOL_SIZE"', src, "池容量上限必须可由环境变量配置")
+        self.assertIn("len(current) >= MAX_POOL_SIZE", src, "添加校验必须使用常量而非字面量 6")
+        self.assertNotIn("len(current) >= 6", src, "检测到硬编码的 6 个币种上限回归")
+        self.assertNotIn("最多允许 6 个币种", src, "检测到硬编码错误文案回归")
+
+    def test_frontend_default_cap_not_stuck_at_six(self):
+        src = self.SEC.read_text(encoding="utf-8")
+        self.assertNotIn("maximum: 6", src, "前端默认池容量占位仍写死 6")
+
+    def test_concurrent_positions_follow_pool_size(self):
+        import ai_factor_trader as aft
+        self.assertEqual(aft.MAX_CONCURRENT_POSITIONS, len(ip.load_instruments()),
+                         "并发持仓上限应随标的池自动伸缩")
+        self.assertEqual(aft.MAX_SAME_DIRECTION_POSITIONS, 3,
+                         "同向持仓上限应固定为 3(防 Beta 踩踏)，不随池扩容放大")
+
+
 if __name__ == "__main__":
     unittest.main()

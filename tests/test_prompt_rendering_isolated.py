@@ -22,6 +22,9 @@ from typing import Any, Dict, List
 from unittest.mock import Mock, patch
 
 import scripts.prompt_library as prompts
+# 纯配置数据模块（import 时只读 .env，早于 IO 栅栏安装）：风控提示词函数引用的
+# 全部大写常量由此注入沙箱命名空间，新增风控参数无需再改本测试。
+import scripts.risk_constants as risk_constants
 
 # Read code only, before installing the runtime IO fence.
 PROJECT = Path(__file__).resolve().parents[1]
@@ -67,10 +70,12 @@ class Sandbox(unittest.TestCase):
         self.profile = {"name": "隔离策略", "pipelines": {"trading_user": [{"id": "u", "title": "自定义", "source": "custom", "enabled": True, "content": "余额={{account_balance}} 持仓={{account_positions}} 挂单={{pending_orders}}"}]}}
         node = next(n for n in TRADER_TREE.body if isinstance(n, ast.FunctionDef) and n.name == "construct_full_market_prompt")
         self.ns = dict(List=List, Dict=Dict, Any=Any, datetime=datetime, os=os, json=json,
+                       __version__="0.0.0-sandbox",
                        safe_float=lambda x: float(x or 0), active_profile=lambda: prompts.resolve_profile(self.profile),
                        apply_module_layout=prompts.apply_module_layout,
                        AI_MEMORY_MD_FILE=str(self.root / "memory.md"), AI_MEMORY_FILE=str(self.root / "memory.json"),
                        NEWS_SENTIMENT_FILE=str(self.root / "news.json"))
+        self.ns.update({k: v for k, v in vars(risk_constants).items() if k.isupper()})
         exec(compile(ast.Module(body=[node], type_ignores=[]), "scripts/ai_brain_trader.py", "exec"), self.ns)
         self.construct = self.ns["construct_full_market_prompt"]
 

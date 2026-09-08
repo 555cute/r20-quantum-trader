@@ -234,6 +234,14 @@ class IsolatedPromptAntiDrawdownTests(unittest.TestCase):
         self.assertIn("功率态=KINETIC_EXHAUSTION", prompt_str)
         self.assertIn("κ=1.61", prompt_str)
         self.assertIn("Φ=-0.16", prompt_str)
+    def test_system_prompt_contains_anti_drawdown_directives(self):
+        profile = abt.active_profile()
+        sys_prompt = profile.get("trading_system", "")
+        # v7.6.0 重写后的标准措辞（语义不变：三阶棘轮 + 峰值回撤/动能耗散主动止盈 + CLOSE_MARKET 指令）
+        self.assertIn("三阶利润棘轮", sys_prompt)
+        self.assertIn("峰值回撤", sys_prompt)
+        self.assertIn("动能耗散", sys_prompt)
+        self.assertIn("CLOSE_MARKET", sys_prompt)
 
 
 if __name__ == "__main__":
