@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import { useToast } from '../../composables/useToast'
+const toast = useToast()
 import { ref, onMounted , watch} from 'vue'
 import { useI18n } from '../../composables/useI18n'
-import SaveBar from '../../components/admin/SaveBar.vue'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
 import {
@@ -34,9 +35,6 @@ const { t } = useI18n()
 const loading = ref(true)
 const saving = ref(false)
 const testing = ref(false)
-const bannerMsg = ref<{ text: string; type: 'ok' | 'err' | 'warn' } | null>(null)
-const bannerSeq = ref(0)
-watch(bannerMsg, () => { bannerSeq.value++ })
 
 const councilConfig = ref<any>({
   enabled: false,
@@ -54,13 +52,13 @@ const expandedReasoning = ref<Record<string, boolean>>({})
 const consensusModes = [
   {
     id: 'standard',
-    name: '标准提案模式 (Standard)',
+    name: '标准提案模式',
     tag: '高效终审',
     desc: '各交易员提交首轮独立方案与审查汇报，汇编完整卷宗直接由 CIO 终审查决。',
   },
   {
     id: 'cross_examination',
-    name: '双轮质询互评模式 (Cross-Exam)',
+    name: '双轮质询互评',
     tag: '深度攻防',
     desc: '第一轮独立方案 -> 第二轮同行交叉漏洞质询辩论 -> 第三轮 CIO 统筹审阅攻防并拍板。',
   },
@@ -97,7 +95,7 @@ async function loadData() {
       expandedRole.value = roleKeys[0]
     }
   } catch (e: any) {
-    bannerMsg.value = { text: `加载配置失败: ${e.message}`, type: 'err' }
+    toast.err(`加载配置失败: ${e.message}`)
   } finally {
     loading.value = false
   }
@@ -105,7 +103,7 @@ async function loadData() {
 
 async function saveConfig() {
   if (!auth.isSuperadmin) {
-    bannerMsg.value = { text: '仅超级管理员可修改投委会配置', type: 'err' }
+    toast.err('仅超级管理员可修改投委会配置')
     return
   }
   saving.value = true
@@ -120,14 +118,11 @@ async function saveConfig() {
       }),
     })
     councilConfig.value = res.config
-    bannerMsg.value = {
-      text: councilConfig.value.enabled
+    toast.ok(councilConfig.value.enabled
         ? `✅ 对冲基金投委会配置已保存并生效（${consensusModes.find((m) => m.id === councilConfig.value.consensus_mode)?.name || '标准提案模式'}）`
-        : '✅ 投委会配置已保存（当前为单模型直连决策）',
-      type: 'ok',
-    }
+        : '✅ 投委会配置已保存（当前为单模型直连决策）')
   } catch (e: any) {
-    bannerMsg.value = { text: `保存失败: ${e.message}`, type: 'err' }
+    toast.err(`保存失败: ${e.message}`)
   } finally {
     saving.value = false
   }
@@ -149,9 +144,9 @@ async function exportConfig() {
     a.download = `r20-council-config-${new Date().toISOString().slice(0, 10)}.json`
     a.click()
     URL.revokeObjectURL(url)
-    bannerMsg.value = { text: '✅ 投委会配置已导出为 JSON 包（含全部席位提示词与议事规则）', type: 'ok' }
+    toast.ok('投委会配置已导出为 JSON 包（含全部席位提示词与议事规则）')
   } catch (e: any) {
-    bannerMsg.value = { text: `导出失败：${e.message}`, type: 'err' }
+    toast.err(`导出失败：${e.message}`)
   }
 }
 
@@ -185,10 +180,7 @@ async function doImportConfig() {
     await loadData()
     importVisible.value = false
     importRawJson.value = ''
-    bannerMsg.value = {
-      text: `✅ 投委会配置导入成功：席位 ${(res.roles || []).join(' / ')}${res.backup_file ? `；原配置已自动备份为 ${res.backup_file}` : ''}`,
-      type: 'ok',
-    }
+    toast.ok(`投委会配置导入成功：席位 ${(res.roles || []).join(' / ')}${res.backup_file ? `；原配置已自动备份为 ${res.backup_file}` : ''}`)
   } catch (e: any) {
     importFileError.value = `导入失败：${e.message}`
   } finally {
@@ -205,9 +197,9 @@ async function applySuite(suiteId: string) {
       body: JSON.stringify({ suite_id: suiteId }),
     })
     councilConfig.value = res.config
-    bannerMsg.value = { text: '🎉 已载入标准投委会阵容！', type: 'ok' }
+    toast.ok('已载入标准投委会阵容！')
   } catch (e: any) {
-    bannerMsg.value = { text: `载入失败: ${e.message}`, type: 'err' }
+    toast.err(`载入失败: ${e.message}`)
   }
 }
 
@@ -233,7 +225,7 @@ function addNewCustomTrader() {
     model_id: '',
   }
   expandedRole.value = roleId
-  bannerMsg.value = { text: '已添加自定义交易员席位，可直接编辑提示词与参数', type: 'ok' }
+  toast.ok('已添加自定义交易员席位，可直接编辑提示词与参数')
 }
 
 function removeRole(roleId: string) {
@@ -245,7 +237,7 @@ function removeRole(roleId: string) {
   }
   if (!confirm(`确定移除交易员【${role?.name || roleId}】席位吗？`)) return
   delete councilConfig.value.roles[roleId]
-  bannerMsg.value = { text: '已移除席位，点击右上角「保存配置」后生效', type: 'warn' }
+  toast.warn('已移除席位，点击右上角「保存配置」后生效')
 }
 
 async function resetRole(roleId: string) {
@@ -256,9 +248,9 @@ async function resetRole(roleId: string) {
       body: JSON.stringify({ role_id: roleId }),
     })
     councilConfig.value = res.config
-    bannerMsg.value = { text: '已重置为出厂标准模板', type: 'ok' }
+    toast.ok('已重置为出厂标准模板')
   } catch (e: any) {
-    bannerMsg.value = { text: `重置失败: ${e.message}`, type: 'err' }
+    toast.err(`重置失败: ${e.message}`)
   }
 }
 
@@ -266,7 +258,7 @@ async function runDebateTest() {
   testing.value = true
   testResult.value = null
   expandedReasoning.value = {}
-  bannerMsg.value = { text: '投委会正在全息审阅资金与行情并组织交易员辩论（预计 10~25 秒）...', type: 'warn' }
+  toast.warn('投委会正在全息审阅资金与行情并组织交易员辩论（预计 10~25 秒）...')
   try {
     const res = await api('/api/v1/admin/council/test', {
       method: 'POST',
@@ -274,12 +266,12 @@ async function runDebateTest() {
     })
     if (res.status === 'ok') {
       testResult.value = res
-      bannerMsg.value = { text: `✅ 投委会辩论与 CIO 终审完成！耗时 ${res.transcript?.total_duration_ms || 0}ms`, type: 'ok' }
+      toast.ok(`投委会辩论与 CIO 终审完成！耗时 ${res.transcript?.total_duration_ms || 0}ms`)
     } else {
-      bannerMsg.value = { text: `测试失败: ${res.error || '未知错误'}`, type: 'err' }
+      toast.err(`测试失败: ${res.error || '未知错误'}`)
     }
   } catch (e: any) {
-    bannerMsg.value = { text: `测试出错: ${e.message}`, type: 'err' }
+    toast.err(`测试出错: ${e.message}`)
   } finally {
     testing.value = false
   }
@@ -291,12 +283,6 @@ onMounted(loadData)
 <template>
   <div class="space-y-4">
     <!-- Notice Banner -->
-    <SaveBar
-          :type="bannerMsg?.type || 'ok'"
-          :text="bannerMsg?.text || ''"
-          :nonce="bannerSeq"
-          @dismiss="bannerMsg = null"
-        />
     <!-- 1. Top Control Station: Switch, Consensus Mode & Actions -->
     <div class="rounded-2xl border p-4 sm:p-5 shadow-xs space-y-4" style="background-color: var(--surface-2); border-color: var(--line-1);">
       <!-- Header row -->
@@ -307,8 +293,8 @@ onMounted(loadData)
           </div>
           <div>
             <div class="flex items-center space-x-2">
-              <h2 class="text-xs sm:text-[13px] font-semibold uppercase tracking-wide" style="color: var(--ink-1);">
-                {{ t('admin.nCouncil') }}
+              <h2 class="text-xs sm:text-[13px] font-semibold" style="color: var(--ink-1);">
+                {{ t('nav.admin.council') }}
               </h2>
               <span
                 class="badge-lever"
@@ -317,7 +303,7 @@ onMounted(loadData)
                 {{ councilConfig.enabled ? '● 投委会辩论' : '○ 单模型' }}
               </span>
             </div>
-            <p class="text-[11px] mt-0.5" style="color: var(--ink-2);"> 对冲基金投委会决策中枢 (Trading Desk Council) —— 多交易员独立提案并交叉质询，由首席投资官 (CIO) 统筹可用资金终审发单 </p>
+            <p class="text-[11px] mt-0.5" style="color: var(--ink-2);"> 多交易员独立提案、交叉质询，首席仲裁官统筹资金与敞口后终审发单 </p>
           </div>
         </div>
 
@@ -593,7 +579,7 @@ onMounted(loadData)
 
             <!-- Delete (Only for custom traders) -->
             <button
-              v-if="!role.is_arbitrator && roleId !== 'cio' && !['trader_trend', 'trader_momentum', 'trader_quant'].includes(roleId)"
+              v-if="!role.is_arbitrator && roleId !== 'cio' && !['trader_trend', 'trader_momentum', 'trader_quant'].includes(String(roleId))"
               @click="removeRole(String(roleId))"
               :disabled="!auth.isSuperadmin"
               class="p-1.5 rounded text-rose-400 hover:opacity-80 cursor-pointer"
@@ -619,7 +605,7 @@ onMounted(loadData)
         <div v-if="expandedRole === roleId" class="mt-3 pt-3 border-t space-y-3" style="border-color: var(--line-1);">
           <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
             <div class="flex items-center space-x-2">
-              <span style="color: var(--ink-2);">采样温度 (Temperature):</span>
+              <span style="color: var(--ink-2);">采样温度:</span>
               <input
                 v-model="role.temperature"
                 type="number"
@@ -746,7 +732,7 @@ onMounted(loadData)
       <!-- Optional: Round 2 Cross-Examinations Grid (only in cross_examination mode) -->
       <div v-if="testResult.transcript?.cross_examinations && Object.keys(testResult.transcript.cross_examinations).length > 0" class="space-y-1 pt-2">
         <div class="flex items-center space-x-2 text-xs font-bold text-amber-400">
-          <span>第二轮：同行方案交叉漏洞质询与攻防攻守实录 (Cross-Examination)</span>
+          <span>第二轮：交叉质询与攻防实录</span>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div

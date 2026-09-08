@@ -1,8 +1,9 @@
 <script setup lang="ts">
+import { useToast } from '../../composables/useToast'
+const toast = useToast()
 import { ref, computed, onMounted , watch} from 'vue'
 import { useI18n } from '../../composables/useI18n'
 const { t } = useI18n()
-import SaveBar from '../../components/admin/SaveBar.vue'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
 import { HardDrive, RefreshCw, PlugZap, Save, PlayCircle, Archive, AlertCircle, Download, Upload, RotateCcw } from 'lucide-vue-next'
@@ -12,9 +13,6 @@ const auth = useAuthStore()
 
 const loading = ref(true)
 const busy = ref<'test' | 'save' | 'run' | 'restore' | 'upload' | ''>('')
-const bannerMsg = ref<{ text: string; type: 'ok' | 'warn' | 'err' } | null>(null)
-const bannerSeq = ref(0)
-watch(bannerMsg, () => { bannerSeq.value++ })
 const downloadingArchive = ref<string>('')
 
 const simple = ref<any>(null)
@@ -57,7 +55,7 @@ async function load() {
     endpoint.value = s.target?.endpoint || ''
     bucket.value = s.target?.bucket || ''
   } catch (e: any) {
-    bannerMsg.value = { text: `加载失败：${e.message}`, type: 'err' }
+    toast.err(`加载失败：${e.message}`)
   } finally {
     loading.value = false
   }
@@ -77,12 +75,11 @@ function payload() {
 
 async function testConnection() {
   busy.value = 'test'
-  bannerMsg.value = null
   try {
     const res = await api('/api/v1/admin/backups/simple/test', { method: 'POST', body: JSON.stringify(payload()) })
-    bannerMsg.value = { text: `✅ ${res.detail}`, type: 'ok' }
+    toast.ok(`${res.detail}`)
   } catch (e: any) {
-    bannerMsg.value = { text: `测试失败：${e.message}`, type: 'err' }
+    toast.err(`测试失败：${e.message}`)
   } finally {
     busy.value = ''
   }
@@ -90,13 +87,12 @@ async function testConnection() {
 
 async function save() {
   busy.value = 'save'
-  bannerMsg.value = null
   try {
     await api('/api/v1/admin/backups/simple', { method: 'PUT', body: JSON.stringify(payload()) })
-    bannerMsg.value = { text: '✅ 灾备配置已保存，每天北京时间 ' + scheduleTime.value + ' 自动执行', type: 'ok' }
+    toast.ok('灾备配置已保存，每天北京时间 ' + scheduleTime.value + ' 自动执行')
     await load()
   } catch (e: any) {
-    bannerMsg.value = { text: `保存失败：${e.message}`, type: 'err' }
+    toast.err(`保存失败：${e.message}`)
   } finally {
     busy.value = ''
   }
@@ -106,13 +102,12 @@ async function runNow() {
   const phrase = prompt('立即执行完整灾备（打包并按已启用目标上传）需输入确认短语：BACKUP R20')
   if (!phrase) return
   busy.value = 'run'
-  bannerMsg.value = null
   try {
     const res = await api('/api/v1/admin/backups/run', { method: 'POST', body: JSON.stringify({ confirmation: phrase.trim().toUpperCase() }) })
-    bannerMsg.value = { text: `✅ 灾备执行完成（${(res.output || '').length} 字符输出已记录）`, type: 'ok' }
+    toast.ok(`灾备执行完成（${(res.output || '').length} 字符输出已记录）`)
     await load()
   } catch (e: any) {
-    bannerMsg.value = { text: `灾备失败：${e.message}`, type: 'err' }
+    toast.err(`灾备失败：${e.message}`)
   } finally {
     busy.value = ''
   }
@@ -121,7 +116,7 @@ async function runNow() {
 async function downloadArchive(archiveName: string) {
   const clean = archiveName.split('/').pop() || archiveName
   downloadingArchive.value = clean
-  bannerMsg.value = { text: `正在连接并准备下载归档文件 ${clean}...`, type: 'ok' }
+  toast.ok(`正在连接并准备下载归档文件 ${clean}...`)
 
   const token = auth.token || localStorage.getItem('r20.admin.session.id') || ''
   const directUrl = `/api/v1/admin/backups/download/${encodeURIComponent(clean)}${token ? `?token=${encodeURIComponent(token)}` : ''}`
@@ -155,7 +150,7 @@ async function downloadArchive(archiveName: string) {
       window.URL.revokeObjectURL(blobUrl)
     }, 2000)
 
-    bannerMsg.value = { text: `✅ 归档文件 ${clean} 已成功触发下载`, type: 'ok' }
+    toast.ok(`归档文件 ${clean} 已成功触发下载`)
   } catch (e: any) {
     // 双通道策略 2：若 Blob 或 Fetch 产生跨域或浏览器安全拦截，降级采用原生链接直连触发
     try {
@@ -166,9 +161,9 @@ async function downloadArchive(archiveName: string) {
       document.body.appendChild(fallbackA)
       fallbackA.click()
       setTimeout(() => fallbackA.remove(), 1000)
-      bannerMsg.value = { text: `✅ 已切换直接下载通道触发归档 ${clean} 下载`, type: 'ok' }
+      toast.ok(`已切换直接下载通道触发归档 ${clean} 下载`)
     } catch (fallbackErr: any) {
-      bannerMsg.value = { text: `下载失败：${e.message}`, type: 'err' }
+      toast.err(`下载失败：${e.message}`)
     }
   } finally {
     downloadingArchive.value = ''
@@ -186,7 +181,6 @@ async function onFileSelected(e: Event) {
   const file = target.files?.[0]
   if (!file) return
   busy.value = 'upload'
-  bannerMsg.value = null
   try {
     const formData = new FormData()
     formData.append('file', file)
@@ -201,10 +195,10 @@ async function onFileSelected(e: Event) {
     if (!resp.ok) {
       throw new Error(res.detail || `上传失败 HTTP ${resp.status}`)
     }
-    bannerMsg.value = { text: `✅ 备份包 ${file.name} 上传成功！`, type: 'ok' }
+    toast.ok(`备份包 ${file.name} 上传成功！`)
     await load()
   } catch (err: any) {
-    bannerMsg.value = { text: `上传备份失败：${err.message}`, type: 'err' }
+    toast.err(`上传备份失败：${err.message}`)
   } finally {
     busy.value = ''
     if (target) target.value = ''
@@ -220,7 +214,6 @@ async function restoreArchive(archiveName: string) {
     return
   }
   busy.value = 'restore'
-  bannerMsg.value = null
   try {
     const res = await api('/api/v1/admin/backups/restore', {
       method: 'POST',
@@ -229,10 +222,10 @@ async function restoreArchive(archiveName: string) {
         confirmation: 'RESTORE R20'
       })
     })
-    bannerMsg.value = { text: `✅ 备份 ${clean} 恢复成功！共解压 ${res.restored_count} 个核心文件。请重启或刷新服务使新状态接管。`, type: 'ok' }
+    toast.ok(`备份 ${clean} 恢复成功！共解压 ${res.restored_count} 个核心文件。请重启或刷新服务使新状态接管。`)
     await load()
   } catch (e: any) {
-    bannerMsg.value = { text: `恢复失败：${e.message}`, type: 'err' }
+    toast.err(`恢复失败：${e.message}`)
   } finally {
     busy.value = ''
   }
@@ -255,13 +248,6 @@ onMounted(load)
       <p class="text-xs text-[var(--ink-3)]">支持本地/云端全量数据灾备、备份打包直接下载、本地备份上传与一键全量恢复。</p>
       <span class="text-[11px] text-blue-400 bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20">集成与保障 · 2/3</span>
     </div>
-
-    <SaveBar
-          :type="bannerMsg?.type || 'ok'"
-          :text="bannerMsg?.text || ''"
-          :nonce="bannerSeq"
-          @dismiss="bannerMsg = null"
-        />
     <div v-if="loading" class="py-12 text-center text-xs" style="color: var(--ink-2);"><RefreshCw class="w-5 h-5 animate-spin inline mr-1.5" style="color: var(--accent);" />正在加载灾备配置...</div>
 
     <template v-else-if="simple">
@@ -270,7 +256,7 @@ onMounted(load)
         <div class="flex items-center justify-between mb-2">
           <div class="flex items-center space-x-2">
             <HardDrive class="w-4 h-4" style="color: var(--accent);" />
-            <h2 class="text-sm font-bold" style="color: var(--ink-1);">{{ t('admin.nBackup') }}</h2>
+            <h2 class="text-sm font-bold" style="color: var(--ink-1);">{{ t('nav.admin.backup') }}</h2>
         <p class="text-[11px] mt-0.5" style="color: var(--ink-2);"> 自动灾备 </p>
           </div>
           <label class="flex items-center space-x-2 text-xs cursor-pointer">
@@ -359,7 +345,7 @@ onMounted(load)
           <div class="px-4 py-3 border-b flex items-center justify-between" style="border-color: var(--line-1); background-color: var(--surface-1);">
             <div class="flex items-center space-x-2">
               <Archive class="w-4 h-4 text-cyan-400" />
-              <h2 class="text-xs font-semibold uppercase tracking-wide" style="color: var(--ink-1);">备份归档清单 ({{ status?.local_archives?.length ?? 0 }})</h2>
+              <h2 class="text-xs font-semibold" style="color: var(--ink-1);">备份归档清单 ({{ status?.local_archives?.length ?? 0 }})</h2>
             </div>
             <span class="text-[11px]" style="color: var(--ink-3);">支持直接下载与一键恢复</span>
           </div>

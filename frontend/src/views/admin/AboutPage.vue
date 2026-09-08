@@ -98,7 +98,7 @@ onMounted(() => {
           <div class="flex items-center justify-between pb-3 mb-3 border-b" style="border-color: var(--line-1);">
             <div class="flex items-center space-x-2">
               <Info class="w-4 h-4" style="color: var(--accent);" />
-              <h2 class="text-sm font-bold" style="color: var(--ink-1);">{{ t('admin.nAbout') }}</h2>
+              <h2 class="text-sm font-bold" style="color: var(--ink-1);">{{ t('nav.admin.about') }}</h2>
             </div>
             <span class="text-[11px] px-2 py-0.5 rounded border font-bold" style="background-color: var(--up-bg); color: var(--up); border-color: var(--up-line);">OPEN SOURCE</span>
           </div>
@@ -137,7 +137,7 @@ onMounted(() => {
         <div class="flex items-center justify-between pb-3 mb-3 border-b" style="border-color: var(--line-1);">
           <div class="flex items-center space-x-2">
             <ShieldCheck class="w-4 h-4 text-emerald-500" />
-            <h2 class="text-sm font-bold" style="color: var(--ink-1);">安全更新 (Git Fast-Forward)</h2>
+            <h2 class="text-sm font-bold" style="color: var(--ink-1);">安全更新</h2>
           </div>
           <span class="text-[11px] px-2 py-0.5 rounded border font-bold" style="background-color: var(--accent-bg); color: var(--accent); border-color: var(--accent-line);">FF-ONLY</span>
         </div>

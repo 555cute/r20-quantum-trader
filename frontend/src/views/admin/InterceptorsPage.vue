@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import { useToast } from '../../composables/useToast'
+const toast = useToast()
 import { ref, onMounted , watch} from 'vue'
 import { useI18n } from '../../composables/useI18n'
-import SaveBar from '../../components/admin/SaveBar.vue'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
 import {
@@ -16,9 +17,6 @@ const { t } = useI18n()
 
 const plugins = ref<any[]>([])
 const loading = ref(true)
-const bannerMsg = ref<{ text: string; type: 'ok' | 'err' | 'warn' } | null>(null)
-const bannerSeq = ref(0)
-watch(bannerMsg, () => { bannerSeq.value++ })
 
 // Code Editor Modal State
 const editorVisible = ref(false)
@@ -45,7 +43,7 @@ async function loadPlugins() {
     const res = await api('/api/v1/admin/interceptors')
     plugins.value = res.plugins || []
   } catch (e: any) {
-    bannerMsg.value = { text: `加载插件失败：${e.message}`, type: 'err' }
+    toast.err(`加载插件失败：${e.message}`)
   } finally {
     loading.value = false
   }
@@ -59,12 +57,9 @@ async function togglePlugin(p: any) {
       body: JSON.stringify({ enabled: nextState }),
     })
     p.enabled = nextState
-    bannerMsg.value = {
-      text: `已${nextState ? '启用' : '停用'}拦截插件「${p.name || p.filename}」`,
-      type: 'ok',
-    }
+    toast.ok(`已${nextState ? '启用' : '停用'}拦截插件「${p.name || p.filename}」`)
   } catch (e: any) {
-    bannerMsg.value = { text: `操作失败：${e.message}`, type: 'err' }
+    toast.err(`操作失败：${e.message}`)
   }
 }
 
@@ -82,9 +77,9 @@ async function movePlugin(idx: number, dir: -1 | 1) {
       body: JSON.stringify({ pipeline_order: newOrder }),
     })
     plugins.value = res.plugins || arr
-    bannerMsg.value = { text: '已更新拦截管线执行优先级顺序', type: 'ok' }
+    toast.ok('已更新拦截管线执行优先级顺序')
   } catch (e: any) {
-    bannerMsg.value = { text: `排序更新失败：${e.message}`, type: 'err' }
+    toast.err(`排序更新失败：${e.message}`)
     await loadPlugins()
   }
 }
@@ -98,7 +93,7 @@ async function openEditor(p: any) {
     codeError.value = ''
     editorVisible.value = true
   } catch (e: any) {
-    bannerMsg.value = { text: `读取插件源码失败：${e.message}`, type: 'err' }
+    toast.err(`读取插件源码失败：${e.message}`)
   }
 }
 
@@ -110,7 +105,7 @@ async function saveCode() {
       method: 'PUT',
       body: JSON.stringify({ code: editingCode.value }),
     })
-    bannerMsg.value = { text: `✅ 插件「${editingFilename.value}」代码已保存并热加载生效`, type: 'ok' }
+    toast.ok(`插件「${editingFilename.value}」代码已保存并热加载生效`)
     editorVisible.value = false
     await loadPlugins()
   } catch (e: any) {
@@ -134,10 +129,10 @@ async function deletePlugin(p: any) {
   if (!confirm(`确定删除拦截插件「${p.name || p.filename}」？\n文件将被从磁盘彻底移除。`)) return
   try {
     await api(`/api/v1/admin/interceptors/${encodeURIComponent(p.filename)}`, { method: 'DELETE' })
-    bannerMsg.value = { text: `已删除插件「${p.filename}」`, type: 'ok' }
+    toast.ok(`已删除插件「${p.filename}」`)
     await loadPlugins()
   } catch (e: any) {
-    bannerMsg.value = { text: `删除失败：${e.message}`, type: 'err' }
+    toast.err(`删除失败：${e.message}`)
   }
 }
 
@@ -150,7 +145,7 @@ async function runSandbox() {
     })
     testModalVisible.value = true
   } catch (e: any) {
-    bannerMsg.value = { text: `沙箱回归测试执行失败：${e.message}`, type: 'err' }
+    toast.err(`沙箱回归测试执行失败：${e.message}`)
   } finally {
     testing.value = false
   }
@@ -204,7 +199,7 @@ async function submitCreate() {
         code: newCode.value,
       }),
     })
-    bannerMsg.value = { text: `🎉 成功创建拦截插件「${res.name || res.filename}」！`, type: 'ok' }
+    toast.ok(`成功创建拦截插件「${res.name || res.filename}」！`)
     createModalVisible.value = false
     await loadPlugins()
   } catch (e: any) {
@@ -224,8 +219,8 @@ onMounted(loadPlugins)
           <ShieldCheck class="w-3.5 h-3.5" style="color: var(--up);" />
         </div>
         <div>
-          <h1 class="text-xs sm:text-[13px] font-semibold uppercase tracking-wide" style="color: var(--ink-1);">
-            {{ t('admin.nInterceptors') }}
+          <h1 class="text-xs sm:text-[13px] font-semibold" style="color: var(--ink-1);">
+            {{ t('nav.admin.interceptors') }}
           </h1>
           <p class="text-[11px] mt-0.5" style="color: var(--ink-2);"> 物理拦截插件配置中心 —— 交易决策发出前必须通过 Python 物理拦截插件管线 (Fail-Closed) </p>
         </div>
@@ -254,12 +249,6 @@ onMounted(loadPlugins)
     </div>
 
     <!-- Alert / Banner Message -->
-    <SaveBar
-          :type="bannerMsg?.type || 'ok'"
-          :text="bannerMsg?.text || ''"
-          :nonce="bannerSeq"
-          @dismiss="bannerMsg = null"
-        />
     <!-- Loading State -->
     <div v-if="loading" class="py-12 text-center text-xs" style="color: var(--ink-2);">正在扫描加载物理拦截插件...</div>
 

@@ -1,8 +1,9 @@
 <script setup lang="ts">
+import { useToast } from '../../composables/useToast'
+const toast = useToast()
 import { ref, computed, onMounted , watch} from 'vue'
 import { useI18n } from '../../composables/useI18n'
 const { t } = useI18n()
-import SaveBar from '../../components/admin/SaveBar.vue'
 import { useApi } from '../../composables/useApi'
 import { MessageCircle, Zap, CheckCircle2, AlertCircle } from 'lucide-vue-next'
 
@@ -19,17 +20,6 @@ const enabledChannelsCount = computed(() => {
   return ['qq', 'telegram', 'wechat', 'webhook'].filter(k => config.value[k]?.enabled).length
 })
 
-const bannerMsg = ref<{ type: 'ok' | 'warn' | 'error'; text: string } | null>(null)
-const bannerSeq = ref(0)
-watch(bannerMsg, () => { bannerSeq.value++ })
-let bannerTimer: any = null
-
-function showNotificationBanner(type: 'ok' | 'warn' | 'error', text: string) {
-  bannerMsg.value = { type, text }
-  if (bannerTimer) clearTimeout(bannerTimer)
-  bannerTimer = setTimeout(() => { bannerMsg.value = null }, 6000)
-}
-
 async function loadConfig(silent = false) {
   if (!silent) loading.value = true
   try {
@@ -44,7 +34,7 @@ async function loadConfig(silent = false) {
     config.value = res
   } catch (e: any) {
     console.error(e)
-    showNotificationBanner('error', '加载通知配置失败: ' + (e.message || String(e)))
+    toast.err('加载通知配置失败: ' + (e.message || String(e)))
   } finally {
     if (!silent) loading.value = false
   }
@@ -72,10 +62,10 @@ async function toggleChannel(channel: string, enabled: boolean) {
       }
     }
     const res = await api(`/api/v1/admin/channels/${channel}/toggle`, { method: 'PUT', body: JSON.stringify(payload) })
-    showNotificationBanner('ok', res.message || `${channel} 通道已成功${enabled ? '开启' : '关闭'}`)
+    toast.ok(res.message || `${channel} 通道已成功${enabled ? '开启' : '关闭'}`)
     await loadConfig(true)
   } catch (e: any) {
-    showNotificationBanner('error', e.message || '通道状态切换失败')
+    toast.err(e.message || '通道状态切换失败')
     await loadConfig(true)
   }
 }
@@ -97,10 +87,10 @@ async function saveAll() {
       qq_openid: config.value.qq.openid,
     }
     const res = await api('/api/v1/admin/notifications', { method: 'PUT', body: JSON.stringify(body) })
-    showNotificationBanner('ok', res.message || '全部通知通道配置已保存')
+    toast.ok(res.message || '全部通知通道配置已保存')
     await loadConfig(true)
   } catch (e: any) {
-    showNotificationBanner('error', e.message || '保存配置失败')
+    toast.err(e.message || '保存配置失败')
   }
 }
 
@@ -243,12 +233,6 @@ onMounted(() => {
     </div>
 
     <!-- Alert / Banner Message -->
-    <SaveBar
-          :type="bannerMsg?.type || 'ok'"
-          :text="bannerMsg?.text || ''"
-          :nonce="bannerSeq"
-          @dismiss="bannerMsg = null"
-        />
     <div v-if="loading" class="py-12 text-center text-xs" style="color: var(--ink-2);">正在加载通知配置...</div>
 
     <template v-else-if="config">
@@ -257,7 +241,7 @@ onMounted(() => {
         <div class="flex items-center justify-between mb-4">
           <div class="flex items-center space-x-2">
             <span class="inline-block w-2 h-2 rounded-full" :class="config.qq.enabled ? 'bg-emerald-500' : 'bg-zinc-500'"></span>
-            <h2 class="text-sm font-bold" style="color: var(--ink-1);">{{ t('admin.nNotify') }}</h2>
+            <h2 class="text-sm font-bold" style="color: var(--ink-1);">{{ t('nav.admin.notify') }}</h2>
           </div>
           <div class="flex items-center space-x-3">
             <button @click="startQqBind" class="px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer transition-all shadow-xs" style="background-color: var(--ink-1); color: var(--surface-2);">扫码绑定</button>
@@ -426,14 +410,14 @@ onMounted(() => {
       <!-- Schedule + Notification Categories + Save -->
       <div class="rounded-xl border p-4 sm:p-5 shadow-xs transition-colors space-y-4" style="background-color: var(--surface-2); border-color: var(--line-1);">
         <div>
-          <h2 class="text-sm font-bold mb-1" style="color: var(--ink-1);">📡 全闭环通知类别与事件流 (Notification Categories)</h2>
+          <h2 class="text-sm font-bold mb-1" style="color: var(--ink-1);">通知类别与事件流</h2>
           <p class="text-xs" style="color: var(--ink-2);">系统底层事件已全面升级，针对不同关键节点自动化推送结构化卡片文案：</p>
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 text-xs">
           <div class="p-3 rounded-lg border space-y-1" style="background-color: var(--surface-1); border-color: var(--line-1);">
             <div class="flex items-center space-x-1.5 font-bold text-emerald-400">
-              <span>🚀 实盘开仓触发 (trade.opened)</span>
+              <span>🚀 实盘开仓触发 <code class="mono text-[10px] opacity-60">trade.opened</code></span>
             </div>
             <p class="text-[11px] leading-relaxed" style="color: var(--ink-2);">
               包含标的、多空方向、杠杆、开仓挂单价、OCO云端止盈/止损双轨及大模型因果决策逻辑。
@@ -442,7 +426,7 @@ onMounted(() => {
 
           <div class="p-3 rounded-lg border space-y-1" style="background-color: var(--surface-1); border-color: var(--line-1);">
             <div class="flex items-center space-x-1.5 font-bold text-blue-400">
-              <span>🎯 平仓结清提醒 (trade.closed)</span>
+              <span>平仓结清提醒 <code class="mono text-[10px] opacity-60">trade.closed</code></span>
             </div>
             <p class="text-[11px] leading-relaxed" style="color: var(--ink-2);">
               智能区分「🎉 盈利落袋」、「⚖️ 保本结清」与「🛡️ 风控止损」，清晰输出净盈亏 U 数、ROI 与持仓时长。
@@ -451,7 +435,7 @@ onMounted(() => {
 
           <div class="p-3 rounded-lg border space-y-1" style="background-color: var(--surface-1); border-color: var(--line-1);">
             <div class="flex items-center space-x-1.5 font-bold text-indigo-400">
-              <span>🛡️ 保本锁利移损 (trade.sl_updated)</span>
+              <span>保本锁利移损 <code class="mono text-[10px] opacity-60">trade.sl_updated</code></span>
             </div>
             <p class="text-[11px] leading-relaxed" style="color: var(--ink-2);">
               浮盈达标触发保本移损时，即刻播报原止损位与上移后的保本价，确认锁定本单胜率下限。
@@ -460,7 +444,7 @@ onMounted(() => {
 
           <div class="p-3 rounded-lg border space-y-1" style="background-color: var(--surface-1); border-color: var(--line-1);">
             <div class="flex items-center space-x-1.5 font-bold text-purple-400">
-              <span>🧬 AI 自进化心法 (evolution.completed)</span>
+              <span>AI 自进化心法 <code class="mono text-[10px] opacity-60">evolution.completed</code></span>
             </div>
             <p class="text-[11px] leading-relaxed" style="color: var(--ink-2);">
               每日闭环自进化完成后，实时推送当日全样本胜率、演进状态及大模型提炼的核心实战心法。
@@ -469,7 +453,7 @@ onMounted(() => {
 
           <div class="p-3 rounded-lg border space-y-1" style="background-color: var(--surface-1); border-color: var(--line-1);">
             <div class="flex items-center space-x-1.5 font-bold text-red-400">
-              <span>🚨 黑天鹅避险熔断 (risk.triggered)</span>
+              <span>🚨 黑天鹅避险熔断 <code class="mono text-[10px] opacity-60">risk.triggered</code></span>
             </div>
             <p class="text-[11px] leading-relaxed" style="color: var(--ink-2);">
               全网舆情暴跌或流动性枯竭触发全自动熔断时，以 P0 最高优先级向全部通道进行声光告警。
@@ -478,7 +462,7 @@ onMounted(() => {
 
           <div class="p-3 rounded-lg border space-y-1" style="background-color: var(--surface-1); border-color: var(--line-1);">
             <div class="flex items-center space-x-1.5 font-bold text-amber-400">
-              <span>📊 每日晨/晚报 (briefing.ready)</span>
+              <span>📊 每日晨/晚报 <code class="mono text-[10px] opacity-60">briefing.ready</code></span>
             </div>
             <p class="text-[11px] leading-relaxed" style="color: var(--ink-2);">
               按下方指定时间自动汇总在手仓位、资金净值、当日累计盈亏与宏观市场因果微积分综述。

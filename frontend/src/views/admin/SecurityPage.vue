@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import { useToast } from '../../composables/useToast'
+const toast = useToast()
 import { ref, onMounted , watch} from 'vue'
 import { useI18n } from '../../composables/useI18n'
-import SaveBar from '../../components/admin/SaveBar.vue'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
 import { ShieldAlert, Wallet, Save, Terminal, KeyRound, RefreshCw, Layers, Trash2, X, LogOut, Unlink } from 'lucide-vue-next'
@@ -12,9 +13,6 @@ const { t } = useI18n()
 const config = ref<any>(null)
 const runtime = ref<any>(null)
 const loading = ref(true)
-const bannerMsg = ref<{ text: string; type: 'ok' | 'err' | 'warn' } | null>(null)
-const bannerSeq = ref(0)
-watch(bannerMsg, () => { bannerSeq.value++ })
 
 // ---- OAuth ----
 const oauthSite = ref('global')
@@ -71,7 +69,7 @@ async function loadAll() {
     instruments.value = inst.instruments || []
     instLimits.value = inst.limits || instLimits.value
   } catch (e: any) {
-    bannerMsg.value = { text: `加载失败：${e.message}`, type: 'err' }
+    toast.err(`加载失败：${e.message}`)
   } finally {
     loading.value = false
   }
@@ -82,12 +80,11 @@ function applyRuntime(rt: any) {
 }
 
 async function rediagnose() {
-  bannerMsg.value = { text: '正在检查 OKX CLI、OAuth 与私有读取…', type: 'warn' }
+  toast.warn('正在检查 OKX CLI、OAuth 与私有读取…')
   try {
     applyRuntime(await api('/api/v1/admin/okx/runtime?refresh=1'))
-    bannerMsg.value = null
   } catch (e: any) {
-    bannerMsg.value = { text: `诊断失败：${e.message}`, type: 'err' }
+    toast.err(`诊断失败：${e.message}`)
   }
 }
 
@@ -118,15 +115,15 @@ async function checkOauth() {
     const d = await api('/api/v1/admin/okx/oauth/status')
     if (d.status === 'logged_in') {
       oauthResult.value = { kind: 'logged_in', site: d.site, scopes: d.scopes || [] }
-      bannerMsg.value = { text: '✅ OKX OAuth 授权成功', type: 'ok' }
+      toast.ok('OKX OAuth 授权成功')
       await rediagnose()
     } else if (d.status === 'pending') {
-      bannerMsg.value = { text: '授权尚未完成，请先在 OKX 页面确认', type: 'warn' }
+      toast.warn('授权尚未完成，请先在 OKX 页面确认')
     } else {
       oauthResult.value = { kind: 'error', message: `当前状态：${d.status}。${d.detail || '授权码可能已过期，请重新发起。'}` }
     }
   } catch (e: any) {
-    bannerMsg.value = { text: e.message, type: 'err' }
+    toast.err(e.message)
   }
 }
 
@@ -135,12 +132,12 @@ async function logoutOauth() {
   loggingOutOauth.value = true
   try {
     const d = await api('/api/v1/admin/okx/oauth/logout', { method: 'POST' })
-    bannerMsg.value = { text: d.message || 'OKX OAuth 账号已解绑', type: 'ok' }
+    toast.ok(d.message || 'OKX OAuth 账号已解绑')
     oauthResult.value = null
     oauthState.value = ''
     await rediagnose()
   } catch (e: any) {
-    bannerMsg.value = { text: `解绑失败：${e.message}`, type: 'err' }
+    toast.err(`解绑失败：${e.message}`)
   } finally {
     loggingOutOauth.value = false
   }
@@ -171,7 +168,7 @@ async function checkCli() {
   try {
     cliCheck.value = await api('/api/v1/admin/okx/cli-check')
   } catch (e: any) {
-    bannerMsg.value = { text: `CLI 检测失败：${e.message}`, type: 'err' }
+    toast.err(`CLI 检测失败：${e.message}`)
   }
 }
 
@@ -187,11 +184,11 @@ async function installCli() {
   installingCli.value = true
   try {
     const d = await api('/api/v1/admin/okx/install-cli', { method: 'POST', body: JSON.stringify({ confirmation: phrase.trim().toUpperCase() }) })
-    bannerMsg.value = { text: `✅ OKX CLI 安装/校验成功：${d.path || ''} ${d.version || ''}`.trim(), type: 'ok' }
+    toast.ok(`OKX CLI 安装/校验成功：${d.path || ''} ${d.version || ''}`.trim())
     cliCheck.value = null
     await rediagnose()
   } catch (e: any) {
-    bannerMsg.value = { text: `CLI 安装失败：${e.message}`, type: 'err' }
+    toast.err(`CLI 安装失败：${e.message}`)
   } finally {
     installingCli.value = false
   }
@@ -202,7 +199,7 @@ async function saveEnvironment() {
   if (environment === 'live') {
     const approved = prompt('切换到 LIVE 实盘环境\n输入 LIVE 确认已核对实盘 Key 权限与 IP 白名单')
     if (approved?.trim().toUpperCase() !== 'LIVE') {
-      bannerMsg.value = { text: '未输入 LIVE，环境未切换', type: 'warn' }
+      toast.warn('未输入 LIVE，环境未切换')
       return
     }
   }
@@ -216,10 +213,10 @@ async function saveEnvironment() {
     if (keys.value.demo_pass) body.okx_demo_passphrase = keys.value.demo_pass
     await api('/api/v1/admin/config', { method: 'PUT', body: JSON.stringify(body) })
     keys.value = { live_key: '', live_secret: '', live_pass: '', demo_key: '', demo_secret: '', demo_pass: '' }
-    bannerMsg.value = { text: `OKX ${environment.toUpperCase()} 环境与凭证已安全保存`, type: 'ok' }
+    toast.ok(`OKX ${environment.toUpperCase()} 环境与凭证已安全保存`)
     await loadAll()
   } catch (e: any) {
-    bannerMsg.value = { text: `保存失败：${e.message}`, type: 'err' }
+    toast.err(`保存失败：${e.message}`)
   }
 }
 
@@ -227,23 +224,23 @@ async function saveManualClose() {
   try {
     const d = await api('/api/v1/admin/config', { method: 'PUT', body: JSON.stringify({ manual_close_enabled: manualClose.value }) })
     manualClose.value = !!d.manual_close_enabled
-    bannerMsg.value = { text: manualClose.value ? '⚠ 后台手动平仓已启用' : '后台手动平仓已禁用', type: manualClose.value ? 'warn' : 'ok' }
+    if (manualClose.value) toast.warn('后台手动平仓已启用'); else toast.ok('后台手动平仓已禁用')
   } catch (e: any) {
-    bannerMsg.value = { text: e.message, type: 'err' }
+    toast.err(e.message)
   }
 }
 
 async function saveCapital() {
-  if (!auth.isSuperadmin) { bannerMsg.value = { text: '仅超级管理员可修改初始本金', type: 'err' }; return }
-  if (capitalConfirm.value.trim().toUpperCase() !== 'UPDATE CAPITAL') { bannerMsg.value = { text: '确认短语必须精确为：UPDATE CAPITAL', type: 'err' }; return }
+  if (!auth.isSuperadmin) { toast.err('仅超级管理员可修改初始本金'); return }
+  if (capitalConfirm.value.trim().toUpperCase() !== 'UPDATE CAPITAL') { toast.err('确认短语必须精确为：UPDATE CAPITAL'); return }
   savingCapital.value = true
   try {
     const res = await api('/api/v1/admin/account-baseline', { method: 'PUT', body: JSON.stringify({ initial_capital: parseFloat(newCapital.value), confirmation: capitalConfirm.value }) })
-    bannerMsg.value = { text: res.effect || `初始本金已调整为 ${res.initial_capital} USDT`, type: 'ok' }
+    toast.ok(res.effect || `初始本金已调整为 ${res.initial_capital} USDT`)
     capitalConfirm.value = ''
     await loadAll()
   } catch (e: any) {
-    bannerMsg.value = { text: `更新失败：${e.message}`, type: 'err' }
+    toast.err(`更新失败：${e.message}`)
   } finally {
     savingCapital.value = false
   }
@@ -251,30 +248,30 @@ async function saveCapital() {
 
 async function addInstrument() {
   const instId = newInstId.value.trim().toUpperCase()
-  if (!/^[A-Z0-9]{2,15}-USDT-SWAP$/.test(instId)) { bannerMsg.value = { text: '格式示例：XRP-USDT-SWAP（仅 USDT 永续）', type: 'err' }; return }
+  if (!/^[A-Z0-9]{2,15}-USDT-SWAP$/.test(instId)) { toast.err('格式示例：XRP-USDT-SWAP（仅 USDT 永续）'); return }
   try {
     const res = await api('/api/v1/admin/instruments', { method: 'POST', body: JSON.stringify({ inst_id: instId }) })
-    bannerMsg.value = { text: res.message || `${instId} 已成功加入交易池并实时同步全网大屏与因果雷达`, type: 'ok' }
+    toast.ok(res.message || `${instId} 已成功加入交易池并实时同步全网大屏与因果雷达`)
     newInstId.value = ''
     const inst = await api('/api/v1/admin/instruments')
     instruments.value = inst.instruments || []
   } catch (e: any) {
-    bannerMsg.value = { text: `添加失败：${e.message}`, type: 'err' }
+    toast.err(`添加失败：${e.message}`)
   }
 }
 
 async function removeInstrument(item: any) {
-  if (item.protected) { bannerMsg.value = { text: 'BTC 为保底标的，不可删除', type: 'err' }; return }
-  if (item.has_tracker) { bannerMsg.value = { text: `${item.name} 存在持仓追踪器，禁止移除`, type: 'err' }; return }
+  if (item.protected) { toast.err('BTC 为保底标的，不可删除'); return }
+  if (item.has_tracker) { toast.err(`${item.name} 存在持仓追踪器，禁止移除`); return }
   const phrase = prompt(`删除交易池标的 ${item.instId}\n输入确认短语：REMOVE ${item.instId}`)
   if (!phrase) return
   try {
     const res = await api(`/api/v1/admin/instruments/${encodeURIComponent(item.instId)}`, { method: 'DELETE', body: JSON.stringify({ confirmation: phrase.trim().toUpperCase() }) })
-    bannerMsg.value = { text: res.message || `${item.instId} 已从交易池移除并实时同步全网大屏与因果雷达`, type: 'ok' }
+    toast.ok(res.message || `${item.instId} 已从交易池移除并实时同步全网大屏与因果雷达`)
     const inst = await api('/api/v1/admin/instruments')
     instruments.value = inst.instruments || []
   } catch (e: any) {
-    bannerMsg.value = { text: `删除失败：${e.message}`, type: 'err' }
+    toast.err(`删除失败：${e.message}`)
   }
 }
 
@@ -291,7 +288,7 @@ async function loadPositions() {
 }
 
 function openClose(pos: any) {
-  if (!manualClose.value) { bannerMsg.value = { text: '请先启用后台手动平仓并保存开关', type: 'err' }; return }
+  if (!manualClose.value) { toast.err('请先启用后台手动平仓并保存开关'); return }
   closePhraseInput.value = ''
   closeModal.value = { show: true, pos }
 }
@@ -299,10 +296,10 @@ function openClose(pos: any) {
 async function confirmClose() {
   const pos = closeModal.value?.pos
   if (!pos) return
-  if (!closePassword.value) { bannerMsg.value = { text: '请输入当前管理员密码', type: 'err' }; return }
-  if (!pos.close_token || !pos.close_confirmation) { bannerMsg.value = { text: '平仓令牌缺失，请刷新当前持仓', type: 'err' }; return }
+  if (!closePassword.value) { toast.err('请输入当前管理员密码'); return }
+  if (!pos.close_token || !pos.close_confirmation) { toast.err('平仓令牌缺失，请刷新当前持仓'); return }
   if (closePhraseInput.value.trim().toUpperCase() !== pos.close_confirmation) {
-    bannerMsg.value = { text: `确认短语必须精确为：${pos.close_confirmation}`, type: 'err' }
+    toast.err(`确认短语必须精确为：${pos.close_confirmation}`)
     return
   }
   closing.value = true
@@ -311,12 +308,12 @@ async function confirmClose() {
       method: 'POST',
       body: JSON.stringify({ close_token: pos.close_token, admin_password: closePassword.value, confirmation: closePhraseInput.value.trim().toUpperCase() }),
     })
-    bannerMsg.value = { text: `✅ 已确认平仓：${d.instId} ${d.closed_size}`, type: 'ok' }
+    toast.ok(`已确认平仓：${d.instId} ${d.closed_size}`)
     closeModal.value = null
     closePassword.value = ''
     await loadPositions()
   } catch (e: any) {
-    bannerMsg.value = { text: `平仓失败：${e.message}`, type: 'err' }
+    toast.err(`平仓失败：${e.message}`)
   } finally {
     closing.value = false
   }
@@ -334,8 +331,8 @@ onMounted(loadAll)
           <Wallet class="w-3.5 h-3.5" />
         </div>
         <div>
-          <h1 class="text-xs sm:text-[13px] font-semibold uppercase tracking-wide" style="color: var(--ink-1);">
-            {{ t('admin.nSecurity') }}
+          <h1 class="text-xs sm:text-[13px] font-semibold" style="color: var(--ink-1);">
+            {{ t('nav.admin.security') }}
           </h1>
           <p class="text-[11px] mt-0.5" style="color: var(--ink-2);"> OKX 账户连接与交易标的池 —— OKX 官方账户授权连接、实盘/模拟盘环境切换、初始本金基准与交易标的管理 </p>
         </div>
@@ -344,13 +341,6 @@ onMounted(loadAll)
         交易核心底座 · 2/4
       </span>
     </div>
-
-    <SaveBar
-          :type="bannerMsg?.type || 'ok'"
-          :text="bannerMsg?.text || ''"
-          :nonce="bannerSeq"
-          @dismiss="bannerMsg = null"
-        />
     <div v-if="loading" class="py-12 text-center text-xs" style="color: var(--ink-2);">正在加载...</div>
 
     <template v-else-if="config">
@@ -550,7 +540,7 @@ onMounted(loadAll)
         <div class="px-4 py-3 border-b flex items-center justify-between" style="border-color: var(--line-1); background-color: var(--surface-1);">
           <div class="flex items-center space-x-2">
             <Layers class="w-4 h-4" style="color: var(--accent);" />
-            <h2 class="text-xs font-semibold uppercase tracking-wide" style="color: var(--ink-1);">
+            <h2 class="text-xs font-semibold" style="color: var(--ink-1);">
               3. 交易标的池 ({{ instruments.length }}/{{ instLimits.maximum }})
             </h2>
           </div>
@@ -576,7 +566,7 @@ onMounted(loadAll)
                 <td class="py-2.5 px-3" style="color: var(--ink-2);">{{ item.name }}</td>
                 <td class="py-2.5 px-3 num" style="color: var(--ink-3);">{{ item.ctType || 'SWAP' }}</td>
                 <td class="py-2.5 px-3">
-                  <span v-if="item.protected" class="px-1.5 py-0.5 rounded-[3px] text-[11px] font-bold border" style="background-color: var(--warn-bg); border-color: var(--warn-line); color: var(--warn);">🔒 保底必选</span>
+                  <span v-if="item.protected" class="px-1.5 py-0.5 rounded-[3px] text-[11px] font-bold border" style="background-color: var(--warn-bg); border-color: var(--warn-line); color: var(--warn);">保底必选</span>
                   <span v-else-if="item.has_tracker" class="px-1.5 py-0.5 rounded-[3px] text-[11px] font-bold border" style="background-color: var(--accent-bg); border-color: var(--accent-line); color: var(--accent);">持仓中</span>
                   <span v-else class="text-[11px] px-1.5 py-0.5 rounded-[3px] border" style="background-color: var(--surface-3); border-color: var(--line-1); color: var(--ink-3);">可移除</span>
                 </td>
@@ -597,7 +587,7 @@ onMounted(loadAll)
         <div class="px-4 py-3 border-b flex items-center justify-between" style="border-color: var(--line-1); background-color: var(--surface-1);">
           <div class="flex items-center space-x-2">
             <KeyRound class="w-4 h-4 text-rose-500" />
-            <h2 class="text-xs font-semibold uppercase tracking-wide" style="color: var(--ink-1);">4. 当前持仓与应急平仓</h2>
+            <h2 class="text-xs font-semibold" style="color: var(--ink-1);">4. 当前持仓与应急平仓</h2>
           </div>
           <button @click="loadPositions" class="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg border text-xs cursor-pointer transition-all shadow-xs" style="background-color: var(--surface-2); border-color: var(--line-2); color: var(--ink-1);">
             <RefreshCw class="w-3.5 h-3.5" />

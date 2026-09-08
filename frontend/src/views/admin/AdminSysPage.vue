@@ -1,8 +1,9 @@
 <script setup lang="ts">
+import { useToast } from '../../composables/useToast'
+const toast = useToast()
 import { ref, onMounted , watch} from 'vue'
 import { useI18n } from '../../composables/useI18n'
 const { t } = useI18n()
-import SaveBar from '../../components/admin/SaveBar.vue'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
 import { UserCog, KeyRound, Plus, Lock, Unlock, ShieldCheck, AlertCircle } from 'lucide-vue-next'
@@ -13,9 +14,6 @@ const auth = useAuthStore()
 const users = ref<any[]>([])
 const currentUserId = ref<number>(0)
 const loading = ref(true)
-const bannerMsg = ref<{ text: string; type: 'ok' | 'err' } | null>(null)
-const bannerSeq = ref(0)
-watch(bannerMsg, () => { bannerSeq.value++ })
 
 // Password form
 const pwdUserId = ref<number>(0)
@@ -38,7 +36,7 @@ async function load() {
     currentUserId.value = res.current_user_id
     pwdUserId.value = res.current_user_id
   } catch (e: any) {
-    bannerMsg.value = { text: e.message, type: 'err' }
+    toast.err(e.message)
   } finally {
     loading.value = false
   }
@@ -46,7 +44,7 @@ async function load() {
 
 async function changePassword() {
   if (newPassword.value.length < 12) {
-    bannerMsg.value = { text: '新密码至少需要 12 位字符', type: 'err' }
+    toast.err('新密码至少需要 12 位字符')
     return
   }
   changingPwd.value = true
@@ -55,11 +53,11 @@ async function changePassword() {
       method: 'PUT',
       body: JSON.stringify({ current_password: currentPassword.value, new_password: newPassword.value }),
     })
-    bannerMsg.value = { text: '✅ 密码已修改，其他设备的会话已全部失效', type: 'ok' }
+    toast.ok('密码已修改，其他设备的会话已全部失效')
     currentPassword.value = ''
     newPassword.value = ''
   } catch (e: any) {
-    bannerMsg.value = { text: `修改失败：${e.message}`, type: 'err' }
+    toast.err(`修改失败：${e.message}`)
   } finally {
     changingPwd.value = false
   }
@@ -67,7 +65,7 @@ async function changePassword() {
 
 async function createUser() {
   if (newUsername.value.length < 3 || newPasswordForCreate.value.length < 12) {
-    bannerMsg.value = { text: '账号至少 3 位，密码至少 12 位', type: 'err' }
+    toast.err('账号至少 3 位，密码至少 12 位')
     return
   }
   try {
@@ -75,13 +73,13 @@ async function createUser() {
       method: 'POST',
       body: JSON.stringify({ username: newUsername.value, password: newPasswordForCreate.value, role: newRole.value }),
     })
-    bannerMsg.value = { text: `已创建管理员 ${newUsername.value}`, type: 'ok' }
+    toast.ok(`已创建管理员 ${newUsername.value}`)
     createVisible.value = false
     newUsername.value = ''
     newPasswordForCreate.value = ''
     await load()
   } catch (e: any) {
-    bannerMsg.value = { text: `创建失败：${e.message}`, type: 'err' }
+    toast.err(`创建失败：${e.message}`)
   }
 }
 
@@ -90,7 +88,7 @@ async function toggleEnabled(u: any) {
     await api(`/api/v1/admin/users/${u.id}/enabled`, { method: 'PUT', body: JSON.stringify({ enabled: !u.enabled }) })
     await load()
   } catch (e: any) {
-    bannerMsg.value = { text: e.message, type: 'err' }
+    toast.err(e.message)
   }
 }
 
@@ -99,10 +97,10 @@ async function unlockUser(u: any) {
   if (!phrase) return
   try {
     await api(`/api/v1/admin/users/${u.id}/unlock`, { method: 'POST', body: JSON.stringify({ confirmation: phrase.trim().toUpperCase() }) })
-    bannerMsg.value = { text: `${u.username} 已解锁`, type: 'ok' }
+    toast.ok(`${u.username} 已解锁`)
     await load()
   } catch (e: any) {
-    bannerMsg.value = { text: e.message, type: 'err' }
+    toast.err(e.message)
   }
 }
 
@@ -115,18 +113,11 @@ onMounted(load)
       <p class="text-xs text-[var(--ink-3)]">PBKDF2-SHA256 加盐哈希 · 连续失败 5 次锁定 15 分钟 · 会话 12 小时。</p>
       <span class="text-[11px] text-blue-400 bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20">治理 · 2/3</span>
     </div>
-
-    <SaveBar
-          :type="bannerMsg?.type || 'ok'"
-          :text="bannerMsg?.text || ''"
-          :nonce="bannerSeq"
-          @dismiss="bannerMsg = null"
-        />
     <!-- Change Password -->
     <div class="rounded-xl border p-4 sm:p-5 shadow-xs transition-colors" style="background-color: var(--surface-2); border-color: var(--line-1);">
       <div class="flex items-center space-x-2 mb-4 pb-3 border-b" style="border-color: var(--line-1);">
         <KeyRound class="w-4 h-4 text-amber-500" />
-        <h2 class="text-sm font-bold" style="color: var(--ink-1);">{{ t('admin.nAdminSys') }}</h2>
+        <h2 class="text-sm font-bold" style="color: var(--ink-1);">{{ t('nav.admin.adminsys') }}</h2>
         <p class="text-[11px] mt-0.5" style="color: var(--ink-2);"> 修改密码 </p>
         <span class="text-[11px] ml-2" style="color: var(--ink-3);">当前账号：{{ auth.user?.username }}（修改后需重新登录）</span>
       </div>
@@ -153,7 +144,7 @@ onMounted(load)
       <div class="px-4 py-3 border-b flex items-center justify-between" style="border-color: var(--line-1); background-color: var(--surface-1);">
         <div class="flex items-center space-x-2">
           <UserCog class="w-4 h-4 text-blue-400" />
-          <h2 class="text-xs font-semibold uppercase tracking-wide" style="color: var(--ink-1);">管理员账号与权限</h2>
+          <h2 class="text-xs font-semibold" style="color: var(--ink-1);">管理员账号与权限</h2>
         </div>
         <button v-if="auth.isSuperadmin" @click="createVisible = true" class="flex items-center space-x-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer shadow-xs" style="background-color: var(--ink-1); color: var(--surface-2);">
           <Plus class="w-3.5 h-3.5" />

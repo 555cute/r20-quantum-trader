@@ -1,10 +1,11 @@
 <script setup lang="ts">
+import { useToast } from '../../composables/useToast'
+const toast = useToast()
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useI18n } from '../../composables/useI18n'
 const { t } = useI18n()
 import { useApi } from '../../composables/useApi'
 import PageHeader from '../../components/admin/PageHeader.vue'
-import SaveBar from '../../components/admin/SaveBar.vue'
 import DangerZone from '../../components/admin/DangerZone.vue'
 import {
   ShieldAlert,
@@ -24,9 +25,6 @@ const { api } = useApi()
 
 const loading = ref(true)
 const busy = ref<'save' | 'reset' | ''>('')
-const bannerMsg = ref<{ text: string; type: 'ok' | 'err' | 'warn' } | null>(null)
-const bannerSeq = ref(0)
-watch(bannerMsg, () => { bannerSeq.value++ })
 
 const schema = ref<{ groups: any[]; params: any[] } | null>(null)
 const suites = ref<any[]>([])
@@ -48,13 +46,12 @@ const activeSuiteId = computed(() => {
 async function applySuite(s: any) {
   if (busy.value) return
   busy.value = 'save'
-  bannerMsg.value = null
   try {
     const res = await api('/api/v1/admin/risk', { method: 'POST', body: JSON.stringify({ suite_id: s.id }) })
     syncFromServer(res.values)
-    bannerMsg.value = { text: `已一键应用「${s.name}」预设 ✓ ${res.effect}`, type: 'ok' }
+    toast.ok(`已一键应用「${s.name}」预设 ✓ ${res.effect}`)
   } catch (e: any) {
-    bannerMsg.value = { text: `应用预设失败: ${e.message}`, type: 'err' }
+    toast.err(`应用预设失败: ${e.message}`)
   } finally {
     busy.value = ''
   }
@@ -100,7 +97,7 @@ async function loadData() {
     effectText.value = res.effect || ''
     syncFromServer(res.values)
   } catch (e: any) {
-    bannerMsg.value = { text: `加载失败: ${e.message}`, type: 'err' }
+    toast.err(`加载失败: ${e.message}`)
   } finally {
     loading.value = false
   }
@@ -137,19 +134,18 @@ async function saveChanges() {
     return dirtyKeys.value.includes(p.key) && (v < p.min || v > p.max)
   })
   if (bad.length) {
-    bannerMsg.value = { text: `以下参数越界：${bad.map((p: any) => p.label).join('、')}`, type: 'err' }
+    toast.err(`以下参数越界：${bad.map((p: any) => p.label).join('、')}`)
     return
   }
   busy.value = 'save'
-  bannerMsg.value = null
   try {
     const values: Record<string, number> = {}
     for (const k of dirtyKeys.value) values[k] = draft[k]
     const res = await api('/api/v1/admin/risk', { method: 'POST', body: JSON.stringify({ values }) })
     syncFromServer(res.values)
-    bannerMsg.value = { text: `已保存 ${res.updated.length} 项修改 ✓ ${res.effect}`, type: 'ok' }
+    toast.ok(`已保存 ${res.updated.length} 项修改 ✓ ${res.effect}`)
   } catch (e: any) {
-    bannerMsg.value = { text: `保存失败: ${e.message}`, type: 'err' }
+    toast.err(`保存失败: ${e.message}`)
   } finally {
     busy.value = ''
   }
@@ -157,13 +153,12 @@ async function saveChanges() {
 
 async function resetAll() {
   busy.value = 'reset'
-  bannerMsg.value = null
   try {
     const res = await api('/api/v1/admin/risk/reset', { method: 'POST', body: JSON.stringify({ confirmation: 'RESET RISK' }) })
     syncFromServer(res.values)
-    bannerMsg.value = { text: `已恢复代码默认基线 ✓ ${res.effect}`, type: 'ok' }
+    toast.ok(`已恢复代码默认基线 ✓ ${res.effect}`)
   } catch (e: any) {
-    bannerMsg.value = { text: `重置失败: ${e.message}`, type: 'err' }
+    toast.err(`重置失败: ${e.message}`)
   } finally {
     busy.value = ''
   }
@@ -175,8 +170,8 @@ onMounted(loadData)
 <template>
   <div class="space-y-4 max-w-[1400px] mx-auto pb-24">
     <PageHeader
-      :title="t('admin.nRisk')"
-      description="执行层风控管理 (Fail-Closed Hard Risk Gates) —— 仓位敞口 · 单笔风险 · 止损熔断 · 金字塔加仓，全部硬门禁集中配置"
+      :title="t('nav.admin.risk')"
+      description="执行层硬风控集中配置：仓位敞口 · 单笔风险 · 止损熔断 · 金字塔加仓"
     >
       <template #actions>
         <span class="badge-lever">
@@ -193,13 +188,6 @@ onMounted(loadData)
         <p class="opacity-80">注：本页为执行层代码硬拦截；「物理拦截插件」与「提示词工坊」中的 AI 侧门禁（如置信度、顺势铁律）在各自页面独立配置，双层防线互为兜底。</p>
       </div>
     </div>
-
-    <SaveBar
-      :type="bannerMsg?.type || 'ok'"
-      :text="bannerMsg?.text || ''"
-      :nonce="bannerSeq"
-      @dismiss="bannerMsg = null"
-    />
 
     <div v-if="loading" class="flex items-center justify-center py-24">
       <Loader2 class="w-6 h-6 animate-spin" style="color: var(--ink-2);" />
@@ -243,7 +231,7 @@ onMounted(loadData)
         <div class="px-4 py-3 border-b flex items-center gap-2" style="border-color: var(--line-1);">
           <component :is="groupIcons[group.id] || ShieldAlert" class="w-4 h-4" style="color: var(--ink-1);" />
           <div>
-            <h2 class="text-xs font-semibold uppercase tracking-wide" style="color: var(--ink-1);">{{ group.label }}</h2>
+            <h2 class="text-xs font-semibold" style="color: var(--ink-1);">{{ group.label }}</h2>
             <p class="text-[11px] mt-0.5" style="color: var(--ink-2);">{{ group.desc }}</p>
           </div>
         </div>

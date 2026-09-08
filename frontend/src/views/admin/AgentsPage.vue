@@ -47,7 +47,7 @@ onMounted(load)
         <div class="px-4 py-3 border-b flex items-center justify-between" style="border-color: var(--line-1); background-color: var(--surface-1);">
           <div class="flex items-center space-x-2">
             <Package class="w-4 h-4 text-blue-400" />
-            <h2 class="text-xs font-semibold uppercase tracking-wide" style="color: var(--ink-1);">{{ t('admin.nAgents') }}</h2>
+            <h2 class="text-xs font-semibold" style="color: var(--ink-1);">{{ t('nav.admin.agents') }}</h2>
         <p class="text-[11px] mt-0.5" style="color: var(--ink-2);"> 受管 Worker 单元清单 </p>
           </div>
           <button @click="load" class="flex items-center space-x-1 px-2.5 py-1 rounded-lg border text-[11px] cursor-pointer transition-all shadow-xs" style="background-color: var(--surface-2); border-color: var(--line-2); color: var(--ink-1);">
@@ -84,7 +84,7 @@ onMounted(load)
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <!-- Model Telemetry -->
         <div class="rounded-xl border overflow-hidden shadow-xs p-4" style="background-color: var(--surface-2); border-color: var(--line-1);">
-          <div class="flex items-center space-x-2 mb-3"><Cpu class="w-4 h-4 text-purple-400" /><h2 class="text-xs font-semibold uppercase tracking-wide" style="color: var(--ink-1);">模型调用遥测 (最近 50 次)</h2></div>
+          <div class="flex items-center space-x-2 mb-3"><Cpu class="w-4 h-4 text-purple-400" /><h2 class="text-xs font-semibold" style="color: var(--ink-1);">模型调用遥测 (最近 50 次)</h2></div>
           <div class="text-[11px] mb-3 p-2.5 rounded-lg border leading-relaxed" style="background-color: var(--surface-1); border-color: var(--line-1); color: var(--ink-2);">{{ data.prompt_policy }}</div>
           <div class="grid grid-cols-3 gap-2.5 mb-3 text-center">
             <div class="rounded-lg border p-2" style="background-color: var(--surface-1); border-color: var(--line-1);"><div class="text-[11px]" style="color: var(--ink-3);">总调用量</div><div class="text-sm font-bold num mt-0.5" style="color: var(--ink-1);">{{ data.model_stats?.total_calls ?? '--' }}</div></div>
@@ -117,7 +117,7 @@ onMounted(load)
 
         <!-- Secret Store -->
         <div class="rounded-xl border p-4 shadow-xs transition-colors" style="background-color: var(--surface-2); border-color: var(--line-1);">
-          <div class="flex items-center space-x-2 mb-3"><KeyRound class="w-4 h-4 text-amber-500" /><h2 class="text-xs font-semibold uppercase tracking-wide" style="color: var(--ink-1);">本机加密密文库</h2></div>
+          <div class="flex items-center space-x-2 mb-3"><KeyRound class="w-4 h-4 text-amber-500" /><h2 class="text-xs font-semibold" style="color: var(--ink-1);">本机加密密文库</h2></div>
           <div class="space-y-1.5 text-xs">
             <div class="flex items-center justify-between border rounded-lg px-3 py-2" style="background-color: var(--surface-1); border-color: var(--line-1);">
               <span style="color: var(--ink-2);">加密库状态</span>

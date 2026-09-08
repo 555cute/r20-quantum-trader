@@ -78,7 +78,7 @@ onMounted(() => {
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 mb-3 border-b" style="border-color: var(--line-1);">
         <div class="flex items-center space-x-2">
           <Terminal class="w-4 h-4 text-purple-400" />
-          <h2 class="text-xs font-semibold uppercase tracking-wide" style="color: var(--ink-1);">{{ t('admin.nDecisions') }}</h2>
+          <h2 class="text-xs font-semibold" style="color: var(--ink-1);">{{ t('nav.admin.decisions') }}</h2>
           <span class="text-[11px] px-1.5 py-0.5 rounded border font-bold" style="background-color: var(--surface-1); border-color: var(--line-1); color: var(--ink-3);">最新在前</span>
         </div>
         <!-- Log Selector Tabs -->
@@ -95,14 +95,14 @@ onMounted(() => {
             class="px-2.5 py-1 rounded text-xs font-bold cursor-pointer transition-colors"
             :style="activeLogTab === 'backend' ? { backgroundColor: 'var(--ink-1)', color: 'var(--surface-2)' } : { color: 'var(--ink-2)' }"
           >
-            控制面服务 (Backend)
+            控制面服务
           </button>
           <button
             @click="fetchLogStream('scheduler')"
             class="px-2.5 py-1 rounded text-xs font-bold cursor-pointer transition-colors"
             :style="activeLogTab === 'scheduler' ? { backgroundColor: 'var(--ink-1)', color: 'var(--surface-2)' } : { color: 'var(--ink-2)' }"
           >
-            任务调度器 (Scheduler)
+            任务调度器
           </button>
         </div>
       </div>

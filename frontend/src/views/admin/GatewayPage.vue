@@ -1,17 +1,15 @@
 <script setup lang="ts">
+import { useToast } from '../../composables/useToast'
+const toast = useToast()
 import { ref, computed, onMounted , watch} from 'vue'
 import { useI18n } from '../../composables/useI18n'
 const { t } = useI18n()
-import SaveBar from '../../components/admin/SaveBar.vue'
 import { useApi } from '../../composables/useApi'
 import { Zap, RefreshCw, RotateCcw, Server, Clock, AlertTriangle } from 'lucide-vue-next'
 
 const { api } = useApi()
 const gw = ref<any>(null)
 const loading = ref(true)
-const bannerMsg = ref<{ text: string; type: 'ok' | 'err' } | null>(null)
-const bannerSeq = ref(0)
-watch(bannerMsg, () => { bannerSeq.value++ })
 
 const deliveredCount = computed(() => (gw.value?.stats?.delivered ?? 0) + (gw.value?.stats?.accepted ?? 0))
 const deliveryTotal = computed(() => Object.values(gw.value?.stats || {}).reduce((a: number, b: any) => a + Number(b || 0), 0))
@@ -22,7 +20,7 @@ async function load() {
   try {
     gw.value = await api('/api/v1/admin/gateway?limit=50')
   } catch (e: any) {
-    bannerMsg.value = { text: `加载失败：${e.message}`, type: 'err' }
+    toast.err(`加载失败：${e.message}`)
   } finally {
     loading.value = false
   }
@@ -36,10 +34,10 @@ async function replayDelivery(id: number) {
       method: 'POST',
       body: JSON.stringify({ confirmation: phrase.trim().toUpperCase() }),
     })
-    bannerMsg.value = { text: `投递 #${id} 已重新入队`, type: 'ok' }
+    toast.ok(`投递 #${id} 已重新入队`)
     await load()
   } catch (e: any) {
-    bannerMsg.value = { text: `重放失败：${e.message}`, type: 'err' }
+    toast.err(`重放失败：${e.message}`)
   }
 }
 
@@ -59,13 +57,6 @@ onMounted(load)
       <p class="text-xs text-[var(--ink-3)]">调度任务、事件投递队列与死信重放；Gateway 仅记录无内容遥测。</p>
       <span class="text-[11px] text-blue-400 bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20">日常运行 · 4/4</span>
     </div>
-
-    <SaveBar
-          :type="bannerMsg?.type || 'ok'"
-          :text="bannerMsg?.text || ''"
-          :nonce="bannerSeq"
-          @dismiss="bannerMsg = null"
-        />
     <div v-if="loading" class="py-12 text-center text-xs text-[var(--ink-3)]"><RefreshCw class="w-5 h-5 animate-spin inline mr-1.5 text-blue-400" />正在加载网关状态...</div>
 
     <template v-else-if="gw">
@@ -96,7 +87,7 @@ onMounted(load)
       <!-- Scheduler Jobs -->
       <div v-if="gw.scheduler?.jobs?.length" class="rounded-xl border overflow-hidden shadow-xs" style="background-color: var(--surface-2); border-color: var(--line-1);">
         <div class="px-4 py-3 border-b flex items-center justify-between" style="border-color: var(--line-1); background-color: var(--surface-1);">
-          <h2 class="text-xs font-semibold uppercase tracking-wide" style="color: var(--ink-1);">{{ t('admin.nGateway') }}</h2>
+          <h2 class="text-xs font-semibold" style="color: var(--ink-1);">{{ t('nav.admin.gateway') }}</h2>
         <p class="text-[11px] mt-0.5" style="color: var(--ink-2);"> 本地调度计划（北京时间） </p>
           <span class="text-[11px]" style="color: var(--ink-3);">{{ gw.scheduler.jobs.length }} 个受管定时作业</span>
         </div>
@@ -130,7 +121,7 @@ onMounted(load)
       <div class="rounded-xl border overflow-hidden shadow-xs" style="background-color: var(--surface-2); border-color: var(--line-1);">
         <div class="px-4 py-3 border-b flex items-center justify-between" style="border-color: var(--line-1); background-color: var(--surface-1);">
           <div class="flex items-center space-x-2">
-            <h2 class="text-xs font-semibold uppercase tracking-wide" style="color: var(--ink-1);">事件投递队列 (最近 50 条)</h2>
+            <h2 class="text-xs font-semibold" style="color: var(--ink-1);">事件投递队列 (最近 50 条)</h2>
             <span class="text-[11px] px-2 py-0.2 rounded border font-bold" style="background-color: var(--accent-bg); color: var(--accent); border-color: var(--accent-line);">
               {{ gw.deliveries?.length || 0 }} 记录
             </span>

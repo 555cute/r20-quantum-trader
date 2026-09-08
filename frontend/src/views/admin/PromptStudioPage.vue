@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import { useToast } from '../../composables/useToast'
+const toast = useToast()
 import { ref, computed, onMounted , watch} from 'vue'
 import { useI18n } from '../../composables/useI18n'
 import PageHeader from '../../components/admin/PageHeader.vue'
 const { t } = useI18n()
-import SaveBar from '../../components/admin/SaveBar.vue'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
 import {
@@ -17,9 +18,6 @@ const auth = useAuthStore()
 
 const lib = ref<any>(null)
 const loading = ref(true)
-const bannerMsg = ref<{ text: string; type: 'ok' | 'err' | 'warn' } | null>(null)
-const bannerSeq = ref(0)
-watch(bannerMsg, () => { bannerSeq.value++ })
 
 const selectedProfileId = ref<string>('')
 const activePipeline = ref<'trading_system' | 'trading_user'>('trading_system')
@@ -75,7 +73,7 @@ async function loadLib() {
     }
     loadWorkingModules()
   } catch (e: any) {
-    bannerMsg.value = { text: `加载失败：${e.message}`, type: 'err' }
+    toast.err(`加载失败：${e.message}`)
   } finally {
     loading.value = false
   }
@@ -123,12 +121,12 @@ function insertVarIntoActiveModule(key: string) {
   const m = workingModules.value[idx]
   const tag = `{{${key}}}`
   if (m.content && m.content.includes(tag)) {
-    bannerMsg.value = { text: `模块「${m.title}」已包含变量 ${tag}`, type: 'warn' }
+    toast.warn(`模块「${m.title}」已包含变量 ${tag}`)
     return
   }
   m.content = m.content ? `${m.content.trim()}\n\n${tag}` : tag
   dirty.value = true
-  bannerMsg.value = { text: `✅ 已插入变量插槽 ${tag} 到模块「${m.title}」`, type: 'ok' }
+  toast.ok(`已插入变量插槽 ${tag} 到模块「${m.title}」`)
 }
 
 async function saveProfile() {
@@ -149,21 +147,21 @@ async function saveProfile() {
         pipelines: pipelinesMap,
       }),
     })
-    bannerMsg.value = { text: `✅ 方案「${selectedProfile.value.name}」· ${pipelines.find(p => p.id === activePipeline.value)?.label} 模块布局已保存，下一轮推演自动生效`, type: 'ok' }
+    toast.ok(`方案「${selectedProfile.value.name}」· ${pipelines.find(p => p.id === activePipeline.value)?.label} 模块布局已保存，下一轮推演自动生效`)
     dirty.value = false
     await loadLib()
   } catch (e: any) {
-    bannerMsg.value = { text: `保存失败：${e.message}`, type: 'err' }
+    toast.err(`保存失败：${e.message}`)
   }
 }
 
 async function activateProfile() {
   try {
     await api(`/api/v1/admin/prompt-profiles/${encodeURIComponent(selectedProfileId.value)}/activate`, { method: 'POST', body: '{}' })
-    bannerMsg.value = { text: `已激活方案「${selectedProfile.value?.name}」`, type: 'ok' }
+    toast.ok(`已激活方案「${selectedProfile.value?.name}」`)
     await loadLib()
   } catch (e: any) {
-    bannerMsg.value = { text: `激活失败：${e.message}`, type: 'err' }
+    toast.err(`激活失败：${e.message}`)
   }
 }
 
@@ -175,11 +173,11 @@ async function duplicateProfile() {
       method: 'POST',
       body: JSON.stringify({ name, description: '', source_id: selectedProfileId.value }),
     })
-    bannerMsg.value = { text: `已复制为可编辑方案「${res.profile.name}」`, type: 'ok' }
+    toast.ok(`已复制为可编辑方案「${res.profile.name}」`)
     selectedProfileId.value = res.profile.id
     await loadLib()
   } catch (e: any) {
-    bannerMsg.value = { text: `复制失败：${e.message}`, type: 'err' }
+    toast.err(`复制失败：${e.message}`)
   }
 }
 
@@ -191,11 +189,11 @@ async function createProfile() {
       method: 'POST',
       body: JSON.stringify({ name, description: '', source_id: 'stable' }),
     })
-    bannerMsg.value = { text: `已创建可编辑方案「${res.profile.name}」，现在可以自由增删改模块`, type: 'ok' }
+    toast.ok(`已创建可编辑方案「${res.profile.name}」，现在可以自由增删改模块`)
     selectedProfileId.value = res.profile.id
     await loadLib()
   } catch (e: any) {
-    bannerMsg.value = { text: `创建失败：${e.message}`, type: 'err' }
+    toast.err(`创建失败：${e.message}`)
   }
 }
 
@@ -242,7 +240,7 @@ async function deleteProfile() {
     selectedProfileId.value = ''
     await loadLib()
   } catch (e: any) {
-    bannerMsg.value = { text: `删除失败：${e.message}`, type: 'err' }
+    toast.err(`删除失败：${e.message}`)
   }
 }
 
@@ -252,7 +250,7 @@ async function showHistory() {
     const res = await api(`/api/v1/admin/prompt-profiles/${encodeURIComponent(selectedProfileId.value)}/history`)
     historyList.value = res.history || []
   } catch (e: any) {
-    bannerMsg.value = { text: `历史加载失败：${e.message}`, type: 'err' }
+    toast.err(`历史加载失败：${e.message}`)
   }
 }
 
@@ -263,11 +261,11 @@ async function rollback(revId: string) {
       method: 'POST',
       body: JSON.stringify({ revision_id: revId }),
     })
-    bannerMsg.value = { text: '已回滚到所选历史版本', type: 'ok' }
+    toast.ok('已回滚到所选历史版本')
     historyVisible.value = false
     await loadLib()
   } catch (e: any) {
-    bannerMsg.value = { text: `回滚失败：${e.message}`, type: 'err' }
+    toast.err(`回滚失败：${e.message}`)
   }
 }
 
@@ -283,9 +281,9 @@ async function exportProfile() {
     a.download = `r20-strategy-${selectedProfile.value?.name || 'profile'}-${new Date().toISOString().slice(0, 10)}.json`
     a.click()
     URL.revokeObjectURL(a.href)
-    bannerMsg.value = { text: `✅ 方案「${selectedProfile.value?.name}」已成功导出为 JSON 策略包`, type: 'ok' }
+    toast.ok(`方案「${selectedProfile.value?.name}」已成功导出为 JSON 策略包`)
   } catch (e: any) {
-    bannerMsg.value = { text: `导出失败：${e.message}`, type: 'err' }
+    toast.err(`导出失败：${e.message}`)
   }
 }
 
@@ -326,7 +324,7 @@ async function submitImport() {
         name_override: importNameOverride.value.trim() || undefined,
       }),
     })
-    bannerMsg.value = { text: `🎉 成功导入策略方案「${res.profile.name}」！`, type: 'ok' }
+    toast.ok(`成功导入策略方案「${res.profile.name}」！`)
     importVisible.value = false
     importRawJson.value = ''
     importNameOverride.value = ''
@@ -339,7 +337,7 @@ async function submitImport() {
 
 function copyPreview() {
   navigator.clipboard.writeText(compiledPreview.value)
-  bannerMsg.value = { text: '编译后实发 Prompt 已复制', type: 'ok' }
+  toast.ok('编译后实发 Prompt 已复制')
 }
 
 onMounted(loadLib)
@@ -347,7 +345,7 @@ onMounted(loadLib)
 
 <template>
 
-    <PageHeader :title="t('admin.nPrompt')" :description="t('admin.promptDesc')" />
+    <PageHeader :title="t('nav.admin.prompts')" :description="t('admin.promptDesc')" />
   <div class="space-y-4 text-xs">
     <!-- Header Summary & Plaza Gateway -->
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-1">
@@ -422,12 +420,6 @@ onMounted(loadLib)
     </div>
 
     <!-- Alert / Banner Message -->
-    <SaveBar
-          :type="bannerMsg?.type || 'ok'"
-          :text="bannerMsg?.text || ''"
-          :nonce="bannerSeq"
-          @dismiss="bannerMsg = null"
-        />
     <!-- Loading State -->
     <div v-if="loading" class="py-12 text-center text-xs" style="color: var(--ink-2);">正在加载提示词策略库...</div>
 

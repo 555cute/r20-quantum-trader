@@ -67,8 +67,8 @@ onMounted(load)
       <div class="px-4 py-3 border-b flex items-center justify-between" style="border-color: var(--line-1); background-color: var(--surface-1);">
         <div class="flex items-center space-x-2">
           <Scroll class="w-4 h-4 text-purple-400" />
-          <h2 class="text-xs font-semibold uppercase tracking-wide" style="color: var(--ink-1);">
-            {{ t('admin.nAudit') }} ({{ filtered().length }} {{ t('admin.auditEntries') }})
+          <h2 class="text-xs font-semibold" style="color: var(--ink-1);">
+            {{ t('nav.admin.audit') }} ({{ filtered().length }} {{ t('admin.auditEntries') }})
           </h2>
         </div>
         <span class="text-[11px]" style="color: var(--ink-3);">点击任意行穿透查看原始参数 JSON</span>

@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import { useToast } from '../../composables/useToast'
+const toast = useToast()
 import { ref, computed, onMounted , watch} from 'vue'
 import { useI18n } from '../../composables/useI18n'
-import SaveBar from '../../components/admin/SaveBar.vue'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
 import {
@@ -31,9 +32,6 @@ const { t } = useI18n()
 
 const loading = ref(true)
 const busy = ref<'save' | 'run' | 'add' | 'delete' | 'toggle' | 'rollback' | ''>('')
-const bannerMsg = ref<{ text: string; type: 'ok' | 'err' | 'warn' } | null>(null)
-const bannerSeq = ref(0)
-watch(bannerMsg, () => { bannerSeq.value++ })
 
 // Pipelines state (evolution_system & evolution_user)
 const activeTab = ref<'settings' | 'evolution_system' | 'evolution_user'>('settings')
@@ -69,7 +67,7 @@ async function loadData() {
     evolutionReport.value = reportRes || null
     syncWorkingModules()
   } catch (e: any) {
-    bannerMsg.value = { text: `加载失败: ${e.message}`, type: 'err' }
+    toast.err(`加载失败: ${e.message}`)
   } finally {
     loading.value = false
   }
@@ -102,11 +100,10 @@ async function refreshMemory() {
 async function reloadMemory() {
   if (busy.value || loading.value) return
   loading.value = true
-  bannerMsg.value = null
   try {
     await refreshMemory()
   } catch (e: any) {
-    bannerMsg.value = { text: `重新加载心法失败: ${e.message}`, type: 'err' }
+    toast.err(`重新加载心法失败: ${e.message}`)
   } finally {
     loading.value = false
   }
@@ -115,14 +112,13 @@ async function reloadMemory() {
 async function toggleLessonStatus(lessonId: string) {
   if (busy.value || loading.value) return
   busy.value = 'toggle'
-  bannerMsg.value = null
   try {
     await api(`/api/v1/admin/memory/toggle/${encodeURIComponent(lessonId)}?expected_version=${encodeURIComponent(expectedMemoryVersion())}`, { method: 'POST' })
     await refreshMemory()
-    bannerMsg.value = { text: `✅ 心法状态已切换（大模型下次决策立即感知）`, type: 'ok' }
+    toast.ok(`心法状态已切换（大模型下次决策立即感知）`)
   } catch (e: any) {
     memoryVersion.value = null
-    bannerMsg.value = { text: `状态切换失败: ${e.message}`, type: 'err' }
+    toast.err(`状态切换失败: ${e.message}`)
   } finally {
     busy.value = ''
   }
@@ -132,14 +128,13 @@ async function rollbackToBaseline() {
   if (!confirm('【防污染紧急回滚】确定要清除非基准的过期或被污染心法，重置回官方基准黄金心法库吗？')) return
   if (busy.value || loading.value) return
   busy.value = 'rollback'
-  bannerMsg.value = null
   try {
     await api(`/api/v1/admin/memory/rollback?expected_version=${encodeURIComponent(expectedMemoryVersion())}`, { method: 'POST' })
     await refreshMemory()
-    bannerMsg.value = { text: '🛡️ 已成功执行宪法级防污染回滚，系统已重置为黄金基准认知！', type: 'ok' }
+    toast.ok('🛡️ 已成功执行宪法级防污染回滚，系统已重置为黄金基准认知！')
   } catch (e: any) {
     memoryVersion.value = null
-    bannerMsg.value = { text: `回滚失败: ${e.message}`, type: 'err' }
+    toast.err(`回滚失败: ${e.message}`)
   } finally {
     busy.value = ''
   }
@@ -150,7 +145,6 @@ async function addMemoryItem() {
   if (!text) return
   if (busy.value || loading.value) return
   busy.value = 'add'
-  bannerMsg.value = null
   try {
     const res = await api('/api/v1/admin/memory', {
       method: 'POST',
@@ -159,10 +153,10 @@ async function addMemoryItem() {
     // Reload full structured list
     await refreshMemory()
     newMemoryText.value = ''
-    bannerMsg.value = { text: '✅ 新心法已通过防偏见审查，并成功同步写入决策注入层', type: 'ok' }
+    toast.ok('新心法已通过防偏见审查，并成功同步写入决策注入层')
   } catch (e: any) {
     memoryVersion.value = null
-    bannerMsg.value = { text: `添加心法失败: ${e.message}`, type: 'err' }
+    toast.err(`添加心法失败: ${e.message}`)
   } finally {
     busy.value = ''
   }
@@ -172,14 +166,13 @@ async function deleteMemoryItem(idx: number, lessonId: string) {
   if (!confirm('确定删除此条自进化心法吗？')) return
   if (busy.value || loading.value) return
   busy.value = 'delete'
-  bannerMsg.value = null
   try {
     await api(`/api/v1/admin/memory/${idx}?lesson_id=${encodeURIComponent(lessonId)}&expected_version=${encodeURIComponent(expectedMemoryVersion())}`, { method: 'DELETE' })
     await refreshMemory()
-    bannerMsg.value = { text: '✅ 该条自进化心法已成功移除', type: 'ok' }
+    toast.ok('该条自进化心法已成功移除')
   } catch (e: any) {
     memoryVersion.value = null
-    bannerMsg.value = { text: `删除失败: ${e.message}`, type: 'err' }
+    toast.err(`删除失败: ${e.message}`)
   } finally {
     busy.value = ''
   }
@@ -188,7 +181,6 @@ async function deleteMemoryItem(idx: number, lessonId: string) {
 async function savePipelineModules() {
   if (!selectedProfile.value) return
   busy.value = 'save'
-  bannerMsg.value = null
   try {
     const pipelinesMap: Record<string, any[]> = {}
     pipelinesMap[activeTab.value] = workingModules.value.map((m) => ({
@@ -208,10 +200,10 @@ async function savePipelineModules() {
         pipelines: pipelinesMap,
       }),
     })
-    bannerMsg.value = { text: `✅ 自进化模版布局已成功保存，下一轮复盘自动生效`, type: 'ok' }
+    toast.ok(`自进化模版布局已成功保存，下一轮复盘自动生效`)
     await loadData()
   } catch (e: any) {
-    bannerMsg.value = { text: `保存失败: ${e.message}`, type: 'err' }
+    toast.err(`保存失败: ${e.message}`)
   } finally {
     busy.value = ''
   }
@@ -225,16 +217,15 @@ async function triggerEvolutionNow() {
     return
   }
   busy.value = 'run'
-  bannerMsg.value = null
   try {
     const res = await api('/api/v1/admin/gateway/jobs/self_improvement/run', {
       method: 'POST',
       body: JSON.stringify({ confirmation: 'RUN JOB' }),
     })
-    bannerMsg.value = { text: `✅ 自进化复盘已完成（已自动执行离群噪点过滤与宪法安全审查）！${res.detail || ''}`, type: 'ok' }
+    toast.ok(`自进化复盘已完成（已自动执行离群噪点过滤与宪法安全审查）！${res.detail || ''}`)
     await loadData()
   } catch (e: any) {
-    bannerMsg.value = { text: `执行复盘失败: ${e.message}`, type: 'err' }
+    toast.err(`执行复盘失败: ${e.message}`)
   } finally {
     busy.value = ''
   }
@@ -252,10 +243,10 @@ onMounted(loadData)
           <Brain class="w-3.5 h-3.5" />
         </div>
         <div>
-          <h1 class="text-xs sm:text-[13px] font-semibold uppercase tracking-wide" style="color: var(--ink-1);">
-            {{ t('admin.nEvolution') }}
+          <h1 class="text-xs sm:text-[13px] font-semibold" style="color: var(--ink-1);">
+            {{ t('nav.admin.evolution') }}
           </h1>
-          <p class="text-[11px] mt-0.5" style="color: var(--ink-2);"> AI 策略自进化认知中枢与白盒防污染护栏 (Evolution Shield) —— 离群噪点剔除、宪法级防偏见红线、心法生命周期衰减与白盒启停管理 </p>
+          <p class="text-[11px] mt-0.5" style="color: var(--ink-2);"> 穿透平仓台账自省归因，提炼心法注入下一轮决策；离群噪点剔除与半衰期淘汰 </p>
         </div>
       </div>
       <span class="badge-lever">
@@ -264,12 +255,6 @@ onMounted(loadData)
     </div>
 
     <!-- Banner -->
-    <SaveBar
-          :type="bannerMsg?.type || 'ok'"
-          :text="bannerMsg?.text || ''"
-          :nonce="bannerSeq"
-          @dismiss="bannerMsg = null"
-        />
     <!-- Navigation Tabs -->
     <div class="flex flex-wrap items-center justify-between gap-3 p-1.5 rounded-xl border" style="background-color: var(--surface-2); border-color: var(--line-1);">
       <div class="flex flex-wrap gap-1">
@@ -383,7 +368,7 @@ onMounted(loadData)
           <div class="text-[11px] font-bold uppercase" style="color: var(--ink-3);">AI 逐单归因与深度诊断切片 ({{ evolutionReport.insights.length }} 条)</div>
           <div class="space-y-1 max-h-[160px] overflow-y-auto pr-1">
             <div v-for="(ins, idx) in evolutionReport.insights" :key="idx" class="p-2 rounded border text-[11px] leading-relaxed" style="background-color: var(--surface-1); border-color: var(--line-1); color: var(--ink-2);">
-              <span class="text-indigo-400 font-bold mr-1">#{{ idx + 1 }}</span>
+              <span class="text-indigo-400 font-bold mr-1">#{{ Number(idx) + 1 }}</span>
               <span>{{ ins }}</span>
             </div>
           </div>
@@ -444,8 +429,8 @@ onMounted(loadData)
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 mb-3 border-b" style="border-color: var(--line-1);">
           <div class="flex items-center space-x-2">
             <Brain class="w-4 h-4 text-emerald-400" />
-            <h2 class="text-xs font-semibold uppercase tracking-wide" style="color: var(--ink-1);">
-              白盒实战心法生命周期管理 (Structured Heuristic Rules)
+            <h2 class="text-xs font-semibold" style="color: var(--ink-1);">
+              心法生命周期管理
             </h2>
           </div>
           <span class="text-[11px]" style="color: var(--ink-3);">

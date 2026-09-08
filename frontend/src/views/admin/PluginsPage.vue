@@ -45,7 +45,7 @@ onMounted(load)
         <div class="flex items-center justify-between mb-3">
           <div class="flex items-center space-x-2">
             <Blocks class="w-4 h-4" style="color: var(--accent);" />
-            <h2 class="text-xs font-semibold uppercase tracking-wide" style="color: var(--ink-1);">{{ t('admin.nPlugins') }}</h2>
+            <h2 class="text-xs font-semibold" style="color: var(--ink-1);">{{ t('nav.admin.plugins') }}</h2>
           </div>
           <button @click="load" class="flex items-center space-x-1 px-2.5 py-1 rounded-lg border text-[11px] cursor-pointer transition-all shadow-xs" style="background-color: var(--surface-1); border-color: var(--line-2); color: var(--ink-1);">
             <RefreshCw class="w-3 h-3" />

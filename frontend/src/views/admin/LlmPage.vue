@@ -568,8 +568,8 @@ onMounted(() => {
             <Cpu class="w-3.5 h-3.5" />
           </div>
           <div>
-            <h1 class="text-xs sm:text-[13px] font-semibold uppercase tracking-wide" style="color: var(--ink-1);">
-              {{ t('admin.nLlm') }}
+            <h1 class="text-xs sm:text-[13px] font-semibold" style="color: var(--ink-1);">
+              {{ t('nav.admin.llm') }}
             </h1>
             <p class="text-[11px] mt-0.5" style="color: var(--ink-2);"> AI 模型供应商与直连矩阵 —— 管理大模型渠道矩阵、思考强度与 API 密钥直连 </p>
           </div>
@@ -609,7 +609,7 @@ onMounted(() => {
             <div>
               <div class="flex items-center space-x-2">
                 <h2 class="text-xs sm:text-[13px] font-bold" style="color: var(--ink-1);">
-                  全局思考推演与超时上限 (Reasoning & Thinking Timeout)
+                  全局思考推演与超时上限
                 </h2>
                 <span
                   class="px-2 py-0.5 rounded text-[11px] font-bold border"
@@ -653,7 +653,7 @@ onMounted(() => {
           <div class="p-3 rounded-xl border space-y-1.5 sm:col-span-1 lg:col-span-2" style="background-color: var(--surface-1); border-color: var(--line-1);">
             <div class="flex items-center justify-between">
               <label class="text-[11px] font-bold" style="color: var(--ink-2);">
-                思考时间上限 (秒 / Seconds)
+                思考时间上限（秒）
               </label>
               <span class="text-[11px]" style="color: var(--ink-3);">有效范围: 10 ~ 1800 秒</span>
             </div>

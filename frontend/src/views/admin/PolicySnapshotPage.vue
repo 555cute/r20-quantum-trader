@@ -1,8 +1,9 @@
 <script setup lang="ts">
+import { useToast } from '../../composables/useToast'
+const toast = useToast()
 import { ref, onMounted , watch} from 'vue'
 import { useI18n } from '../../composables/useI18n'
 const { t } = useI18n()
-import SaveBar from '../../components/admin/SaveBar.vue'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
 import {
@@ -39,9 +40,6 @@ const deleting = ref<string | null>(null)
 const snapshotData = ref<any>(null)
 const archives = ref<any[]>([])
 const errorMsg = ref<string | null>(null)
-const bannerMsg = ref<{ text: string; type: 'ok' | 'err' | 'warn' } | null>(null)
-const bannerSeq = ref(0)
-watch(bannerMsg, () => { bannerSeq.value++ })
 
 // Archive Dialog State
 const showArchiveModal = ref(false)
@@ -72,11 +70,11 @@ async function fetchSnapshot() {
 
 async function saveArchive() {
   if (!auth.isSuperadmin) {
-    bannerMsg.value = { text: '仅超级管理员可归档策略版本', type: 'err' }
+    toast.err('仅超级管理员可归档策略版本')
     return
   }
   if (!archiveName.value.trim()) {
-    bannerMsg.value = { text: '请输入策略归档名称', type: 'warn' }
+    toast.warn('请输入策略归档名称')
     return
   }
   archiving.value = true
@@ -89,14 +87,14 @@ async function saveArchive() {
       }),
     })
     if (res && res.ok) {
-      bannerMsg.value = { text: `🎉 策略版本已归档入库：${res.entry?.name} (#${res.entry?.policy_hash})`, type: 'ok' }
+      toast.ok(`策略版本已归档入库：${res.entry?.name} (#${res.entry?.policy_hash})`)
       showArchiveModal.value = false
       archiveName.value = ''
       archiveDesc.value = ''
       await fetchSnapshot()
     }
   } catch (err: any) {
-    bannerMsg.value = { text: `归档失败: ${err.message}`, type: 'err' }
+    toast.err(`归档失败: ${err.message}`)
   } finally {
     archiving.value = false
   }
@@ -114,11 +112,11 @@ async function restorePolicy(hash: string, name: string) {
       body: JSON.stringify({ policy_hash: hash }),
     })
     if (res && res.ok) {
-      bannerMsg.value = { text: `✅ 策略已原子回滚至【${name}】(#${hash})！下一决策周期将立即生效`, type: 'ok' }
+      toast.ok(`策略已原子回滚至【${name}】(#${hash})！下一决策周期将立即生效`)
       await fetchSnapshot()
     }
   } catch (err: any) {
-    bannerMsg.value = { text: `回滚失败: ${err.message}`, type: 'err' }
+    toast.err(`回滚失败: ${err.message}`)
   } finally {
     restoring.value = false
   }
@@ -135,11 +133,11 @@ async function deleteArchive(hash: string, name: string) {
       method: 'DELETE',
     })
     if (res && res.ok) {
-      bannerMsg.value = { text: `🗑️ 策略版本【${name}】已成功删除`, type: 'ok' }
+      toast.ok(`🗑️ 策略版本【${name}】已成功删除`)
       await fetchSnapshot()
     }
   } catch (err: any) {
-    bannerMsg.value = { text: `删除失败: ${err.message}`, type: 'err' }
+    toast.err(`删除失败: ${err.message}`)
   } finally {
     deleting.value = null
   }
@@ -159,12 +157,6 @@ onMounted(() => {
 <template>
   <div class="space-y-4">
     <!-- Notice Banner -->
-    <SaveBar
-          :type="bannerMsg?.type || 'ok'"
-          :text="bannerMsg?.text || ''"
-          :nonce="bannerSeq"
-          @dismiss="bannerMsg = null"
-        />
     <!-- Header Control Station -->
     <div
       class="rounded-2xl border p-4 sm:p-5 2xl:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4"
@@ -180,7 +172,7 @@ onMounted(() => {
         <div>
           <div class="flex items-center space-x-2">
             <h2 class="text-sm 2xl:text-base font-bold" style="color: var(--ink-1);">
-              {{ t('admin.nPolicy') }}
+              {{ t('nav.admin.policy') }}
             </h2>
             <span
               v-if="snapshotData?.policy_version"
@@ -190,7 +182,7 @@ onMounted(() => {
               {{ snapshotData.policy_version }}
             </span>
           </div>
-          <p class="text-xs 2xl:text-sm mt-0.5" style="color: var(--ink-2);"> 策略大一统版本快照 (Policy Snapshot Workbench) —— 四大策略单元（提示词、自进化、物理拦截、模型委员会）的不可变指纹聚合与具名归档/一键回滚。 </p>
+          <p class="text-xs 2xl:text-sm mt-0.5" style="color: var(--ink-2);"> 四大策略单元（提示词、自进化、物理拦截、模型委员会）的不可变指纹聚合，支持具名归档与一键回滚 </p>
         </div>
       </div>
 
@@ -241,7 +233,7 @@ onMounted(() => {
         <div class="flex items-center space-x-2">
           <Hash class="w-4 h-4 2xl:w-5 2xl:h-5 text-purple-400 shrink-0" />
           <div>
-            <div class="text-[11px] 2xl:text-xs text-[var(--ink-2)]">当前活跃策略版本 (Active Version)</div>
+            <div class="text-[11px] 2xl:text-xs text-[var(--ink-2)]">当前活跃策略版本</div>
             <div class="font-bold text-sm 2xl:text-base mt-0.5" style="color: var(--ink-1);">
               {{ snapshotData.snapshot.policy_version }}
             </div>
@@ -250,7 +242,7 @@ onMounted(() => {
         <div class="flex items-center space-x-2">
           <Activity class="w-4 h-4 2xl:w-5 2xl:h-5 text-cyan-400 shrink-0" />
           <div>
-            <div class="text-[11px] 2xl:text-xs text-[var(--ink-2)]">不可变指纹哈希 (Fingerprint Hash)</div>
+            <div class="text-[11px] 2xl:text-xs text-[var(--ink-2)]">不可变指纹哈希</div>
             <div class="font-bold text-sm 2xl:text-base mt-0.5 text-cyan-400">
               #{{ snapshotData.snapshot.policy_hash }}
             </div>
@@ -259,7 +251,7 @@ onMounted(() => {
         <div class="flex items-center space-x-2">
           <Clock class="w-4 h-4 2xl:w-5 2xl:h-5 text-emerald-400 shrink-0" />
           <div>
-            <div class="text-[11px] 2xl:text-xs text-[var(--ink-2)]">快照生成时间 (Snapshot Time)</div>
+            <div class="text-[11px] 2xl:text-xs text-[var(--ink-2)]">快照生成时间</div>
             <div class="font-bold text-sm 2xl:text-base mt-0.5 text-emerald-400">
               {{ formatTimestamp(snapshotData.snapshot.timestamp) }}
             </div>
@@ -280,7 +272,7 @@ onMounted(() => {
                 <span class="p-1.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400">
                   <FileText class="w-4 h-4" />
                 </span>
-                <span class="font-bold text-xs" style="color: var(--ink-1);">提示词策略工作室 (Prompt Studio)</span>
+                <span class="font-bold text-xs" style="color: var(--ink-1);">提示词策略工作室</span>
               </div>
               <router-link
                 to="/admin/promptlib"
@@ -329,7 +321,7 @@ onMounted(() => {
                 <span class="p-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
                   <Sparkles class="w-4 h-4" />
                 </span>
-                <span class="font-bold text-xs" style="color: var(--ink-1);">自进化心法防线 (Evolution Shield)</span>
+                <span class="font-bold text-xs" style="color: var(--ink-1);">自进化心法</span>
               </div>
               <router-link
                 to="/admin/evolution"
@@ -380,7 +372,7 @@ onMounted(() => {
                 <span class="p-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400">
                   <ShieldCheck class="w-4 h-4" />
                 </span>
-                <span class="font-bold text-xs" style="color: var(--ink-1);">物理拦截插件 (Interceptors)</span>
+                <span class="font-bold text-xs" style="color: var(--ink-1);">物理拦截插件</span>
               </div>
               <router-link
                 to="/admin/interceptors"
@@ -429,7 +421,7 @@ onMounted(() => {
                 <span class="p-1.5 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-400">
                   <Users class="w-4 h-4" />
                 </span>
-                <span class="font-bold text-xs" style="color: var(--ink-1);">模型委员会中枢 (Council Desk)</span>
+                <span class="font-bold text-xs" style="color: var(--ink-1);">模型委员会</span>
               </div>
               <router-link
                 to="/admin/council"
@@ -453,7 +445,7 @@ onMounted(() => {
               <div class="flex justify-between py-1 border-b border-dashed" style="border-color: var(--line-1);">
                 <span class="text-[var(--ink-2)]">真实共识模式 Mode:</span>
                 <span class="text-purple-400 font-bold">
-                  {{ snapshotData.snapshot.units?.model_council?.consensus_mode === 'cross_examination' ? '双轮真实质询 (Cross-Exam)' : '标准提案裁决 (Standard)' }}
+                  {{ snapshotData.snapshot.units?.model_council?.consensus_mode === 'cross_examination' ? '双轮质询' : '标准提案' }}
                 </span>
               </div>
               <div class="flex justify-between py-1 border-b border-dashed" style="border-color: var(--line-1);">
@@ -484,7 +476,7 @@ onMounted(() => {
           <div class="flex items-center space-x-2">
             <Archive class="w-4 h-4 text-purple-400" />
             <h3 class="text-sm font-bold" style="color: var(--ink-1);">
-              历史策略版本库 (Policy Archive Vault)
+              历史策略版本库
             </h3>
             <span class="text-[11px] px-2 py-0.5 rounded border" style="background-color: var(--surface-1); border-color: var(--line-1); color: var(--ink-2);">
               {{ archives.length }} 个已归档策略包
@@ -568,7 +560,7 @@ onMounted(() => {
         <div class="flex items-center space-x-2">
           <BookmarkPlus class="w-5 h-5 text-purple-400" />
           <h3 class="text-sm font-bold" style="color: var(--ink-1);">
-            归档当前策略版本 (Create Policy Archive)
+            归档当前策略版本
           </h3>
         </div>
 
