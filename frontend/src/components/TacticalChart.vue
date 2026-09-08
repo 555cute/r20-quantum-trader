@@ -75,8 +75,13 @@ const emit = defineEmits<{
 }>()
 
 const store = useDashboardStore()
-const { theme } = useTheme()
+const { theme, cvd } = useTheme()
 const isDark = computed(() => theme.value === 'dark')
+
+/* P1: resolve design-token value at render time — chart follows theme & CVD switches */
+function tok(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#888888'
+}
 const { t, isEn } = useI18n()
 
 // ==========================================
@@ -425,35 +430,35 @@ function getChartStyles(): DeepPartial<Styles> {
     candle: {
       type: 'candle_solid',
       bar: {
-        upColor: '#10B981',
-        downColor: '#F43F5E',
-        noChangeColor: '#888888',
-        upBorderColor: '#10B981',
-        downBorderColor: '#F43F5E',
-        noChangeBorderColor: '#888888',
-        upWickColor: '#10B981',
-        downWickColor: '#F43F5E',
-        noChangeWickColor: '#888888',
+        upColor: tok('--color-up'),
+        downColor: tok('--color-down'),
+        noChangeColor: tok('--text-faint'),
+        upBorderColor: tok('--color-up'),
+        downBorderColor: tok('--color-down'),
+        noChangeBorderColor: tok('--text-faint'),
+        upWickColor: tok('--color-up'),
+        downWickColor: tok('--color-down'),
+        noChangeWickColor: tok('--text-faint'),
       },
       priceMark: {
         show: true,
         high: {
           show: true,
-          color: dark ? '#CBD5E1' : '#475569',
+          color: tok('--text-muted'),
           textOffset: 4,
           textSize: 10,
         },
         low: {
           show: true,
-          color: dark ? '#CBD5E1' : '#475569',
+          color: tok('--text-muted'),
           textOffset: 4,
           textSize: 10,
         },
         last: {
           show: true,
-          upColor: '#10B981',
-          downColor: '#F43F5E',
-          noChangeColor: '#888888',
+          upColor: tok('--color-up'),
+          downColor: tok('--color-down'),
+          noChangeColor: tok('--text-faint'),
           line: {
             show: true,
             style: 'dashed',
@@ -467,7 +472,7 @@ function getChartStyles(): DeepPartial<Styles> {
             paddingTop: 2,
             paddingRight: 4,
             paddingBottom: 2,
-            color: '#FFFFFF',
+            color: tok('--text-main'),
           },
         },
       },
@@ -477,22 +482,22 @@ function getChartStyles(): DeepPartial<Styles> {
         text: {
           size: 11,
           family: 'JetBrains Mono, monospace',
-          color: dark ? '#94A3B8' : '#64748B',
+          color: tok('--text-muted'),
         },
       },
     },
     indicator: {
       ohlc: {
-        upColor: '#10B981',
-        downColor: '#F43F5E',
-        noChangeColor: '#888888',
+        upColor: tok('--color-up'),
+        downColor: tok('--color-down'),
+        noChangeColor: tok('--text-faint'),
       },
       lines: [
         { style: 'solid', smooth: false, size: 1.5, color: '#F59E0B' }, // MA5 / 黄
         { style: 'solid', smooth: false, size: 1.5, color: '#38BDF8' }, // MA10 / 蓝
         { style: 'solid', smooth: false, size: 1.5, color: '#A855F7' }, // MA20 / 紫
-        { style: 'solid', smooth: false, size: 1.5, color: '#F43F5E' },
-        { style: 'solid', smooth: false, size: 1.5, color: '#10B981' },
+        { style: 'solid', smooth: false, size: 1.5, color: tok('--color-down') },
+        { style: 'solid', smooth: false, size: 1.5, color: tok('--color-up') },
       ],
       lastValueMark: {
         show: true,
@@ -503,7 +508,7 @@ function getChartStyles(): DeepPartial<Styles> {
           paddingTop: 1,
           paddingRight: 3,
           paddingBottom: 1,
-          color: '#FFFFFF',
+          color: tok('--text-main'),
         },
       },
     },
@@ -512,12 +517,12 @@ function getChartStyles(): DeepPartial<Styles> {
       size: 'auto',
       axisLine: {
         show: true,
-        color: dark ? '#1E293B' : '#E2E8F0',
+        color: tok('--bg-elevated'),
         size: 1,
       },
       tickText: {
         show: true,
-        color: dark ? '#64748B' : '#94A3B8',
+        color: tok('--text-faint'),
         family: 'JetBrains Mono, monospace',
         size: 10,
       },
@@ -525,7 +530,7 @@ function getChartStyles(): DeepPartial<Styles> {
         show: true,
         size: 1,
         length: 3,
-        color: dark ? '#1E293B' : '#E2E8F0',
+        color: tok('--bg-elevated'),
       },
     },
     yAxis: {
@@ -536,12 +541,12 @@ function getChartStyles(): DeepPartial<Styles> {
       inside: false,
       axisLine: {
         show: true,
-        color: dark ? '#1E293B' : '#E2E8F0',
+        color: tok('--bg-elevated'),
         size: 1,
       },
       tickText: {
         show: true,
-        color: dark ? '#94A3B8' : '#64748B',
+        color: tok('--text-muted'),
         family: 'JetBrains Mono, monospace',
         size: 11,
       },
@@ -551,7 +556,7 @@ function getChartStyles(): DeepPartial<Styles> {
     },
     separator: {
       size: 1,
-      color: dark ? '#1E293B' : '#E2E8F0',
+      color: tok('--bg-elevated'),
       fill: true,
       activeBackgroundColor: dark ? '#334155' : '#CBD5E1',
     },
@@ -563,11 +568,11 @@ function getChartStyles(): DeepPartial<Styles> {
           style: 'dashed',
           dashedValue: [4, 4],
           size: 1,
-          color: dark ? '#64748B' : '#94A3B8',
+          color: tok('--text-faint'),
         },
         text: {
           show: true,
-          color: '#FFFFFF',
+          color: tok('--text-main'),
           size: 11,
           family: 'JetBrains Mono, monospace',
           backgroundColor: '#3B82F6',
@@ -579,11 +584,11 @@ function getChartStyles(): DeepPartial<Styles> {
           style: 'dashed',
           dashedValue: [4, 4],
           size: 1,
-          color: dark ? '#64748B' : '#94A3B8',
+          color: tok('--text-faint'),
         },
         text: {
           show: true,
-          color: '#FFFFFF',
+          color: tok('--text-main'),
           size: 10,
           family: 'JetBrains Mono, monospace',
           backgroundColor: '#475569',
@@ -778,7 +783,7 @@ function updatePriceLines() {
         },
         text: {
           size: 11,
-          color: '#FFFFFF',
+          color: tok('--text-main'),
           backgroundColor: isLong ? '#10B981' : '#F43F5E',
         },
       },
@@ -801,7 +806,7 @@ function updatePriceLines() {
         },
         text: {
           size: 11,
-          color: '#FFFFFF',
+          color: tok('--text-main'),
           backgroundColor: '#F43F5E',
         },
       },
@@ -824,7 +829,7 @@ function updatePriceLines() {
         },
         text: {
           size: 11,
-          color: '#FFFFFF',
+          color: tok('--text-main'),
           backgroundColor: '#10B981',
         },
       },
@@ -965,7 +970,7 @@ function copySimulationSummary() {
 }
 
 // 监听主题与外部持仓变化
-watch(isDark, () => {
+watch([isDark, cvd], () => {
   klineChart?.setStyles(getChartStyles())
 })
 

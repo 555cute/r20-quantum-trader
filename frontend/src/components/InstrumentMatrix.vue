@@ -57,6 +57,13 @@ function getActionLabel(action?: string) {
   if (action === 'SELL_SHORT') return t('desk.shortSell', '顺势做空 SELL')
   return 'WAIT'
 }
+
+function confTier(item: any) {
+  const c = Number(item.decision?.confidence || item.confidence || 0)
+  if (c >= 70) return { key: 'conf.high', color: 'var(--color-up)' }
+  if (c >= 40) return { key: 'conf.mid', color: 'var(--color-warn)' }
+  return { key: 'conf.low', color: 'var(--text-faint)' }
+}
 </script>
 
 <template>
@@ -185,10 +192,11 @@ function getActionLabel(action?: string) {
             >
               {{ getActionLabel(item.decision?.action || item.action) }}
             </span>
-            <div class="flex items-center space-x-1 text-xs font-mono font-bold shrink-0" style="color: var(--text-muted);">
-              <span class="text-[11px] font-medium" style="color: var(--text-muted);">Conf:</span>
-              <span class="num-tabular font-bold" style="color: var(--text-main);">{{ item.decision?.confidence || item.confidence || 0 }}%</span>
-              <ArrowUpRight class="w-3.5 h-3.5 opacity-60 group-hover:opacity-100 transition-opacity" />
+            <div class="flex items-center space-x-1.5 text-xs font-mono font-bold shrink-0" :title="'Confidence ' + (item.decision?.confidence || item.confidence || 0) + '%'">
+              <!-- F4: tier label + dot, not fake-precise % -->
+              <span class="w-1.5 h-1.5 rounded-full shrink-0" :style="{ backgroundColor: confTier(item).color }"></span>
+              <span class="text-[11px]" :style="{ color: confTier(item).color }">{{ t(confTier(item).key) }}</span>
+              <ArrowUpRight class="w-3.5 h-3.5 opacity-60 group-hover:opacity-100 transition-opacity" style="color: var(--text-faint);" />
             </div>
           </div>
         </div>

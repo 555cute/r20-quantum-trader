@@ -192,7 +192,7 @@ function setLayout(mode: 'dual' | 'stacked') {
         <button
           @click="store.showAboutModal = true"
           class="hover:text-[var(--color-brand)] transition-colors cursor-pointer"
-          title="点击查看开源仓库与项目信息"
+          :title="t('nav.aboutHint')"
         >
           {{ APP_NAME }} {{ APP_VERSION }}
         </button>
@@ -222,7 +222,7 @@ function setLayout(mode: 'dual' | 'stacked') {
           :style="{ color: store.activeTab === 'trading' ? 'var(--color-brand)' : 'var(--text-muted)' }"
         >
           <Terminal class="w-4 h-4 mb-0.5" />
-          <span class="text-[11px] font-bold">综合操盘</span>
+          <span class="text-[11px] font-bold">{{ t('nav.tabMatrix') }}</span>
         </button>
         <button
           @click="store.activeTab = 'factors'"
@@ -230,7 +230,7 @@ function setLayout(mode: 'dual' | 'stacked') {
           :style="{ color: store.activeTab === 'factors' ? 'var(--color-brand)' : 'var(--text-muted)' }"
         >
           <Cpu class="w-4 h-4 mb-0.5" />
-          <span class="text-[11px] font-bold">决策中枢</span>
+          <span class="text-[11px] font-bold">{{ t('nav.tabRadar') }}</span>
         </button>
         <button
           @click="store.activeTab = 'news'"
@@ -238,7 +238,7 @@ function setLayout(mode: 'dual' | 'stacked') {
           :style="{ color: store.activeTab === 'news' ? 'var(--color-brand)' : 'var(--text-muted)' }"
         >
           <Newspaper class="w-4 h-4 mb-0.5" />
-          <span class="text-[11px] font-bold">市场全息</span>
+          <span class="text-[11px] font-bold">{{ t('nav.tabNews') }}</span>
         </button>
         <button
           @click="store.activeTab = 'lab'"
@@ -246,7 +246,7 @@ function setLayout(mode: 'dual' | 'stacked') {
           :style="{ color: store.activeTab === 'lab' ? 'var(--color-brand)' : 'var(--text-muted)' }"
         >
           <Sparkles class="w-4 h-4 mb-0.5" />
-          <span class="text-[11px] font-bold">量子实验室</span>
+          <span class="text-[11px] font-bold">{{ t('nav.tabLab') }}</span>
         </button>
         <button
           @click="store.activeTab = 'history'"
@@ -254,7 +254,7 @@ function setLayout(mode: 'dual' | 'stacked') {
           :style="{ color: store.activeTab === 'history' ? 'var(--color-brand)' : 'var(--text-muted)' }"
         >
           <Receipt class="w-4 h-4 mb-0.5" />
-          <span class="text-[11px] font-bold">审计台账</span>
+          <span class="text-[11px] font-bold">{{ t('nav.tabLedger') }}</span>
         </button>
       </div>
     </nav>

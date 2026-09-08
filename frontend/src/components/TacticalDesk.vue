@@ -177,32 +177,16 @@ const allProtected = computed(() =>
           </button>
         </div>
 
-        <!-- Cloud OCO Status Badge -->
-        <div
-          class="h-7.5 2xl:h-8.5 flex items-center space-x-1.5 text-xs 2xl:text-sm font-mono px-2.5 2xl:px-3.5 rounded-lg border font-medium"
-          :style="{
-            backgroundColor: allProtected ? 'var(--color-up-bg)' : 'var(--color-warn-bg)',
-            borderColor: allProtected ? 'var(--color-up-border)' : 'var(--color-warn-border)',
-            color: allProtected ? 'var(--color-up)' : 'var(--color-warn)'
-          }"
-        >
-          <ShieldCheck v-if="allProtected" class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
-          <ShieldAlert v-else class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
-          <span class="hidden md:inline">{{ allProtected ? t('desk.ocoProtected', '100% 交易所云端 OCO 止损') : '部分仓位未设止损' }}</span>
-          <span class="md:hidden">{{ allProtected ? '100% OCO' : '未全覆盖' }}</span>
-        </div>
-
-        <!-- Toggle Chart Deck Button -->
+        <!-- Toggle Chart Deck Button (icon-only, P1) -->
         <button
           @click="showChart = !showChart"
-          class="h-7.5 2xl:h-8.5 px-2.5 2xl:px-3 rounded-lg border text-xs 2xl:text-sm font-mono flex items-center space-x-1.5 transition-all cursor-pointer font-bold shrink-0"
+          class="h-7.5 2xl:h-8.5 w-7.5 2xl:w-8.5 flex items-center justify-center rounded-lg border transition-all cursor-pointer shrink-0"
           :style="showChart
             ? { backgroundColor: 'var(--color-brand-bg)', borderColor: 'var(--color-brand-border)', color: 'var(--color-brand)' }
             : { backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }"
-          title="展开/收起 K线与四维交易线可视化操盘画板"
+          :title="showChart ? t('desk.collapseChart') : t('desk.openChart')"
         >
           <LineChart class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
-          <span>{{ showChart ? '收起图表' : 'K线操盘台' }}</span>
         </button>
       </div>
     </div>

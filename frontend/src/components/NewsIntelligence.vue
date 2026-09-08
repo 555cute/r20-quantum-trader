@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useDashboardStore } from '../stores/dashboard'
+import { useI18n } from '../composables/useI18n'
 import { Newspaper, Flame, ExternalLink, ShieldAlert, RefreshCw, Radio } from 'lucide-vue-next'
 
 const store = useDashboardStore()
+const { t } = useI18n()
 const intel = computed<any>(() => store.data?.news_intelligence || {})
 const newsItems = computed<any[]>(() => intel.value.latest_news || [])
 const coinsSentiment = computed<[string, any][]>(() => Object.entries(intel.value.coins_sentiment || {}))
@@ -24,7 +26,7 @@ function labelCn(label: string) {
 }
 
 function importanceClass(imp: string) {
-  if (imp === 'high' || imp === 'critical') return 'color: var(--color-down);'
+  if (imp === 'high' || imp === 'critical') return 'color: var(--color-warn); font-weight: 900;'
   if (imp === 'medium') return 'color: var(--color-warn);'
   return 'color: var(--text-faint);'
 }
@@ -45,7 +47,7 @@ function importanceCn(imp: string) {
         <div>
           <div class="flex items-center space-x-2">
             <h2 class="text-xs sm:text-[13px] 2xl:text-sm font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
-              全网加密重大舆情与流动性情报
+              {{ t('news.title') }}
             </h2>
             <span
               v-if="isStaleFeed"
@@ -54,11 +56,11 @@ function importanceCn(imp: string) {
               title="上游资讯源本轮抓取失败，页面展示的是最近一次成功的缓存内容"
             >
               <span class="w-1.5 h-1.5 rounded-full" style="background-color: var(--color-warn);"></span>
-              <span>数据源延迟 · 展示缓存</span>
+              <span>{{ t('news.staleTag') }}</span>
             </span>
             <span v-else class="hidden md:inline-flex items-center space-x-1 text-[11px] 2xl:text-[11px] font-mono px-2 py-0.5 rounded-[4px] border" style="background-color: var(--color-up-bg); border-color: var(--color-up-border); color: var(--color-up);">
               <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span>错峰自动更新中</span>
+              <span>{{ t('news.autoUpdate') }}</span>
             </span>
           </div>
           <p class="text-[11px] 2xl:text-xs font-mono mt-0.5" style="color: var(--text-muted);">
@@ -78,7 +80,7 @@ function importanceCn(imp: string) {
           title="立即手动刷新最新快讯与舆情"
         >
           <RefreshCw class="w-3 h-3" :class="store.isRefreshing ? 'animate-spin text-blue-400' : ''" />
-          <span class="hidden sm:inline">{{ store.isRefreshing ? '同步中' : '刷新' }}</span>
+          <span class="hidden sm:inline">{{ store.isRefreshing ? t('news.syncing') : t('news.refresh') }}</span>
         </button>
 
         <span
@@ -90,42 +92,47 @@ function importanceCn(imp: string) {
           }"
         >
           <ShieldAlert class="w-3 h-3 2xl:w-3.5 2xl:h-3.5" />
-          <span>{{ breakerActive ? '黑天鹅熔断激活' : '常态监控中' }}</span>
+          <span>{{ breakerActive ? t('news.breakerOn') : t('news.breakerOff') }}</span>
         </span>
 
         <span
           class="h-7 2xl:h-8 px-2.5 2xl:px-3 rounded-[4px] border text-[11px] 2xl:text-xs font-mono inline-flex items-center space-x-1"
           style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-muted);"
         >
-          <span>宏观情绪:</span>
+          <span>{{ t('news.macroLabel') }}:</span>
           <strong style="color: var(--text-main);">{{ macro }}</strong>
         </span>
       </div>
     </div>
 
-    <!-- Coin Sentiment Chips -->
-    <div v-if="coinsSentiment.length" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 2xl:gap-3.5">
+    <!-- P1: Long/Short temperature band (L4: aggregate distribution belongs in one strip, not a card grid) -->
+    <div
+      v-if="coinsSentiment.length"
+      class="rounded-xl border px-3 sm:px-4 py-2.5 flex flex-wrap items-center gap-x-6 gap-y-2 shadow-xs"
+      style="background-color: var(--bg-card); border-color: var(--border-subtle);"
+    >
+      <span class="text-[11px] font-mono font-bold uppercase tracking-wider shrink-0" style="color: var(--text-muted);">{{ t('news.tempBand') }}</span>
       <div
         v-for="[ccy, s] in coinsSentiment"
         :key="ccy"
-        class="rounded-xl border p-3 2xl:p-3.5 shadow-xs transition-colors"
-        style="background-color: var(--bg-card); border-color: var(--border-subtle);"
+        class="flex items-center space-x-2 min-w-0"
+        :title="`${t('news.mentions')} ${((s.mentions ?? 0)).toLocaleString()}${s.long_short_ratio ? ' · ' + t('news.lsRatio') + ' ' + s.long_short_ratio : ''}`"
       >
-        <div class="flex items-center justify-between mb-1.5">
-          <span class="text-xs 2xl:text-sm font-black font-mono" style="color: var(--text-main);">{{ ccy }}</span>
-          <span class="px-1.5 py-0.2 rounded text-[11px] 2xl:text-xs font-mono font-bold border" :style="labelClass(s.label)">
-            {{ labelCn(s.label) }}
-          </span>
-        </div>
-        <div class="flex items-center justify-between text-[11px] 2xl:text-xs font-mono">
-          <span style="color: var(--color-up);">多 {{ s.bullish_ratio || s.bullish_pct || '--' }}</span>
-          <span style="color: var(--color-down);">空 {{ s.bearish_ratio || s.bearish_pct || '--' }}</span>
-        </div>
-        <div class="flex items-center justify-between text-[11px] 2xl:text-[11px] font-mono mt-1 pt-1 border-t" style="border-color: var(--border-subtle);">
-          <span style="color: var(--text-faint);">提及 {{ (s.mentions ?? 0).toLocaleString() }}</span>
-          <span v-if="s.long_short_ratio" class="font-bold text-blue-400">比率 {{ s.long_short_ratio }}</span>
-        </div>
+        <span class="text-xs font-mono font-black" style="color: var(--text-main);">{{ ccy }}</span>
+        <!-- bull/bear ratio micro-bar -->
+        <span class="w-14 h-1 rounded-full overflow-hidden flex shrink-0" style="background-color: var(--bg-badge);">
+          <span
+            class="h-full"
+            :style="{ width: Math.min(100, Number(s.bullish_ratio || s.bullish_pct || 50)) + '%', backgroundColor: 'var(--color-up)' }"
+          ></span>
+        </span>
+        <span class="text-[11px] font-mono num-tabular shrink-0" :style="{ color: s.label === 'bullish' ? 'var(--color-up)' : s.label === 'bearish' ? 'var(--color-down)' : 'var(--text-muted)' }">
+          {{ labelCn(s.label) }}
+        </span>
       </div>
+      <span class="text-[11px] font-mono ml-auto shrink-0" style="color: var(--text-faint);">
+        {{ t('news.macroLabel') }} <strong style="color: var(--text-main);">{{ macro }}</strong>
+      </span>
     </div>
 
     <!-- News List -->
@@ -134,7 +141,7 @@ function importanceCn(imp: string) {
       class="py-16 2xl:py-24 text-center border border-dashed rounded-xl"
       style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-muted);"
     >
-      <p class="text-xs 2xl:text-sm font-mono font-medium">当前市场无破坏性突发黑天鹅或高热度异动，舆情环境平稳。</p>
+      <p class="text-xs 2xl:text-sm font-mono font-medium">{{ t('news.calmEmpty') }}</p>
     </div>
 
     <div v-else class="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-3 2xl:gap-4">
@@ -163,9 +170,9 @@ function importanceCn(imp: string) {
         </div>
 
         <div class="mt-3 2xl:mt-4 pt-2.5 2xl:pt-3 border-t flex items-center justify-between text-[11px] 2xl:text-xs font-mono" style="border-color: var(--border-subtle); color: var(--text-muted);">
-          <span>热度: <strong :style="importanceClass(item.importance)">{{ importanceCn(item.importance) }}</strong></span>
+          <span>{{ t('news.hot') }}: <strong :style="importanceClass(item.importance)">{{ importanceCn(item.importance) }}</strong></span>
           <span class="flex items-center space-x-2">
-            <span>标的: <strong style="color: var(--text-main);">{{ (item.coins || []).join(', ') || 'ALL' }}</strong></span>
+            <span>{{ t('news.target') }}: <strong style="color: var(--text-main);">{{ (item.coins || []).join(', ') || 'ALL' }}</strong></span>
             <a
               v-if="item.url"
               :href="item.url"
@@ -174,7 +181,7 @@ function importanceCn(imp: string) {
               class="flex items-center hover:underline"
               style="color: var(--color-brand);"
             >
-              原文<ExternalLink class="w-3 h-3 ml-0.5" />
+              {{ t('news.source') }}<ExternalLink class="w-3 h-3 ml-0.5" />
             </a>
           </span>
         </div>
