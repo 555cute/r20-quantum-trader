@@ -303,7 +303,7 @@ onMounted(loadData)
         @click="saveChanges"
         :disabled="busy !== ''"
         class="px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 disabled:opacity-50"
-        style="background-color: var(--ink-1); color: var(--surface-2);"
+        style="background-color: var(--accent); color: var(--accent-ink);"
       >
         <Save class="w-3.5 h-3.5" />
         {{ busy === 'save' ? '保存中…' : '保存并生效' }}

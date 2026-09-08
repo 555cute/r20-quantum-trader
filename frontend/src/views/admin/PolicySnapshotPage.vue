@@ -146,7 +146,7 @@ async function deleteArchive(hash: string, name: string) {
 function formatTimestamp(ts: number) {
   if (!ts) return '未记录'
   const d = new Date(ts * 1000)
-  return d.toLocaleString()
+  return d.toLocaleString("sv-SE")
 }
 
 onMounted(() => {
@@ -192,7 +192,7 @@ onMounted(() => {
           @click="showArchiveModal = true"
           :disabled="!auth.isSuperadmin"
           class="flex items-center space-x-1.5 px-3 py-1.5 2xl:px-4 2xl:py-2 rounded-xl text-xs 2xl:text-sm font-bold cursor-pointer transition-all shadow-xs"
-          style="background-color: var(--ink-1); color: var(--surface-2);"
+          style="background-color: var(--accent); color: var(--accent-ink);"
         >
           <BookmarkPlus class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
           <span>归档为策略版本</span>
@@ -602,7 +602,7 @@ onMounted(() => {
             @click="saveArchive"
             :disabled="archiving"
             class="px-4 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-all shadow-xs"
-            style="background-color: var(--ink-1); color: var(--surface-2);"
+            style="background-color: var(--accent); color: var(--accent-ink);"
           >
             {{ archiving ? '正在归档中...' : '确认归档入库' }}
           </button>

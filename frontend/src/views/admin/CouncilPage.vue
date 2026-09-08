@@ -119,8 +119,8 @@ async function saveConfig() {
     })
     councilConfig.value = res.config
     toast.ok(councilConfig.value.enabled
-        ? `✅ 对冲基金投委会配置已保存并生效（${consensusModes.find((m) => m.id === councilConfig.value.consensus_mode)?.name || '标准提案模式'}）`
-        : '✅ 投委会配置已保存（当前为单模型直连决策）')
+        ? `对冲基金投委会配置已保存并生效（${consensusModes.find((m) => m.id === councilConfig.value.consensus_mode)?.name || '标准提案模式'}）`
+        : '投委会配置已保存（当前为单模型直连决策）')
   } catch (e: any) {
     toast.err(`保存失败: ${e.message}`)
   } finally {

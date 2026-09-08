@@ -223,7 +223,7 @@ onMounted(() => {
 <template>
   <div class="space-y-4 max-w-[2048px] mx-auto">
     <div class="flex items-center justify-between">
-      <p class="text-xs" style="color: var(--ink-2);"> QQ 官方应用 Bot —— 逐通道配置、仅诊断、发送测试；最后统一保存投递时间。 </p>
+      <p class="text-xs" style="color: var(--ink-2);"> QQ 官方应用 Bot：逐通道配置、仅诊断、发送测试；最后统一保存投递时间。 </p>
       <span
         class="text-[11px] px-2 py-1 rounded border font-bold"
         style="background-color: var(--accent-bg); color: var(--accent); border-color: var(--accent-line);"
@@ -244,7 +244,7 @@ onMounted(() => {
             <h2 class="text-sm font-bold" style="color: var(--ink-1);">{{ t('nav.admin.notify') }}</h2>
           </div>
           <div class="flex items-center space-x-3">
-            <button @click="startQqBind" class="px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer transition-all shadow-xs" style="background-color: var(--ink-1); color: var(--surface-2);">扫码绑定</button>
+            <button @click="startQqBind" class="px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer transition-all shadow-xs" style="background-color: var(--accent); color: var(--accent-ink);">扫码绑定</button>
             <button @click="startCapture" class="flex items-center space-x-1 px-2.5 py-1 rounded-lg border text-xs cursor-pointer transition-all shadow-xs" style="background-color: var(--accent-bg); border-color: var(--accent-line); color: var(--accent);">
               <Zap class="w-3 h-3" />
               <span>⚡ 自动获取 OpenID</span>
@@ -474,7 +474,7 @@ onMounted(() => {
           <label class="block text-[11px] mb-1 font-bold" style="color: var(--ink-2);">每日量化简报时间 (北京时间，多个用逗号隔开)</label>
           <input v-model="config._briefingTimes" placeholder="08:00, 20:00" class="w-full rounded-lg px-3 py-2 text-xs outline-none border mb-4" style="background-color: var(--surface-input); border-color: var(--line-1); color: var(--ink-1);" />
           <div class="flex items-center space-x-3">
-            <button @click="saveAll" class="px-4 py-2 rounded-lg text-xs font-bold cursor-pointer transition-all shadow-xs" style="background-color: var(--ink-1); color: var(--surface-2);">保存全部通知通道</button>
+            <button @click="saveAll" class="px-4 py-2 rounded-lg text-xs font-bold cursor-pointer transition-all shadow-xs" style="background-color: var(--accent); color: var(--accent-ink);">保存全部通知通道</button>
             <button @click="saveSchedule" class="px-4 py-2 rounded-lg border text-xs cursor-pointer transition-all shadow-xs" style="background-color: var(--surface-1); border-color: var(--line-2); color: var(--ink-1);">保存通知时间</button>
           </div>
         </div>
@@ -509,7 +509,7 @@ onMounted(() => {
         <p class="text-xs mb-4" :class="{ 'text-blue-500': bindStatus?.tone === 'blue', 'text-emerald-500': bindStatus?.tone === 'green', 'text-amber-500': bindStatus?.tone === 'amber', 'text-rose-500': bindStatus?.tone === 'red' }">{{ bindStatus?.text }}</p>
         <div class="flex justify-center space-x-2">
           <button @click="startQqBind" class="px-3 py-1.5 rounded-lg border text-xs cursor-pointer transition-all shadow-xs" style="background-color: var(--surface-1); border-color: var(--line-2); color: var(--ink-1);">刷新二维码</button>
-          <button @click="closeBindModal" class="px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-all shadow-xs" style="background-color: var(--ink-1); color: var(--surface-2);">关闭</button>
+          <button @click="closeBindModal" class="px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-all shadow-xs" style="background-color: var(--accent); color: var(--accent-ink);">关闭</button>
         </div>
       </div>
     </div>

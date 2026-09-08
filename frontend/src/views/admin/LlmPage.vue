@@ -571,7 +571,7 @@ onMounted(() => {
             <h1 class="text-xs sm:text-[13px] font-semibold" style="color: var(--ink-1);">
               {{ t('nav.admin.llm') }}
             </h1>
-            <p class="text-[11px] mt-0.5" style="color: var(--ink-2);"> AI 模型供应商与直连矩阵 —— 管理大模型渠道矩阵、思考强度与 API 密钥直连 </p>
+            <p class="text-[11px] mt-0.5" style="color: var(--ink-2);"> AI 模型供应商与直连矩阵：管理大模型渠道矩阵、思考强度与 API 密钥直连 </p>
           </div>
         </div>
 
@@ -628,7 +628,7 @@ onMounted(() => {
             @click="saveGlobalSettings"
             :disabled="savingSettings"
             class="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold text-white transition-all cursor-pointer shadow-xs disabled:opacity-40"
-            style="background-color: var(--info); border-color: var(--info);"
+            style="background-color: var(--accent); border-color: var(--accent); color: var(--accent-ink);"
           >
             <RefreshCw v-if="savingSettings" class="w-3.5 h-3.5 animate-spin" />
             <Save v-else class="w-3.5 h-3.5" />
@@ -1019,7 +1019,7 @@ onMounted(() => {
           <button
             @click="saveProviderConfig"
             class="px-6 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs btn-primary-text"
-            style="background-color: var(--info); color: #FFFFFF;"
+            style="background-color: var(--accent); color: var(--accent-ink);"
           >
             保存供应商配置
           </button>
@@ -1113,7 +1113,7 @@ onMounted(() => {
                 v-if="m.id !== cfg?.active_model_id"
                 @click="activateModel(m)"
                 class="px-3 py-1 rounded-xl text-xs font-bold border transition-all cursor-pointer shadow-xs btn-primary-text"
-                style="background-color: var(--info); color: #FFFFFF;"
+                style="background-color: var(--accent); color: var(--accent-ink);"
                 title="一键设为主脑"
               >
                 启用
@@ -1301,7 +1301,7 @@ onMounted(() => {
                 @click="executeRemoteFetch"
                 :disabled="fetchingRemote"
                 class="flex items-center space-x-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer shadow-xs btn-primary-text"
-                style="background-color: var(--info); color: #FFFFFF;"
+                style="background-color: var(--accent); color: var(--accent-ink);"
               >
                 <RefreshCw class="w-3.5 h-3.5" :class="fetchingRemote ? 'animate-spin' : ''" />
                 <span>{{ fetchingRemote ? '正在探测...' : '重新探测' }}</span>
@@ -1365,7 +1365,7 @@ onMounted(() => {
               <button
                 @click="importRemoteModel(rm, true)"
                 class="px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer shadow-xs btn-primary-text"
-                style="background-color: var(--info); color: #FFFFFF;"
+                style="background-color: var(--accent); color: var(--accent-ink);"
               >
                 添加并启用
               </button>
@@ -1518,7 +1518,7 @@ onMounted(() => {
           <button
             @click="saveModelForm"
             class="px-5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs btn-primary-text"
-            style="background-color: var(--info); color: #FFFFFF;"
+            style="background-color: var(--accent); color: var(--accent-ink);"
           >
             保存模型
           </button>

@@ -222,7 +222,7 @@ onMounted(loadPlugins)
           <h1 class="text-xs sm:text-[13px] font-semibold" style="color: var(--ink-1);">
             {{ t('nav.admin.interceptors') }}
           </h1>
-          <p class="text-[11px] mt-0.5" style="color: var(--ink-2);"> 物理拦截插件配置中心 —— 交易决策发出前必须通过 Python 物理拦截插件管线 (Fail-Closed) </p>
+          <p class="text-[11px] mt-0.5" style="color: var(--ink-2);"> 物理拦截插件配置中心：交易决策发出前必须通过 Python 物理拦截插件管线 (Fail-Closed) </p>
         </div>
       </div>
       <div class="flex items-center space-x-2">
@@ -437,7 +437,7 @@ onMounted(loadPlugins)
               @click="saveCode"
               :disabled="savingCode"
               class="flex items-center space-x-1.5 px-4 sm:px-5 py-1.5 sm:py-2 rounded-xl font-bold text-xs cursor-pointer transition-all shadow-xs disabled:opacity-50"
-              style="background-color: var(--ink-1); color: var(--surface-2);"
+              style="background-color: var(--accent); color: var(--accent-ink);"
             >
               <Save class="w-4 h-4" />
               <span>{{ savingCode ? '正在保存...' : '保存代码并热加载' }}</span>
@@ -505,7 +505,7 @@ onMounted(loadPlugins)
           <button
             @click="submitCreate"
             class="px-4 sm:px-5 py-1.5 sm:py-2 rounded-xl font-bold text-xs cursor-pointer transition-all shadow-xs"
-            style="background-color: var(--ink-1); color: var(--surface-2);"
+            style="background-color: var(--accent); color: var(--accent-ink);"
           >
             创建并加入管线
           </button>
@@ -575,7 +575,7 @@ onMounted(loadPlugins)
           <button
             @click="testModalVisible = false"
             class="px-4 sm:px-5 py-1.5 sm:py-2 rounded-xl text-xs font-bold cursor-pointer transition-all shadow-xs"
-            style="background-color: var(--ink-1); color: var(--surface-2);"
+            style="background-color: var(--accent); color: var(--accent-ink);"
           >
             关闭测试报告
           </button>

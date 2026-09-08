@@ -131,7 +131,7 @@ onMounted(load)
           <input v-model="newPassword" type="password" class="w-full rounded-lg px-3 py-2 text-xs outline-none border" style="background-color: var(--surface-input); border-color: var(--line-1); color: var(--ink-1);" />
         </div>
         <div class="flex items-end">
-          <button @click="changePassword" :disabled="changingPwd" class="w-full flex items-center justify-center space-x-1.5 px-4 py-2 rounded-lg text-xs font-bold cursor-pointer disabled:opacity-50 transition-all shadow-xs" style="background-color: var(--ink-1); color: var(--surface-2);">
+          <button @click="changePassword" :disabled="changingPwd" class="w-full flex items-center justify-center space-x-1.5 px-4 py-2 rounded-lg text-xs font-bold cursor-pointer disabled:opacity-50 transition-all shadow-xs" style="background-color: var(--accent); color: var(--accent-ink);">
             <ShieldCheck class="w-3.5 h-3.5" /><span>{{ changingPwd ? '修改中...' : '确认修改' }}</span>
           </button>
         </div>
@@ -146,7 +146,7 @@ onMounted(load)
           <UserCog class="w-4 h-4 text-blue-400" />
           <h2 class="text-xs font-semibold" style="color: var(--ink-1);">管理员账号与权限</h2>
         </div>
-        <button v-if="auth.isSuperadmin" @click="createVisible = true" class="flex items-center space-x-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer shadow-xs" style="background-color: var(--ink-1); color: var(--surface-2);">
+        <button v-if="auth.isSuperadmin" @click="createVisible = true" class="flex items-center space-x-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer shadow-xs" style="background-color: var(--accent); color: var(--accent-ink);">
           <Plus class="w-3.5 h-3.5" />
           <span>新建管理员</span>
         </button>
@@ -211,7 +211,7 @@ onMounted(load)
         <input v-model="newPasswordForCreate" type="password" class="w-full rounded-lg px-3 py-2 text-xs outline-none border mb-4" style="background-color: var(--surface-input); border-color: var(--line-1); color: var(--ink-1);" />
         <div class="flex justify-end space-x-2">
           <button @click="createVisible = false" class="px-3 py-2 rounded-lg border text-xs cursor-pointer transition-all shadow-xs" style="background-color: var(--surface-1); border-color: var(--line-2); color: var(--ink-1);">取消</button>
-          <button @click="createUser" class="px-3 py-2 rounded-lg text-xs font-bold cursor-pointer transition-all shadow-xs" style="background-color: var(--ink-1); color: var(--surface-2);">创建</button>
+          <button @click="createUser" class="px-3 py-2 rounded-lg text-xs font-bold cursor-pointer transition-all shadow-xs" style="background-color: var(--accent); color: var(--accent-ink);">创建</button>
         </div>
       </div>
     </div>

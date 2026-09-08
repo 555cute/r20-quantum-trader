@@ -107,9 +107,9 @@ onMounted(load)
                 <td class="py-2.5 px-4 font-bold" style="color: var(--ink-1);">{{ j.name }}</td>
                 <td class="py-2.5 px-3 text-[11px]" style="color: var(--ink-2);">{{ j.script }}</td>
                 <td class="py-2.5 px-3 font-medium" style="color: var(--ink-1);">{{ j.schedule }}</td>
-                <td class="py-2.5 px-3 num" style="color: var(--ink-3);">{{ j.last_scheduled_at || '尚未调度' }}</td>
+                <td class="py-2.5 px-3 num" style="color: var(--ink-3);">{{ j.last_scheduled_at ? fmtJobTime(j.last_scheduled_at) : '尚未调度' }}</td>
                 <td class="py-2.5 px-4 text-right font-bold" :class="j.overdue ? 'text-rose-400' : 'text-emerald-400'">
-                  {{ j.overdue ? '⚠ 逾期' : '正常' }}
+                  {{ j.overdue ? '逾期' : '正常' }}
                 </td>
               </tr>
             </tbody>

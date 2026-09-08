@@ -16,6 +16,14 @@ const busy = ref<'test' | 'save' | 'run' | 'restore' | 'upload' | ''>('')
 const downloadingArchive = ref<string>('')
 
 const simple = ref<any>(null)
+
+/** 灾备执行时间：按 started_at/finished_at/created_at 顺序取，格式统一 */
+function fmtBackupTime(latest: any): string {
+  const raw = latest?.finished_at || latest?.started_at || latest?.created_at || latest?.time
+  if (!raw) return '--'
+  const s = String(raw)
+  return s.replace('T', ' ').slice(0, 19)
+}
 const targetTypes = ref<any[]>([])
 const status = ref<any>(null)
 const uploadFileInput = ref<HTMLInputElement | null>(null)
@@ -236,7 +244,7 @@ function fmtBytes(n: number) {
   return n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.round(n / 1024) + ' KB'
 }
 function fmtTime(ts: number) {
-  return new Date(ts * 1000).toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' })
+  return new Date(ts * 1000).toLocaleString('sv-SE', { hour12: false, timeZone: 'Asia/Shanghai' })
 }
 
 onMounted(load)
@@ -265,7 +273,7 @@ onMounted(load)
           </label>
         </div>
 
-        <div v-if="simple.legacy_bypy" class="p-2.5 rounded-lg border text-[11px]" style="background-color: var(--warn-bg); border-color: var(--warn-line); color: var(--warn);">⚠ {{ simple.migration_note }}</div>
+        <div v-if="simple.legacy_bypy" class="p-2.5 rounded-lg border text-[11px]" style="background-color: var(--warn-bg); border-color: var(--warn-line); color: var(--warn);">{{ simple.migration_note }}</div>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div>
@@ -316,7 +324,7 @@ onMounted(load)
         <div class="flex flex-wrap items-center gap-2 mt-4">
           <template v-if="auth.isSuperadmin">
             <button @click="testConnection" :disabled="busy !== ''" class="flex items-center space-x-1 px-3 py-2 rounded-lg border text-xs cursor-pointer disabled:opacity-40 transition-all shadow-xs" style="background-color: var(--surface-1); border-color: var(--line-2); color: var(--ink-1);"><PlugZap class="w-3.5 h-3.5" /><span>{{ busy === 'test' ? '测试中...' : '测试连接' }}</span></button>
-            <button @click="save" :disabled="busy !== ''" class="flex items-center space-x-1 px-3 py-2 rounded-lg text-xs font-bold cursor-pointer disabled:opacity-40 transition-all shadow-xs" style="background-color: var(--ink-1); color: var(--surface-2);"><Save class="w-3.5 h-3.5" /><span>{{ busy === 'save' ? '保存中...' : '保存灾备' }}</span></button>
+            <button @click="save" :disabled="busy !== ''" class="flex items-center space-x-1 px-3 py-2 rounded-lg text-xs font-bold cursor-pointer disabled:opacity-40 transition-all shadow-xs" style="background-color: var(--accent); color: var(--accent-ink);"><Save class="w-3.5 h-3.5" /><span>{{ busy === 'save' ? '保存中...' : '保存灾备' }}</span></button>
             <button @click="runNow" :disabled="busy !== ''" class="flex items-center space-x-1 px-3 py-2 rounded-lg text-xs font-bold cursor-pointer disabled:opacity-40 transition-all shadow-xs" style="background-color: var(--down-bg); border-color: var(--down-line); color: var(--down);"><PlayCircle class="w-3.5 h-3.5" /><span>{{ busy === 'run' ? '执行中（最长10分钟）...' : '立即备份' }}</span></button>
 
             <!-- Hidden file input for upload -->
@@ -333,7 +341,7 @@ onMounted(load)
         <div class="rounded-xl border p-4 sm:p-5 shadow-xs transition-colors" style="background-color: var(--surface-2); border-color: var(--line-1);">
           <h2 class="text-xs font-bold uppercase mb-3" style="color: var(--ink-1);">最近一次灾备</h2>
           <div v-if="simple.latest" class="space-y-1.5 text-xs">
-            <div class="flex justify-between border rounded-lg px-3 py-2" style="background-color: var(--surface-1); border-color: var(--line-1);"><span style="color: var(--ink-2);">时间</span><span style="color: var(--ink-1);">{{ simple.latest.created_at || simple.latest.time || JSON.stringify(simple.latest).slice(0, 60) }}</span></div>
+            <div class="flex justify-between border rounded-lg px-3 py-2" style="background-color: var(--surface-1); border-color: var(--line-1);"><span style="color: var(--ink-2);">时间</span><span class="num" style="color: var(--ink-1);">{{ fmtBackupTime(simple.latest) }}</span></div>
             <div class="flex justify-between border rounded-lg px-3 py-2" style="background-color: var(--surface-1); border-color: var(--line-1);"><span style="color: var(--ink-2);">状态</span><span class="text-emerald-500 font-bold">{{ simple.latest.status || 'success' }}</span></div>
           </div>
           <div v-else class="py-6 text-center text-xs" style="color: var(--ink-3);">尚无匹配的灾备清单记录</div>

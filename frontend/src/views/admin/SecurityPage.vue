@@ -334,7 +334,7 @@ onMounted(loadAll)
           <h1 class="text-xs sm:text-[13px] font-semibold" style="color: var(--ink-1);">
             {{ t('nav.admin.security') }}
           </h1>
-          <p class="text-[11px] mt-0.5" style="color: var(--ink-2);"> OKX 账户连接与交易标的池 —— OKX 官方账户授权连接、实盘/模拟盘环境切换、初始本金基准与交易标的管理 </p>
+          <p class="text-[11px] mt-0.5" style="color: var(--ink-2);"> OKX 账户连接与交易标的池：OKX 官方账户授权连接、实盘/模拟盘环境切换、初始本金基准与交易标的管理 </p>
         </div>
       </div>
       <span class="badge-lever">
@@ -456,7 +456,7 @@ onMounted(loadAll)
             </div>
             <div v-else-if="oauthResult?.kind === 'logged_in'" class="mt-2 p-2.5 rounded-lg border text-[11px] text-emerald-500" style="background-color: var(--up-bg); border-color: var(--up-line);">
               <div class="flex items-center justify-between">
-                <span>✅ 当前已经登录 · 站点 {{ oauthResult.site }}</span>
+                <span>已登录 · 站点 {{ oauthResult.site }}</span>
                 <span class="text-[11px] text-emerald-400">已就绪</span>
               </div>
               <div class="text-[11px] break-all mt-1" style="color: var(--ink-2);">{{ (oauthResult.scopes || []).join(', ') }}</div>
@@ -597,7 +597,7 @@ onMounted(loadAll)
         <div v-if="snapshotState" class="px-4 pt-2 text-[11px] text-amber-500">{{ snapshotState }}</div>
         <div v-if="snapshot" class="px-4 pt-2 text-[11px]" style="color: var(--ink-2);">
           环境：<strong :class="snapshot.environment === 'live' ? 'text-rose-500' : 'text-emerald-500'">{{ (snapshot.environment || '').toUpperCase() }}</strong>
-          · 持仓 {{ snapshot.positions?.length ?? 0 }} · 当前挂单 {{ snapshot.orders?.length ?? 0 }} · {{ new Date(snapshot.captured_at_ms).toLocaleString() }}
+          · 持仓 {{ snapshot.positions?.length ?? 0 }} · 当前挂单 {{ snapshot.orders?.length ?? 0 }} · {{ new Date(snapshot.captured_at_ms).toLocaleString("sv-SE") }}
         </div>
         <div class="overflow-x-auto mt-2">
           <table v-if="snapshot?.positions?.length" class="w-full text-left text-xs whitespace-nowrap">

@@ -85,7 +85,7 @@ onMounted(() => {
 <template>
   <div class="space-y-4 text-xs">
     <div class="flex items-center justify-between">
-      <p class="text-xs text-[var(--ink-3)]">确认版本状态，执行安全快进（Fast-Forward）更新。</p>
+      <p class="text-xs text-[var(--ink-3)]">确认版本状态，执行安全快进更新。</p>
       <span class="text-[11px] text-blue-400 bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20">治理 · 3/3</span>
     </div>
 
@@ -108,7 +108,7 @@ onMounted(() => {
             <div>网关控制面: <span style="color: var(--ink-1);">{{ about.product?.control_plane }} (v{{ about.product?.gateway_version }})</span></div>
             <div>运行环境: <span style="color: var(--ink-1);">Python {{ about.runtime?.python }}</span></div>
           </div>
-          <a href="https://github.com/555cute/r20-quantum-trader" target="_blank" class="inline-flex items-center space-x-1.5 mt-4 px-3 py-1.5 rounded-lg border text-xs font-bold transition-all cursor-pointer shadow-xs" style="background-color: var(--ink-1); color: var(--surface-2);">
+          <a href="https://github.com/555cute/r20-quantum-trader" target="_blank" class="inline-flex items-center space-x-1.5 mt-4 px-3 py-1.5 rounded-lg border text-xs font-bold transition-all cursor-pointer shadow-xs" style="background-color: var(--accent); color: var(--accent-ink);">
             <GitBranch class="w-3.5 h-3.5" />
             <span>GitHub 官方代码仓库</span>
           </a>
@@ -181,7 +181,7 @@ onMounted(() => {
             @click="openUpdateModal"
             :disabled="updateChecking || updateRunning"
             class="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold transition-all cursor-pointer shadow-xs text-white"
-            style="background-color: var(--info); border-color: var(--info);"
+            style="background-color: var(--accent); border-color: var(--accent); color: var(--accent-ink);"
           >
             <Download class="w-3.5 h-3.5" />
             <span>执行安全更新</span>
@@ -234,7 +234,7 @@ onMounted(() => {
           <AlertTriangle class="w-5 h-5 text-amber-500 shrink-0" />
           <div>
             <h3 class="text-sm font-bold" style="color: var(--ink-1);">确认更新 R20 系统</h3>
-            <p class="text-[11px]" style="color: var(--ink-2);"> 关于 R20 —— 执行 fast-forward 拉取最新主分支代码 </p>
+            <p class="text-[11px]" style="color: var(--ink-2);"> 关于 R20：执行 fast-forward 拉取最新主分支代码 </p>
           </div>
         </div>
 
@@ -264,7 +264,7 @@ onMounted(() => {
             @click="executeUpdate"
             :disabled="confirmPhrase.trim().toUpperCase() !== 'UPDATE R20' || updateRunning"
             class="flex items-center space-x-1.5 px-4 py-1.5 rounded-lg text-xs font-bold text-white transition-all cursor-pointer shadow-xs disabled:opacity-40 disabled:cursor-not-allowed"
-            style="background-color: var(--info); border-color: var(--info);"
+            style="background-color: var(--accent); border-color: var(--accent); color: var(--accent-ink);"
           >
             <RefreshCw v-if="updateRunning" class="w-3.5 h-3.5 animate-spin" />
             <span>{{ updateRunning ? '正在更新中...' : '立即确认更新' }}</span>

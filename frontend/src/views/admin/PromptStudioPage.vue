@@ -433,7 +433,7 @@ onMounted(loadLib)
             v-if="auth.isSuperadmin"
             @click="createProfile"
             class="flex items-center space-x-1 px-2 py-1 rounded-lg text-[11px] font-bold cursor-pointer shadow-xs transition-colors"
-            style="background-color: var(--ink-1); color: var(--surface-2);"
+            style="background-color: var(--accent); color: var(--accent-ink);"
           >
             <Plus class="w-3 h-3" />
             <span>新建方案</span>
@@ -591,7 +591,7 @@ onMounted(loadLib)
               :disabled="!dirty"
               class="btn-primary-text flex items-center space-x-1.5 px-4 py-2 rounded-lg font-bold transition-all shadow-xs"
               :class="dirty ? 'cursor-pointer hover:bg-blue-600 active:scale-95' : 'opacity-40 cursor-not-allowed'"
-              style="background-color: var(--info); color: #FFFFFF !important;"
+              style="background-color: var(--accent); color: var(--accent-ink) !important;"
             >
               <Save class="w-4 h-4" style="color: #FFFFFF;" />
               <span style="color: #FFFFFF;">保存当前方案{{ dirty ? ' *' : '' }}</span>
@@ -722,7 +722,7 @@ onMounted(loadLib)
               <button
                 @click="insertVarIntoActiveModule(v.key); variableGuideVisible = false"
                 class="btn-primary-text px-2.5 py-1 rounded-lg font-bold text-[11px] cursor-pointer shadow-xs hover:bg-blue-600 transition-colors"
-                style="background-color: var(--info); color: #FFFFFF !important;"
+                style="background-color: var(--accent); color: var(--accent-ink) !important;"
               >
                 <span style="color: #FFFFFF;">插入到当前模块</span>
               </button>
@@ -816,7 +816,7 @@ onMounted(loadLib)
           <button
             @click="submitImport"
             class="px-5 py-2 rounded-xl font-bold text-xs cursor-pointer transition-all shadow-xs"
-            style="background-color: var(--ink-1); color: var(--surface-2);"
+            style="background-color: var(--accent); color: var(--accent-ink);"
           >
             确认导入并载入方案
           </button>

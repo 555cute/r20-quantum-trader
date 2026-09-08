@@ -451,7 +451,7 @@ onMounted(loadData)
             @click="addMemoryItem"
             :disabled="busy !== '' || !newMemoryText.trim()"
             class="flex items-center justify-center space-x-1 px-4 py-2 rounded-lg text-xs font-bold cursor-pointer disabled:opacity-40 transition-all shadow-xs shrink-0"
-            style="background-color: var(--ink-1); color: var(--surface-2);"
+            style="background-color: var(--accent); color: var(--accent-ink);"
           >
             <Plus class="w-3.5 h-3.5" />
             <span>{{ busy === 'add' ? '安全审查中...' : '提交审查并收录' }}</span>
@@ -573,7 +573,7 @@ onMounted(loadData)
             @click="savePipelineModules"
             :disabled="busy !== ''"
             class="flex items-center space-x-1 px-4 py-2 rounded-lg text-xs font-bold cursor-pointer disabled:opacity-40 transition-all shadow-xs"
-            style="background-color: var(--ink-1); color: var(--surface-2);"
+            style="background-color: var(--accent); color: var(--accent-ink);"
           >
             <Save class="w-3.5 h-3.5" />
             <span>{{ busy === 'save' ? '保存中...' : '保存模版' }}</span>

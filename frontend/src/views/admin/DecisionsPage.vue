@@ -64,7 +64,7 @@ onMounted(() => {
 <template>
   <div class="space-y-4 max-w-[2048px] mx-auto">
     <div class="flex items-center justify-between">
-      <p class="text-xs" style="color: var(--ink-2);"> 系统实时日志流 —— 核对 AI 宏观基调与逐币动作，并审查交易、后台与任务调度三路实时日志流。 </p>
+      <p class="text-xs" style="color: var(--ink-2);"> 系统实时日志流：核对 AI 宏观基调与逐币动作，并审查交易、后台与任务调度三路实时日志流。 </p>
       <span
         class="text-[11px] px-2 py-1 rounded border font-bold"
         style="background-color: var(--accent-bg); color: var(--accent); border-color: var(--accent-line);"
