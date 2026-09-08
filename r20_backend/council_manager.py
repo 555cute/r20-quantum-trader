@@ -458,8 +458,11 @@ def _call_single_trader(
         f"   - 对在途持仓逐一给出管理建议：HOLD（波段完好继续持有）、CLOSE_MARKET（结构破位斩仓）或 UPDATE_SL（浮盈锁定移动止损）；\n"
         f"   - 对在途未成交限价挂单逐一给出建议：CANCEL（偏离盘口或动能失效立即撤单）或 KEEP（继续保留）；\n"
         f"2. 标的池全标的新开/加仓作战提案（以行情矩阵清单为准，逐标的）：\n"
-        f"   - 针对各标的输出明确方案：倾向（BUY_LONG / SELL_SHORT / WAIT）、入场限价 limit_price、2.0x ATR 止损 stop_loss、止盈 take_profit、拟投入保证金与置信度；\n"
-        f"3. 质询与风控：简要指出其他交易员方案可能带来的资金过载或流动性风险（60字内/标的）。"
+        f"   - 针对各标的输出明确方案：倾向（BUY_LONG / SELL_SHORT / WAIT）、入场限价、1.8~2.2x 1H ATR 分层止损、≥2.0R 止盈、拟投入保证金与置信度；\n"
+        f"3. 质询与风控：简要指出其他交易员方案可能带来的资金过载或流动性风险（60字内/标的）。\n\n"
+        f"【提案输出格式（强制）】正文分析之后，必须以标准报价单块收尾（每标的一行，无明确结论的标的也必须列 WAIT 行），供 CIO 与执行层逐项横向对比：\n"
+        f"标的 | 倾向 | 限价 | 止损 | 止盈 | 拟用保证金(USDT) | 置信度(0-100) | 一句话依据\n"
+        f"示例：BTC-USDT-SWAP | WAIT | - | - | - | - | 55 | 箱体中段乱跳，无概率优势"
     )
 
     messages = [
@@ -843,6 +846,8 @@ def execute_council_debate(
         "   - 在 pending_orders_management 中对所有在途未成交挂单下达处理指令（CANCEL / KEEP）及理由；\n"
         "2. 【标的池全标的开仓方案终审 (decisions) 与采纳归属 (adopted_role)】：\n"
         f"   - 仔细比对各位交易员提交的方案{'与交叉质询辩论' if consensus_mode == 'cross_examination' else ''}，评估逻辑最扎实者采纳，存在漏洞者驳回；\n"
+        f"   - 各席提案末尾附有标准报价单（标的|倾向|限价|止损|止盈|保证金|置信度|依据），请逐项横向对比后再裁决；"
+        f"你批复的点位若与被采纳参谋报价单明显偏离，必须在 reasoning 中说明调整原因；\n"
         "   - decisions 必须是标的字典（如 \"BTC-USDT-SWAP\"），每个标的必须包含 \"adopted_role\" 字段：\n"
         "     * 采纳某位交易员方案时填写其 role_id（例如 \"trader_trend\"、\"trader_momentum\"、\"trader_quant\"）；\n"
         "     * 全员驳回或无人被采纳时填写 \"REJECT_ALL\" 或 null；\n"

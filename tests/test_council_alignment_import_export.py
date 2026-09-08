@@ -39,6 +39,15 @@ class CouncilPresetAlignmentTests(unittest.TestCase):
                    "adopted_role", "REJECT_ALL", "4H Fail-Closed"):
             self.assertIn(kw, cio)
 
+    def test_runtime_prompts_enforce_quote_sheet_format(self):
+        """参谋报价单格式强制在运行时模板(代码层)，任何定制/导入的角色提示词都绕不开。"""
+        src = Path(cm.__file__).read_text(encoding="utf-8")
+        self.assertIn("提案输出格式（强制）", src)
+        self.assertIn("标的 | 倾向 | 限价 | 止损 | 止盈 | 拟用保证金(USDT) | 置信度(0-100) | 一句话依据", src)
+        self.assertIn("标准报价单", src)                      # CIO 侧逐项对比与偏离说明指令
+        self.assertNotIn("2.0x ATR 止损 stop_loss", src)      # 运行时旧写死数字已清除
+        self.assertIn("1.8~2.2x 1H ATR 分层止损", src)
+
 
 class CouncilPresetMigrationTests(unittest.TestCase):
     def setUp(self):
