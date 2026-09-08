@@ -62,6 +62,7 @@ class Settings:
     llm_model: str = "gemini-3.7-flash-high"
     llm_reasoning_effort: str = "high"
     llm_thinking_timeout: float = 120.0
+    llm_max_output_tokens: int = 4096
     notification_webhook: str = ""
     setup_token: str = ""
     admin_token: str = ""
@@ -102,6 +103,12 @@ def refresh_settings() -> Settings:
     settings.llm_model = os.getenv("LLM_MODEL", "gemini-3.7-flash-high")
     settings.llm_reasoning_effort = os.getenv("LLM_REASONING_EFFORT", "high")
     settings.llm_thinking_timeout = float(os.getenv("LLM_THINKING_TIMEOUT", os.getenv("LLM_TIMEOUT_SECONDS", "120.0")))
+    try:
+        settings.llm_max_output_tokens = int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "4096") or "4096")
+    except (TypeError, ValueError):
+        settings.llm_max_output_tokens = 4096
+    if settings.llm_max_output_tokens < 1 or settings.llm_max_output_tokens > 128000:
+        settings.llm_max_output_tokens = 4096
     settings.notification_webhook = os.getenv("R20_NOTIFICATION_WEBHOOK", "")
     settings.setup_token = os.getenv("R20_SETUP_TOKEN", "")
     settings.admin_token = os.getenv("R20_ADMIN_TOKEN", "")

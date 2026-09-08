@@ -82,6 +82,7 @@ class LLMMultiProviderTests(unittest.TestCase):
         self.assertTrue(url_chat.endswith("/chat/completions"))
         self.assertEqual(headers_chat["Authorization"], "Bearer sk-test-chat")
         self.assertEqual(payload_chat["reasoning_effort"], "high")
+        self.assertEqual(payload_chat["max_completion_tokens"], 4096)
         self.assertNotIn("temperature", payload_chat)  # Omitted for o3-mini reasoning model
 
         # 2. OpenAI Responses Protocol (Complete Responses)
@@ -99,6 +100,7 @@ class LLMMultiProviderTests(unittest.TestCase):
         self.assertIn("input", payload_resp)
         self.assertEqual(payload_resp["text"]["format"]["type"], "json_object")
         self.assertEqual(payload_resp["reasoning"]["effort"], "medium")
+        self.assertEqual(payload_resp["max_output_tokens"], 4096)
 
         # 3. Anthropic Claude Messages Protocol
         url_claude, headers_claude, payload_claude = llm_manager.build_request_spec(
@@ -119,6 +121,7 @@ class LLMMultiProviderTests(unittest.TestCase):
         self.assertEqual(len(payload_claude["messages"]), 1)
         self.assertEqual(payload_claude["thinking"]["type"], "enabled")
         self.assertEqual(payload_claude["thinking"]["budget_tokens"], 16000)
+        self.assertEqual(payload_claude["max_tokens"], 16000 + 4096)
 
     def test_model_crud_and_activation(self):
         # 1. Add custom model with claude_messages format

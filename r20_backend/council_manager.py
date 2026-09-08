@@ -281,6 +281,7 @@ def _call_single_trader(
     override_url = None
     override_key = None
     override_format = None
+    override_max_tokens = None
     override_effort = role_spec.get("reasoning_effort") or "medium"
     temperature = float(role_spec.get("temperature", 0.2))
 
@@ -293,6 +294,7 @@ def _call_single_trader(
                 override_key = item.get("api_key")
                 override_format = item.get("api_format")
                 override_effort = item.get("reasoning_effort") or override_effort
+                override_max_tokens = item.get("max_output_tokens") or cfg.get("max_output_tokens")
                 break
     else:
         override_effort = cfg.get("active_reasoning_effort", "medium")
@@ -338,6 +340,7 @@ def _call_single_trader(
             reasoning_effort=override_effort,
             temperature=temperature,
             timeout=timeout,
+            max_tokens=override_max_tokens,
         )
         return {
             "proposal_id": proposal_id,
@@ -380,6 +383,7 @@ def _call_single_trader_critique(
     override_url = None
     override_key = None
     override_format = None
+    override_max_tokens = None
     override_effort = role_spec.get("reasoning_effort") or "medium"
     temperature = float(role_spec.get("temperature", 0.2))
 
@@ -392,6 +396,7 @@ def _call_single_trader_critique(
                 override_key = item.get("api_key")
                 override_format = item.get("api_format")
                 override_effort = item.get("reasoning_effort") or override_effort
+                override_max_tokens = item.get("max_output_tokens") or cfg.get("max_output_tokens")
                 break
     else:
         override_effort = cfg.get("active_reasoning_effort", "medium")
@@ -436,6 +441,7 @@ def _call_single_trader_critique(
             reasoning_effort=override_effort,
             temperature=temperature,
             timeout=timeout,
+            max_tokens=override_max_tokens,
         )
         return {
             "role_id": role_id,
@@ -478,7 +484,7 @@ def execute_council_debate(
     - Proposals are tagged with proposal_id (e.g. trader_trend_prop).
     - CIO decisions must include adopted_role (e.g. 'trader_trend' or 'REJECT_ALL'/None).
     """
-    from r20_backend.llm_manager import execute_llm_request, get_active_llm_runtime, load_llm_config
+    from r20_backend.llm_manager import execute_llm_request, get_active_llm_runtime, load_llm_config, parse_model_json_object
 
     config = load_council_config()
     roles = config.get("roles", {})
@@ -675,6 +681,7 @@ def execute_council_debate(
     override_url = None
     override_key = None
     override_format = None
+    override_max_tokens = None
     override_effort = "high"
     cio_temperature = float(cio_spec.get("temperature", 0.2))
 
@@ -687,6 +694,7 @@ def execute_council_debate(
                 override_key = item.get("api_key")
                 override_format = item.get("api_format")
                 override_effort = item.get("reasoning_effort") or "high"
+                override_max_tokens = item.get("max_output_tokens") or cfg.get("max_output_tokens")
                 break
     else:
         override_effort = cfg.get("active_reasoning_effort", "high")
@@ -754,20 +762,10 @@ def execute_council_debate(
         temperature=cio_temperature,
         response_format={"type": "json_object"},
         timeout=cio_timeout,
+        max_tokens=override_max_tokens,
     )
 
-    clean_content = content.strip()
-    if clean_content.startswith("```json"):
-        clean_content = clean_content[7:]
-    if clean_content.startswith("```"):
-        clean_content = clean_content[3:]
-    if clean_content.endswith("```"):
-        clean_content = clean_content[:-3]
-    clean_content = clean_content.strip()
-
-    brain_output = json.loads(clean_content)
-    if not isinstance(brain_output, dict):
-        raise ValueError("CIO output root must be a JSON object")
+    brain_output = parse_model_json_object(content)
 
     # Post-process & normalize adopted_role in decisions for traceability
     decisions = brain_output.get("decisions")

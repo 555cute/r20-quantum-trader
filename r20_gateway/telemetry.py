@@ -24,6 +24,19 @@ class ModelCallTelemetry:
 
     def finish(self, status: str, response: dict[str, Any] | None = None, output_chars: int = 0, error: Exception | None = None) -> None:
         usage = (response or {}).get("usage", {}) if isinstance(response, dict) else {}
+        if not isinstance(usage, dict):
+            usage = {}
+        if error is not None:
+            err_usage = getattr(error, "usage", None)
+            if isinstance(err_usage, dict) and err_usage and not usage:
+                usage = err_usage
+            err_chars = getattr(error, "output_chars", None)
+            if output_chars == 0 and err_chars is not None:
+                output_chars = int(err_chars)
+        error_type = type(error).__name__ if error else ""
+        stage = getattr(error, "stage", "") if error is not None else ""
+        if stage and error_type:
+            error_type = f"{error_type}:{stage}"
         record = {
             "caller": self.caller,
             "model": self.model,
@@ -38,7 +51,7 @@ class ModelCallTelemetry:
             "input_tokens": usage.get("prompt_tokens") or usage.get("input_tokens"),
             "output_tokens": usage.get("completion_tokens") or usage.get("output_tokens"),
             "total_tokens": usage.get("total_tokens"),
-            "error_type": type(error).__name__ if error else "",
+            "error_type": error_type,
         }
         try:
             GatewayStore(DB_PATH).record_model_call(record)

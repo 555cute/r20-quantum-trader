@@ -1164,7 +1164,7 @@ def execute_batch_ai_brain_cycle(
     api_format = "openai_chat"
     thinking_timeout = float(os.environ.get("LLM_THINKING_TIMEOUT", os.environ.get("LLM_TIMEOUT_SECONDS", 120.0)))
     try:
-        from r20_backend.llm_manager import get_active_llm_runtime, execute_llm_request
+        from r20_backend.llm_manager import get_active_llm_runtime, execute_llm_request, parse_model_json_object
         active_llm = get_active_llm_runtime()
         model_name = os.environ.get("LLM_MODEL") or active_llm.get("model") or model_name
         effort = os.environ.get("LLM_REASONING_EFFORT") or active_llm.get("reasoning_effort") or effort
@@ -1174,6 +1174,7 @@ def execute_batch_ai_brain_cycle(
         thinking_timeout = float(active_llm.get("thinking_timeout") or thinking_timeout)
     except Exception:
         execute_llm_request = None
+        parse_model_json_object = None
 
     telemetry = ModelCallTelemetry(
         "trading_brain", model_name, str(effort), effective_system_prompt, prompt
@@ -1182,6 +1183,8 @@ def execute_batch_ai_brain_cycle(
         t0 = time.time()
         raw_res = None
         brain_output = None
+        content = ""
+        usage_dict = {}
 
         # Transparent check: is Multi-Agent Council enabled?
         council_enabled = False
@@ -1245,13 +1248,19 @@ def execute_batch_ai_brain_cycle(
                     content = res["choices"][0]["message"]["content"].strip()
                     raw_res = res
 
-            if content.startswith("```json"): content = content[7:]
-            if content.startswith("```"): content = content[3:]
-            if content.endswith("```"): content = content[:-3]
-
-            brain_output = json.loads(content.strip())
-            if not isinstance(brain_output, dict):
-                raise ValueError("LLM response root must be an object")
+            if parse_model_json_object:
+                brain_output = parse_model_json_object(content)
+            else:
+                cleaned = (content or "").strip()
+                if cleaned.startswith("```json"):
+                    cleaned = cleaned[7:]
+                if cleaned.startswith("```"):
+                    cleaned = cleaned[3:]
+                if cleaned.endswith("```"):
+                    cleaned = cleaned[:-3]
+                brain_output = json.loads(cleaned.strip())
+                if not isinstance(brain_output, dict):
+                    raise ValueError("LLM response root must be an object")
         decisions_dict = brain_output.get("decisions", {})
         pos_mgmt_list = brain_output.get("position_management", [])
         macro_summary = str(brain_output.get("macro_assessment", "宏观中性震荡"))[:120]
@@ -1378,7 +1387,7 @@ def execute_batch_ai_brain_cycle(
         return standard_cache
 
     except Exception as e:
-        telemetry.finish("failed", error=e)
+        telemetry.finish("failed", raw_res if "raw_res" in locals() else None, output_chars=len(content) if "content" in locals() else 0, error=e)
         print(f"[AI Brain Batch] Error in batch inference: {e}")
         return None
 

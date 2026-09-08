@@ -218,12 +218,14 @@ class LLMActivateRequest(BaseModel):
     provider_id: str | None = None
     reasoning_effort: str | None = Field(default=None, pattern=r"^(low|medium|high|minimal|none|auto|max|xhigh)$")
     thinking_timeout: float | None = Field(default=None, ge=5.0, le=1800.0)
+    max_output_tokens: int | None = Field(default=None, ge=1, le=128000)
 
 
 class LLMSettingsUpdateRequest(BaseModel):
     thinking_timeout: float = Field(default=120.0, ge=5.0, le=1800.0)
     active_model_id: str | None = None
     reasoning_effort: str | None = None
+    max_output_tokens: int | None = Field(default=None, ge=1, le=128000)
 
 
 class LLMTestRequest(BaseModel):
@@ -272,6 +274,7 @@ class LLMModelUpsertRequest(BaseModel):
     capabilities: list[str] | None = None
     context_length: int | None = None
     description: str | None = ""
+    max_output_tokens: int | None = Field(default=None, ge=1, le=128000)
 
 
 class LLMFetchModelsRequest(BaseModel):
@@ -1525,7 +1528,7 @@ def admin_get_llm_models(x_r20_session: str | None = Header(default=None, alias=
 def admin_activate_llm_model(payload: LLMActivateRequest, x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
     actor = require_superadmin(x_r20_session)
     try:
-        result = activate_provider_model(payload.provider_id or "custom", payload.model_id, payload.reasoning_effort, payload.thinking_timeout)
+        result = activate_provider_model(payload.provider_id or "custom", payload.model_id, payload.reasoning_effort, payload.thinking_timeout, payload.max_output_tokens)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     audit_record("llm.model.activate", "success", {
@@ -1533,6 +1536,7 @@ def admin_activate_llm_model(payload: LLMActivateRequest, x_r20_session: str | N
         "model_id": payload.model_id,
         "reasoning_effort": result.get("active_reasoning_effort"),
         "thinking_timeout": result.get("thinking_timeout"),
+        "max_output_tokens": result.get("max_output_tokens"),
     })
     return result
 
@@ -1548,12 +1552,14 @@ def admin_update_llm_settings(
         active_model_id=payload.active_model_id,
         reasoning_effort=payload.reasoning_effort,
         thinking_timeout=payload.thinking_timeout,
+        max_output_tokens=payload.max_output_tokens,
     )
     audit_record("llm.settings.update", "success", {
         "actor": actor["username"],
         "thinking_timeout": payload.thinking_timeout,
         "active_model_id": payload.active_model_id,
         "reasoning_effort": payload.reasoning_effort,
+        "max_output_tokens": payload.max_output_tokens,
     })
     return result
 
@@ -1608,7 +1614,10 @@ def admin_test_llm(payload: LLMTestRequest, x_r20_session: str | None = Header(d
 def admin_upsert_llm_model(payload: LLMModelUpsertRequest, provider_id: str = "custom", x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
     actor = require_superadmin(x_r20_session)
     try:
-        res = upsert_model(provider_id, payload.model_dump(exclude_none=True))
+        model_data = payload.model_dump(exclude_none=True)
+        if "max_output_tokens" in payload.model_fields_set:
+            model_data["max_output_tokens"] = payload.max_output_tokens
+        res = upsert_model(provider_id, model_data)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     audit_record("llm.model.upsert", "success", {"actor": actor["username"], "model_id": payload.id, "api_format": res.get("api_format")})

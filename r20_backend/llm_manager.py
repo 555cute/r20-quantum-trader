@@ -30,6 +30,250 @@ SUPPORTED_API_FORMATS = [
 
 STANDARD_REASONING_EFFORTS = ["max", "xhigh", "high", "medium", "low", "minimal", "none", "auto"]
 
+DEFAULT_MAX_OUTPUT_TOKENS = 4096
+MAX_MAX_OUTPUT_TOKENS = 128000
+
+
+class LlmProtocolError(RuntimeError):
+    """Safe, typed LLM failure. Never includes headers, keys, prompts, or full bodies."""
+
+    stage = "protocol"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        output_chars: int = 0,
+        usage: Optional[Dict[str, Any]] = None,
+        reason: str = "",
+    ) -> None:
+        super().__init__(message)
+        self.output_chars = int(output_chars or 0)
+        self.usage = usage if isinstance(usage, dict) else {}
+        self.reason = str(reason or "")
+
+
+class LlmEnvelopeJsonError(LlmProtocolError):
+    stage = "envelope_json"
+
+
+class LlmIncompleteError(LlmProtocolError):
+    stage = "incomplete"
+
+
+class LlmRefusalError(LlmProtocolError):
+    stage = "refusal"
+
+
+class LlmEmptyContentError(LlmProtocolError):
+    stage = "empty_content"
+
+
+class LlmBusinessJsonError(LlmProtocolError):
+    stage = "business_json"
+
+
+class LlmHttpError(LlmProtocolError):
+    stage = "http"
+
+
+_SECRET_FRAGMENT_RE = re.compile(r"(sk-[A-Za-z0-9_\-]{8,}|Bearer\s+\S+|api[_-]?key\s*[:=]\s*\S+)", re.I)
+
+
+def normalize_max_output_tokens(value: Any, *, default: int = DEFAULT_MAX_OUTPUT_TOKENS, strict: bool = False) -> int:
+    """Validate an output-token limit. Config load is lenient; admin writes may be strict."""
+    if value is None or value == "":
+        if strict:
+            raise ValueError("max_output_tokens is required")
+        return int(default)
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        if strict:
+            raise ValueError("max_output_tokens must be an integer") from None
+        return int(default)
+    if parsed < 1 or parsed > MAX_MAX_OUTPUT_TOKENS:
+        if strict:
+            raise ValueError(f"max_output_tokens must be between 1 and {MAX_MAX_OUTPUT_TOKENS}")
+        return int(default)
+    return parsed
+
+
+def _chat_output_token_field(model: str) -> str:
+    m = (model or "").lower()
+    if m.startswith(("o1", "o3", "o4")) or "gpt-5" in m or "gpt-6" in m:
+        return "max_completion_tokens"
+    return "max_tokens"
+
+
+def _safe_error_excerpt(raw: str, limit: int = 160) -> str:
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            err = parsed.get("error")
+            if isinstance(err, dict):
+                text = str(err.get("message") or err.get("code") or "")
+            elif isinstance(err, str):
+                text = err
+            else:
+                text = str(parsed.get("message") or parsed.get("msg") or "")
+    except Exception:
+        pass
+    text = _SECRET_FRAGMENT_RE.sub("[redacted]", text).replace("\n", " ").strip()
+    return text[:limit]
+
+
+def _strip_markdown_json_fence(text: str) -> str:
+    cleaned = str(text or "").strip()
+    if cleaned.startswith("```json"):
+        cleaned = cleaned[7:]
+    if cleaned.startswith("```"):
+        cleaned = cleaned[3:]
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3]
+    return cleaned.strip()
+
+
+def parse_model_json_object(text: str) -> Dict[str, Any]:
+    """Strict business JSON object parse. Permits an existing Markdown fence only; never repairs braces or quotes."""
+    raw = str(text or "")
+    cleaned = _strip_markdown_json_fence(raw)
+    if not cleaned:
+        raise LlmBusinessJsonError(
+            f"LLM business JSON is empty (output_chars={len(raw)})",
+            output_chars=len(raw),
+        )
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        raise LlmBusinessJsonError(
+            f"LLM business JSON parse failed at pos {exc.pos}: {exc.msg} (output_chars={len(raw)})",
+            output_chars=len(raw),
+        ) from None
+    if not isinstance(parsed, dict):
+        raise LlmBusinessJsonError(
+            f"LLM business JSON root must be an object (output_chars={len(raw)})",
+            output_chars=len(raw),
+        )
+    return parsed
+
+
+def _extract_protocol_content(api_format: str, res_json: Dict[str, Any]) -> Tuple[str, str, Dict[str, Any]]:
+    usage = res_json.get("usage") if isinstance(res_json.get("usage"), dict) else {}
+    content = ""
+    reasoning_content = ""
+    if api_format == "claude_messages":
+        text_chunks = [c.get("text", "") for c in res_json.get("content", []) if isinstance(c, dict) and c.get("type") == "text"]
+        thinking_chunks = [c.get("thinking", "") for c in res_json.get("content", []) if isinstance(c, dict) and c.get("type") == "thinking"]
+        content = "".join(str(x) for x in text_chunks)
+        reasoning_content = "\n".join(str(x) for x in thinking_chunks)
+        if not usage:
+            raw_usage = res_json.get("usage") if isinstance(res_json.get("usage"), dict) else {}
+            usage = {
+                "input_tokens": raw_usage.get("input_tokens", 0),
+                "output_tokens": raw_usage.get("output_tokens", 0),
+                "total_tokens": int(raw_usage.get("input_tokens") or 0) + int(raw_usage.get("output_tokens") or 0),
+            }
+    elif api_format == "openai_responses":
+        content = str(res_json.get("output_text") or "")
+        if not content.strip():
+            for item in res_json.get("output") or []:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("type") == "message":
+                    for part in item.get("content") or []:
+                        if isinstance(part, dict) and (part.get("type") == "output_text" or "text" in part):
+                            content += str(part.get("text", ""))
+                elif item.get("type") == "reasoning":
+                    reasoning_content += str(item.get("content") or item.get("summary") or "")
+        else:
+            for item in res_json.get("output") or []:
+                if isinstance(item, dict) and item.get("type") == "reasoning":
+                    reasoning_content += str(item.get("content") or item.get("summary") or "")
+    else:
+        choices = res_json.get("choices") or []
+        msg = choices[0].get("message", {}) if choices and isinstance(choices[0], dict) else {}
+        if not isinstance(msg, dict):
+            msg = {}
+        content = str(msg.get("content") or "")
+        reasoning_content = str(msg.get("reasoning_content") or "")
+    return content.strip(), reasoning_content.strip(), usage
+
+
+def _protocol_refusal_reason(api_format: str, res_json: Dict[str, Any]) -> str:
+    if api_format == "openai_responses":
+        for item in res_json.get("output") or []:
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") == "refusal" or str(item.get("status") or "").lower() == "refused":
+                return "refusal"
+            for part in item.get("content") or []:
+                if isinstance(part, dict) and part.get("type") == "refusal":
+                    return "refusal"
+    elif api_format == "claude_messages":
+        if str(res_json.get("stop_reason") or "").lower() == "refusal":
+            return "refusal"
+    else:
+        choices = res_json.get("choices") or []
+        if choices and isinstance(choices[0], dict):
+            ch = choices[0]
+            if str(ch.get("finish_reason") or "").lower() == "content_filter":
+                return "content_filter"
+            msg = ch.get("message") if isinstance(ch.get("message"), dict) else {}
+            if msg.get("refusal"):
+                return "refusal"
+    return ""
+
+
+def _protocol_incomplete_reason(api_format: str, res_json: Dict[str, Any]) -> str:
+    if api_format == "openai_responses":
+        status = str(res_json.get("status") or "").lower()
+        if status in ("incomplete", "cancelled"):
+            details = res_json.get("incomplete_details") if isinstance(res_json.get("incomplete_details"), dict) else {}
+            return str(details.get("reason") or status)
+        if status == "failed":
+            return "failed"
+    elif api_format == "claude_messages":
+        if str(res_json.get("stop_reason") or "").lower() == "max_tokens":
+            return "max_tokens"
+    else:
+        choices = res_json.get("choices") or []
+        if choices and isinstance(choices[0], dict):
+            if str(choices[0].get("finish_reason") or "").lower() == "length":
+                return "length"
+    return ""
+
+
+def _finalize_protocol_response(api_format: str, res_json: Dict[str, Any]) -> Tuple[str, str, Dict[str, Any]]:
+    content, reasoning_content, usage = _extract_protocol_content(api_format, res_json)
+    output_chars = len(content)
+    refusal = _protocol_refusal_reason(api_format, res_json)
+    if refusal:
+        raise LlmRefusalError(
+            f"LLM response refused (reason={refusal}, output_chars={output_chars})",
+            output_chars=output_chars,
+            usage=usage,
+            reason=refusal,
+        )
+    incomplete = _protocol_incomplete_reason(api_format, res_json)
+    if incomplete:
+        raise LlmIncompleteError(
+            f"LLM response incomplete (reason={incomplete}, output_chars={output_chars})",
+            output_chars=output_chars,
+            usage=usage,
+            reason=incomplete,
+        )
+    if not content:
+        raise LlmEmptyContentError(
+            f"LLM response empty (output_chars=0)",
+            output_chars=0,
+            usage=usage,
+        )
+    return content, reasoning_content, usage
+
 
 def _atomic_write_json(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -256,6 +500,10 @@ def init_llm_config() -> Dict[str, Any]:
     cur_timeout = getattr(settings, "llm_thinking_timeout", 120.0) or float(os.getenv("LLM_THINKING_TIMEOUT", os.getenv("LLM_TIMEOUT_SECONDS", "120.0")))
     raw_timeout = data.get("thinking_timeout")
     thinking_timeout = float(raw_timeout) if raw_timeout is not None else float(cur_timeout or 120.0)
+    cur_max_out = getattr(settings, "llm_max_output_tokens", None) or os.getenv("LLM_MAX_OUTPUT_TOKENS") or DEFAULT_MAX_OUTPUT_TOKENS
+    raw_max_out = data.get("max_output_tokens")
+    max_output_tokens = normalize_max_output_tokens(raw_max_out if raw_max_out is not None else cur_max_out)
+
 
     models_map: Dict[str, Dict[str, Any]] = {}
     for p in merged_providers:
@@ -280,6 +528,7 @@ def init_llm_config() -> Dict[str, Any]:
                 "reasoning_effort": m.get("reasoning_effort") or m.get("default_effort", "high"),
                 "capabilities": m.get("capabilities", _detect_capabilities(mid)),
                 "context_length": m.get("context_length"),
+                "max_output_tokens": m.get("max_output_tokens"),
                 "description": m.get("description", ""),
             }
 
@@ -321,6 +570,7 @@ def init_llm_config() -> Dict[str, Any]:
         "active_model_id": active_m_id,
         "active_reasoning_effort": active_effort,
         "thinking_timeout": thinking_timeout,
+        "max_output_tokens": max_output_tokens,
         "providers": merged_providers,
         "models": flat_models,
     }
@@ -350,6 +600,7 @@ def load_llm_config(mask_keys: bool = True) -> Dict[str, Any]:
         "active_model_id": active_mid,
         "active_reasoning_effort": active_effort,
         "thinking_timeout": config.get("thinking_timeout", 120.0),
+        "max_output_tokens": normalize_max_output_tokens(config.get("max_output_tokens")),
         "standard_reasoning_efforts": STANDARD_REASONING_EFFORTS,
         "supported_api_formats": SUPPORTED_API_FORMATS,
         "providers": [],
@@ -371,6 +622,7 @@ def load_llm_config(mask_keys: bool = True) -> Dict[str, Any]:
                 "reasoning_type": m.get("reasoning_type") or _detect_reasoning_type(m_id),
                 "reasoning_effort": m.get("reasoning_effort") or "high",
                 "context_length": m.get("context_length"),
+                "max_output_tokens": m.get("max_output_tokens"),
                 "description": m.get("description", ""),
                 "is_active": m_id == active_mid,
             })
@@ -415,6 +667,7 @@ def load_llm_config(mask_keys: bool = True) -> Dict[str, Any]:
             "reasoning_effort": m.get("reasoning_effort", "high"),
             "capabilities": m.get("capabilities") or _detect_capabilities(m["id"]),
             "context_length": m.get("context_length"),
+            "max_output_tokens": m.get("max_output_tokens"),
             "description": m.get("description", ""),
             "has_key": has_key,
             "is_active": m["id"] == active_mid,
@@ -482,6 +735,15 @@ def get_active_llm_runtime() -> Dict[str, Any]:
         or getattr(settings, "llm_thinking_timeout", 120.0)
     )
 
+    model_max = target_model.get("max_output_tokens") if target_model else None
+    max_output_tokens = normalize_max_output_tokens(
+        model_max if model_max not in (None, "") else (
+            config.get("max_output_tokens")
+            or os.getenv("LLM_MAX_OUTPUT_TOKENS")
+            or getattr(settings, "llm_max_output_tokens", DEFAULT_MAX_OUTPUT_TOKENS)
+        )
+    )
+
     return {
         "model": model_name,
         "name": target_model.get("name", model_name) if target_model else model_name,
@@ -493,10 +755,11 @@ def get_active_llm_runtime() -> Dict[str, Any]:
         "reasoning_effort": active_effort,
         "reasoning_type": reasoning_type,
         "thinking_timeout": thinking_timeout,
+        "max_output_tokens": max_output_tokens,
     }
 
 
-def activate_provider_model(provider_id: str, model_id: str, reasoning_effort: Optional[str] = None, thinking_timeout: Optional[float] = None) -> Dict[str, Any]:
+def activate_provider_model(provider_id: str, model_id: str, reasoning_effort: Optional[str] = None, thinking_timeout: Optional[float] = None, max_output_tokens: Optional[int] = None) -> Dict[str, Any]:
     """One-click switch to activate a model. Updates config, .env, and encrypted store."""
     from .settings_store import update_env
     from .config import refresh_settings
@@ -550,6 +813,8 @@ def activate_provider_model(provider_id: str, model_id: str, reasoning_effort: O
     if thinking_timeout is not None:
         timeout_val = max(5.0, min(float(thinking_timeout), 1800.0))
         config["thinking_timeout"] = timeout_val
+    if max_output_tokens is not None:
+        config["max_output_tokens"] = normalize_max_output_tokens(max_output_tokens, strict=True)
     _atomic_write_json(LLM_CONFIG_FILE, config)
 
     # Sync to .env and secrets
@@ -574,6 +839,8 @@ def activate_provider_model(provider_id: str, model_id: str, reasoning_effort: O
     if thinking_timeout is not None:
         timeout_val = max(5.0, min(float(thinking_timeout), 1800.0))
         env_values["LLM_THINKING_TIMEOUT"] = str(int(timeout_val) if timeout_val.is_integer() else timeout_val)
+    if max_output_tokens is not None:
+        env_values["LLM_MAX_OUTPUT_TOKENS"] = str(config["max_output_tokens"])
     if api_key:
         env_values["LLM_API_KEY"] = api_key
         if save_secrets:
@@ -588,6 +855,7 @@ def activate_provider_model(provider_id: str, model_id: str, reasoning_effort: O
         "active_model_name": target_model.get("name"),
         "active_reasoning_effort": effort,
         "thinking_timeout": config.get("thinking_timeout", 120.0),
+        "max_output_tokens": normalize_max_output_tokens(config.get("max_output_tokens")),
         "base_url": base_url,
         "api_format": target_model.get("api_format", "openai_chat"),
         "provider_name": target_model.get("provider_name", "自定义"),
@@ -600,8 +868,9 @@ def update_llm_settings(
     active_model_id: Optional[str] = None,
     reasoning_effort: Optional[str] = None,
     thinking_timeout: Optional[float] = None,
+    max_output_tokens: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """Update global LLM settings including model, reasoning effort, and thinking timeout limit."""
+    """Update global LLM settings including model, reasoning effort, thinking timeout, and max output tokens."""
     from .settings_store import update_env
     from .config import refresh_settings
 
@@ -621,6 +890,11 @@ def update_llm_settings(
         config["thinking_timeout"] = val
         env_values["LLM_THINKING_TIMEOUT"] = str(int(val) if val.is_integer() else val)
 
+    if max_output_tokens is not None:
+        val = normalize_max_output_tokens(max_output_tokens, strict=True)
+        config["max_output_tokens"] = val
+        env_values["LLM_MAX_OUTPUT_TOKENS"] = str(val)
+
     _atomic_write_json(LLM_CONFIG_FILE, config)
     if env_values:
         update_env(env_values)
@@ -631,6 +905,7 @@ def update_llm_settings(
         "active_model_id": config.get("active_model_id"),
         "active_reasoning_effort": config.get("active_reasoning_effort"),
         "thinking_timeout": config.get("thinking_timeout", 120.0),
+        "max_output_tokens": normalize_max_output_tokens(config.get("max_output_tokens")),
     }
 
 
@@ -647,6 +922,9 @@ def upsert_model(provider_id: str, model_data: Dict[str, Any]) -> Dict[str, Any]
     desc = str(model_data.get("description", "")).strip()
     caps = model_data.get("capabilities") or _detect_capabilities(mid)
     ctx_len = model_data.get("context_length")
+    model_max_tokens = None
+    if "max_output_tokens" in model_data and model_data.get("max_output_tokens") not in (None, ""):
+        model_max_tokens = normalize_max_output_tokens(model_data.get("max_output_tokens"), strict=True)
 
     if not mid:
         raise ValueError("模型 ID 不能为空")
@@ -692,6 +970,10 @@ def upsert_model(provider_id: str, model_data: Dict[str, Any]) -> Dict[str, Any]
         existing["reasoning_effort"] = default_effort
         existing["capabilities"] = caps
         existing["context_length"] = ctx_len
+        if model_max_tokens is not None:
+            existing["max_output_tokens"] = model_max_tokens
+        elif "max_output_tokens" in model_data:
+            existing.pop("max_output_tokens", None)
         existing["description"] = desc
     else:
         models.append({
@@ -708,6 +990,8 @@ def upsert_model(provider_id: str, model_data: Dict[str, Any]) -> Dict[str, Any]
             "context_length": ctx_len,
             "description": desc,
         })
+        if model_max_tokens is not None:
+            models[-1]["max_output_tokens"] = model_max_tokens
 
     # Also update provider's local models array
     if prov:
@@ -719,6 +1003,10 @@ def upsert_model(provider_id: str, model_data: Dict[str, Any]) -> Dict[str, Any]
             p_existing["reasoning_type"] = reasoning_type
             p_existing["reasoning_effort"] = default_effort
             p_existing["context_length"] = ctx_len
+            if model_max_tokens is not None:
+                p_existing["max_output_tokens"] = model_max_tokens
+            elif "max_output_tokens" in model_data:
+                p_existing.pop("max_output_tokens", None)
             p_existing["description"] = desc
         else:
             prov_models.append({
@@ -730,6 +1018,8 @@ def upsert_model(provider_id: str, model_data: Dict[str, Any]) -> Dict[str, Any]
                 "context_length": ctx_len,
                 "description": desc,
             })
+            if model_max_tokens is not None:
+                prov_models[-1]["max_output_tokens"] = model_max_tokens
 
     _atomic_write_json(LLM_CONFIG_FILE, config)
     return {
@@ -1073,6 +1363,7 @@ def build_request_spec(
     m_lower = model.lower()
     rtype = reasoning_type if reasoning_type != "auto" else _detect_reasoning_type(model)
     effort = (reasoning_effort or "auto").strip().lower()
+    output_limit = normalize_max_output_tokens(max_tokens)
 
     # Protocol 1: Anthropic Claude Messages API
     if api_format == "claude_messages":
@@ -1095,7 +1386,7 @@ def build_request_spec(
 
         payload: Dict[str, Any] = {
             "model": model,
-            "max_tokens": max_tokens,
+            "max_tokens": output_limit,
             "messages": chat_messages,
         }
         if system_chunks:
@@ -1111,7 +1402,7 @@ def build_request_spec(
             }
             budget = budget_map[effort]
             payload["thinking"] = {"type": "enabled", "budget_tokens": budget}
-            payload["max_tokens"] = budget + max_tokens
+            payload["max_tokens"] = budget + output_limit
         elif effort == "none":
             payload["thinking"] = {"type": "disabled"}
             if temperature is not None:
@@ -1139,6 +1430,7 @@ def build_request_spec(
         payload: Dict[str, Any] = {
             "model": model,
             "input": messages,
+            "max_output_tokens": output_limit,
         }
         if response_format and response_format.get("type") == "json_object":
             payload["text"] = {"format": {"type": "json_object"}}
@@ -1191,6 +1483,8 @@ def build_request_spec(
         if response_format and rtype != "deepseek_reasoner":
             payload["response_format"] = response_format
 
+        payload[_chat_output_token_field(model)] = output_limit
+
         return endpoint, headers, payload
 
 
@@ -1226,6 +1520,7 @@ def execute_llm_request(
     temperature: Optional[float] = 0.2,
     response_format: Optional[Dict[str, Any]] = None,
     timeout: Optional[float] = None,
+    max_tokens: Optional[int] = None,
 ) -> Tuple[str, str, Dict[str, Any], int]:
     """Unified executor for LLM calls across all 3 protocols.
     Returns: (content, reasoning_content, usage_dict, latency_ms)
@@ -1243,6 +1538,9 @@ def execute_llm_request(
     target_effort = reasoning_effort or runtime.get("reasoning_effort") or "high"
     target_rtype = runtime.get("reasoning_type", "auto")
     effective_timeout = float(timeout) if (timeout is not None and float(timeout) > 0) else float(runtime.get("thinking_timeout") or 120.0)
+    target_max_tokens = normalize_max_output_tokens(
+        max_tokens if max_tokens is not None else runtime.get("max_output_tokens")
+    )
 
     endpoint, headers, payload = build_request_spec(
         model=target_model,
@@ -1254,6 +1552,7 @@ def execute_llm_request(
         temperature=temperature,
         response_format=response_format,
         reasoning_type=target_rtype,
+        max_tokens=target_max_tokens,
     )
 
     t0 = time.perf_counter()
@@ -1293,33 +1592,16 @@ def execute_llm_request(
                 pass
             last_exc = exc
 
-            # Adaptive fallback retry on rejected parameter
-            if exc.code == 400 and any(kw in err_b.lower() for kw in ["reasoning_effort", "temperature", "response_format", "invalid parameter"]):
-                fallback_payload = {
-                    "model": target_model,
-                    "messages": messages,
-                }
-                fb_req = urllib.request.Request(
-                    endpoint,
-                    data=json.dumps(fallback_payload).encode("utf-8"),
-                    headers=headers,
-                )
-                try:
-                    resp_handle = urllib.request.urlopen(fb_req, timeout=effective_timeout)
-                    last_exc = None
-                    break
-                except Exception as fb_exc:
-                    if not _is_transient(getattr(fb_exc, "code", 0) or 0, getattr(fb_exc, "msg", "")):
-                        raise
-                    exc = fb_exc
-                    last_exc = fb_exc
-
             if _is_transient(exc.code, err_b) and attempt < 2:
                 time.sleep(2.0 * (attempt + 1))
                 continue
-            raise RuntimeError(
-                f"LLM 网关返回 HTTP {exc.code}（模型 {target_model}）：{(err_b or '')[:280]}"
-            ) from exc
+            excerpt = _safe_error_excerpt(err_b)
+            detail = f"：{excerpt}" if excerpt else ""
+            raise LlmHttpError(
+                f"LLM gateway returned HTTP {exc.code} (model={target_model}){detail}",
+                output_chars=len(err_b or ""),
+                reason=str(exc.code),
+            ) from None
         except (TimeoutError, socket.timeout) as exc:
             last_exc = exc
             if attempt < 2:
@@ -1344,43 +1626,22 @@ def execute_llm_request(
     with resp_handle as resp:
         latency_ms = int((time.perf_counter() - t0) * 1000)
         body_bytes = resp.read()
-        res_json = json.loads(body_bytes.decode("utf-8", errors="replace"))
+        body_text = body_bytes.decode("utf-8", errors="replace")
 
-    content = ""
-    reasoning_content = ""
-    usage = res_json.get("usage", {})
+    try:
+        res_json = json.loads(body_text)
+    except json.JSONDecodeError as exc:
+        raise LlmEnvelopeJsonError(
+            f"LLM HTTP envelope JSON parse failed at pos {exc.pos}: {exc.msg} (output_chars={len(body_text)})",
+            output_chars=len(body_text),
+        ) from None
+    if not isinstance(res_json, dict):
+        raise LlmEnvelopeJsonError(
+            f"LLM HTTP envelope JSON root must be an object (output_chars={len(body_text)})",
+            output_chars=len(body_text),
+        )
 
-    # Protocol 1: Claude Messages Response
-    if target_format == "claude_messages":
-        text_chunks = [c.get("text", "") for c in res_json.get("content", []) if c.get("type") == "text"]
-        thinking_chunks = [c.get("thinking", "") for c in res_json.get("content", []) if c.get("type") == "thinking"]
-        content = "".join(text_chunks).strip()
-        reasoning_content = "\n".join(thinking_chunks).strip()
-        if not usage:
-            usage = {
-                "total_tokens": res_json.get("usage", {}).get("input_tokens", 0) + res_json.get("usage", {}).get("output_tokens", 0)
-            }
-
-    # Protocol 2: OpenAI Responses Response
-    elif target_format == "openai_responses":
-        content = str(res_json.get("output_text") or "").strip()
-        if not content:
-            for item in res_json.get("output", []):
-                if item.get("type") == "message":
-                    for part in item.get("content", []):
-                        if part.get("type") == "output_text" or "text" in part:
-                            content += str(part.get("text", ""))
-                elif item.get("type") == "reasoning":
-                    reasoning_content += str(item.get("content") or item.get("summary") or "")
-        content = content.strip()
-        reasoning_content = reasoning_content.strip()
-
-    # Protocol 3: OpenAI Chat Completions Response
-    else:
-        msg = res_json.get("choices", [{}])[0].get("message", {})
-        content = str(msg.get("content", "")).strip()
-        reasoning_content = str(msg.get("reasoning_content") or "").strip()
-
+    content, reasoning_content, usage = _finalize_protocol_response(target_format, res_json)
     return content, reasoning_content, usage, latency_ms
 
 
@@ -1486,44 +1747,17 @@ def test_llm_connection(
         except Exception:
             pass
 
-        # Adaptive fallback retry
-        is_param_conflict = any(kw in err_body.lower() for kw in [
-            "reasoning_effort", "temperature", "unrecognized request argument", "unknown parameter", "invalid parameter"
-        ])
-        if is_param_conflict and api_format == "openai_chat":
-            try:
-                fb_payload = {"model": model, "messages": test_messages}
-                fb_req = urllib.request.Request(endpoint, data=json.dumps(fb_payload).encode("utf-8"), headers=headers)
-                t1 = time.perf_counter()
-                with urllib.request.urlopen(fb_req, timeout=timeout) as fb_resp:
-                    fb_latency = int((time.perf_counter() - t1) * 1000)
-                    fb_body = fb_resp.read().decode("utf-8", errors="replace")
-                    fb_json = json.loads(fb_body)
-                    fb_msg = fb_json.get("choices", [{}])[0].get("message", {})
-                    return {
-                        "ok": True,
-                        "status_code": 200,
-                        "latency_ms": fb_latency,
-                        "model": model,
-                        "api_format": api_format,
-                        "endpoint": endpoint,
-                        "response_preview": str(fb_msg.get("content", ""))[:120] or "OK",
-                        "warning": f"上游服务拒绝了参数 ({err_body[:80]}…)，系统已自适应去除冲突参数并测试成功",
-                        "compatibility_note": "模型不支持自定义 reasoning_effort 或 temperature 参数；实际调用将自动去除",
-                    }
-            except Exception:
-                pass
-
         rec = "请核对配置"
         if status_code == 401:
             rec = "API Key 认证失败，请检查密钥是否正确或是否已过期"
         elif status_code == 404:
-            rec = f"端点未找到 (404)，请检查 API 格式协议是否选对（如 Anthropic 需选 Claude Messages，OpenAI 选 Chat 或 Responses），以及 Base URL 路径是否正确"
+            rec = "端点未找到 (404)，请检查 API 格式协议是否选对（如 Anthropic 需选 Claude Messages，OpenAI 选 Chat 或 Responses），以及 Base URL 路径是否正确"
         elif status_code == 429:
             rec = "请求频次超限或账户配额/余额不足 (429 Rate Limit)"
         elif status_code in (500, 502, 503):
             rec = "上游大模型服务暂时不可用或内部服务故障"
 
+        excerpt = _safe_error_excerpt(err_body, limit=240)
         return {
             "ok": False,
             "status_code": status_code,
@@ -1531,7 +1765,7 @@ def test_llm_connection(
             "model": model,
             "api_format": api_format,
             "endpoint": endpoint,
-            "error": f"HTTP {status_code}: {err_body[:240]}",
+            "error": f"HTTP {status_code}" + (f": {excerpt}" if excerpt else ""),
             "recommendation": rec,
         }
 

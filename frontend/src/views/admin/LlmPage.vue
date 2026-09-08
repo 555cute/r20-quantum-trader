@@ -79,6 +79,7 @@ const modelForm = ref<any>({
   capabilities: ['chat'],
   reasoning_effort: 'high',
   context_length: 128000,
+  max_output_tokens: null as number | null,
   description: '',
 })
 
@@ -87,6 +88,7 @@ const copiedText = ref<string | null>(null)
 
 // Global Reasoning & Thinking Timeout State
 const thinkingTimeoutInput = ref<number>(120)
+const maxOutputTokensInput = ref<number>(4096)
 const savingSettings = ref(false)
 const settingsResult = ref<any>(null)
 
@@ -102,12 +104,13 @@ async function saveGlobalSettings() {
       method: 'POST',
       body: JSON.stringify({
         thinking_timeout: Number(thinkingTimeoutInput.value) || 120,
+        max_output_tokens: Number(maxOutputTokensInput.value) || 4096,
         active_model_id: cfg.value?.active_model_id,
         reasoning_effort: cfg.value?.active_reasoning_effort,
       }),
     })
     await loadConfig()
-    settingsResult.value = { ok: true, message: `推演参数已保存：思考上限设为 ${thinkingTimeoutInput.value} 秒` }
+    settingsResult.value = { ok: true, message: `推演参数已保存：思考上限 ${thinkingTimeoutInput.value} 秒，输出上限 ${maxOutputTokensInput.value} tokens` }
     setTimeout(() => {
       settingsResult.value = null
     }, 3500)
@@ -126,6 +129,7 @@ async function loadConfig() {
     if (cfg.value?.thinking_timeout) {
       thinkingTimeoutInput.value = Number(cfg.value.thinking_timeout)
     }
+    maxOutputTokensInput.value = Number(cfg.value?.max_output_tokens) || 4096
     if (selectedProvider.value) {
       const updated = cfg.value.providers?.find((p: any) => p.id === selectedProvider.value.id)
       if (updated) {
@@ -440,6 +444,7 @@ function openAddModelModal() {
     capabilities: ['chat'],
     reasoning_effort: 'high',
     context_length: 128000,
+    max_output_tokens: null,
     description: '',
   }
   modelModalVisible.value = true
@@ -454,6 +459,7 @@ function openEditModelModal(m: any) {
     capabilities: m.capabilities || ['chat'],
     reasoning_effort: m.reasoning_effort || 'high',
     context_length: m.context_length || 128000,
+    max_output_tokens: m.max_output_tokens ?? null,
     description: m.description || '',
   }
   modelModalVisible.value = true
@@ -464,6 +470,7 @@ async function saveModelForm() {
   try {
     const payload = {
       ...modelForm.value,
+      max_output_tokens: modelForm.value.max_output_tokens === '' ? null : modelForm.value.max_output_tokens,
       provider_id: selectedProvider.value.id,
       provider_name: selectedProvider.value.name,
       base_url: selectedProvider.value.base_url,
@@ -646,6 +653,10 @@ onMounted(() => {
               <span>思考强度:</span>
               <span class="font-bold uppercase text-emerald-400">{{ cfg?.active_reasoning_effort || 'HIGH' }}</span>
             </div>
+            <div class="text-[10px] flex items-center space-x-1" style="color: var(--text-muted);">
+              <span>输出上限:</span>
+              <span class="font-bold text-blue-400">{{ cfg?.max_output_tokens || 4096 }} tok</span>
+            </div>
           </div>
 
           <!-- Thinking Timeout Input Field -->
@@ -712,6 +723,33 @@ onMounted(() => {
                   300s (长思考链)
                 </button>
               </div>
+            </div>
+          </div>
+
+          <!-- Max output tokens -->
+          <div class="p-3 rounded-xl border space-y-1.5 font-mono sm:col-span-1 lg:col-span-3" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
+            <div class="flex items-center justify-between">
+              <label for="global-max-output-tokens" class="text-[10px] font-bold" style="color: var(--text-muted);">
+                模型输出上限 (max_output_tokens)
+              </label>
+              <span class="text-[10px]" style="color: var(--text-faint);">有效范围: 1 ~ 128000</span>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <input
+                v-model.number="maxOutputTokensInput"
+                id="global-max-output-tokens"
+                name="max_output_tokens"
+                autocomplete="off"
+                type="number"
+                min="1"
+                max="128000"
+                step="1"
+                placeholder="4096"
+                class="w-28 rounded-lg px-3 py-1.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-blue-500 border font-bold font-mono"
+                style="background-color: var(--bg-card); border-color: var(--border-medium); color: var(--text-main);"
+              />
+              <span class="text-xs font-bold" style="color: var(--text-muted);">tokens</span>
+              <span class="text-[10px]" style="color: var(--text-faint);">写入 Responses 的 max_output_tokens，以及 Chat/Claude 兼容输出上限。默认 4096。</span>
             </div>
           </div>
         </div>
@@ -1500,6 +1538,22 @@ onMounted(() => {
               type="number"
               placeholder="1048576"
               class="w-full rounded-xl px-3.5 py-2 text-xs outline-none border font-mono"
+              style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-main);"
+            />
+          </div>
+
+          <div>
+            <label for="model-max-output-tokens" class="block text-[11px] font-bold mb-1" style="color: var(--text-muted);">输出上限 (max_output_tokens，留空继承全局)</label>
+            <input
+              v-model.number="modelForm.max_output_tokens"
+              id="model-max-output-tokens"
+              name="model_max_output_tokens"
+              autocomplete="off"
+              type="number"
+              min="1"
+              max="128000"
+              placeholder="继承全局设置"
+              class="w-full rounded-xl px-3.5 py-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-blue-500 border font-mono"
               style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-main);"
             />
           </div>

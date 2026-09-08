@@ -392,7 +392,7 @@ def call_llm_evolution_review(closed_trades: List[Dict[str, Any]], existing_memo
     effort = os.environ.get("LLM_REASONING_EFFORT") or "high"
     api_format = "openai_chat"
     try:
-        from r20_backend.llm_manager import get_active_llm_runtime, execute_llm_request
+        from r20_backend.llm_manager import get_active_llm_runtime, execute_llm_request, parse_model_json_object
         active_llm = get_active_llm_runtime()
         model_name = os.environ.get("LLM_MODEL") or active_llm.get("model") or model_name
         effort = os.environ.get("LLM_REASONING_EFFORT") or active_llm.get("reasoning_effort") or effort
@@ -402,6 +402,7 @@ def call_llm_evolution_review(closed_trades: List[Dict[str, Any]], existing_memo
         thinking_timeout = max(90.0, float(active_llm.get("thinking_timeout") or os.environ.get("LLM_THINKING_TIMEOUT", 120.0)))
     except Exception:
         execute_llm_request = None
+        parse_model_json_object = None
         thinking_timeout = max(90.0, float(os.environ.get("LLM_THINKING_TIMEOUT", os.environ.get("LLM_TIMEOUT_SECONDS", 120.0))))
 
     telemetry = ModelCallTelemetry(
@@ -412,6 +413,7 @@ def call_llm_evolution_review(closed_trades: List[Dict[str, Any]], existing_memo
         log_msg(f"🚀 正在调用 {model_name} ({api_format} / 思考上限 {thinking_timeout:.0f}s) 进行 AI 大脑深度认知复盘与策略参数优化...")
         raw_res = None
         content = ""
+        usage_dict = {}
         if execute_llm_request:
             content, _, usage_dict, _ = execute_llm_request(
                 messages=[
@@ -450,22 +452,24 @@ def call_llm_evolution_review(closed_trades: List[Dict[str, Any]], existing_memo
                 content = res["choices"][0]["message"]["content"].strip()
                 raw_res = res
 
-        content = (content or "").strip()
-        if content.startswith("```json"):
-            content = content[7:]
-        if content.startswith("```"):
-            content = content[3:]
-        if content.endswith("```"):
-            content = content[:-3]
-        
-        review_json = json.loads(content.strip())
-        if not isinstance(review_json, dict):
-            review_json = {}
+        if parse_model_json_object:
+            review_json = parse_model_json_object(content)
+        else:
+            cleaned = (content or "").strip()
+            if cleaned.startswith("```json"):
+                cleaned = cleaned[7:]
+            if cleaned.startswith("```"):
+                cleaned = cleaned[3:]
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3]
+            review_json = json.loads(cleaned.strip())
+            if not isinstance(review_json, dict):
+                raise ValueError("LLM evolution JSON root must be an object")
         telemetry.finish("success", raw_res, output_chars=len(content))
         log_msg(f"✅ AI 大脑认知复盘完成 (耗时 {round(time.time() - t0, 2)}s)")
         return review_json
     except Exception as e:
-        telemetry.finish("failed", error=e)
+        telemetry.finish("failed", raw_res if "raw_res" in locals() else None, output_chars=len(content) if "content" in locals() else 0, error=e)
         log_msg(f"Error in LLM evolution review: {e}")
         # Surface the upstream failure in the dashboard report instead of silently
         # degrading to an unexplained NO_CHANGE (which looks like a stale cache).
