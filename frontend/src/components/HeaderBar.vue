@@ -3,7 +3,7 @@ import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useDashboardStore } from '../stores/dashboard'
 import { useTheme } from '../composables/useTheme'
 import { useI18n } from '../composables/useI18n'
-import { APP_VERSION, APP_NAME, OFFICIAL_REPO, OFFICIAL_NOTICE } from '../config/version'
+import { APP_VERSION, APP_NAME, OFFICIAL_NOTICE } from '../config/version'
 import AboutModal from './AboutModal.vue'
 import CryptoLogo from './CryptoLogo.vue'
 import {
@@ -69,22 +69,12 @@ const tabs = computed(() => [
         </div>
         <button
           @click="store.showAboutModal = true"
-          class="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold border transition-colors cursor-pointer"
+          class="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold border transition-colors cursor-pointer whitespace-nowrap"
           style="background-color: var(--bg-card-subtle); color: var(--text-muted); border-color: var(--border-subtle);"
-          :title="t('nav.aboutTitle')"
-        >
-          {{ APP_VERSION }}
-        </button>
-        <a
-          :href="OFFICIAL_REPO"
-          target="_blank"
-          rel="noopener"
-          class="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold border transition-opacity hover:opacity-80 whitespace-nowrap"
-          style="background-color: rgba(247,147,26,0.08); color: var(--text-muted); border-color: var(--border-subtle);"
           :title="OFFICIAL_NOTICE"
         >
-          官方
-        </a>
+          {{ APP_VERSION }} · 官方
+        </button>
         <span
           class="w-1.5 h-1.5 rounded-full shrink-0"
           :class="store.isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'"
