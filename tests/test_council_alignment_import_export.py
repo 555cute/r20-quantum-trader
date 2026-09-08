@@ -45,6 +45,11 @@ class CouncilPresetAlignmentTests(unittest.TestCase):
         self.assertIn("提案输出格式（强制）", src)
         self.assertIn("标的 | 倾向 | 限价 | 止损 | 止盈 | 拟用保证金(USDT) | 置信度(0-100) | 一句话依据", src)
         self.assertIn("标准报价单", src)
+        self.assertNotIn("6 大", src)
+        self.assertNotIn("6大", src)
+        self.assertIn("标的池全部标的", src)
+        self.assertIn("行情矩阵清单", src)
+
 
 
 class CouncilPresetMigrationTests(unittest.TestCase):

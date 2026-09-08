@@ -9,7 +9,7 @@ Fully Re-architected in v7.2.2 with Full Account Awareness:
    - Account available capital (USDT balance), position count & risk limits;
    - Active position lifecycle (HOLD / CLOSE_MARKET / UPDATE_SL for trailing profit);
    - Pending maker limit orders lifecycle (CANCEL stale orders vs. KEEP active setups);
-   - Opening/Pyramiding proposals for all 6 active instruments with exact parameters.
+   - Opening/Pyramiding proposals for every instrument in the live pool with exact parameters.
 3. Chief Investment Officer (CIO / Head of Trading) Verdict:
    The CIO reviews all submitted proposals, weighs cross-examination feedback, determines
    which trader's plan to fund and execute (or rejects all for WAIT), and outputs the
@@ -853,11 +853,11 @@ def execute_council_debate(
         f"{cio_spec.get('prompt', '')}\n\n"
         "====================================================\n"
         "【投委会终审发单契约强约束（全面落盘持仓处理、挂单撤留与新标的点位！）】\n"
-        "你必须对全局资金、在途持仓、在途挂单及 6 大主力标的做出终审裁决：\n"
+        "你必须对全局资金、在途持仓、在途挂单及标的池全部标的做出终审裁决：\n"
         "1. 【持仓与挂单闭环管理】：\n"
         "   - 在 position_management 中对所有活动持仓下达权威指令（HOLD / CLOSE_MARKET / UPDATE_SL）及理由；\n"
         "   - 在 pending_orders_management 中对所有在途未成交挂单下达处理指令（CANCEL / KEEP）及理由；\n"
-        "2. 【6 大标的开仓方案终审 (decisions) 与采纳归属 (adopted_role)】：\n"
+        "2. 【标的池全部标的开仓方案终审 (decisions) 与采纳归属 (adopted_role)】：\n"
         f"   - 仔细比对各位交易员提交的方案{'与交叉质询辩论' if consensus_mode == 'cross_examination' else ''}，评估逻辑最扎实者采纳，存在漏洞者驳回；\n"
         "   - 各席提案末尾附有标准报价单（标的|倾向|限价|止损|止盈|保证金|置信度|依据），请逐项横向对比后再裁决；你批复的点位若与被采纳参谋报价单明显偏离，必须在 reasoning 中说明调整原因；\n"
         "   - decisions 必须是标的字典（如 \"BTC-USDT-SWAP\"），每个标的必须包含 \"adopted_role\" 字段：\n"
@@ -893,7 +893,7 @@ def execute_council_debate(
         "请作为首席投资官 (CIO) 审阅卷宗，统筹资金安全，裁定本轮发单并输出标准 JSON：\n"
         "1. 在 macro_assessment 中给出全局资金偏好、仓位总敞口与宏观裁定总括。\n"
         "2. 在 position_management 中落实每一个现有持仓的动态处理。\n"
-        "3. 在 decisions 中对 6 大标的逐一下达方案采纳或驳回批复（包含 adopted_role 与 reasoning），并给出完整四维点位！"
+        "3. 在 decisions 中对行情矩阵清单逐一下达方案采纳或驳回批复（包含 adopted_role 与 reasoning），并给出完整四维点位！"
     )
 
     cio_timeout = max(MIN_SAFE_REASONING_TIME, deadline - time.time())
