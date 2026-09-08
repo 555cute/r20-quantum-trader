@@ -196,6 +196,14 @@ export const zhCN = {
   },
 
   // Secondary Tabs
+  cmd: {
+    placeholder: '输入命令或页面名…',
+    pages: '页面', tabs: '视图', actions: '操作',
+    toDark: '切换深色主题', toLight: '切换浅色主题',
+    cvdOn: '开启色盲友好涨跌色', cvdOff: '关闭色盲友好涨跌色',
+    openTerminal: '打开实盘终端', refresh: '立即刷新数据',
+    navigate: '导航', select: '执行', noMatch: '无匹配命令',
+  },
   news: {
     tempBand: '多空温度',
     mentions: '提及',

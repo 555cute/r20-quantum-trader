@@ -6,6 +6,7 @@ import { useTheme } from '../composables/useTheme'
 import { useI18n } from '../composables/useI18n'
 import { APP_VERSION } from '../config/version'
 import AboutModal from '../components/AboutModal.vue'
+import CommandPalette from '../components/CommandPalette.vue'
 import CryptoLogo from '../components/CryptoLogo.vue'
 import {
   LayoutDashboard,
@@ -35,12 +36,13 @@ import {
   X,
   Sparkles,
   Globe,
+  Eye, EyeOff,
 } from 'lucide-vue-next'
 
 const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
-const { theme, toggleTheme } = useTheme()
+const { theme, toggleTheme, cvd, toggleCvd } = useTheme()
 const { t, isEn, toggleLocale } = useI18n()
 
 const navGroups = computed(() => [
@@ -450,6 +452,19 @@ const showAboutModal = ref(false)
             <Moon v-else class="w-3.5 h-3.5 text-slate-700 hover:-rotate-12 transition-transform" />
           </button>
 
+          <!-- P3: CVD toggle -->
+          <button
+            @click="toggleCvd()"
+            class="flex items-center justify-center w-8 h-8 rounded-lg border transition-all cursor-pointer shadow-xs shrink-0"
+            :style="cvd
+              ? { backgroundColor: 'var(--color-brand-bg)', borderColor: 'var(--color-brand-border)', color: 'var(--color-brand)' }
+              : { backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-subtle)', color: 'var(--text-main)' }"
+            :title="t('nav.cvdHint')"
+          >
+            <EyeOff v-if="cvd" class="w-3.5 h-3.5" />
+            <Eye v-else class="w-3.5 h-3.5" style="color: var(--text-muted);" />
+          </button>
+
           <!-- Back to Terminal -->
           <a
             href="/"
@@ -494,6 +509,8 @@ const showAboutModal = ref(false)
     </div>
 
     <!-- About Modal -->
+    <CommandPalette />
+
     <AboutModal
       :visible="showAboutModal"
       @close="showAboutModal = false"
