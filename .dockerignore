@@ -1,0 +1,67 @@
+# Git
+.git
+.gitignore
+
+# Python / Node 构建缓存
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+frontend/node_modules/
+frontend/dist/
+node_modules/
+
+# 运行时数据与日志（compose 用宿主机卷挂载，绝不进镜像）
+data/*
+!data/.gitkeep
+logs/
+backups/
+checkpoints/
+state/
+sessions/
+tool_results/
+media/
+
+# 敏感文件：绝不进构建上下文
+.env
+.env.*
+.okx/
+.bypy/
+credentials.yaml
+
+# 仓库杂项（镜像不需要）
+Dockerfile
+docker-compose.yml
+deploy/
+promo_local/
+*.md
+!README.md
+!STANDALONE.md
+!RECOVERY_GUIDE.md
+fix_*.py
+*_patch.py
+premium_ui.py
+light_theme_refactor.py
+refine_body.py
+ui_patch.py
+history.db*
+chats.json
+jobs.json
+skill.json
+skills-lock.json
+agent.json
+agent/
+skills/
+memory/
+mem_agent/
+mem_metadata/
+mem_session/
+digest/
+AGENTS.md
+SOUL.md
+PROFILE.md
+MEMORY.md
+HEARTBEAT.md
+*.png
+*.log

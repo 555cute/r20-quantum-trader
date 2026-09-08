@@ -41,7 +41,8 @@ COPY scripts/ ./scripts/
 COPY plugins/ ./plugins/
 COPY dashboard/ ./dashboard/
 COPY tests/ ./tests/
-COPY static/ ./static/
+# docs/images 供 /docs 配图与 og:image(/images/*) 同源读取，缺了会整站图片 404
+COPY docs/ ./docs/
 
 # Copy built frontend from stage 1
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
