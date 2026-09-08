@@ -187,7 +187,7 @@ export const zhCN = {
     councilTitle: 'AI 宏观周期多模型委员会全息质询纪要',
     councilSubtitle: '多模型交叉质询、四维点位约束与物理防线终审',
     sentimentTitle: '全网多源全要素舆情与黑天鹅预警雷达',
-    sentimentSubtitle: 'OKX快讯 + 币安公告 + 宏观情报全要素清洗',
+    sentimentSubtitle: 'OKX快讯 + 币安公告/媒体RSS + 宏观情报全要素清洗',
     labTitle: 'AI 策略自进化与认知提炼中心',
     labSubtitle: '基于实盘胜率、盈亏比与动力学反馈，每 6 小时自主修正参数与策略心法',
     ledgerTitle: '不可篡改实盘历史成交与财务台账',

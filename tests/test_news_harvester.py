@@ -119,20 +119,28 @@ class NewsHarvesterTests(TestCase):
     def _seed_cache(self, payload: dict) -> None:
         self.cache.write_text(json.dumps(payload), encoding="utf-8")
 
-    def _binance_urlopen(self, body):
+    def _binance_urlopen(self, body, media=None):
+        media_bodies = media or {}
+
         def urlopen(req, timeout=None, **kwargs):
             url = getattr(req, "full_url", str(req))
-            self.assertEqual(url, harvester.BINANCE_CMS_URL)
             parsed = urllib.parse.urlsplit(url)
             self.assertEqual(parsed.scheme, "https")
-            self.assertEqual(parsed.hostname, "www.binance.com")
             headers = {key.lower(): value for key, value in req.header_items()}
             self.assertNotIn("authorization", headers)
             self.assertNotIn("x-mbx-apikey", headers)
             self.assertEqual(timeout, harvester.BINANCE_HTTP_TIMEOUT)
-            return _FakeHTTPResponse(body)
+            if url == harvester.BINANCE_CMS_URL:
+                self.assertEqual(parsed.hostname, "www.binance.com")
+                return _FakeHTTPResponse(body)
+            allowed = {feed["url"]: feed for feed in harvester.BINANCE_MEDIA_FEEDS}
+            self.assertIn(url, allowed)
+            self.assertEqual(parsed.hostname, allowed[url]["host"])
+            payload = media_bodies.get(url, "<rss version='2.0'><channel></channel></rss>")
+            return _FakeHTTPResponse(payload)
 
         return urlopen
+
 
     def test_binance_only_skips_okx_cli_and_filters_catalogs(self):
         self.selected.return_value = ("binance",)
@@ -622,6 +630,70 @@ class NewsHarvesterTests(TestCase):
         self.assertTrue(live["circuit_breaker"].get("active"))
         self.notify.assert_called_once()
         self.assertTrue(self.cb.exists())
+
+    def test_binance_media_rss_folds_into_binance_source(self):
+        self.selected.return_value = ("binance",)
+        now_ms = int(FROZEN_TS * 1000)
+        catalogs = [{
+            "catalogId": 48,
+            "catalogName": "New Cryptocurrency Listing",
+            "articles": [{
+                "id": 48,
+                "code": "list-ok",
+                "title": "BTC listed",
+                "releaseDate": now_ms - 10_000,
+            }],
+        }]
+        from email.utils import formatdate
+        rss = (
+            "<?xml version='1.0'?><rss version='2.0'><channel>"
+            f"<item><title>ETH ETF inflows</title><link>https://www.coindesk.com/eth-etf</link>"
+            f"<guid>cd-eth-1</guid><pubDate>{formatdate(FROZEN_TS - 20, usegmt=True)}</pubDate>"
+            "<description>inflows</description></item></channel></rss>"
+        )
+        media = {harvester.BINANCE_MEDIA_FEEDS[0]["url"]: rss}
+        with patch.object(harvester.urllib.request, "urlopen", self._binance_urlopen(_cms(catalogs), media=media)), \
+             patch.object(harvester.time, "time", return_value=FROZEN_TS):
+            payload = harvester.fetch_and_analyze_news_sentiment()
+        ids = [row["id"] for row in payload["latest_news"]]
+        self.assertIn("binance:48", ids)
+        media_rows = [row for row in payload["latest_news"] if row.get("authority") == "media"]
+        self.assertTrue(media_rows)
+        self.assertEqual(media_rows[0]["category"], "CoinDesk")
+        self.assertEqual(media_rows[0]["url"], "https://www.coindesk.com/eth-etf")
+        self.assertEqual(media_rows[0]["source"], "binance")
+        self.assertIn("ETH", media_rows[0]["coins"])
+        self.assertEqual(payload["coins_sentiment"], {})
+
+    def test_media_headline_does_not_arm_breaker(self):
+        self.selected.return_value = ("binance",)
+        now_ms = int(FROZEN_TS * 1000)
+        catalogs = [{
+            "catalogId": 48,
+            "catalogName": "New Cryptocurrency Listing",
+            "articles": [{
+                "id": "ok",
+                "code": "ok-list",
+                "title": "BTC listed",
+                "releaseDate": now_ms - 10_000,
+            }],
+        }]
+        from email.utils import formatdate
+        rss = (
+            "<?xml version='1.0'?><rss version='2.0'><channel>"
+            f"<item><title>{SWAN_TITLE}</title><link>https://www.coindesk.com/swan</link>"
+            f"<guid>cd-swan</guid><pubDate>{formatdate(FROZEN_TS - 20, usegmt=True)}</pubDate>"
+            "</item></channel></rss>"
+        )
+        media = {harvester.BINANCE_MEDIA_FEEDS[0]["url"]: rss}
+        with patch.object(harvester.urllib.request, "urlopen", self._binance_urlopen(_cms(catalogs), media=media)), \
+             patch.object(harvester.time, "time", return_value=FROZEN_TS):
+            payload = harvester.fetch_and_analyze_news_sentiment()
+        self.assertTrue(any(row["title"] == SWAN_TITLE for row in payload["latest_news"]))
+        self.assertFalse(payload["circuit_breaker"].get("active"))
+        self.notify.assert_not_called()
+        self.assertFalse(self.cb.exists())
+
 
 
 if __name__ == "__main__":

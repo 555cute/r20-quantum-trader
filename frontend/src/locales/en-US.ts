@@ -187,7 +187,7 @@ export const enUS = {
     councilTitle: 'Multi-Model Investment Council Consensus Log',
     councilSubtitle: 'Cross-model inquiry, 4D price constraints & physical risk final review',
     sentimentTitle: 'Global Sentiment & Black Swan Circuit Breaker',
-    sentimentSubtitle: 'OKX News + Binance Announcements + Macro Intel Pipeline',
+    sentimentSubtitle: 'OKX News + Binance announcements/media RSS + Macro Intel Pipeline',
     labTitle: 'AI Self-Evolution & Cognitive Synthesis Lab',
     labSubtitle: 'Autonomous parameter & heuristic fine-tuning every 6 hours based on PnL and calculus feedback',
     ledgerTitle: 'Immutable Live Trade History & Financial Ledger',

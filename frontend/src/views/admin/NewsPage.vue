@@ -334,7 +334,7 @@ onMounted(() => {
       <Info class="w-3.5 h-3.5 shrink-0 mt-0.5" style="color: var(--accent, #3875F6);" />
       <div class="space-y-1 min-w-0 break-words">
         <p>{{ effectText || '保存后立即按勾选过滤禁用源的缓存；下次定时或手动采集才拉新。空选表示关闭全部来源。' }}</p>
-        <p class="opacity-80">币安官方公告只有标题、时间、分类和链接，不提供正文或牛熊分数，不参与情绪统计。该接口是网站公开资讯，不需要交易 API Key，也不会开启交易。</p>
+        <p class="opacity-80">币安情报中心与 OKX 快讯对齐：官方公告 + 资讯中心媒体标题/链接。不编正文或牛熊分，不需要交易 API Key。媒体标题只进展示和模型；开仓熔断仍只认官方/已验证源。</p>
       </div>
     </div>
 

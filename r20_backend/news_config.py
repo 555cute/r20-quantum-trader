@@ -14,7 +14,7 @@ ENV_FILE = env_file_path(ROOT)
 NEWS_CACHE_FILE = ROOT / "data" / "news_sentiment.json"
 SOURCE_OPTIONS = [
     {"id": "okx", "name": "OKX 聚合资讯", "description": "通过 OKX News CLI 获取财经快讯与其提供的币种情绪统计；与交易所选择独立。"},
-    {"id": "binance", "name": "币安官方公告", "description": "公开公告标题、发布时间、分类及原文链接，涵盖上币、下架、维护和 API/规则更新；不提供牛熊情绪统计。"},
+    {"id": "binance", "name": "币安情报中心", "description": "官方公告来自币安公开 CMS；CoinDesk 与 CoinTelegraph 固定 HTTPS RSS 折入同一源。不编正文情绪。媒体标题可展示、进模型，不能单独触发开仓熔断。"},
 ]
 _SOURCE_NAMES = {source["id"]: source["name"] for source in SOURCE_OPTIONS}
 _SOURCE_STATES = {"ok", "empty", "error", "stale", "disabled", "pending"}

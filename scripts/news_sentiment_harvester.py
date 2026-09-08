@@ -4,10 +4,12 @@ Crypto news & black-swan circuit-breaker harvester.
 
 Collects only admin-selected sources (OKX CLI and/or Binance public CMS),
 normalizes rows, and writes data/news_sentiment.json. Binance contributes
-title/time/category/link only — no fabricated body or bull/bear scores.
-Black-swan matching stays the existing regex set; listing/delisting never
-opens or closes positions.
+official catalogs plus other CMS media titles/links from the same GET —
+no fabricated body or bull/bear scores. Black-swan matching stays the
+existing regex set; listing/delisting never opens or closes positions.
+Media-only headlines cannot arm the 30-minute new-entry freeze.
 """
+
 
 import os
 import sys
@@ -29,6 +31,9 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
+from email.utils import parsedate_to_datetime
+
 
 from instrument_pool import load_instruments
 from r20_backend.news_config import SOURCE_OPTIONS, selected_sources, select_news_items
@@ -69,9 +74,25 @@ BINANCE_CMS_URL = (
 )
 BINANCE_DETAIL_PREFIX = "https://www.binance.com/en/support/announcement/detail/"
 # 48 listing, 49 latest rules/news, 161 delisting, 157 maintenance, 51 API updates.
-# 93 activities and 128 airdrops are not trading announcements.
-BINANCE_TRADE_CATALOGS = {48, 49, 161, 157, 51}
+# CMS type=1 has no third-party media catalogs. Media is a fixed HTTPS RSS allowlist.
+BINANCE_OFFICIAL_CATALOGS = {48, 49, 161, 157, 51}
 BINANCE_SKIP_CATALOGS = {93, 128}
+BINANCE_MEDIA_FEEDS = (
+    {
+        "id": "coindesk",
+        "name": "CoinDesk",
+        "host": "www.coindesk.com",
+        "url": "https://www.coindesk.com/arc/outboundfeeds/rss/",
+    },
+    {
+        "id": "cointelegraph",
+        "name": "CoinTelegraph",
+        "host": "cointelegraph.com",
+        "url": "https://cointelegraph.com/rss",
+    },
+)
+
+
 _BINANCE_CODE_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 _ALL_COIN_TOKENS = {"ALL", "*", "全部", "全部币种"}
 MACRO_UNAVAILABLE = "无可验证情绪数据"
@@ -263,7 +284,8 @@ def _bj_time(published_ms, tz_bj) -> str:
 
 def _base_row(source: str, *, item_id: str, published_ms, title: str, summary: str,
               coins: list, platforms: list, importance, url: str, category: str,
-              stale: bool) -> dict:
+              stale: bool, authority: str = "official") -> dict:
+    kind = "official" if str(authority) != "media" else "media"
     return {
         "id": item_id,
         "time": _bj_time(published_ms, datetime.timezone(datetime.timedelta(hours=8))),
@@ -278,7 +300,9 @@ def _base_row(source: str, *, item_id: str, published_ms, title: str, summary: s
         "category": category,
         "published_at": int(published_ms) if published_ms else 0,
         "stale": bool(stale),
+        "authority": kind,
     }
+
 
 
 def _load_previous_cache() -> dict:
@@ -425,6 +449,97 @@ def _fetch_binance_cms():
     return catalogs
 
 
+def _fetch_fixed_https(url: str, host: str, accept: str) -> bytes:
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme != "https" or (parsed.hostname or "").lower() != host.lower():
+        raise ValueError("refusing non-allowlisted host")
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 R20NewsHarvester",
+            "Accept": accept,
+        },
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=BINANCE_HTTP_TIMEOUT) as response:
+            raw = response.read()
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"HTTP {exc.code}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"URL error: {exc.reason}") from exc
+    if not raw:
+        raise RuntimeError("empty body")
+    return raw
+
+
+def _rss_published_ms(text) -> int | None:
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = parsedate_to_datetime(raw)
+    except (TypeError, ValueError, OverflowError):
+        return _as_unix_ms(raw)
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+    return int(parsed.timestamp() * 1000)
+
+
+def _parse_rss_feed(feed: dict, xml_text: str, target_coins: list) -> list:
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return []
+    items = []
+    for node in root.iter():
+        tag = node.tag.rsplit("}", 1)[-1].lower()
+        if tag != "item":
+            continue
+        fields = {}
+        for child in list(node):
+            fields[child.tag.rsplit("}", 1)[-1].lower()] = (child.text or "")
+        title = _strip_html(fields.get("title"))
+        link = _safe_http_url(fields.get("link") or fields.get("guid"))
+        published_ms = _rss_published_ms(fields.get("pubdate") or fields.get("published"))
+        if not title or not link or not published_ms:
+            continue
+        guid = _strip_html(fields.get("guid") or link)
+        item_id = _prefixed_id("binance", f"{feed['id']}:{guid}"[:160])
+        summary = _strip_html(fields.get("description") or "")[:400]
+        items.append(_base_row(
+            "binance",
+            item_id=item_id,
+            published_ms=published_ms,
+            title=title,
+            summary=summary,
+            coins=_match_coins(title + " " + summary, target_coins),
+            platforms=[feed["name"]],
+            importance="",
+            url=link,
+            category=feed["name"],
+            stale=False,
+            authority="media",
+        ))
+        if len(items) >= 10:
+            break
+    return items
+
+
+def _harvest_binance_media(target_coins: list) -> list:
+    collected = []
+    for feed in BINANCE_MEDIA_FEEDS:
+        try:
+            raw = _fetch_fixed_https(feed["url"], feed["host"], "application/rss+xml, application/xml, text/xml")
+            text = raw.decode("utf-8", errors="replace")
+            collected.extend(_parse_rss_feed(feed, text, target_coins))
+        except Exception:
+            continue
+    return collected
+
+
 def _harvest_binance(target_coins: list) -> dict:
     try:
         catalogs = _fetch_binance_cms()
@@ -438,7 +553,7 @@ def _harvest_binance(target_coins: list) -> dict:
             catalog_id = int(node.get("catalogId"))
         except (TypeError, ValueError):
             continue
-        if catalog_id in BINANCE_SKIP_CATALOGS or catalog_id not in BINANCE_TRADE_CATALOGS:
+        if catalog_id in BINANCE_SKIP_CATALOGS or catalog_id not in BINANCE_OFFICIAL_CATALOGS:
             continue
         category = _strip_html(node.get("catalogName") or catalog_id)
         articles = node.get("articles")
@@ -475,12 +590,20 @@ def _harvest_binance(target_coins: list) -> dict:
                 url=url,
                 category=category,
                 stale=False,
+                authority="official",
             ))
+    for row in _harvest_binance_media(target_coins):
+        if row["id"] in seen:
+            continue
+        seen.add(row["id"])
+        items.append(row)
     return {
         "status": "ok" if items else "empty",
         "items": items,
         "error": None,
     }
+
+
 
 
 def _normalize_okx_item(item: dict, target_coins: list) -> dict | None:
@@ -504,7 +627,9 @@ def _normalize_okx_item(item: dict, target_coins: list) -> dict | None:
         url=_safe_http_url(item.get("sourceUrl")),
         category=_strip_html(item.get("category") or ""),
         stale=False,
+        authority="media",
     )
+
 
 
 def _parse_okx_sentiments(sent_res, target_coins: list) -> dict:
@@ -653,6 +778,8 @@ def _evaluate_black_swans(rows: list, now_ts: float):
     for row in rows:
         if row.get("stale"):
             continue
+        if str(row.get("authority") or "official") == "media":
+            continue
         published_ms = int(row.get("published_at") or 0)
         if published_ms <= 0:
             continue
@@ -670,6 +797,7 @@ def _evaluate_black_swans(rows: list, now_ts: float):
         trigger_circuit_breaker(triggered[0], triggered[1])
     else:
         _maybe_clear_expired_breaker()
+
 
 
 def _overall_status(enabled: tuple, source_status: dict) -> str:
