@@ -73,7 +73,7 @@ const tabs = computed(() => [
           style="background-color: var(--bg-card-subtle); color: var(--text-muted); border-color: var(--border-subtle);"
           :title="OFFICIAL_NOTICE"
         >
-          {{ APP_VERSION }} · 官方
+          {{ APP_VERSION }} · Official
         </button>
         <span
           class="w-1.5 h-1.5 rounded-full shrink-0"
