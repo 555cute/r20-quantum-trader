@@ -55,12 +55,12 @@ def _sqlite_traded_names() -> set[str]:
     return names
 
 
-def allowed_inst_ids(existing_ledger_trades=None, trackers=None) -> set[str]:
-    """Allow current pool plus this account's filled-history traces.
+def allowed_inst_ids(existing_ledger_trades=None, trackers=None, live_positions=None) -> set[str]:
+    """Allow current pool plus this account's filled-history and live holdings.
 
     Sources: live pool, scoped SQLite trades.inst, prior JSON ledger rows,
-    and current-position trackers. Submitted journal entries are not fills
-    and do not authorize keeping a delisted coin.
+    current-position trackers, and exchange positions with abs(pos)>0.
+    Submitted journal entries are not fills.
     """
     allowed = {item["instId"] for item in TARGET_INSTRUMENTS if item.get("instId")}
     names: set[str] = set(_sqlite_traded_names())
@@ -74,6 +74,18 @@ def allowed_inst_ids(existing_ledger_trades=None, trackers=None) -> set[str]:
         inst = str(key).rsplit("_", 1)[0]
         if inst:
             names.add(inst)
+    for pos in live_positions or []:
+        if not isinstance(pos, dict):
+            continue
+        try:
+            size = abs(float(pos.get("pos", 0.0) or 0.0))
+        except (TypeError, ValueError):
+            continue
+        if size <= 0:
+            continue
+        inst_id = str(pos.get("instId") or "").strip()
+        if inst_id:
+            allowed.add(inst_id)
     for name in names:
         inst_id = _inst_id_from_name(name)
         if inst_id:
@@ -321,7 +333,7 @@ def build_lifecycle_ledger(exchange=None):
     close_orders = [o for o in orders_history if str(o.get("reduceOnly", "")).lower() == "true" and o.get("state") == "filled"]
 
     journal = load_account_signal_journal()
-    pool_ids = allowed_inst_ids(existing, trackers)
+    pool_ids = allowed_inst_ids(existing, trackers, pos_data)
     trades_lifecycle = []
 
     for p in pos_data:

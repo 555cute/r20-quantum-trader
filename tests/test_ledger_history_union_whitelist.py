@@ -70,6 +70,13 @@ class LedgerUnionWhitelistTests(unittest.TestCase):
         self.assertIn("BTC-USDT-SWAP", allowed)
         self.assertNotIn("LEAK-USDT-SWAP", allowed)
 
+    def test_live_position_without_tracker_keeps_delisted_coin(self):
+        with patch.object(sfl, "_sqlite_traded_names", return_value=set()):
+            allowed = sfl.allowed_inst_ids([], {}, [{"instId": "SUI-USDT-SWAP", "pos": "1.5"}])
+            allowed_flat = sfl.allowed_inst_ids([], {}, [{"instId": "SUI-USDT-SWAP", "pos": "0"}])
+        self.assertIn("SUI-USDT-SWAP", allowed)
+        self.assertNotIn("SUI-USDT-SWAP", allowed_flat)
+
     def test_submitted_journal_does_not_keep_delisted_coin(self):
         with patch.object(sfl, "_sqlite_traded_names", return_value=set()):
             allowed = sfl.allowed_inst_ids([])
