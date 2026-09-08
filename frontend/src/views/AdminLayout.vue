@@ -45,45 +45,58 @@ const { t, isEn, toggleLocale } = useI18n()
 
 const navGroups = computed(() => [
   {
-    label: t('admin.sysOverview'),
+    label: t('admin.grpObserve'),
     items: [
-      { id: 'overview', label: t('admin.dashboard'), icon: LayoutDashboard },
-      { id: 'decisions', label: t('admin.runtimeTelemetry', '决策日志'), icon: Radio },
+      { id: 'overview', label: t('admin.nOverview'), icon: LayoutDashboard },
+      { id: 'decisions', label: t('admin.nDecisions'), icon: Radio },
+      { id: 'audit', label: t('admin.nAudit'), icon: Scroll },
     ],
   },
   {
-    label: t('admin.strategyConfig'),
+    label: t('admin.grpStrategyEvo'),
     items: [
-      { id: 'promptlib', label: t('admin.promptStudio', '提示词策略'), icon: FileText },
-      { id: 'evolution', label: t('admin.evolutionConfig', '自进化配置'), icon: Sparkles },
-      { id: 'interceptors', label: t('admin.interceptors', '物理拦截插件'), icon: ShieldCheck },
-      { id: 'risk', label: t('admin.riskControl', '风控管理'), icon: ShieldAlert },
+      { id: 'promptlib', label: t('admin.nPrompt'), icon: FileText },
+      { id: 'council', label: t('admin.nCouncil'), icon: Users },
+      { id: 'evolution', label: t('admin.nEvolution'), icon: Sparkles },
+      { id: 'policy', label: t('admin.nPolicy'), icon: Layers },
       { id: 'news', label: t('admin.newsSources', '新闻来源'), icon: Newspaper },
-      { id: 'council', label: t('admin.councilSettings', '模型委员会'), icon: Users },
-      { id: 'policy', label: t('admin.policySnapshots', '策略版本快照'), icon: Layers },
-      { id: 'llm', label: t('admin.llmConnections', '模型连接'), icon: Cpu },
-      { id: 'agents', label: '运行单元', icon: Package },
-      { id: 'plugins', label: '系统插件', icon: FileCode },
     ],
   },
   {
-    label: t('admin.tradingGateway'),
+    label: t('admin.grpRiskExec'),
     items: [
-      { id: 'security', label: t('admin.accountInstruments', '账户与标的池'), icon: Wallet },
-      { id: 'gateway', label: t('admin.gatewayJobs', '任务网关'), icon: RefreshCw },
-      { id: 'notify', label: t('admin.notifications', '消息通知'), icon: Radio },
-      { id: 'backup', label: t('admin.backups', '备份与还原'), icon: FileCode },
+      { id: 'risk', label: t('admin.nRisk'), icon: ShieldAlert },
+      { id: 'interceptors', label: t('admin.nInterceptors'), icon: ShieldCheck },
+      { id: 'security', label: t('admin.nSecurity'), icon: Wallet },
+      { id: 'gateway', label: t('admin.nGateway'), icon: RefreshCw },
     ],
   },
   {
-    label: t('admin.systemAdmin'),
+    label: t('admin.grpPlatform'),
     items: [
-      { id: 'audit', label: t('admin.auditLogs', '操作审计'), icon: Scroll },
-      { id: 'adminsys', label: t('admin.securityAuth', '管理员与密码'), icon: UserCog },
-      { id: 'about', label: '版本与更新', icon: Info },
+      { id: 'llm', label: t('admin.nLlm'), icon: Cpu },
+      { id: 'agents', label: t('admin.nAgents'), icon: Package },
+      { id: 'plugins', label: t('admin.nPlugins'), icon: FileCode },
+    ],
+  },
+  {
+    label: t('admin.grpSystem'),
+    items: [
+      { id: 'notify', label: t('admin.nNotify'), icon: Radio },
+      { id: 'backup', label: t('admin.nBackup'), icon: FileCode },
+      { id: 'adminsys', label: t('admin.nAdminSys'), icon: UserCog },
+      { id: 'about', label: t('admin.nAbout'), icon: Info },
     ],
   },
 ])
+
+/* P2: collapsible icon-mode sidebar (persisted) */
+const collapsed = ref(false)
+try { collapsed.value = localStorage.getItem('r20_admin_sidebar') === 'collapsed' } catch (_) {}
+function toggleCollapse() {
+  collapsed.value = !collapsed.value
+  try { localStorage.setItem('r20_admin_sidebar', collapsed.value ? 'collapsed' : 'open') } catch (_) {}
+}
 
 const mobileDrawerOpen = ref(false)
 const isNavigating = ref(false)
@@ -277,7 +290,8 @@ const showAboutModal = ref(false)
 
     <!-- Desktop Sidebar (Hidden completely on mobile, only visible on md:) -->
     <aside
-      class="hidden md:flex md:w-[240px] md:shrink-0 md:border-r md:flex-col md:h-screen md:sticky md:top-0 transition-colors z-30"
+      class="hidden md:flex md:shrink-0 md:border-r md:flex-col md:h-screen md:sticky md:top-0 transition-all z-30"
+      :class="collapsed ? 'md:w-[56px]' : 'md:w-[240px]'"
       style="background-color: var(--bg-card); border-color: var(--border-subtle);"
     >
       <!-- Brand Header (Desktop) -->
@@ -285,9 +299,9 @@ const showAboutModal = ref(false)
         class="px-4 py-3.5 border-b flex items-center justify-between"
         style="border-color: var(--border-subtle);"
       >
-        <div class="flex items-center space-x-2.5">
-          <CryptoLogo class="w-6 h-6 rounded-md shadow-xs" />
-          <div>
+        <div class="flex items-center space-x-2.5 min-w-0">
+          <CryptoLogo class="w-6 h-6 rounded-md shadow-xs shrink-0" />
+          <div v-if="!collapsed">
             <div class="text-xs font-black tracking-wide font-mono" style="color: var(--text-main);">
               R20 CONTROL
             </div>
@@ -295,38 +309,57 @@ const showAboutModal = ref(false)
               @click="showAboutModal = true"
               class="text-[11px] font-mono transition-colors cursor-pointer text-left block"
               style="color: var(--color-brand);"
-              title="点击查看开源主仓信息"
+              :title="t('nav.aboutHint')"
             >
               {{ APP_VERSION }}
             </button>
           </div>
         </div>
 
-        <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" title="控制面正常"></span>
+        <div class="flex items-center space-x-1.5 shrink-0">
+          <span v-if="!collapsed" class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" :title="t('admin.controlHealthy')"></span>
+          <button
+            @click="toggleCollapse()"
+            class="w-6 h-6 rounded-md border flex items-center justify-center cursor-pointer hover:bg-[var(--bg-card-hover)] transition-colors"
+            style="border-color: var(--border-subtle); color: var(--text-muted);"
+            :title="collapsed ? t('admin.expandSidebar') : t('admin.collapseSidebar')"
+          >
+            <ChevronRight class="w-3.5 h-3.5 transition-transform" :class="collapsed ? '' : 'rotate-180'" />
+          </button>
+        </div>
       </div>
 
       <!-- Nav Groups (Desktop Vertical) -->
       <nav class="overflow-y-auto overflow-x-hidden flex-1 py-2 px-2.5 space-y-1">
         <div v-for="group in navGroups" :key="group.label" class="mb-4.5">
           <div
+            v-if="!collapsed"
             class="text-[11px] font-mono font-bold uppercase tracking-wider px-2.5 py-1.5 mb-1 flex items-center justify-between"
             style="color: var(--text-faint);"
           >
             <span>{{ group.label }}</span>
           </div>
+          <div v-else class="h-px mx-2 mb-1.5" style="background-color: var(--border-subtle);"></div>
           <div class="space-y-1.5">
             <button
               v-for="item in group.items"
               :key="item.id"
               @click="navigateTo(item.id)"
-              class="w-full text-left px-3 py-2 rounded-lg text-xs font-mono font-medium transition-all flex items-center space-x-2.5 cursor-pointer min-h-[38px]"
+              class="relative w-full text-left px-3 py-2 rounded-lg text-xs font-mono font-medium transition-all flex items-center cursor-pointer min-h-[38px]"
+              :class="collapsed ? 'justify-center px-0' : 'space-x-2.5'"
               :style="activeView === item.id
-                ? { backgroundColor: 'var(--color-brand-bg)', color: 'var(--color-brand)', borderColor: 'var(--color-brand-border)' }
+                ? { backgroundColor: 'var(--color-brand-bg)', color: 'var(--color-brand)' }
                 : { color: 'var(--text-muted)' }"
-              :class="activeView === item.id ? 'border font-bold shadow-xs' : 'border border-transparent hover:text-[var(--text-main)] hover:bg-[var(--bg-card-hover)]'"
+              :title="item.label"
             >
+              <!-- P2: left indicator bar for active item -->
+              <span
+                v-if="activeView === item.id"
+                class="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full"
+                style="background-color: var(--color-brand);"
+              ></span>
               <component :is="item.icon" class="w-3.5 h-3.5 shrink-0" />
-              <span class="truncate">{{ item.label }}</span>
+              <span v-if="!collapsed" class="truncate">{{ item.label }}</span>
             </button>
           </div>
         </div>
@@ -344,7 +377,7 @@ const showAboutModal = ref(false)
           >
             {{ auth.user?.username?.charAt(0).toUpperCase() || 'A' }}
           </div>
-          <div class="truncate">
+          <div v-if="!collapsed" class="truncate">
             <div class="font-bold truncate text-[11px]" style="color: var(--text-main);">{{ auth.user?.username || 'admin' }}</div>
             <div class="text-[11px] capitalize" style="color: var(--text-faint);">{{ auth.user?.role || 'superadmin' }}</div>
           </div>
