@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from '../../composables/useI18n'
+import DataTable from '../../components/admin/DataTable.vue'
 const { t } = useI18n()
 import { useApi } from '../../composables/useApi'
 import { Scroll, RefreshCw, Search } from 'lucide-vue-next'
@@ -73,37 +74,37 @@ onMounted(load)
         <span class="text-[11px] font-mono" style="color: var(--text-faint);">点击任意行穿透查看原始参数 JSON</span>
       </div>
 
-      <div class="table-scroll-container max-h-[580px] overflow-y-auto">
-        <table class="w-full text-left text-xs font-mono whitespace-nowrap">
-          <thead class="sticky top-0 z-10">
-            <tr class="border-b text-[11px] uppercase tracking-wider font-bold" style="border-color: var(--border-subtle); background-color: var(--bg-card-subtle); color: var(--text-muted);">
-              <th class="py-2.5 px-4">时间戳</th>
-              <th class="py-2.5 px-3">动作类型</th>
-              <th class="py-2.5 px-3">执行结果</th>
-              <th class="py-2.5 px-4">操作者与审计详情</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="(r, i) in filtered()"
-              :key="i"
-              @click="detailRec = r"
-              class="border-b last:border-b-0 hover:bg-[var(--bg-card-hover)] transition-colors cursor-pointer"
-              style="border-color: var(--border-subtle);"
-            >
-              <td class="py-2.5 px-4 num-tabular" style="color: var(--text-faint);">{{ r.timestamp }}</td>
-              <td class="py-2.5 px-3 font-bold" style="color: var(--color-brand);">{{ r.action }}</td>
-              <td class="py-2.5 px-3 font-bold" :class="statusColor(r.status)">{{ r.status }}</td>
-              <td class="py-2.5 px-4 max-w-[480px] truncate" style="color: var(--text-muted);">
-                <strong style="color: var(--text-main);">{{ r.detail?.actor || r.detail?.username || 'system' }}</strong>
-                <span class="ml-1 opacity-70">· {{ JSON.stringify(r.detail || {}) }}</span>
-              </td>
-            </tr>
-            <tr v-if="filtered().length === 0">
-              <td colspan="4" class="py-8 text-center" style="color: var(--text-faint);">暂无符合条件的审计记录</td>
-            </tr>
-          </tbody>
-        </table>
+      <div class="max-h-[580px] overflow-y-auto">
+        <DataTable
+          flat
+          clickable
+          :columns="[
+            { key: 'timestamp', label: '时间戳' },
+            { key: 'action', label: '动作类型' },
+            { key: 'status', label: '执行结果' },
+            { key: 'detail', label: '操作者与审计详情' },
+          ]"
+          :rows="filtered()"
+          :row-key="(r: any, i: number) => i"
+          empty-text="暂无符合条件的审计记录"
+          @row-click="detailRec = $event"
+        >
+          <template #cell-timestamp="{ row }">
+            <span class="num-tabular" style="color: var(--text-faint);">{{ row.timestamp }}</span>
+          </template>
+          <template #cell-action="{ row }">
+            <span class="font-bold" style="color: var(--color-brand);">{{ row.action }}</span>
+          </template>
+          <template #cell-status="{ row }">
+            <span class="font-bold" :class="statusColor(row.status)">{{ row.status }}</span>
+          </template>
+          <template #cell-detail="{ row }">
+            <span class="block max-w-[480px] truncate">
+              <strong style="color: var(--text-main);">{{ row.detail?.actor || row.detail?.username || 'system' }}</strong>
+              <span class="ml-1 opacity-70" style="color: var(--text-muted);">· {{ JSON.stringify(row.detail || {}) }}</span>
+            </span>
+          </template>
+        </DataTable>
       </div>
     </div>
 
