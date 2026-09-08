@@ -339,6 +339,38 @@ class AssetMultiplierPersistenceTests(unittest.TestCase):
                     else:
                         self.assertFalse(self.mult_path.exists())
 
+    def test_schema_conforming_review_without_multipliers_preserves_state(self):
+        review = {
+            "change_status": "NO_CHANGE",
+            "diagnosis_insights": [],
+            "evolution_actions": [],
+            "ai_long_term_memory": [],
+            "memory_overwrites_reason": "No new evidence",
+        }
+        self.llm_execute.return_value = (json.dumps(review), "", {}, 0.01)
+        for present in (True, False):
+            with self.subTest(present=present):
+                if present:
+                    self.mult_path.write_bytes(self.EXISTING_MULT_BYTES)
+                elif self.mult_path.exists():
+                    self.mult_path.unlink()
+                report = self._run_cycle()
+                self.assertFalse(report["llm_error"])
+                if present:
+                    self.assertEqual(self.mult_path.read_bytes(), self.EXISTING_MULT_BYTES)
+                else:
+                    self.assertFalse(self.mult_path.exists())
+
+    def test_invalid_or_empty_multiplier_map_preserves_state(self):
+        self.mult_path.write_bytes(self.EXISTING_MULT_BYTES)
+        for multipliers in ([], {}):
+            with self.subTest(multipliers=multipliers):
+                review = {"change_status": "NO_CHANGE", "asset_multipliers": multipliers}
+                self.llm_execute.return_value = (json.dumps(review), "", {}, 0.01)
+                report = self._run_cycle()
+                self.assertFalse(report["llm_error"])
+                self.assertEqual(self.mult_path.read_bytes(), self.EXISTING_MULT_BYTES)
+
     def test_successful_review_writes_bounded_multipliers(self):
         self.llm_execute.side_effect = None
         self.llm_execute.return_value = (

@@ -572,13 +572,10 @@ def run_self_evolution(force: bool = False):
     except Exception as exc:
         log_msg(f"Markdown mirror sync skipped: {exc}")
 
-    # Genuine LLM failures must not create or reset adaptive multipliers.
-    # Prior memory is preserved separately; do not treat a missing review as 1.0.
-    if not llm_failed:
+    # The review schema does not require multipliers; omission is not a neutral reset.
+    raw_asset_mults = llm_review.get("asset_multipliers")
+    if not llm_failed and isinstance(raw_asset_mults, dict) and raw_asset_mults:
         try:
-            raw_asset_mults = llm_review.get("asset_multipliers", {})
-            if not isinstance(raw_asset_mults, dict):
-                raw_asset_mults = {}
             asset_mults = {
                 asset: clamp(raw_asset_mults.get(asset, 1.0), 0.5, 1.5, 1.0)
                 for asset in TARGET_INSTRUMENTS

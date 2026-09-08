@@ -334,7 +334,7 @@ python3 deploy/update_docker.py rollback
 
 模型输出上限可在后台 LLM 设置中保存，默认 `4096`，也支持模型专属上限（留空继承全局）。Responses 使用 `max_output_tokens`；Chat 与 Claude 使用各自协议字段。输出截断、拒绝、空内容、HTTP 外层 JSON 和业务 JSON 错误分别记录；无效 JSON 不补全、不作为交易指令执行。大上下文和高思考强度下仍需按供应商能力设置上限，短探针成功不代表真实交易长提示词一定成功。
 
-自进化模型调用失败时保留错误诊断，并跳过 `asset_multipliers.json` 写入：已有文件保持原样，缺失文件保持缺失；有效复盘结果仍按原有边界写入倍率。
+自进化模型失败，或响应省略 `asset_multipliers`、返回空映射/错误类型时，不写 `asset_multipliers.json`：已有文件保持原样，缺失文件保持缺失。只有显式返回非空倍率映射时，才按原有边界写入倍率。
 
 
 
