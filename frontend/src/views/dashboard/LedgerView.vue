@@ -7,7 +7,7 @@ import { computed, ref } from 'vue';
 import { Download, ScrollText } from 'lucide-vue-next';
 import { useDashboardStore } from '../../stores/dashboard';
 import { useI18n } from '../../composables/useI18n';
-import { fmtNum, fmtSigned, fmtPct, fmtPrice, arrow, dirClass } from '../../utils/format';
+import { fmtNum, fmtSigned, fmtPct, fmtPrice, arrow, dirClass, cleanReason } from '../../utils/format';
 import PageHead from '../../components/dashboard/PageHead.vue';
 import BaseStat from '../../components/base/BaseStat.vue';
 import BaseEmpty from '../../components/base/BaseEmpty.vue';
@@ -163,11 +163,11 @@ function dirOf(side: string): 'long' | 'short' {
             <thead>
               <tr>
                 <th>{{ t('dash.ledger.col.symbol') }}</th>
-                <th class="col-num">{{ t('dash.ledger.col.entry') }}</th>
-                <th class="col-num">{{ t('dash.ledger.col.exit') }}</th>
+                <th class="col-num hidden md:table-cell">{{ t('dash.ledger.col.entry') }}</th>
+                <th class="col-num hidden md:table-cell">{{ t('dash.ledger.col.exit') }}</th>
                 <th class="col-num">{{ t('dash.ledger.col.pnl') }}</th>
-                <th class="col-num">{{ t('dash.ledger.col.fees') }}</th>
-                <th>{{ t('dash.ledger.col.hold') }}</th>
+                <th class="col-num hidden md:table-cell">{{ t('dash.ledger.col.fees') }}</th>
+                <th class="hidden md:table-cell">{{ t('dash.ledger.col.hold') }}</th>
                 <th>{{ t('dash.ledger.col.exitReason') }}</th>
                 <th>{{ t('dash.ledger.col.time') }}</th>
               </tr>
@@ -182,15 +182,15 @@ function dirOf(side: string): 'long' | 'short' {
                     <span class="badge badge-mono hidden xl:inline-flex">{{ x.lever }}</span>
                   </div>
                 </td>
-                <td class="col-num">{{ fmtPrice(x.open_px) }}</td>
-                <td class="col-num" :class="x.status === 'holding' && 't-faint'">{{ x.status === 'holding' ? t('status.running') : fmtPrice(x.close_px) }}</td>
+                <td class="col-num hidden md:table-cell">{{ fmtPrice(x.open_px) }}</td>
+                <td class="col-num hidden md:table-cell" :class="x.status === 'holding' && 't-faint'">{{ x.status === 'holding' ? t('status.running') : fmtPrice(x.close_px) }}</td>
                 <td class="col-num" :class="dirClass(x.net_pnl)">
                   {{ arrow(x.net_pnl) }} {{ fmtSigned(x.net_pnl) }}
                   <span class="t-faint block text-2xs">{{ fmtPct(x.roi_pct) }}</span>
                 </td>
-                <td class="col-num t-faint">{{ fmtNum(Math.abs(Number(x.fee) || 0), 2) }}</td>
-                <td class="num text-xs" style="color: var(--ink-2)">{{ x.duration || '--' }}</td>
-                <td class="text-xs" style="color: var(--ink-2); white-space: normal; max-width: 220px">{{ x.exit_reason || '--' }}</td>
+                <td class="col-num t-faint hidden md:table-cell">{{ fmtNum(Math.abs(Number(x.fee) || 0), 2) }}</td>
+                <td class="num text-xs hidden md:table-cell" style="color: var(--ink-2)">{{ x.duration || '--' }}</td>
+                <td class="text-xs" style="color: var(--ink-2); white-space: normal; max-width: 220px">{{ cleanReason(x.exit_reason) }}</td>
                 <td class="num text-xs" style="color: var(--ink-3)">{{ String(x.close_time || '').slice(5, 16) }}</td>
               </tr>
             </tbody>

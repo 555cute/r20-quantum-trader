@@ -101,3 +101,9 @@ export function confTier(v: number | null | undefined): { tier: 'high' | 'mid' |
   if (n >= 65) return { tier: 'mid', label: '中' };
   return { tier: 'low', label: '低' };
 }
+
+/** 去掉文本前导装饰性 emoji（后端台账 exit_reason 等历史数据带 🛑/✨/🛡 前缀，设计语言不再使用装饰 emoji） */
+export function cleanReason(v: string | null | undefined): string {
+  if (!v) return '--'
+  return v.replace(/^[\p{Extended_Pictographic}\uFE0F\u200D\s]+/u, '').trim() || '--'
+}

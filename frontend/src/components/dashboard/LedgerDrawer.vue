@@ -4,7 +4,7 @@ import { computed } from 'vue';
 import BaseDrawer from '../base/BaseDrawer.vue';
 import DirTag from '../base/DirTag.vue';
 import { useI18n } from '../../composables/useI18n';
-import { fmtNum, fmtSigned, fmtPct, fmtPrice, dirClass } from '../../utils/format';
+import { fmtNum, fmtSigned, fmtPct, fmtPrice, dirClass, cleanReason } from '../../utils/format';
 
 const props = defineProps<{ trade: any | null }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
@@ -58,7 +58,7 @@ const cells = computed(() => [
           </div>
           <div>
             <dt class="t-label">{{ t('dash.ledger.col.exitReason') }}</dt>
-            <dd class="mt-0.5 leading-snug" style="color: var(--ink-1)">{{ x.exit_reason || '--' }}</dd>
+            <dd class="mt-0.5 leading-snug" style="color: var(--ink-1)">{{ cleanReason(x.exit_reason) }}</dd>
           </div>
         </dl>
       </div>

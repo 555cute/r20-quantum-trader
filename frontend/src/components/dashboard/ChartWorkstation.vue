@@ -85,10 +85,10 @@ const isDark = computed(() => theme.value === 'dark')
 
 /* P4: mobile hides the always-on legend to stop multi-line overlay on narrow screens;
    desktop keeps it (data always readable). Re-applied when crossing the 640px breakpoint. */
-function legendRule(): 'hover' | 'click' {
-  // 桌面：悬停图表才显示指标数值，不再常驻遮挡 K 线
-  // 移动：点按 K 线显示数值（tap 即 click）
-  return typeof window !== 'undefined' && window.innerWidth < 640 ? 'click' : 'hover'
+function legendRule(): 'follow_cross' {
+  // klinecharts v10：follow_cross = 图例不常驻（不再遮挡 K 线），
+  // 鼠标悬停或点按出十字光标时跟随显示指标数值（移动端点按可见）
+  return 'follow_cross'
 }
 
 /* P1: resolve design-token value at render time — chart follows theme & CVD switches */
@@ -1140,7 +1140,7 @@ onUnmounted(() => {
             <ChevronDown class="h-3 w-3 transition-transform" :class="showIndicatorMenu && 'rotate-180'" />
           </button>
           <Transition name="pop">
-            <div v-if="showIndicatorMenu" class="float-panel absolute right-0 top-9 z-50 max-h-[65vh] w-72 max-w-[calc(100vw-24px)] overflow-y-auto p-3">
+            <div v-if="showIndicatorMenu" class="float-panel absolute right-0 top-9 z-50 max-h-[65vh] w-72 overflow-y-auto p-3 max-md:fixed max-md:inset-x-2 max-md:top-auto max-md:bottom-2 max-md:w-auto max-md:max-h-[70vh]">
               <p class="t-label mb-2">{{ t('dash.matrix.chart.indicatorHint') }}</p>
               <p class="t-label mb-1.5">{{ t('dash.matrix.chart.overlays') }}</p>
               <div class="mb-3 grid grid-cols-2 gap-1.5">
