@@ -74,8 +74,7 @@ from r20_backend.llm_manager import (
     test_llm_connection,
     fetch_remote_models,
     init_llm_providers,
-    _atomic_write_json,
-    LLM_PROVIDERS_FILE,
+    save_llm_config,
 )
 from scripts.prompt_library import (
     PRESETS, TEMPLATE_KEYS, active_profile, activate_profile, all_profiles, apply_module_layout,
@@ -1245,17 +1244,36 @@ def update_admin_config(payload: AdminConfigUpdate, x_r20_admin_token: str | Non
     if any(k.startswith("llm_") for k in data):
         try:
             cfg = init_llm_providers()
-            active_p = next((p for p in cfg.get("providers", []) if p["id"] == cfg.get("active_provider_id")), None)
+            # 激活供应商必须从 active_model_id 反查——配置结构里从来没有
+            # active_provider_id 这个键，旧写法令整段同步静默失效：
+            # 用户在全局设置里换密钥 → 供应商与模型仍持旧键 → 全部模型连不上。
+            active_mid = cfg.get("active_model_id", "")
+            active_model = next((m for m in cfg.get("models", []) if m.get("id") == active_mid), None)
+            active_pid = (active_model or {}).get("provider_id")
+            active_p = next((p for p in cfg.get("providers", []) if p.get("id") == active_pid), None) if active_pid else None
+            dirty = False
             if active_p:
                 if "llm_base_url" in data and data["llm_base_url"]:
                     active_p["base_url"] = data["llm_base_url"].rstrip("/")
+                    dirty = True
                 if "llm_api_key" in data and data["llm_api_key"]:
                     active_p["api_key"] = data["llm_api_key"]
-                if "llm_model" in data and data["llm_model"]:
-                    cfg["active_model_id"] = data["llm_model"]
-                if "llm_reasoning_effort" in data and data["llm_reasoning_effort"]:
-                    cfg["active_reasoning_effort"] = data["llm_reasoning_effort"]
-                _atomic_write_json(LLM_PROVIDERS_FILE, cfg)
+                    dirty = True
+            if "llm_model" in data and data["llm_model"]:
+                cfg["active_model_id"] = data["llm_model"]
+                dirty = True
+            if "llm_reasoning_effort" in data and data["llm_reasoning_effort"]:
+                cfg["active_reasoning_effort"] = data["llm_reasoning_effort"]
+                dirty = True
+            if dirty:
+                # 供应商凭据变更后，同步刷新其名下模型的扁平快照（与 upsert_provider 同口径）
+                if active_p:
+                    for mm in cfg.get("models", []):
+                        if mm.get("provider_id") == active_p.get("id"):
+                            mm["base_url"] = active_p.get("base_url", mm.get("base_url", ""))
+                            if active_p.get("api_key"):
+                                mm["api_key"] = active_p["api_key"]
+                save_llm_config(cfg)
         except Exception:
             pass
     audit_record("config.update", "success", {"fields": sorted(data.keys())})

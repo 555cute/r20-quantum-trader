@@ -77,7 +77,14 @@ def _detect_reasoning_type(model_id: str) -> str:
 def _detect_capabilities(model_id: str) -> List[str]:
     m = model_id.lower()
     caps = ["chat"]
-    if any(k in m for k in ["vision", "image", "flash", "gpt-4o", "gpt-5", "gpt-6", "gemini", "claude", "grok", "muse", "vl", "omni", "multimodal"]):
+    # 视觉能力只信任显式多模态信号。历史版本把 "flash" 当视觉关键词，
+    # 导致 deepseek-v4-flash / glm-5.3-flash / qwen3.8-flash 等纯文本模型
+    # 被误标 vision；gemini/claude/gpt 家族本就有自己的家族关键词。
+    vision_substrings = ["vision", "image", "omni", "multimodal", "vl-", "-vl", "_vl", ".vl",
+                         "gpt-4o", "gpt-5", "gpt-6", "gemini", "claude", "grok", "muse"]
+    vision_tokens = {"vl", "4v", "5v", "6v", "vln"}
+    tokens = {t for t in re.split(r"[^a-z0-9]+", m) if t}
+    if any(k in m for k in vision_substrings) or (tokens & vision_tokens):
         caps.append("vision")
     if not ("-r1-distill" in m or "-thinking" in m):
         caps.append("tools")
@@ -260,13 +267,32 @@ def init_llm_config() -> Dict[str, Any]:
             }
 
     # Preserve any custom models that were added by user or tests
+    prov_by_id = {p.get("id"): p for p in merged_providers}
     for m in data.get("models", []):
         mid = m.get("id")
         if mid:
             if mid in models_map:
-                models_map[mid].update(m)
+                fresh = models_map[mid]
+                merged = dict(m)
+                # 供应商凭据是唯一权威源：历史快照键/地址不得覆盖供应商当前值
+                if fresh.get("api_key"):
+                    merged["api_key"] = fresh["api_key"]
+                if fresh.get("base_url"):
+                    merged["base_url"] = fresh["base_url"]
+                fresh.update(merged)
             else:
-                models_map[mid] = m
+                entry = dict(m)
+                prov = prov_by_id.get(entry.get("provider_id"))
+                if prov:
+                    # 顶层扁平模型同样按 provider_id 重挂供应商当前凭据——
+                    # 否则轮换密钥后旧快照键永久粘住，模型必须删掉重加才能恢复
+                    if prov.get("api_key"):
+                        entry["api_key"] = prov["api_key"]
+                    if prov.get("base_url"):
+                        entry["base_url"] = prov["base_url"]
+                    if not entry.get("api_format"):
+                        entry["api_format"] = prov.get("api_format", "openai_chat")
+                models_map[mid] = entry
 
     flat_models = list(models_map.values())
     if not any(m["id"] == active_m_id for m in flat_models) and flat_models:
@@ -287,6 +313,11 @@ def init_llm_config() -> Dict[str, Any]:
 # Backwards compatibility alias for app.py
 LLM_PROVIDERS_FILE = LLM_CONFIG_FILE
 init_llm_providers = init_llm_config
+
+
+def save_llm_config(config: Dict[str, Any]) -> None:
+    """唯一配置写入口：调用时解析 LLM_CONFIG_FILE 模块全局，测试沙箱 patch 必然生效。"""
+    _atomic_write_json(LLM_CONFIG_FILE, config)
 
 
 def load_llm_config(mask_keys: bool = True) -> Dict[str, Any]:
@@ -613,8 +644,8 @@ def upsert_model(provider_id: str, model_data: Dict[str, Any]) -> Dict[str, Any]
     if prov:
         if not base_url:
             base_url = prov.get("base_url", "")
-        if not api_key and prov.get("api_key"):
-            api_key = prov.get("api_key", "")
+        # 不再把供应商密钥快照进模型条目：密钥唯一存放处是供应商，
+        # 读取时由 init_llm_config 合并注入；轮换密钥即刻对全部模型生效
         if not provider_name:
             provider_name = prov.get("name", "自定义")
         if not provider_id:
@@ -781,6 +812,35 @@ def upsert_provider(provider_data: Dict[str, Any]) -> Dict[str, Any]:
             "description": desc,
             "models": [],
         })
+
+    # ── 凭据轮换联动：供应商是密钥唯一权威源 ──
+    # 1) 刷新该供应商下扁平缓存中的历史快照键/地址，杜绝旧键粘住导致"改完密钥模型全连不上"；
+    # 2) 激活模型属于该供应商时，把新凭据回写全局 .env 与密钥库，交易引擎运行时同步对齐。
+    if existing:
+        affected = [m for m in config.get("models", []) if m.get("provider_id") == pid]
+        for mm in affected:
+            mm["base_url"] = base_url
+            if api_key:
+                mm["api_key"] = api_key
+        active_mid = config.get("active_model_id", "")
+        if affected and any(mm.get("id") == active_mid for mm in affected):
+            try:
+                from .settings_store import update_env
+                from .config import refresh_settings
+                try:
+                    from r20_gateway.secrets import save_secrets
+                except ImportError:
+                    save_secrets = None
+                env_values = {"LLM_BASE_URL": base_url}
+                if api_key:
+                    env_values["LLM_API_KEY"] = api_key
+                    if save_secrets:
+                        save_secrets({"LLM_API_KEY": api_key})
+                update_env(env_values)
+                refresh_settings()
+            except Exception:
+                pass
+
     _atomic_write_json(LLM_CONFIG_FILE, config)
     return {"id": pid, "name": name, "base_url": base_url}
 
