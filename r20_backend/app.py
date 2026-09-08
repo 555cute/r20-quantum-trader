@@ -3459,13 +3459,14 @@ def market_candles(inst_id: str, bar: str = "1H", limit: int = 150, response: Re
     if bar not in valid_bars:
         bar = "1H"
     limit = max(10, min(limit, 300))
-    cache_key = f"{inst_id}:{bar}:{limit}"
+    env = selected_environment()
+    venue = str(getattr(env, "base_url", "") or "") or f"{getattr(env, 'exchange', '')}:{getattr(env, 'mode', '')}"
+    cache_key = f"{venue}:{inst_id}:{bar}:{limit}"
     now_ts = time.time()
     cached = _CANDLES_CACHE.get(cache_key)
     if cached and (now_ts - cached[0] < 1.0):
         return {"instId": inst_id, "bar": bar, "candles": cached[1], "source": "cache"}
     try:
-        env = selected_environment()
         raw = get_exchange(env).candles(inst_id, bar=bar, limit=limit)
         candles = []
         for item in reversed(raw or []):
