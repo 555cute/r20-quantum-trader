@@ -289,17 +289,16 @@ async function saveProviderConfig() {
       payload.id = payload.name.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_')
     }
     if (!payload.api_key) delete payload.api_key
-    await api('/api/v1/admin/llm/providers', {
+    const saved = await api('/api/v1/admin/llm/providers', {
       method: 'POST',
       body: JSON.stringify(payload),
     })
     alert('供应商配置已成功保存！')
     await loadConfig()
-    if (selectedProvider.value?.is_new) {
-      const created = cfg.value.providers?.find((p: any) => p.id === payload.id)
-      if (created) {
-        selectedProvider.value = created
-      }
+    const savedId = saved?.id || payload.id
+    const created = cfg.value.providers?.find((p: any) => p.id === savedId)
+    if (created) {
+      selectedProvider.value = created
     }
   } catch (err: any) {
     alert(err.message)
