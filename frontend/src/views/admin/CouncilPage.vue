@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted , watch} from 'vue'
+import { useI18n } from '../../composables/useI18n'
+import SaveBar from '../../components/admin/SaveBar.vue'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
 import {
@@ -27,11 +29,14 @@ import {
 
 const { api } = useApi()
 const auth = useAuthStore()
+const { t } = useI18n()
 
 const loading = ref(true)
 const saving = ref(false)
 const testing = ref(false)
 const bannerMsg = ref<{ text: string; type: 'ok' | 'err' | 'warn' } | null>(null)
+const bannerSeq = ref(0)
+watch(bannerMsg, () => { bannerSeq.value++ })
 
 const councilConfig = ref<any>({
   enabled: false,
@@ -286,14 +291,12 @@ onMounted(loadData)
 <template>
   <div class="space-y-4">
     <!-- Notice Banner -->
-    <div
-      v-if="bannerMsg"
-      class="p-3 rounded-xl text-xs font-mono border transition-all"
-      :class="bannerMsg.type === 'ok' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : bannerMsg.type === 'warn' ? 'bg-amber-500/10 border-amber-500/20 text-amber-400' : 'bg-rose-500/10 border-rose-500/20 text-rose-400'"
-    >
-      {{ bannerMsg.text }}
-    </div>
-
+    <SaveBar
+          :type="bannerMsg?.type || 'ok'"
+          :text="bannerMsg?.text || ''"
+          :nonce="bannerSeq"
+          @dismiss="bannerMsg = null"
+        />
     <!-- 1. Top Control Station: Switch, Consensus Mode & Actions -->
     <div class="rounded-2xl border p-4 sm:p-5 shadow-xs space-y-4" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
       <!-- Header row -->
@@ -305,7 +308,7 @@ onMounted(loadData)
           <div>
             <div class="flex items-center space-x-2">
               <h2 class="text-xs sm:text-[13px] font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
-                对冲基金投委会决策中枢 (Trading Desk Council)
+                {{ t('admin.nCouncil') }}
               </h2>
               <span
                 class="badge-lever"
@@ -314,9 +317,7 @@ onMounted(loadData)
                 {{ councilConfig.enabled ? '● 投委会辩论' : '○ 单模型' }}
               </span>
             </div>
-            <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);">
-              多交易员独立提案并交叉质询，由首席投资官 (CIO) 统筹可用资金终审发单
-            </p>
+            <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);"> 对冲基金投委会决策中枢 (Trading Desk Council) —— 多交易员独立提案并交叉质询，由首席投资官 (CIO) 统筹可用资金终审发单 </p>
           </div>
         </div>
 

@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+
+import { useI18n } from '../../composables/useI18n'
+const { t } = useI18n()
 import { useApi } from '../../composables/useApi'
 import {
   Cpu,
@@ -566,11 +569,9 @@ onMounted(() => {
           </div>
           <div>
             <h1 class="text-xs sm:text-[13px] font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
-              AI 模型供应商与直连矩阵
+              {{ t('admin.nLlm') }}
             </h1>
-            <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);">
-              管理大模型渠道矩阵、思考强度与 API 密钥直连
-            </p>
+            <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);"> AI 模型供应商与直连矩阵 —— 管理大模型渠道矩阵、思考强度与 API 密钥直连 </p>
           </div>
         </div>
 

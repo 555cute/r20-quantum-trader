@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted , watch} from 'vue'
+import { useI18n } from '../../composables/useI18n'
+const { t } = useI18n()
+import SaveBar from '../../components/admin/SaveBar.vue'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
 import { HardDrive, RefreshCw, PlugZap, Save, PlayCircle, Archive, AlertCircle, Download, Upload, RotateCcw } from 'lucide-vue-next'
@@ -10,6 +13,8 @@ const auth = useAuthStore()
 const loading = ref(true)
 const busy = ref<'test' | 'save' | 'run' | 'restore' | 'upload' | ''>('')
 const bannerMsg = ref<{ text: string; type: 'ok' | 'warn' | 'err' } | null>(null)
+const bannerSeq = ref(0)
+watch(bannerMsg, () => { bannerSeq.value++ })
 const downloadingArchive = ref<string>('')
 
 const simple = ref<any>(null)
@@ -251,10 +256,12 @@ onMounted(load)
       <span class="text-[11px] font-mono text-blue-400 bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20">集成与保障 · 2/3</span>
     </div>
 
-    <div v-if="bannerMsg" class="p-3 rounded-lg text-xs font-mono border" :class="bannerMsg.type === 'ok' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : bannerMsg.type === 'warn' ? 'bg-amber-500/10 border-amber-500/20 text-amber-400' : 'bg-rose-500/10 border-rose-500/20 text-rose-400'">
-      <div class="flex items-start gap-2"><AlertCircle v-if="bannerMsg.type !== 'ok'" class="w-4 h-4 shrink-0 mt-0.5" /><span>{{ bannerMsg.text }}</span></div>
-    </div>
-
+    <SaveBar
+          :type="bannerMsg?.type || 'ok'"
+          :text="bannerMsg?.text || ''"
+          :nonce="bannerSeq"
+          @dismiss="bannerMsg = null"
+        />
     <div v-if="loading" class="py-12 text-center text-xs font-mono" style="color: var(--text-muted);"><RefreshCw class="w-5 h-5 animate-spin inline mr-1.5" style="color: var(--color-brand);" />正在加载灾备配置...</div>
 
     <template v-else-if="simple">
@@ -263,7 +270,8 @@ onMounted(load)
         <div class="flex items-center justify-between mb-2">
           <div class="flex items-center space-x-2">
             <HardDrive class="w-4 h-4" style="color: var(--color-brand);" />
-            <h2 class="text-sm font-bold font-mono" style="color: var(--text-main);">自动灾备</h2>
+            <h2 class="text-sm font-bold font-mono" style="color: var(--text-main);">{{ t('admin.nBackup') }}</h2>
+        <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);"> 自动灾备 </p>
           </div>
           <label class="flex items-center space-x-2 text-xs font-mono cursor-pointer">
             <input v-model="enabled" type="checkbox" class="accent-blue-500 w-4 h-4" :disabled="!auth.isSuperadmin" />

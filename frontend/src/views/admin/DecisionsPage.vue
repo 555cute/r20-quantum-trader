@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useI18n } from '../../composables/useI18n'
+const { t } = useI18n()
 import { useApi } from '../../composables/useApi'
 import { Terminal, RefreshCw } from 'lucide-vue-next'
 
@@ -62,7 +64,7 @@ onMounted(() => {
 <template>
   <div class="space-y-4 max-w-[2048px] mx-auto">
     <div class="flex items-center justify-between">
-      <p class="text-xs font-mono" style="color: var(--text-muted);">核对 AI 宏观基调与逐币动作，并审查交易、后台与任务调度三路实时日志流。</p>
+      <p class="text-xs font-mono" style="color: var(--text-muted);"> 系统实时日志流 —— 核对 AI 宏观基调与逐币动作，并审查交易、后台与任务调度三路实时日志流。 </p>
       <span
         class="text-[11px] font-mono px-2 py-1 rounded border font-bold"
         style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);"
@@ -76,7 +78,7 @@ onMounted(() => {
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 mb-3 border-b" style="border-color: var(--border-subtle);">
         <div class="flex items-center space-x-2">
           <Terminal class="w-4 h-4 text-purple-400" />
-          <h2 class="text-xs font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">系统实时日志流</h2>
+          <h2 class="text-xs font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">{{ t('admin.nDecisions') }}</h2>
           <span class="text-[11px] font-mono px-1.5 py-0.5 rounded border font-bold" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-faint);">最新在前</span>
         </div>
         <!-- Log Selector Tabs -->

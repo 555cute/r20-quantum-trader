@@ -274,6 +274,8 @@ export const enUS = {
     nAdminSys: 'Accounts & Updates',
     nAbout: 'About',
     dzUnlock: 'Type {phrase} to unlock',
+    auditEntries: 'entries',
+    promptDesc: 'Prompt module assembly, semantic slots & policy packs — single source of truth for decision corpus',
     controlHealthy: 'Control plane healthy',
     expandSidebar: 'Expand sidebar',
     collapseSidebar: 'Collapse to icons',

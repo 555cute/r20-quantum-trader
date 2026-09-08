@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useI18n } from '../../composables/useI18n'
+const { t } = useI18n()
 import { useApi } from '../../composables/useApi'
 import { Package, Cpu, KeyRound, RefreshCw } from 'lucide-vue-next'
 
@@ -45,7 +47,8 @@ onMounted(load)
         <div class="px-4 py-3 border-b flex items-center justify-between" style="border-color: var(--border-subtle); background-color: var(--bg-card-subtle);">
           <div class="flex items-center space-x-2">
             <Package class="w-4 h-4 text-blue-400" />
-            <h2 class="text-xs font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">受管 Worker 单元清单</h2>
+            <h2 class="text-xs font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">{{ t('admin.nAgents') }}</h2>
+        <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);"> 受管 Worker 单元清单 </p>
           </div>
           <button @click="load" class="flex items-center space-x-1 px-2.5 py-1 rounded-lg border text-[11px] font-mono cursor-pointer transition-all shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-medium); color: var(--text-main);">
             <RefreshCw class="w-3 h-3" />

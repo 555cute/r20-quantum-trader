@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted , watch} from 'vue'
+import { useI18n } from '../../composables/useI18n'
+const { t } = useI18n()
+import SaveBar from '../../components/admin/SaveBar.vue'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
 import { UserCog, KeyRound, Plus, Lock, Unlock, ShieldCheck, AlertCircle } from 'lucide-vue-next'
@@ -11,6 +14,8 @@ const users = ref<any[]>([])
 const currentUserId = ref<number>(0)
 const loading = ref(true)
 const bannerMsg = ref<{ text: string; type: 'ok' | 'err' } | null>(null)
+const bannerSeq = ref(0)
+watch(bannerMsg, () => { bannerSeq.value++ })
 
 // Password form
 const pwdUserId = ref<number>(0)
@@ -111,15 +116,18 @@ onMounted(load)
       <span class="text-[11px] font-mono text-blue-400 bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20">治理 · 2/3</span>
     </div>
 
-    <div v-if="bannerMsg" class="p-3 rounded-lg text-xs font-mono border" :class="bannerMsg.type === 'ok' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-rose-500/10 border-rose-500/20 text-rose-400'">
-      <div class="flex items-center gap-2"><AlertCircle v-if="bannerMsg.type === 'err'" class="w-4 h-4 shrink-0" /><span>{{ bannerMsg.text }}</span></div>
-    </div>
-
+    <SaveBar
+          :type="bannerMsg?.type || 'ok'"
+          :text="bannerMsg?.text || ''"
+          :nonce="bannerSeq"
+          @dismiss="bannerMsg = null"
+        />
     <!-- Change Password -->
     <div class="rounded-xl border p-4 sm:p-5 shadow-xs transition-colors" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
       <div class="flex items-center space-x-2 mb-4 pb-3 border-b" style="border-color: var(--border-subtle);">
         <KeyRound class="w-4 h-4 text-amber-500" />
-        <h2 class="text-sm font-bold font-mono" style="color: var(--text-main);">修改密码</h2>
+        <h2 class="text-sm font-bold font-mono" style="color: var(--text-main);">{{ t('admin.nAdminSys') }}</h2>
+        <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);"> 修改密码 </p>
         <span class="text-[11px] font-mono ml-2" style="color: var(--text-faint);">当前账号：{{ auth.user?.username }}（修改后需重新登录）</span>
       </div>
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
