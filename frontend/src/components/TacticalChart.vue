@@ -443,13 +443,13 @@ function getChartStyles(): DeepPartial<Styles> {
       priceMark: {
         show: true,
         high: {
-          show: true,
+          show: false,
           color: tok('--text-muted'),
           textOffset: 4,
           textSize: 10,
         },
         low: {
-          show: true,
+          show: false,
           color: tok('--text-muted'),
           textOffset: 4,
           textSize: 10,
@@ -477,7 +477,7 @@ function getChartStyles(): DeepPartial<Styles> {
         },
       },
       tooltip: {
-        showRule: 'always',
+        showRule: 'follow_cross',
         showType: 'standard',
         text: {
           size: 11,
@@ -487,6 +487,10 @@ function getChartStyles(): DeepPartial<Styles> {
       },
     },
     indicator: {
+      tooltip: {
+        showRule: 'follow_cross',
+        showType: 'standard',
+      },
       ohlc: {
         upColor: tok('--color-up'),
         downColor: tok('--color-down'),

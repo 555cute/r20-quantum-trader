@@ -29,7 +29,7 @@ function copyPrompt() {
 
 <template>
   <!-- P4 deep: icon-only floating stack, bottom-left, no chart obstruction -->
-  <div class="fixed bottom-20 left-3 sm:bottom-6 sm:left-4 z-40 flex flex-col space-y-2">
+  <div class="fixed bottom-24 right-3 sm:bottom-6 sm:right-5 z-40 flex flex-col space-y-2">
     <button
       @click="manualRefresh"
       :title="t('cmd.refresh')"
