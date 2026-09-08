@@ -1,6 +1,15 @@
 export const zhCN = {
   // Navigation & General
   nav: {
+    settings: '设置',
+    language: '语言',
+    theme: '主题',
+    themeDark: '深色',
+    themeLight: '浅色',
+    cvd: '色盲友好涨跌色',
+    cvdHint: '用蓝/朱替代绿/红，方向仍附 ▲▼ 符号',
+    aboutHint: '点击查看开源仓库与项目信息',
+    today: '今日',
     title: 'R20量子交易系统',
     badge: '机构桌面端',
     tabMatrix: '实盘',
@@ -49,6 +58,8 @@ export const zhCN = {
     loss: '负',
     rrRatio: '盈亏比',
     holdingCapital: '持仓本金',
+    notionalValue: '名义敞口',
+    longShort: '多空',
     notionalExposure: '名义敞口',
     long: '多',
     short: '空',
@@ -63,6 +74,8 @@ export const zhCN = {
 
   // Tactical Desk (Positions & Orders)
   desk: {
+    collapseChart: '收起图表',
+    openChart: 'K线操盘台',
     activePositions: '在途实盘持仓',
     pendingOrders: '在途限价挂单',
     colInstrument: '标的 / 杠杆',
@@ -170,6 +183,42 @@ export const zhCN = {
   },
 
   // Secondary Tabs
+  news: {
+    tempBand: '多空温度',
+    mentions: '提及',
+    lsRatio: '多空比',
+    macroLabel: '宏观',
+    title: '全网加密重大舆情与流动性情报',
+    fetchedAt: '主流财经与链上异动 · 抓取于',
+    staleTag: '数据源延迟 · 展示缓存',
+    autoUpdate: '错峰自动更新中',
+    refresh: '刷新',
+    syncing: '同步中',
+    breakerOn: '黑天鹅熔断激活',
+    breakerOff: '常态监控中',
+    hot: '热度',
+    target: '标的',
+    source: '原文',
+    calmEmpty: '当前市场无破坏性突发黑天鹅或高热度异动，舆情环境平稳。',
+  },
+  conf: {
+    high: '高置信', mid: '中置信', low: '低置信',
+  },
+  radar: {
+    title: 'AI 宏观多周期推演与决策审计',
+    subtitle: '宏观大盘研判、多模型辩论实录与在途持仓管理指令',
+    cycle: '15m 周期',
+    kept: '最近保留 {n} 轮决策',
+    empty: '暂无历史决策记录，等待下一次 15 分钟推演周期',
+    council: '投委会决策',
+    macroSummary: '宏观研判总结',
+    debate: '多角色模型现场辩论纪要',
+    latency: '协作总时延',
+    verdict: '首席仲裁官裁决收口：采纳专家参谋核心论点，生成统一发单指令',
+    finalModel: '终审模型',
+    posMgmt: '在途持仓管理指令',
+    neutral: '宏观中性震荡',
+  },
   tabs: {
     councilTitle: 'AI 宏观周期多模型委员会全息质询纪要',
     councilSubtitle: '多模型交叉质询、四维点位约束与物理防线终审',

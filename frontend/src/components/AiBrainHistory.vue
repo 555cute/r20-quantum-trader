@@ -1,11 +1,25 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useDashboardStore } from '../stores/dashboard'
+import { useI18n } from '../composables/useI18n'
 import { Brain, ChevronDown, Users, ShieldCheck } from 'lucide-vue-next'
 
 const store = useDashboardStore()
+const { t } = useI18n()
 const history = computed<any[]>(() => (store.data?.ai_brain_history || []).slice(0, 24))
 const expanded = ref<Set<number>>(new Set())
+
+
+function dominantAction(item: any): string {
+  const acts = (item.position_management || []).map((p: any) => String(p.action || ''))
+  if (acts.some((a: string) => a.includes('LONG') || a.includes('BUY'))) return 'long'
+  if (acts.some((a: string) => a.includes('SHORT') || a.includes('SELL'))) return 'short'
+  return 'hold'
+}
+function accentColor(item: any) {
+  const d = dominantAction(item)
+  return d === 'long' ? 'var(--color-up)' : d === 'short' ? 'var(--color-down)' : 'var(--border-medium)'
+}
 
 function toggle(i: number) {
   const s = new Set(expanded.value)
@@ -28,19 +42,19 @@ function toggle(i: number) {
         <div>
           <div class="flex items-center space-x-2">
             <h2 class="text-xs sm:text-[13px] 2xl:text-sm font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
-              AI 宏观多周期推演基调与决策审计
+              {{ t('radar.title') }}
             </h2>
             <span class="text-[11px] 2xl:text-[11px] font-mono px-1.5 py-0.5 rounded border" style="background-color: var(--bg-badge); color: var(--color-brand); border-color: var(--border-subtle);">
-              15m 周期
+              {{ t('radar.cycle') }}
             </span>
           </div>
           <p class="text-[11px] 2xl:text-xs font-mono mt-0.5" style="color: var(--text-muted);">
-            宏观大盘研判、多模型辩论实录与在途持仓管理指令
+            {{ t('radar.subtitle') }}
           </p>
         </div>
       </div>
       <div class="hidden sm:flex items-center space-x-1 text-xs 2xl:text-sm font-mono" style="color: var(--text-muted);">
-        <span>最近保留 {{ history.length }} 轮决策</span>
+        <span>{{ t('radar.kept').replace('{n}', String(history.length)) }}</span>
       </div>
     </div>
 
@@ -50,7 +64,7 @@ function toggle(i: number) {
       class="py-16 2xl:py-24 text-center text-xs 2xl:text-sm font-mono rounded-xl border border-dashed"
       style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-muted);"
     >
-      暂无历史决策记录，等待下一次 15 分钟推演周期
+      {{ t('radar.empty') }}
     </div>
 
     <!-- History List -->
@@ -58,8 +72,8 @@ function toggle(i: number) {
       <div
         v-for="(item, i) in history"
         :key="i"
-        class="rounded-xl border p-3.5 2xl:p-4.5 transition-all"
-        style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);"
+        class="rounded-xl border border-l-2 p-3.5 2xl:p-4.5 transition-all"
+        :style="{ backgroundColor: 'var(--bg-card-subtle)', borderColor: 'var(--border-subtle)', borderLeftColor: accentColor(item) }"
       >
         <button @click="toggle(i)" class="w-full flex items-center justify-between text-left cursor-pointer gap-2">
           <div class="flex items-center space-x-2.5 2xl:space-x-3 min-w-0">
@@ -71,10 +85,10 @@ function toggle(i: number) {
               class="px-2 py-0.5 rounded text-[11px] 2xl:text-xs font-mono font-bold border shrink-0"
               style="background-color: var(--bg-badge); border-color: var(--border-medium); color: var(--text-main);"
             >
-              🏛️ 委员会决策
+              🏛️ {{ t('radar.council') }}
             </span>
             <span class="text-xs 2xl:text-sm font-sans truncate" style="color: var(--text-muted);">
-              {{ item.macro_assessment || '宏观中性震荡' }}
+              {{ item.macro_assessment || t('radar.neutral') }}
             </span>
           </div>
           <ChevronDown
@@ -88,10 +102,10 @@ function toggle(i: number) {
           <!-- Macro Summary -->
           <div>
             <div class="text-[11px] 2xl:text-xs font-bold font-mono uppercase mb-1" style="color: var(--text-faint);">
-              宏观研判总结:
+              {{ t('radar.macroSummary') }}:
             </div>
             <p class="text-xs 2xl:text-sm font-sans leading-relaxed" style="color: var(--text-main);">
-              {{ item.macro_assessment || '宏观中性震荡' }}
+              {{ item.macro_assessment || t('radar.neutral') }}
             </p>
           </div>
 
@@ -104,10 +118,10 @@ function toggle(i: number) {
             <div class="flex items-center justify-between border-b pb-2" style="border-color: var(--border-subtle);">
               <div class="flex items-center space-x-2 text-xs 2xl:text-sm font-bold" style="color: var(--text-main);">
                 <Users class="w-4 h-4 2xl:w-4.5 2xl:h-4.5" />
-                <span>【多角色模型现场辩论纪要】</span>
+                <span>【{{ t('radar.debate') }}】</span>
               </div>
               <span class="text-[11px] 2xl:text-xs font-mono" style="color: var(--text-faint);">
-                协作总时延: {{ item.council_transcript.total_duration_ms }}ms
+                {{ t('radar.latency') }}: {{ item.council_transcript.total_duration_ms }}ms
               </span>
             </div>
 
@@ -131,9 +145,9 @@ function toggle(i: number) {
 
             <!-- Arbitrator summary -->
             <div class="mt-1 pt-2 border-t text-xs 2xl:text-sm font-bold flex items-center justify-between" style="border-color: var(--border-subtle); color: var(--color-up);">
-              <span>⚖️ 首席仲裁官裁决收口: 采纳专家参谋核心论点，生成统一发单指令</span>
+              <span>⚖️ {{ t('radar.verdict') }}</span>
               <span class="text-[11px] 2xl:text-xs font-normal" style="color: var(--text-faint);">
-                终审模型: {{ item.council_transcript.arbitrator?.model_used }}
+                {{ t('radar.finalModel') }}: {{ item.council_transcript.arbitrator?.model_used }}
               </span>
             </div>
           </div>
@@ -144,7 +158,7 @@ function toggle(i: number) {
             class="p-3 2xl:p-4 rounded-xl border space-y-1.5 2xl:space-y-2 font-mono text-xs 2xl:text-sm"
             style="background-color: var(--bg-card); border-color: var(--border-subtle);"
           >
-            <span class="text-[11px] 2xl:text-xs font-bold block uppercase" style="color: var(--text-faint);">在途持仓管理指令</span>
+            <span class="text-[11px] 2xl:text-xs font-bold block uppercase" style="color: var(--text-faint);">{{ t('radar.posMgmt') }}</span>
             <div v-for="(p, j) in item.position_management" :key="j" class="flex flex-wrap items-center gap-x-2 gap-y-0.5 2xl:gap-x-3" style="color: var(--text-muted);">
               <strong style="color: var(--text-main);">{{ p.instId }}</strong>
               <span

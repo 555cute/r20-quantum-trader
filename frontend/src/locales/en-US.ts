@@ -1,6 +1,15 @@
 export const enUS = {
   // Navigation & General
   nav: {
+    settings: 'Settings',
+    language: 'Language',
+    theme: 'Theme',
+    themeDark: 'Dark',
+    themeLight: 'Light',
+    cvd: 'Color-blind safe P&L',
+    cvdHint: 'Blue/orange instead of green/red; direction keeps ▲▼ glyphs',
+    aboutHint: 'Open-source repo & project info',
+    today: 'today',
     title: 'R20 QUANTUM',
     badge: 'INSTITUTIONAL',
     tabMatrix: 'Live Matrix',
@@ -49,6 +58,8 @@ export const enUS = {
     loss: 'L',
     rrRatio: 'R:R',
     holdingCapital: 'Position Margin',
+    notionalValue: 'Notional',
+    longShort: 'L/S',
     notionalExposure: 'Notional Exposure',
     long: 'Long',
     short: 'Short',
@@ -63,6 +74,8 @@ export const enUS = {
 
   // Tactical Desk (Positions & Orders)
   desk: {
+    collapseChart: 'Collapse chart',
+    openChart: 'Chart desk',
     activePositions: 'Active Positions',
     pendingOrders: 'Pending Limit Orders',
     colInstrument: 'Instrument / Lev',
@@ -170,6 +183,42 @@ export const enUS = {
   },
 
   // Secondary Tabs
+  news: {
+    tempBand: 'L/S TEMPERATURE',
+    mentions: 'Mentions',
+    lsRatio: 'L/S ratio',
+    macroLabel: 'Macro',
+    title: 'Crypto-wide Sentiment & Liquidity Intel',
+    fetchedAt: 'Major finance & on-chain moves · fetched',
+    staleTag: 'Feed delayed · cached',
+    autoUpdate: 'Auto-refreshing',
+    refresh: 'Refresh',
+    syncing: 'Syncing',
+    breakerOn: 'Black-swan breaker ACTIVE',
+    breakerOff: 'Normal monitoring',
+    hot: 'Heat',
+    target: 'Coins',
+    source: 'Source',
+    calmEmpty: 'No disruptive black-swan or high-heat moves. Sentiment environment is calm.',
+  },
+  conf: {
+    high: 'High conf', mid: 'Mid conf', low: 'Low conf',
+  },
+  radar: {
+    title: 'AI Macro Multi-Timeframe Reasoning & Decision Audit',
+    subtitle: 'Macro assessment, live model debate transcript, in-flight position directives',
+    cycle: '15m cycle',
+    kept: 'Last {n} decision cycles',
+    empty: 'No decision history yet — waiting for the next 15-minute cycle',
+    council: 'Council decision',
+    macroSummary: 'Macro summary',
+    debate: 'Live multi-agent debate transcript',
+    latency: 'Total latency',
+    verdict: 'CIO verdict: advisor theses adopted, unified order instruction issued',
+    finalModel: 'Final model',
+    posMgmt: 'In-flight position directives',
+    neutral: 'Macro neutral / range',
+  },
   tabs: {
     councilTitle: 'Multi-Model Investment Council Consensus Log',
     councilSubtitle: 'Cross-model inquiry, 4D price constraints & physical risk final review',

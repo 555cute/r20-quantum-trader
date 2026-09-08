@@ -15,6 +15,8 @@
   --bg-card-hover: #2B3139;
   --bg-input: #0B0E11;
   --bg-badge: #2B3139;
+  --bg-elevated: #2B3139; /* 浮层/弹层表面=再上一级台阶 */
+  --text-primary: #FFFFFF; /* 仅关键大数字与标题 */
   --bg-overlay: rgba(2, 4, 6, 0.72);
 
   --border-subtle: #2B3139;
@@ -80,6 +82,8 @@
   --bg-card-hover: #E2E8F0;
   --bg-input: #FFFFFF;
   --bg-badge: #F1F5F9;
+  --bg-elevated: #FFFFFF;
+  --text-primary: #0B0E11;
   --bg-overlay: rgba(15, 23, 42, 0.45);
   
   --border-subtle: #E2E8F0;
