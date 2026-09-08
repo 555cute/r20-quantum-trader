@@ -62,13 +62,14 @@ class QqBindTests(unittest.TestCase):
              patch("r20_backend.qq_bind._persist") as persist:
             first = qq_bind.poll_bind_task("t-9")
             task.last_poll = 0
+            self.ensure_daemon.reset_mock()
             second = qq_bind.poll_bind_task("t-9")
         self.assertEqual(first["status"], "pending")
         self.assertEqual(second["status"], "bound")
         self.assertEqual(second["app_id"], "100456789")
         self.assertEqual(second["openid"], "OPENID-USER")
         persist.assert_called_once_with("100456789", "topsecret-value", "OPENID-USER")
-        self.ensure_daemon.assert_called()
+        self.ensure_daemon.assert_called_once_with()
         # the public view must never contain the secret material
         self.assertNotIn("topsecret-value", json.dumps(second))
         self.assertNotIn("bot_encrypt_secret", json.dumps(second))
@@ -84,11 +85,12 @@ class QqBindTests(unittest.TestCase):
         with patch("r20_backend.qq_bind._post_qq", side_effect=lambda path, payload, timeout=12: next(responses)), \
              patch("r20_backend.qq_bind._persist") as persist, \
              patch("r20_backend.qq_bind.start_openid_capture", return_value={"capture_id": "cap-auto-1"}) as start_cap:
+            self.ensure_daemon.reset_mock()
             res = qq_bind.poll_bind_task("t-await")
         self.assertEqual(res["status"], "awaiting_message")
         self.assertEqual(res["capture_id"], "cap-auto-1")
         persist.assert_called_once_with("1905549905", "my-secret", "")
-        self.ensure_daemon.assert_called()
+        self.ensure_daemon.assert_called_once_with()
         start_cap.assert_called_once_with("1905549905", "my-secret", timeout=90)
 
     def test_start_and_poll_openid_capture(self):
