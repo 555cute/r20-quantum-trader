@@ -259,7 +259,7 @@ v7.6.0 起，全部执行层硬风控参数从 py 源码中彻底剥离，收敛
 
 #### 1. 克隆代码与配置环境变量
 ```bash
-git clone https://github.com/555cute/r20-quantum-trader.git
+git clone https://github.com/cnlimiter/r20-quantum-trader.git
 cd r20-quantum-trader
 
 cp env.example .env
@@ -327,12 +327,14 @@ python3 deploy/update_docker.py rollback
 
 - 必须是已有的单实例服务，`/app/data` 使用可写 bind mount，镜像保留 `${R20_IMAGE:-...}`。命令不管理首次安装、远程 Docker context 或多副本更新。
 - 保留宿主机 Compose 及挂载目录，只修改启动 `.env` 的 `R20_IMAGE` 为解析后的不可变 digest；后台密钥/设置仍在 `data/config/.env`。部署历史记录于 `.r20-deploy-state.json`。
-- 更新前等待 `.ai_factor_trader.lock`；锁超时不替换容器。仅重建 R20 服务，等待健康检查，并校验镜像、挂载、DNS、端口与网络。检查到部署配置漂移会在更新前拒绝执行。
+- 更新前按固定顺序等待 `.ai_factor_trader.lock` 和 `.ai_brain_cycle.lock`，同时保护常规因子周期与独立主脑调用；锁超时不替换容器。仅重建 R20 服务，等待健康检查，并校验镜像、挂载、DNS、端口与网络。检查到部署配置漂移会在更新前拒绝执行。
 - 普通更新失败自动恢复上一镜像并验证健康；Docker 命令超时则保留 `pending` 恢复记录，不盲目发起第二次重建。先检查 `status` 与 Docker 状态，确认先前操作已经结束后再执行 `rollback`。
 - 指定已核验版本可把 `--image` 改为 `仓库@sha256:...`；也支持镜像站 digest。`--no-pull` 仅使用本地镜像。`--project-dir` 指定部署目录，多个 `--file` 可保留原有 Compose overlay。不要清理仍需回滚的旧镜像；本命令不会 prune 镜像、删除卷或覆盖业务数据。
 - 后续本地修改流程：提交并推送默认分支 → 等待 **Docker Package** 成功 → 执行更新命令。服务器不自动追踪每次提交，避免未经确认重启交易进程。
 
 模型输出上限可在后台 LLM 设置中保存，默认 `4096`，也支持模型专属上限（留空继承全局）。Responses 使用 `max_output_tokens`；Chat 与 Claude 使用各自协议字段。输出截断、拒绝、空内容、HTTP 外层 JSON 和业务 JSON 错误分别记录；无效 JSON 不补全、不作为交易指令执行。大上下文和高思考强度下仍需按供应商能力设置上限，短探针成功不代表真实交易长提示词一定成功。
+
+自进化模型调用失败时保留错误诊断，并跳过 `asset_multipliers.json` 写入：已有文件保持原样，缺失文件保持缺失；有效复盘结果仍按原有边界写入倍率。
 
 
 
