@@ -25,6 +25,62 @@ POSITION_TRACKER_FILE = os.path.join(DATA_DIR, "position_trackers.json")
 SIGNAL_JOURNAL_FILE = os.path.join(DATA_DIR, "signal_journal.json")
 TARGET_INSTRUMENTS = load_instruments()
 
+def _inst_id_from_name(name: str) -> str:
+    n = str(name or "").strip()
+    if not n:
+        return ""
+    if "-USDT-SWAP" in n or "-USD-SWAP" in n:
+        return n
+    return f"{n}-USDT-SWAP"
+
+
+def _sqlite_traded_names() -> set[str]:
+    """Distinct inst values from this account's scoped r20_quant.db only."""
+    names: set[str] = set()
+    try:
+        import sqlite3
+        from scripts.db_manager import db_path
+        path = db_path()
+        if not os.path.exists(path):
+            return names
+        connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            for (inst,) in connection.execute("SELECT DISTINCT inst FROM trades"):
+                if inst:
+                    names.add(str(inst))
+        finally:
+            connection.close()
+    except Exception:
+        return names
+    return names
+
+
+def allowed_inst_ids(existing_ledger_trades=None, trackers=None) -> set[str]:
+    """Allow current pool plus this account's filled-history traces.
+
+    Sources: live pool, scoped SQLite trades.inst, prior JSON ledger rows,
+    and current-position trackers. Submitted journal entries are not fills
+    and do not authorize keeping a delisted coin.
+    """
+    allowed = {item["instId"] for item in TARGET_INSTRUMENTS if item.get("instId")}
+    names: set[str] = set(_sqlite_traded_names())
+    for row in existing_ledger_trades or []:
+        if not isinstance(row, dict):
+            continue
+        inst = str(row.get("inst") or row.get("name") or row.get("instId") or "")
+        if inst:
+            names.add(inst)
+    for key in trackers or {}:
+        inst = str(key).rsplit("_", 1)[0]
+        if inst:
+            names.add(inst)
+    for name in names:
+        inst_id = _inst_id_from_name(name)
+        if inst_id:
+            allowed.add(inst_id)
+    return allowed
+
+
 
 def _path(legacy: str, name: str) -> str:
     if legacy == os.path.join(DATA_DIR, name):
@@ -264,9 +320,9 @@ def build_lifecycle_ledger(exchange=None):
 
     close_orders = [o for o in orders_history if str(o.get("reduceOnly", "")).lower() == "true" and o.get("state") == "filled"]
 
-    pool_ids = {item["instId"] for item in TARGET_INSTRUMENTS}
-    trades_lifecycle = []
     journal = load_account_signal_journal()
+    pool_ids = allowed_inst_ids(existing, trackers)
+    trades_lifecycle = []
 
     for p in pos_data:
         pos_sz = abs(float(p.get("pos", 0.0) or 0.0))
