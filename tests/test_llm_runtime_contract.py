@@ -332,6 +332,50 @@ class LlmRuntimeContractTests(unittest.TestCase):
         self.assertAlmostEqual(timeouts[0], 5.0, places=2)
         self.assertIn("5s", str(ctx.exception))
 
+    def test_transient_retry_receives_remaining_timeout(self):
+        now = [0.0]
+        timeouts = []
+
+        def fake_perf_counter():
+            return now[0]
+
+        def fake_urlopen(_req, timeout=None):
+            timeouts.append(timeout)
+            if len(timeouts) == 1:
+                now[0] += 0.4
+                raise urllib.error.HTTPError(
+                    "https://example.test/v1/responses",
+                    502,
+                    "Bad Gateway",
+                    None,
+                    io.BytesIO(b'{"error":{"message":"bad gateway"}}'),
+                )
+            now[0] += 0.1
+            return _HttpBody({
+                "status": "completed",
+                "output_text": '{"action":"WAIT"}',
+                "usage": {"input_tokens": 3, "output_tokens": 2, "total_tokens": 5},
+            })
+
+        def fake_sleep(seconds):
+            now[0] += seconds
+
+        with patch.object(llm_manager, "get_active_llm_runtime", return_value=_runtime()), \
+             patch("urllib.request.urlopen", side_effect=fake_urlopen), \
+             patch("r20_backend.llm_manager.time.perf_counter", side_effect=fake_perf_counter), \
+             patch("r20_backend.llm_manager.time.sleep", side_effect=fake_sleep):
+            content, _reasoning, usage, _latency = llm_manager.execute_llm_request(
+                messages=[{"role": "user", "content": "hi"}],
+                timeout=5.0,
+            )
+        self.assertEqual(content, '{"action":"WAIT"}')
+        self.assertEqual(len(timeouts), 2)
+        self.assertAlmostEqual(timeouts[0], 5.0, places=2)
+        self.assertLess(timeouts[1], timeouts[0])
+        self.assertAlmostEqual(timeouts[1], 2.6, places=2)
+        self.assertEqual(usage.get("total_tokens"), 5)
+
+
 
 
 if __name__ == "__main__":
