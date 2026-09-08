@@ -30,9 +30,9 @@
   --ring: rgba(146, 154, 165, 0.35);
 
   /* Dark Titanium / Silver sheen */
-  --color-brand: #F3F4F6;
-  --color-brand-bg: rgba(255, 255, 255, 0.08);
-  --color-brand-border: rgba(255, 255, 255, 0.16);
+  --color-brand: #F7931A; /* BTC 橙：与 logo 同源的实体品牌色（P0 误设近白，此处纠正） */
+  --color-brand-bg: rgba(247, 147, 26, 0.13);
+  --color-brand-border: rgba(247, 147, 26, 0.34);
 
   /* 涨跌色=Binance 实测值（暗底提亮降饱和，L55-72% 区间） */
   --color-up: #0ECB81;
@@ -98,9 +98,9 @@
   --ring: rgba(71, 85, 105, 0.35);
 
   /* Neutral Titanium / Obsidian brand styling */
-  --color-brand: #0F172A;
-  --color-brand-bg: #F1F5F9;
-  --color-brand-border: #CBD5E1;
+  --color-brand: #C2600C;
+  --color-brand-bg: #FDF0DC;
+  --color-brand-border: #F3CE9A;
 
   /* 浅底语义色保持加深一档（AntD 原则：强调色随背景调整，白底 #0ECB81 仅 2.6:1 不达 AA） */
   --color-up: #059669;
@@ -783,4 +783,62 @@ code,
 pre {
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
+}
+
+
+/* ==== P4 deep: 全站表单控件与按钮统一 ==== */
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none !important;
+  border-color: var(--color-brand) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-brand) 20%, transparent) !important;
+}
+input::placeholder, textarea::placeholder { color: var(--text-faint); opacity: 1; }
+select { appearance: none; -webkit-appearance: none; }
+
+/* 共享按钮语汇（新页用类，旧页逐步迁移） */
+.btn-primary {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 32px; padding: 0 14px; border-radius: 8px; cursor: pointer;
+  font-family: ui-monospace, monospace; font-size: 12px; font-weight: 700;
+  background-color: var(--color-brand); border: 1px solid var(--color-brand);
+  color: #FFFFFF; transition: opacity .15s, transform .05s;
+  box-shadow: 0 1px 2px rgba(0,0,0,.25);
+}
+.btn-primary:hover { opacity: .9; }
+.btn-primary:active { transform: translateY(1px); }
+.btn-primary:disabled { opacity: .45; cursor: not-allowed; }
+.btn-ghost {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 32px; padding: 0 12px; border-radius: 8px; cursor: pointer;
+  font-family: ui-monospace, monospace; font-size: 12px; font-weight: 700;
+  background-color: var(--bg-card); border: 1px solid var(--border-medium);
+  color: var(--text-main); transition: background-color .15s;
+}
+.btn-ghost:hover { background-color: var(--bg-card-hover); }
+.btn-danger {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 32px; padding: 0 12px; border-radius: 8px; cursor: pointer;
+  font-family: ui-monospace, monospace; font-size: 12px; font-weight: 700;
+  background-color: var(--color-down-bg); border: 1px solid var(--color-down-border);
+  color: var(--color-down); transition: background-color .15s;
+}
+.btn-danger:hover { background-color: color-mix(in srgb, var(--color-down) 18%, transparent); }
+
+/* 分段控件（周期/布局等） */
+.seg {
+  display: inline-flex; align-items: center; padding: 2px; gap: 2px;
+  border-radius: 8px; border: 1px solid var(--border-subtle);
+  background-color: var(--bg-badge);
+}
+.seg > button {
+  height: 24px; min-width: 28px; padding: 0 8px; border-radius: 6px; cursor: pointer;
+  font-family: ui-monospace, monospace; font-size: 11px; font-weight: 700;
+  color: var(--text-muted); transition: all .12s; border: none; background: transparent;
+}
+.seg > button:hover { color: var(--text-main); }
+.seg > button.seg-on {
+  background-color: var(--bg-card); color: var(--text-main);
+  box-shadow: 0 1px 2px rgba(0,0,0,.18);
 }

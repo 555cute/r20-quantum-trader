@@ -37,6 +37,7 @@ export const enUS = {
   },
 
   // Bento Top HUD Ribbon
+    layoutMode: 'Layout mode',
   hud: {
     accountEquity: 'Account Total Equity',
     pnlWaterline: 'Benchmark Cum. Net PnL',
@@ -74,6 +75,7 @@ export const enUS = {
 
   // Tactical Desk (Positions & Orders)
   desk: {
+    livePrompt: 'Live AI prompt audit',
     collapseChart: 'Collapse chart',
     openChart: 'Chart desk',
     activePositions: 'Active Positions',

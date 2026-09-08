@@ -37,6 +37,7 @@ export const zhCN = {
   },
 
   // Bento Top HUD Ribbon
+    layoutMode: '布局模式',
   hud: {
     accountEquity: '主账户总权益',
     pnlWaterline: '基准累计收益',
@@ -74,6 +75,7 @@ export const zhCN = {
 
   // Tactical Desk (Positions & Orders)
   desk: {
+    livePrompt: '实时 AI 提示词审计',
     collapseChart: '收起图表',
     openChart: 'K线操盘台',
     activePositions: '在途实盘持仓',

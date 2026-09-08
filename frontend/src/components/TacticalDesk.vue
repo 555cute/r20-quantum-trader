@@ -49,17 +49,16 @@ onMounted(() => {
   }
 })
 
+/* P4 deep: single unified symbol selector — full factor pool first, then any extras with positions/orders.
+   Click = filter table + focus chart (chart's own chip row removed). */
 const availableSymbols = computed(() => {
-  const set = new Set<string>()
-  store.positions.forEach((p) => {
-    const s = p.name || p.instId.split('-')[0]
-    if (s) set.add(s)
-  })
-  store.pendingOrders.forEach((o) => {
-    const s = o.name || o.instId.split('-')[0]
-    if (s) set.add(s)
-  })
-  return ['ALL', ...Array.from(set)]
+  const list: string[] = []
+  const seen = new Set<string>()
+  const push = (s?: string) => { if (s && !seen.has(s)) { seen.add(s); list.push(s) } }
+  store.factors.forEach((f: any) => push(f.name || String(f.instId || '').split('-')[0]))
+  store.positions.forEach((p) => push(p.name || p.instId.split('-')[0]))
+  store.pendingOrders.forEach((o) => push(o.name || o.instId.split('-')[0]))
+  return ['ALL', ...list]
 })
 
 const filteredPositions = computed(() => {

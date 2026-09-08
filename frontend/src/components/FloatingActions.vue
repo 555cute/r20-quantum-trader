@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from '../composables/useI18n'
+const { t } = useI18n()
 import { ref } from 'vue'
 import { useDashboardStore } from '../stores/dashboard'
 import { RefreshCw, Terminal, X, Copy } from 'lucide-vue-next'
@@ -26,34 +28,28 @@ function copyPrompt() {
 </script>
 
 <template>
-  <!-- Global Floating Actions (bottom-right: refresh + realtime prompt) -->
-  <div class="fixed bottom-20 right-4 sm:bottom-6 sm:right-6 z-40 flex flex-col items-end space-y-2">
-    <!-- Floating Refresh -->
+  <!-- P4 deep: icon-only floating stack, bottom-left, no chart obstruction -->
+  <div class="fixed bottom-20 left-3 sm:bottom-6 sm:left-4 z-40 flex flex-col space-y-2">
     <button
       @click="manualRefresh"
-      title="立即刷新全量数据"
-      class="w-10 h-10 rounded-full shadow-lg border transition transform hover:-translate-y-0.5 active:scale-95 backdrop-blur-md cursor-pointer flex items-center justify-center"
-      style="background-color: var(--bg-card); border-color: var(--border-medium); color: var(--text-main);"
+      :title="t('cmd.refresh')"
+      class="w-9 h-9 rounded-full shadow-lg border transition hover:-translate-y-0.5 active:scale-95 backdrop-blur-md cursor-pointer flex items-center justify-center"
+      style="background-color: var(--bg-card); border-color: var(--border-medium); color: var(--text-muted);"
     >
       <RefreshCw class="w-4 h-4" :class="{ 'animate-spin': isRotating || store.isRefreshing }" />
     </button>
 
-    <!-- Realtime Prompt Floating Button -->
-    <button
-      @click="promptModalOpen = true"
-      title="点击展开实时 AI 大脑提示词"
-      class="flex items-center space-x-2 px-3.5 py-2 sm:px-4 sm:py-2.5 rounded-full shadow-lg border transition transform hover:-translate-y-0.5 active:scale-95 backdrop-blur-md cursor-pointer"
-      style="background-color: var(--bg-card); border-color: var(--border-medium); color: var(--text-main);"
-    >
-      <div
-        class="w-5 h-5 rounded-full flex items-center justify-center font-bold"
-        style="background-color: var(--color-brand-bg); color: var(--color-brand);"
+    <div class="relative">
+      <button
+        @click="promptModalOpen = true"
+        :title="t('desk.livePrompt')"
+        class="w-9 h-9 rounded-full shadow-lg border transition hover:-translate-y-0.5 active:scale-95 backdrop-blur-md cursor-pointer flex items-center justify-center"
+        style="background-color: var(--bg-card); border-color: var(--border-medium); color: var(--text-muted);"
       >
-        <Terminal class="w-3 h-3" />
-      </div>
-      <span class="text-xs font-mono font-bold tracking-wide">实时提示词</span>
-      <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-    </button>
+        <Terminal class="w-4 h-4" />
+      </button>
+      <span class="absolute top-0 right-0 w-2 h-2 rounded-full bg-emerald-500 animate-pulse pointer-events-none"></span>
+    </div>
   </div>
 
   <!-- Realtime Prompt Audit Modal -->
