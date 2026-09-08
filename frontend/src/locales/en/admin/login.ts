@@ -6,6 +6,7 @@ export const enAdminLogin = {
   submit: 'Sign in',
   submitting: 'Verifying…',
   failed: 'Sign-in failed',
-  backToScreen: '← Back to live screen',
+  rateHint: '5 consecutive failures lock the account for 15 minutes; every attempt is audit-logged.',
+  backToScreen: 'Back to live screen',
   secured: 'Session token stays in this browser only',
 };

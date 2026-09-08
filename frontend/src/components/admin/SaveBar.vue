@@ -23,16 +23,16 @@ onUnmounted(() => { if (timer) clearTimeout(timer) })
 
 const style = () =>
   props.type === 'ok'
-    ? { bg: 'var(--color-up-bg)', border: 'var(--color-up-border)', fg: 'var(--color-up)' }
+    ? { bg: 'var(--up-bg)', border: 'var(--up-line)', fg: 'var(--up)' }
     : props.type === 'warn'
-      ? { bg: 'var(--color-warn-bg)', border: 'var(--color-warn-border)', fg: 'var(--color-warn)' }
-      : { bg: 'var(--color-down-bg)', border: 'var(--color-down-border)', fg: 'var(--color-down)' }
+      ? { bg: 'var(--warn-bg)', border: 'var(--warn-line)', fg: 'var(--warn)' }
+      : { bg: 'var(--down-bg)', border: 'var(--down-line)', fg: 'var(--down)' }
 </script>
 
 <template>
   <div
     v-if="text"
-    class="sticky top-1 z-30 mb-3 flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs font-mono shadow-xs animate-[savebar-in_.18s_ease-out]"
+    class="sticky top-1 z-30 mb-3 flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs shadow-xs animate-[savebar-in_.18s_ease-out]"
     :style="{ backgroundColor: style().bg, borderColor: style().border, color: style().fg }"
     role="status"
   >

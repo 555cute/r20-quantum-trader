@@ -1,0 +1,98 @@
+/* =========================================================================
+   Compat 桥（迁移期）：把后台旧页面残留的 Tailwind 彩色类与旧语汇类
+   映射到新设计令牌。R5 清理时随旧类名一起移除。
+   ========================================================================= */
+
+/* —— 文字色映射（暗亮双模统一走 token）—— */
+.text-emerald-400, .text-emerald-300, .text-green-400, .text-green-300 { color: var(--up); }
+.text-rose-400, .text-rose-300, .text-red-400, .text-red-300, .text-pink-400 { color: var(--down); }
+.text-amber-400, .text-amber-300, .text-yellow-400, .text-yellow-300 { color: var(--warn); }
+.text-sky-400, .text-sky-300, .text-blue-400, .text-blue-300, .text-cyan-400, .text-cyan-300 { color: var(--info); }
+.text-indigo-400, .text-indigo-300, .text-purple-400, .text-purple-300, .text-violet-400, .text-violet-300, .text-fuchsia-400 { color: var(--chart-5); }
+.text-zinc-100, .text-zinc-200, .text-zinc-300, .text-slate-100, .text-slate-200, .text-slate-300 { color: var(--ink-1); }
+.text-zinc-400, .text-slate-400, .text-gray-400 { color: var(--ink-2); }
+.text-zinc-500, .text-slate-500, .text-gray-500 { color: var(--ink-3); }
+.text-emerald-500 { color: var(--up); }
+.text-rose-500, .text-red-500 { color: var(--down); }
+.text-amber-500, .text-yellow-500 { color: var(--warn); }
+.text-sky-500, .text-blue-500 { color: var(--info); }
+.text-orange-400, .text-orange-300, .text-orange-500 { color: var(--accent); }
+
+/* —— 背景色映射 —— */
+.bg-emerald-500\/10, .bg-emerald-500\/15, .bg-emerald-500\/20, .bg-green-500\/10 { background-color: var(--up-bg); }
+.bg-rose-500\/10, .bg-rose-500\/15, .bg-rose-500\/20, .bg-red-500\/10 { background-color: var(--down-bg); }
+.bg-amber-500\/10, .bg-amber-500\/15, .bg-amber-500\/20, .bg-yellow-500\/10 { background-color: var(--warn-bg); }
+.bg-sky-500\/10, .bg-blue-500\/10, .bg-cyan-500\/10 { background-color: var(--info-bg); }
+.bg-indigo-500\/10, .bg-purple-500\/10, .bg-violet-500\/10 { background-color: color-mix(in srgb, var(--chart-5) 10%, transparent); }
+
+/* —— 边框色映射 —— */
+.border-emerald-500\/20, .border-emerald-500\/25, .border-emerald-500\/30 { border-color: var(--up-line); }
+.border-rose-500\/20, .border-rose-500\/25, .border-rose-500\/30, .border-red-500\/20 { border-color: var(--down-line); }
+.border-amber-500\/20, .border-amber-500\/25, .border-amber-500\/30 { border-color: var(--warn-line); }
+.border-sky-500\/20, .border-blue-500\/20, .border-cyan-500\/20 { border-color: var(--info-line); }
+.border-indigo-500\/20, .border-indigo-500\/30 { border-color: color-mix(in srgb, var(--chart-5) 28%, transparent); }
+
+/* —— 旧语汇类桥接（后台页面尚未逐个改模板的部分）—— */
+.badge-lever, .badge-strategy {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: var(--text-2xs); font-weight: 600; line-height: 1;
+  padding: 2px 6px; border-radius: var(--r-ctl);
+  background-color: var(--surface-3); border: 1px solid var(--line-1);
+  color: var(--ink-1); font-variant-numeric: tabular-nums;
+}
+.badge-oco-sl {
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px;
+  border-radius: var(--r-ctl); font-size: var(--text-2xs);
+  border: 1px solid var(--line-1); background-color: var(--surface-3); line-height: 1.2;
+}
+.badge-pending-status {
+  display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px;
+  border-radius: var(--r-ctl); font-size: var(--text-2xs); font-weight: 600;
+  border: 1px solid var(--accent-line); background-color: var(--accent-bg); color: var(--accent);
+}
+.badge-policy-hash {
+  display: inline-flex; align-items: center; font-family: var(--font-mono);
+  font-size: 10px; font-weight: 600; padding: 1px 4px; border-radius: 4px;
+  background-color: var(--info-bg); border: 1px solid var(--info-line); color: var(--info);
+}
+.capsule-direction-long, .capsule-direction-short {
+  display: inline-flex; align-items: center; gap: 3px; padding: 2px 8px;
+  border-radius: var(--r-ctl); font-size: var(--text-2xs); font-weight: 700; line-height: 1.2; white-space: nowrap;
+}
+.capsule-direction-long { background-color: var(--up-bg); border: 1px solid var(--up-line); color: var(--up); }
+.capsule-direction-short { background-color: var(--down-bg); border: 1px solid var(--down-line); color: var(--down); }
+
+/* 旧页头横幅 → 新扁平页头（5 个未迁移页面使用） */
+.panel-banner-compact {
+  display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between;
+  gap: 10px; padding: 2px 2px 12px; margin-bottom: 14px;
+  border-bottom: 1px solid var(--line-1);
+}
+.panel-banner-icon { display: none; }
+.panel-banner-compact h1, .panel-banner-compact h2 { font-size: var(--text-md); font-weight: 600; color: var(--ink-strong); }
+
+/* 旧后台按钮语汇 → 新按钮（保留类名，重定义外观） */
+.btn-admin-primary {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: var(--h-md); padding: 0 12px; border-radius: var(--r-ctl);
+  font-size: var(--text-sm); font-weight: 600; white-space: nowrap; cursor: pointer;
+  background-color: var(--accent); color: var(--accent-ink); border: 1px solid var(--accent);
+  transition: background-color var(--dur-fast);
+}
+.btn-admin-primary:hover { background-color: var(--accent-hover); }
+.btn-admin-secondary {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: var(--h-md); padding: 0 12px; border-radius: var(--r-ctl);
+  font-size: var(--text-sm); font-weight: 600; white-space: nowrap; cursor: pointer;
+  background-color: transparent; color: var(--ink-1); border: 1px solid var(--line-2);
+  transition: background-color var(--dur-fast);
+}
+.btn-admin-secondary:hover { background-color: var(--surface-3); border-color: var(--line-3); }
+.btn-admin-danger {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: var(--h-md); padding: 0 12px; border-radius: var(--r-ctl);
+  font-size: var(--text-sm); font-weight: 600; white-space: nowrap; cursor: pointer;
+  background-color: var(--down-bg); color: var(--down); border: 1px solid var(--down-line);
+  transition: background-color var(--dur-fast);
+}
+.btn-admin-danger:hover { background-color: color-mix(in srgb, var(--down) 18%, transparent); }

@@ -19,8 +19,6 @@ import NewsView from '../views/dashboard/NewsView.vue';
 import EvolutionView from '../views/dashboard/EvolutionView.vue';
 import LedgerView from '../views/dashboard/LedgerView.vue';
 import AboutModal from '../components/dashboard/AboutModal.vue';
-import PeekDrawer from '../components/dashboard/PeekDrawer.vue';
-import CommandPalette from '../components/dashboard/CommandPalette.vue';
 
 const route = useRoute();
 const store = useDashboardStore();
@@ -78,7 +76,5 @@ onUnmounted(() => store.stopPolling());
 
     <MobileTabBar />
     <AboutModal />
-    <PeekDrawer />
-    <CommandPalette />
   </div>
 </template>

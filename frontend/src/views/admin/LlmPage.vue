@@ -568,10 +568,10 @@ onMounted(() => {
             <Cpu class="w-3.5 h-3.5" />
           </div>
           <div>
-            <h1 class="text-xs sm:text-[13px] font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
+            <h1 class="text-xs sm:text-[13px] font-semibold uppercase tracking-wide" style="color: var(--ink-1);">
               {{ t('admin.nLlm') }}
             </h1>
-            <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);"> AI 模型供应商与直连矩阵 —— 管理大模型渠道矩阵、思考强度与 API 密钥直连 </p>
+            <p class="text-[11px] mt-0.5" style="color: var(--ink-2);"> AI 模型供应商与直连矩阵 —— 管理大模型渠道矩阵、思考强度与 API 密钥直连 </p>
           </div>
         </div>
 
@@ -599,26 +599,26 @@ onMounted(() => {
       <!-- Global Reasoning & Thinking Timeout Configuration Card -->
       <div
         class="rounded-2xl border p-4 sm:p-5 shadow-xs transition-colors space-y-3"
-        style="background-color: var(--bg-card); border-color: var(--border-subtle);"
+        style="background-color: var(--surface-2); border-color: var(--line-1);"
       >
-        <div class="flex flex-wrap items-center justify-between gap-2 pb-3 border-b" style="border-color: var(--border-subtle);">
+        <div class="flex flex-wrap items-center justify-between gap-2 pb-3 border-b" style="border-color: var(--line-1);">
           <div class="flex items-center space-x-2.5">
             <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-blue-500/10 text-blue-400 border border-blue-500/20">
               <Clock class="w-4 h-4" />
             </div>
             <div>
               <div class="flex items-center space-x-2">
-                <h2 class="text-xs sm:text-[13px] font-bold font-mono" style="color: var(--text-main);">
+                <h2 class="text-xs sm:text-[13px] font-bold" style="color: var(--ink-1);">
                   全局思考推演与超时上限 (Reasoning & Thinking Timeout)
                 </h2>
                 <span
-                  class="px-2 py-0.5 rounded text-[11px] font-mono font-bold border"
-                  style="background-color: var(--color-brand-bg); border-color: var(--color-brand-border); color: var(--color-brand);"
+                  class="px-2 py-0.5 rounded text-[11px] font-bold border"
+                  style="background-color: var(--accent-bg); border-color: var(--accent-line); color: var(--accent);"
                 >
                   当前上限: {{ cfg?.thinking_timeout || 120 }}s
                 </span>
               </div>
-              <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);">
+              <p class="text-[11px] mt-0.5" style="color: var(--ink-2);">
                 针对长思考链旗舰模型（o1/o3、DeepSeek-R1、Claude 3.7 Thinking、Gemini 3 Pro 等）自定义推演等待上限，杜绝硬编码超时过早截断。
               </p>
             </div>
@@ -628,7 +628,7 @@ onMounted(() => {
             @click="saveGlobalSettings"
             :disabled="savingSettings"
             class="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold text-white transition-all cursor-pointer shadow-xs disabled:opacity-40"
-            style="background-color: var(--color-info); border-color: var(--color-info);"
+            style="background-color: var(--info); border-color: var(--info);"
           >
             <RefreshCw v-if="savingSettings" class="w-3.5 h-3.5 animate-spin" />
             <Save v-else class="w-3.5 h-3.5" />
@@ -638,24 +638,24 @@ onMounted(() => {
 
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
           <!-- Active Model & Reasoning Effort Status -->
-          <div class="p-3 rounded-xl border space-y-1.5 font-mono" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
-            <div class="text-[11px]" style="color: var(--text-faint);">当前主脑活跃模型</div>
+          <div class="p-3 rounded-xl border space-y-1.5" style="background-color: var(--surface-1); border-color: var(--line-1);">
+            <div class="text-[11px]" style="color: var(--ink-3);">当前主脑活跃模型</div>
             <div class="text-xs font-bold truncate text-blue-400">
               {{ cfg?.active_model_id || '未选择' }}
             </div>
-            <div class="text-[11px] flex items-center space-x-1" style="color: var(--text-muted);">
+            <div class="text-[11px] flex items-center space-x-1" style="color: var(--ink-2);">
               <span>思考强度:</span>
               <span class="font-bold uppercase text-emerald-400">{{ cfg?.active_reasoning_effort || 'HIGH' }}</span>
             </div>
           </div>
 
           <!-- Thinking Timeout Input Field -->
-          <div class="p-3 rounded-xl border space-y-1.5 font-mono sm:col-span-1 lg:col-span-2" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
+          <div class="p-3 rounded-xl border space-y-1.5 sm:col-span-1 lg:col-span-2" style="background-color: var(--surface-1); border-color: var(--line-1);">
             <div class="flex items-center justify-between">
-              <label class="text-[11px] font-bold" style="color: var(--text-muted);">
+              <label class="text-[11px] font-bold" style="color: var(--ink-2);">
                 思考时间上限 (秒 / Seconds)
               </label>
-              <span class="text-[11px]" style="color: var(--text-faint);">有效范围: 10 ~ 1800 秒</span>
+              <span class="text-[11px]" style="color: var(--ink-3);">有效范围: 10 ~ 1800 秒</span>
             </div>
             <div class="flex flex-wrap items-center gap-2">
               <input
@@ -665,10 +665,10 @@ onMounted(() => {
                 max="1800"
                 step="5"
                 placeholder="120"
-                class="w-28 rounded-lg px-3 py-1.5 text-xs outline-none border font-bold font-mono"
-                style="background-color: var(--bg-card); border-color: var(--border-medium); color: var(--text-main);"
+                class="w-28 rounded-lg px-3 py-1.5 text-xs outline-none border font-bold"
+                style="background-color: var(--surface-2); border-color: var(--line-2); color: var(--ink-1);"
               />
-              <span class="text-xs font-bold" style="color: var(--text-muted);">秒 (s)</span>
+              <span class="text-xs font-bold" style="color: var(--ink-2);">秒 (s)</span>
 
               <!-- Quick Presets -->
               <div class="flex flex-wrap items-center gap-1.5 pl-2">
@@ -720,10 +720,10 @@ onMounted(() => {
         <!-- Feedback Alert -->
         <div
           v-if="settingsResult"
-          class="p-2.5 rounded-lg border text-xs font-mono flex items-center space-x-2"
+          class="p-2.5 rounded-lg border text-xs flex items-center space-x-2"
           :style="settingsResult.ok
-            ? { backgroundColor: 'var(--color-up-bg)', borderColor: 'var(--color-up-border)', color: 'var(--color-up)' }
-            : { backgroundColor: 'var(--color-down-bg)', borderColor: 'var(--color-down-border)', color: 'var(--color-down)' }"
+            ? { backgroundColor: 'var(--up-bg)', borderColor: 'var(--up-line)', color: 'var(--up)' }
+            : { backgroundColor: 'var(--down-bg)', borderColor: 'var(--down-line)', color: 'var(--down)' }"
         >
           <CheckCircle2 v-if="settingsResult.ok" class="w-3.5 h-3.5 shrink-0" />
           <AlertCircle v-else class="w-3.5 h-3.5 shrink-0" />
@@ -737,7 +737,7 @@ onMounted(() => {
           v-model="searchQuery"
           placeholder="搜索供应商或分组"
           class="w-full rounded-2xl px-4 py-3 pl-11 text-xs outline-none border transition-colors shadow-xs"
-          style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-main);"
+          style="background-color: var(--surface-2); border-color: var(--line-1); color: var(--ink-1);"
         />
         <Search class="w-4 h-4 absolute left-4 top-3.5 text-gray-400 pointer-events-none" />
       </div>
@@ -745,21 +745,21 @@ onMounted(() => {
       <!-- Providers List Container -->
       <div
         class="rounded-2xl border overflow-hidden shadow-xs divide-y transition-colors"
-        style="background-color: var(--bg-card); border-color: var(--border-subtle);"
+        style="background-color: var(--surface-2); border-color: var(--line-1);"
       >
         <div
           v-for="prov in filteredProviders"
           :key="prov.id"
           @click="selectProvider(prov)"
-          class="p-4 flex items-center justify-between hover:bg-[var(--bg-card-subtle)] transition-colors cursor-pointer group"
-          style="border-color: var(--border-subtle);"
+          class="p-4 flex items-center justify-between hover:bg-[var(--surface-1)] transition-colors cursor-pointer group"
+          style="border-color: var(--line-1);"
         >
           <!-- Left: Provider Logo / Icon & Name -->
           <div class="flex items-center space-x-3.5">
             <!-- Icon Avatar -->
             <div
               class="w-10 h-10 rounded-xl flex items-center justify-center border font-bold text-sm shrink-0 transition-transform group-hover:scale-105"
-              style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);"
+              style="background-color: var(--surface-1); border-color: var(--line-1);"
             >
               <span v-if="prov.id === 'openai'" class="text-emerald-500">❖</span>
               <span v-else-if="prov.id === 'siliconflow'" class="text-purple-500">⚡</span>
@@ -777,16 +777,16 @@ onMounted(() => {
             <!-- Provider Name & Subtitle -->
             <div>
               <div class="flex items-center space-x-2">
-                <span class="font-bold text-sm" style="color: var(--text-main);">{{ prov.name }}</span>
+                <span class="font-bold text-sm" style="color: var(--ink-1);">{{ prov.name }}</span>
                 <span
                   v-if="prov.models?.some((m: any) => m.id === cfg?.active_model_id)"
                   class="px-1.5 py-0.2 rounded text-[11px] font-bold border"
-                  style="background-color: var(--color-up-bg); border-color: var(--color-up-border); color: var(--color-up);"
+                  style="background-color: var(--up-bg); border-color: var(--up-line); color: var(--up);"
                 >
                   主脑活跃
                 </span>
               </div>
-              <div class="text-[11px] mt-0.5" style="color: var(--text-faint);">
+              <div class="text-[11px] mt-0.5" style="color: var(--ink-3);">
                 {{ prov.models_count || 0 }} 个模型 · {{ prov.group || '其他' }}
               </div>
             </div>
@@ -801,7 +801,7 @@ onMounted(() => {
               :style="prov.enabled ? {
                 backgroundColor: 'rgba(16, 185, 129, 0.12)',
                 borderColor: 'rgba(16, 185, 129, 0.25)',
-                color: 'var(--color-up)',
+                color: 'var(--up)',
               } : {
                 backgroundColor: 'rgba(239, 68, 68, 0.08)',
                 borderColor: 'rgba(239, 68, 68, 0.2)',
@@ -823,12 +823,12 @@ onMounted(() => {
       <!-- Detail Top Navigation Bar -->
       <div
         class="rounded-2xl border p-4 flex items-center justify-between shadow-xs transition-colors"
-        style="background-color: var(--bg-card); border-color: var(--border-subtle);"
+        style="background-color: var(--surface-2); border-color: var(--line-1);"
       >
         <button
           @click="goBackToList"
-          class="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold cursor-pointer transition-all hover:bg-[var(--bg-card-subtle)]"
-          style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-main);"
+          class="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold cursor-pointer transition-all hover:bg-[var(--surface-1)]"
+          style="background-color: var(--surface-2); border-color: var(--line-1); color: var(--ink-1);"
         >
           <ArrowLeft class="w-4 h-4" />
           <span>返回</span>
@@ -837,11 +837,11 @@ onMounted(() => {
         <div class="flex items-center space-x-2">
           <div
             class="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs"
-            style="background-color: var(--bg-card-subtle); color: var(--color-brand);"
+            style="background-color: var(--surface-1); color: var(--accent);"
           >
             ❖
           </div>
-          <span class="font-bold text-sm sm:text-base" style="color: var(--text-main);">
+          <span class="font-bold text-sm sm:text-base" style="color: var(--ink-1);">
             {{ selectedProvider.name }}
           </span>
         </div>
@@ -853,22 +853,22 @@ onMounted(() => {
       <div
         v-if="detailTab === 'config'"
         class="space-y-4 rounded-2xl border p-5 shadow-xs transition-colors"
-        style="background-color: var(--bg-card); border-color: var(--border-subtle);"
+        style="background-color: var(--surface-2); border-color: var(--line-1);"
       >
         <!-- Section 1: 管理设置项列表 -->
         <div class="space-y-1">
-          <div class="text-[11px] font-bold uppercase tracking-wider mb-2" style="color: var(--text-muted);">
+          <div class="text-[11px] font-bold uppercase tracking-wider mb-2" style="color: var(--ink-2);">
             管理
           </div>
 
           <div
             class="rounded-xl border divide-y overflow-hidden text-xs"
-            style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);"
+            style="background-color: var(--surface-1); border-color: var(--line-1);"
           >
             <!-- 供应商类型 -->
             <div class="p-3.5 flex items-center justify-between">
-              <span class="font-medium" style="color: var(--text-main);">供应商类型</span>
-              <div class="flex items-center space-x-1" style="color: var(--text-muted);">
+              <span class="font-medium" style="color: var(--ink-1);">供应商类型</span>
+              <div class="flex items-center space-x-1" style="color: var(--ink-2);">
                 <span>{{ providerForm.type }}</span>
                 <span class="text-gray-400">›</span>
               </div>
@@ -877,14 +877,14 @@ onMounted(() => {
             <!-- API 交互协议类型 (下拉选择) -->
             <div class="p-3.5 flex items-center justify-between">
               <div>
-                <span class="font-medium" style="color: var(--text-main);">API 交互协议</span>
-                <div class="text-[11px]" style="color: var(--text-faint);">选择该端点底层支持的通信协议标准</div>
+                <span class="font-medium" style="color: var(--ink-1);">API 交互协议</span>
+                <div class="text-[11px]" style="color: var(--ink-3);">选择该端点底层支持的通信协议标准</div>
               </div>
               <select
                 v-model="providerForm.api_format"
                 @change="onApiFormatChange"
-                class="rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border cursor-pointer max-w-[200px]"
-                style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-main);"
+                class="rounded-lg px-2.5 py-1.5 text-xs outline-none border cursor-pointer max-w-[200px]"
+                style="background-color: var(--surface-2); border-color: var(--line-1); color: var(--ink-1);"
               >
                 <option value="openai_chat">OpenAI Chat (/chat/completions)</option>
                 <option value="claude_messages">Claude Messages (/messages)</option>
@@ -894,8 +894,8 @@ onMounted(() => {
 
             <!-- 分组 -->
             <div class="p-3.5 flex items-center justify-between">
-              <span class="font-medium" style="color: var(--text-main);">分组</span>
-              <div class="flex items-center space-x-1" style="color: var(--text-muted);">
+              <span class="font-medium" style="color: var(--ink-1);">分组</span>
+              <div class="flex items-center space-x-1" style="color: var(--ink-2);">
                 <span>{{ providerForm.group }}</span>
                 <span class="text-gray-400">›</span>
               </div>
@@ -903,7 +903,7 @@ onMounted(() => {
 
             <!-- 是否启用开关 -->
             <div class="p-3.5 flex items-center justify-between">
-              <span class="font-medium" style="color: var(--text-main);">是否启用</span>
+              <span class="font-medium" style="color: var(--ink-1);">是否启用</span>
               <label class="relative inline-flex items-center cursor-pointer">
                 <input
                   type="checkbox"
@@ -916,7 +916,7 @@ onMounted(() => {
 
             <!-- 多Key模式开关 -->
             <div class="p-3.5 flex items-center justify-between">
-              <span class="font-medium" style="color: var(--text-main);">多Key模式</span>
+              <span class="font-medium" style="color: var(--ink-1);">多Key模式</span>
               <label class="relative inline-flex items-center cursor-pointer">
                 <input
                   type="checkbox"
@@ -934,30 +934,30 @@ onMounted(() => {
         <div class="space-y-3 pt-2">
           <!-- 供应商唯一标识 ID (仅新建自定义供应商时展示) -->
           <div v-if="selectedProvider.is_new">
-            <label class="block text-xs font-bold mb-1.5" style="color: var(--text-muted);">供应商唯一标识 (ID)</label>
+            <label class="block text-xs font-bold mb-1.5" style="color: var(--ink-2);">供应商唯一标识 (ID)</label>
             <input
               v-model="providerForm.id"
               placeholder="例如: openrouter 或 my-proxy"
-              class="w-full rounded-xl px-4 py-2.5 text-xs outline-none border transition-colors font-mono"
-              style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-main);"
+              class="w-full rounded-xl px-4 py-2.5 text-xs outline-none border transition-colors"
+              style="background-color: var(--surface-1); border-color: var(--line-1); color: var(--ink-1);"
             />
           </div>
 
           <!-- 名称 -->
           <div>
-            <label class="block text-xs font-bold mb-1.5" style="color: var(--text-muted);">名称</label>
+            <label class="block text-xs font-bold mb-1.5" style="color: var(--ink-2);">名称</label>
             <input
               v-model="providerForm.name"
               placeholder="OpenAI"
               class="w-full rounded-xl px-4 py-2.5 text-xs outline-none border transition-colors"
-              style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-main);"
+              style="background-color: var(--surface-1); border-color: var(--line-1); color: var(--ink-1);"
             />
           </div>
 
           <!-- API Key -->
           <div>
             <div class="flex items-center justify-between mb-1.5">
-              <label class="text-xs font-bold" style="color: var(--text-muted);">API Key</label>
+              <label class="text-xs font-bold" style="color: var(--ink-2);">API Key</label>
               <span v-if="selectedProvider.has_key" class="text-[11px] text-emerald-500 font-bold">
                 ✓ 密钥已就绪
               </span>
@@ -967,8 +967,8 @@ onMounted(() => {
                 v-model="providerForm.api_key"
                 :type="showApiKey ? 'text' : 'password'"
                 placeholder="••••••••••••••••••••••••"
-                class="w-full rounded-xl px-4 py-2.5 pr-10 text-xs outline-none border transition-colors font-mono"
-                style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-main);"
+                class="w-full rounded-xl px-4 py-2.5 pr-10 text-xs outline-none border transition-colors"
+                style="background-color: var(--surface-1); border-color: var(--line-1); color: var(--ink-1);"
               />
               <button
                 type="button"
@@ -983,23 +983,23 @@ onMounted(() => {
 
           <!-- API Base URL -->
           <div>
-            <label class="block text-xs font-bold mb-1.5" style="color: var(--text-muted);">API Base URL</label>
+            <label class="block text-xs font-bold mb-1.5" style="color: var(--ink-2);">API Base URL</label>
             <input
               v-model="providerForm.base_url"
               placeholder="https://api.openai.com/v1 或自建中继地址"
-              class="w-full rounded-xl px-4 py-2.5 text-xs outline-none border transition-colors font-mono"
-              style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-main);"
+              class="w-full rounded-xl px-4 py-2.5 text-xs outline-none border transition-colors"
+              style="background-color: var(--surface-1); border-color: var(--line-1); color: var(--ink-1);"
             />
           </div>
 
           <!-- API 路径 -->
           <div>
-            <label class="block text-xs font-bold mb-1.5" style="color: var(--text-muted);">API 路径</label>
+            <label class="block text-xs font-bold mb-1.5" style="color: var(--ink-2);">API 路径</label>
             <input
               v-model="providerForm.api_path"
               placeholder="/chat/completions"
-              class="w-full rounded-xl px-4 py-2.5 text-xs outline-none border transition-colors font-mono"
-              style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-main);"
+              class="w-full rounded-xl px-4 py-2.5 text-xs outline-none border transition-colors"
+              style="background-color: var(--surface-1); border-color: var(--line-1); color: var(--ink-1);"
             />
           </div>
         </div>
@@ -1019,7 +1019,7 @@ onMounted(() => {
           <button
             @click="saveProviderConfig"
             class="px-6 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs btn-primary-text"
-            style="background-color: var(--color-info); color: #FFFFFF;"
+            style="background-color: var(--info); color: #FFFFFF;"
           >
             保存供应商配置
           </button>
@@ -1031,20 +1031,20 @@ onMounted(() => {
         <!-- Models List Container -->
         <div
           class="rounded-3xl border divide-y overflow-hidden shadow-xs transition-colors"
-          style="background-color: var(--bg-card); border-color: var(--border-subtle);"
+          style="background-color: var(--surface-2); border-color: var(--line-1);"
         >
           <div
             v-for="m in selectedProvider.models"
             :key="m.id"
-            class="p-4 sm:p-5 flex items-center justify-between hover:bg-[var(--bg-card-subtle)] transition-colors group"
-            style="border-color: var(--border-subtle);"
+            class="p-4 sm:p-5 flex items-center justify-between hover:bg-[var(--surface-1)] transition-colors group"
+            style="border-color: var(--line-1);"
           >
             <!-- Left: Sparkle Avatar + Model Title + Badges -->
             <div class="flex items-start sm:items-center space-x-3.5 min-w-0 pr-3">
               <!-- Avatar: 经典彩色四角星 Sparkle 图标 -->
               <div
                 class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 shadow-2xs border"
-                style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);"
+                style="background-color: var(--surface-1); border-color: var(--line-1);"
               >
                 <Sparkles class="w-5 h-5 text-indigo-400" />
               </div>
@@ -1053,13 +1053,13 @@ onMounted(() => {
               <div class="min-w-0">
                 <!-- Model ID & Status Badge -->
                 <div class="flex flex-wrap items-center gap-2">
-                  <span class="font-bold text-sm tracking-tight truncate max-w-[200px] sm:max-w-md font-mono" style="color: var(--text-main);">
+                  <span class="font-bold text-sm tracking-tight truncate max-w-[200px] sm:max-w-md" style="color: var(--ink-1);">
                     {{ m.id }}
                   </span>
                   <span
                     v-if="m.id === cfg?.active_model_id"
                     class="px-2 py-0.5 rounded-full text-[11px] font-bold border"
-                    style="background-color: rgba(16, 185, 129, 0.12); border-color: rgba(16, 185, 129, 0.25); color: var(--color-up);"
+                    style="background-color: rgba(16, 185, 129, 0.12); border-color: rgba(16, 185, 129, 0.25); color: var(--up);"
                   >
                     主脑生效
                   </span>
@@ -1084,7 +1084,7 @@ onMounted(() => {
                   <span
                     v-if="m.capabilities?.includes('tools')"
                     class="p-1 rounded-full border flex items-center justify-center"
-                    style="background-color: rgba(59, 130, 246, 0.08); border-color: rgba(59, 130, 246, 0.2); color: var(--color-info);"
+                    style="background-color: rgba(59, 130, 246, 0.08); border-color: rgba(59, 130, 246, 0.2); color: var(--info);"
                     title="支持工具调用"
                   >
                     <Wrench class="w-3 h-3" />
@@ -1099,7 +1099,7 @@ onMounted(() => {
                   </span>
                   <span
                     v-if="m.context_length"
-                    class="text-[11px] font-mono text-gray-400 ml-1"
+                    class="text-[11px] text-gray-400 ml-1"
                   >
                     {{ (m.context_length / 1000).toFixed(0) }}k
                   </span>
@@ -1113,7 +1113,7 @@ onMounted(() => {
                 v-if="m.id !== cfg?.active_model_id"
                 @click="activateModel(m)"
                 class="px-3 py-1 rounded-xl text-xs font-bold border transition-all cursor-pointer shadow-xs btn-primary-text"
-                style="background-color: var(--color-info); color: #FFFFFF;"
+                style="background-color: var(--info); color: #FFFFFF;"
                 title="一键设为主脑"
               >
                 启用
@@ -1122,8 +1122,8 @@ onMounted(() => {
               <button
                 @click="runTestModel(m)"
                 :disabled="testLoading && testingModelId === m.id"
-                class="p-2 rounded-xl border text-xs cursor-pointer hover:bg-[var(--bg-card)] transition-colors"
-                style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-muted);"
+                class="p-2 rounded-xl border text-xs cursor-pointer hover:bg-[var(--surface-2)] transition-colors"
+                style="background-color: var(--surface-1); border-color: var(--line-1); color: var(--ink-2);"
                 title="测试连通性"
               >
                 <RefreshCw class="w-3.5 h-3.5" :class="testLoading && testingModelId === m.id ? 'animate-spin' : ''" />
@@ -1131,8 +1131,8 @@ onMounted(() => {
 
               <button
                 @click="openEditModelModal(m)"
-                class="p-2 rounded-xl border text-xs cursor-pointer hover:bg-[var(--bg-card)] transition-colors"
-                style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-muted);"
+                class="p-2 rounded-xl border text-xs cursor-pointer hover:bg-[var(--surface-2)] transition-colors"
+                style="background-color: var(--surface-1); border-color: var(--line-1); color: var(--ink-2);"
                 title="编辑参数"
               >
                 <Settings class="w-3.5 h-3.5" />
@@ -1141,7 +1141,7 @@ onMounted(() => {
               <button
                 @click="deleteSingleModel(m.id)"
                 class="p-2 rounded-xl border text-xs cursor-pointer hover:bg-red-500/10 transition-colors text-red-400"
-                style="border-color: var(--border-subtle);"
+                style="border-color: var(--line-1);"
                 title="删除该模型"
               >
                 <Trash2 class="w-3.5 h-3.5" />
@@ -1149,7 +1149,7 @@ onMounted(() => {
             </div>
           </div>
 
-          <div v-if="!selectedProvider.models?.length" class="py-16 text-center text-xs" style="color: var(--text-muted);">
+          <div v-if="!selectedProvider.models?.length" class="py-16 text-center text-xs" style="color: var(--ink-2);">
             该供应商名下暂未配置模型，点击下方「获取」可一键从远端自动拉取。
           </div>
         </div>
@@ -1159,9 +1159,9 @@ onMounted(() => {
           v-if="testResult"
           class="rounded-2xl border p-4 transition-all shadow-xs text-xs"
           :style="{
-            backgroundColor: testResult.ok ? 'var(--color-up-bg)' : 'var(--color-down-bg)',
-            borderColor: testResult.ok ? 'var(--color-up-border)' : 'var(--color-down-border)',
-            color: testResult.ok ? 'var(--color-up)' : 'var(--color-down)'
+            backgroundColor: testResult.ok ? 'var(--up-bg)' : 'var(--down-bg)',
+            borderColor: testResult.ok ? 'var(--up-line)' : 'var(--down-line)',
+            color: testResult.ok ? 'var(--up)' : 'var(--down)'
           }"
         >
           <div class="flex items-center justify-between mb-1.5">
@@ -1170,16 +1170,16 @@ onMounted(() => {
               <AlertCircle v-else class="w-4 h-4" />
               <span>{{ testResult.ok ? `模型测试通过 (耗时: ${testResult.latency_ms}ms)` : '连通性测试未通过' }}</span>
             </div>
-            <span class="text-[11px] opacity-75 font-mono">状态: {{ testResult.status_code || 0 }}</span>
+            <span class="text-[11px] opacity-75">状态: {{ testResult.status_code || 0 }}</span>
           </div>
 
-          <div v-if="testResult.ok" class="space-y-1 text-xs" style="color: var(--text-main);">
+          <div v-if="testResult.ok" class="space-y-1 text-xs" style="color: var(--ink-1);">
             <div>输出预览: <span class="font-bold">{{ testResult.response_preview }}</span></div>
             <div v-if="testResult.reasoning_detected" class="text-emerald-500 font-bold">
               🧠 成功识别原生长思维链输出
             </div>
           </div>
-          <div v-else class="text-xs break-all" style="color: var(--color-down);">
+          <div v-else class="text-xs break-all" style="color: var(--down);">
             {{ testResult.error || '连通性测试超时或未收到有效响应' }}
           </div>
         </div>
@@ -1188,7 +1188,7 @@ onMounted(() => {
         <div class="flex items-center justify-center pt-2 pb-20">
           <div
             class="flex items-center space-x-3 p-1.5 rounded-full border shadow-2xl backdrop-blur-md"
-            style="background-color: var(--bg-card); border-color: var(--border-subtle);"
+            style="background-color: var(--surface-2); border-color: var(--line-1);"
           >
             <!-- 获取 (带方块立方体图标的大圆角按钮) -->
             <button
@@ -1204,7 +1204,7 @@ onMounted(() => {
             <button
               @click="openAddModelModal"
               class="flex items-center space-x-2 px-5 py-2.5 rounded-full font-bold text-xs cursor-pointer border transition-all hover:opacity-90 shadow-2xs"
-              style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-main);"
+              style="background-color: var(--surface-1); border-color: var(--line-1); color: var(--ink-1);"
             >
               <Plus class="w-4 h-4" />
               <span>添加新模型</span>
@@ -1226,20 +1226,20 @@ onMounted(() => {
       <!-- Detail Bottom Tab Bar (对齐截图 2 & 截图 3 的底部「配置」与「模型」双Tab) -->
       <div
         class="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center rounded-2xl border p-1 shadow-2xl backdrop-blur-md"
-        style="background-color: var(--bg-card); border-color: var(--border-subtle);"
+        style="background-color: var(--surface-2); border-color: var(--line-1);"
       >
         <button
           @click="detailTab = 'config'"
           class="flex items-center space-x-2 px-6 py-2.5 rounded-xl font-bold text-xs cursor-pointer transition-all border"
           :style="detailTab === 'config' ? {
-            backgroundColor: 'var(--color-info)',
-            borderColor: 'var(--color-info)',
+            backgroundColor: 'var(--info)',
+            borderColor: 'var(--info)',
             color: '#FFFFFF',
             boxShadow: '0 2px 10px rgba(37,99,235,0.35)',
           } : {
             backgroundColor: 'transparent',
             borderColor: 'transparent',
-            color: 'var(--text-muted)',
+            color: 'var(--ink-2)',
           }"
         >
           <Settings class="w-4 h-4" />
@@ -1250,14 +1250,14 @@ onMounted(() => {
           @click="detailTab = 'models'"
           class="flex items-center space-x-2 px-6 py-2.5 rounded-xl font-bold text-xs cursor-pointer transition-all border"
           :style="detailTab === 'models' ? {
-            backgroundColor: 'var(--color-info)',
-            borderColor: 'var(--color-info)',
+            backgroundColor: 'var(--info)',
+            borderColor: 'var(--info)',
             color: '#FFFFFF',
             boxShadow: '0 2px 10px rgba(37,99,235,0.35)',
           } : {
             backgroundColor: 'transparent',
             borderColor: 'transparent',
-            color: 'var(--text-muted)',
+            color: 'var(--ink-2)',
           }"
         >
           <Layers class="w-4 h-4" />
@@ -1274,24 +1274,24 @@ onMounted(() => {
     >
       <div
         class="border rounded-2xl w-full max-w-2xl shadow-2xl p-5 space-y-4 text-xs max-h-[90dvh] flex flex-col"
-        style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-main);"
+        style="background-color: var(--surface-2); border-color: var(--line-1); color: var(--ink-1);"
       >
-        <div class="flex items-center justify-between pb-3 border-b shrink-0" style="border-color: var(--border-subtle);">
+        <div class="flex items-center justify-between pb-3 border-b shrink-0" style="border-color: var(--line-1);">
           <div class="flex items-center space-x-2">
             <DownloadCloud class="w-4 h-4 text-blue-500" />
-            <h3 class="text-sm font-bold uppercase" style="color: var(--text-main);">
+            <h3 class="text-sm font-bold uppercase" style="color: var(--ink-1);">
               获取 {{ selectedProvider?.name }} 远端可用模型
             </h3>
           </div>
-          <span class="text-[11px]" style="color: var(--text-faint);">探测 /models 兼容端点</span>
+          <span class="text-[11px]" style="color: var(--ink-3);">探测 /models 兼容端点</span>
         </div>
 
         <!-- Probe Configuration (仅当需要微调或端点无预存 Key 时作为高级选项展开) -->
-        <div class="p-3 rounded-xl border space-y-2 shrink-0 text-xs" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
+        <div class="p-3 rounded-xl border space-y-2 shrink-0 text-xs" style="background-color: var(--surface-1); border-color: var(--line-1);">
           <div class="flex items-center justify-between">
             <div class="flex items-center space-x-2">
-              <span class="font-bold text-[11px]" style="color: var(--text-main);">探测端点:</span>
-              <span class="font-mono text-[11px] text-blue-400">{{ customFetchUrl || selectedProvider?.base_url }}</span>
+              <span class="font-bold text-[11px]" style="color: var(--ink-1);">探测端点:</span>
+              <span class="text-[11px] text-blue-400">{{ customFetchUrl || selectedProvider?.base_url }}</span>
             </div>
             <div class="flex items-center space-x-1.5">
               <span v-if="selectedProvider?.has_key" class="text-[11px] text-emerald-400 font-bold">
@@ -1301,7 +1301,7 @@ onMounted(() => {
                 @click="executeRemoteFetch"
                 :disabled="fetchingRemote"
                 class="flex items-center space-x-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer shadow-xs btn-primary-text"
-                style="background-color: var(--color-info); color: #FFFFFF;"
+                style="background-color: var(--info); color: #FFFFFF;"
               >
                 <RefreshCw class="w-3.5 h-3.5" :class="fetchingRemote ? 'animate-spin' : ''" />
                 <span>{{ fetchingRemote ? '正在探测...' : '重新探测' }}</span>
@@ -1316,15 +1316,15 @@ onMounted(() => {
           <div
             v-if="remoteFetchResult.ok"
             class="p-2.5 rounded-xl border text-xs flex items-center justify-between"
-            style="background-color: var(--color-up-bg); border-color: var(--color-up-border); color: var(--color-up);"
+            style="background-color: var(--up-bg); border-color: var(--up-line); color: var(--up);"
           >
             <span class="font-bold">✓ 成功探测到 {{ remoteFetchResult.total }} 个可用模型</span>
-            <span class="text-[11px] opacity-80 font-mono">{{ remoteFetchResult.endpoint_used }}</span>
+            <span class="text-[11px] opacity-80">{{ remoteFetchResult.endpoint_used }}</span>
           </div>
           <div
             v-else
             class="p-2.5 rounded-xl border text-xs"
-            style="background-color: var(--color-down-bg); border-color: var(--color-down-border); color: var(--color-down);"
+            style="background-color: var(--down-bg); border-color: var(--down-line); color: var(--down);"
           >
             {{ remoteFetchResult.error }}
           </div>
@@ -1335,8 +1335,8 @@ onMounted(() => {
           <input
             v-model="remoteSearch"
             placeholder="过滤搜索模型 ID..."
-            class="w-full rounded-xl px-3.5 py-1.5 pl-9 text-xs outline-none border font-mono"
-            style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-main);"
+            class="w-full rounded-xl px-3.5 py-1.5 pl-9 text-xs outline-none border"
+            style="background-color: var(--surface-1); border-color: var(--line-1); color: var(--ink-1);"
           />
           <Search class="w-3.5 h-3.5 absolute left-3 top-2.5 text-gray-400 pointer-events-none" />
         </div>
@@ -1346,26 +1346,26 @@ onMounted(() => {
           <div
             v-for="rm in filteredRemoteModels"
             :key="rm.id"
-            class="p-3 rounded-xl border flex items-center justify-between hover:border-[var(--border-strong)] transition-colors"
-            style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);"
+            class="p-3 rounded-xl border flex items-center justify-between hover:border-[var(--line-3)] transition-colors"
+            style="background-color: var(--surface-1); border-color: var(--line-1);"
           >
             <div>
-              <div class="font-bold text-xs" style="color: var(--text-main);">{{ rm.name }}</div>
-              <div class="text-[11px] font-mono text-blue-400">{{ rm.id }}</div>
+              <div class="font-bold text-xs" style="color: var(--ink-1);">{{ rm.name }}</div>
+              <div class="text-[11px] text-blue-400">{{ rm.id }}</div>
             </div>
 
             <div class="flex items-center space-x-2 shrink-0">
               <button
                 @click="importRemoteModel(rm, false)"
-                class="px-2.5 py-1 rounded-lg text-xs font-medium border cursor-pointer hover:bg-[var(--bg-card)] transition-colors"
-                style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-main);"
+                class="px-2.5 py-1 rounded-lg text-xs font-medium border cursor-pointer hover:bg-[var(--surface-2)] transition-colors"
+                style="background-color: var(--surface-2); border-color: var(--line-1); color: var(--ink-1);"
               >
                 + 添加
               </button>
               <button
                 @click="importRemoteModel(rm, true)"
                 class="px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer shadow-xs btn-primary-text"
-                style="background-color: var(--color-info); color: #FFFFFF;"
+                style="background-color: var(--info); color: #FFFFFF;"
               >
                 添加并启用
               </button>
@@ -1373,8 +1373,8 @@ onMounted(() => {
           </div>
         </div>
 
-        <div class="flex items-center justify-between pt-3 border-t shrink-0" style="border-color: var(--border-subtle);">
-          <div class="text-[11px]" style="color: var(--text-muted);">
+        <div class="flex items-center justify-between pt-3 border-t shrink-0" style="border-color: var(--line-1);">
+          <div class="text-[11px]" style="color: var(--ink-2);">
             <span v-if="filteredRemoteModels.length">当前显示 {{ filteredRemoteModels.length }} 个模型</span>
           </div>
           <div class="flex items-center space-x-2">
@@ -1389,7 +1389,7 @@ onMounted(() => {
             <button
               @click="fetchModalVisible = false"
               class="px-4 py-1.5 rounded-xl border text-xs cursor-pointer"
-              style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-main);"
+              style="background-color: var(--surface-1); border-color: var(--line-1); color: var(--ink-1);"
             >
               完成
             </button>
@@ -1406,46 +1406,46 @@ onMounted(() => {
     >
       <div
         class="border rounded-2xl w-full max-w-lg shadow-2xl p-5 sm:p-6 space-y-4 text-xs"
-        style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-main);"
+        style="background-color: var(--surface-2); border-color: var(--line-1); color: var(--ink-1);"
       >
-        <div class="flex items-center justify-between pb-3 border-b" style="border-color: var(--border-subtle);">
-          <h3 class="text-sm font-bold uppercase" style="color: var(--text-main);">
+        <div class="flex items-center justify-between pb-3 border-b" style="border-color: var(--line-1);">
+          <h3 class="text-sm font-bold uppercase" style="color: var(--ink-1);">
             {{ editingModel ? '编辑模型' : '添加新模型' }}
           </h3>
-          <span class="text-[11px]" style="color: var(--text-faint);">所属: {{ selectedProvider?.name }}</span>
+          <span class="text-[11px]" style="color: var(--ink-3);">所属: {{ selectedProvider?.name }}</span>
         </div>
 
         <div class="space-y-3">
           <div>
-            <label class="block text-[11px] font-bold mb-1" style="color: var(--text-muted);">模型 ID</label>
+            <label class="block text-[11px] font-bold mb-1" style="color: var(--ink-2);">模型 ID</label>
             <input
               v-model="modelForm.id"
               :readonly="!!editingModel"
               placeholder="例如 gemini-3.7-flash-high / deepseek-chat"
-              class="w-full rounded-xl px-3.5 py-2 text-xs outline-none border font-mono"
-              style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-main);"
+              class="w-full rounded-xl px-3.5 py-2 text-xs outline-none border"
+              style="background-color: var(--surface-1); border-color: var(--line-1); color: var(--ink-1);"
             />
           </div>
 
           <div>
-            <label class="block text-[11px] font-bold mb-1" style="color: var(--text-muted);">展示名称</label>
+            <label class="block text-[11px] font-bold mb-1" style="color: var(--ink-2);">展示名称</label>
             <input
               v-model="modelForm.name"
               placeholder="Gemini 3.8 Flash (高推演)"
               class="w-full rounded-xl px-3.5 py-2 text-xs outline-none border"
-              style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-main);"
+              style="background-color: var(--surface-1); border-color: var(--line-1); color: var(--ink-1);"
             />
           </div>
 
           <!-- 模型能力标签选择 -->
           <div>
-            <label class="block text-[11px] font-bold mb-1" style="color: var(--text-muted);">能力标签徽标</label>
+            <label class="block text-[11px] font-bold mb-1" style="color: var(--ink-2);">能力标签徽标</label>
             <div class="flex flex-wrap gap-2 pt-1">
               <button
                 type="button"
                 @click="toggleCapability('chat')"
                 class="px-2.5 py-1 rounded-lg border text-xs font-medium cursor-pointer transition-all"
-                :style="modelForm.capabilities.includes('chat') ? { backgroundColor: 'rgba(99, 102, 241, 0.2)', borderColor: '#818CF8', color: '#818CF8' } : { backgroundColor: 'var(--bg-card-subtle)', borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }"
+                :style="modelForm.capabilities.includes('chat') ? { backgroundColor: 'rgba(99, 102, 241, 0.2)', borderColor: '#818CF8', color: '#818CF8' } : { backgroundColor: 'var(--surface-1)', borderColor: 'var(--line-1)', color: 'var(--ink-2)' }"
               >
                 聊天 (chat)
               </button>
@@ -1453,7 +1453,7 @@ onMounted(() => {
                 type="button"
                 @click="toggleCapability('vision')"
                 class="px-2.5 py-1 rounded-lg border text-xs font-medium cursor-pointer transition-all"
-                :style="modelForm.capabilities.includes('vision') ? { backgroundColor: 'rgba(236, 72, 153, 0.2)', borderColor: '#F472B6', color: '#F472B6' } : { backgroundColor: 'var(--bg-card-subtle)', borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }"
+                :style="modelForm.capabilities.includes('vision') ? { backgroundColor: 'rgba(236, 72, 153, 0.2)', borderColor: '#F472B6', color: '#F472B6' } : { backgroundColor: 'var(--surface-1)', borderColor: 'var(--line-1)', color: 'var(--ink-2)' }"
               >
                 T图 &gt; T (vision)
               </button>
@@ -1461,7 +1461,7 @@ onMounted(() => {
                 type="button"
                 @click="toggleCapability('tools')"
                 class="px-2.5 py-1 rounded-lg border text-xs font-medium cursor-pointer transition-all"
-                :style="modelForm.capabilities.includes('tools') ? { backgroundColor: 'rgba(59, 130, 246, 0.2)', borderColor: 'var(--color-info)', color: 'var(--color-info)' } : { backgroundColor: 'var(--bg-card-subtle)', borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }"
+                :style="modelForm.capabilities.includes('tools') ? { backgroundColor: 'rgba(59, 130, 246, 0.2)', borderColor: 'var(--info)', color: 'var(--info)' } : { backgroundColor: 'var(--surface-1)', borderColor: 'var(--line-1)', color: 'var(--ink-2)' }"
               >
                 工具调用 (tools)
               </button>
@@ -1469,7 +1469,7 @@ onMounted(() => {
                 type="button"
                 @click="toggleCapability('reasoning')"
                 class="px-2.5 py-1 rounded-lg border text-xs font-medium cursor-pointer transition-all"
-                :style="modelForm.capabilities.includes('reasoning') ? { backgroundColor: 'rgba(245, 158, 11, 0.2)', borderColor: 'var(--color-warn)', color: 'var(--color-warn)' } : { backgroundColor: 'var(--bg-card-subtle)', borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }"
+                :style="modelForm.capabilities.includes('reasoning') ? { backgroundColor: 'rgba(245, 158, 11, 0.2)', borderColor: 'var(--warn)', color: 'var(--warn)' } : { backgroundColor: 'var(--surface-1)', borderColor: 'var(--line-1)', color: 'var(--ink-2)' }"
               >
                 🧠 链式思考 (CoT)
               </button>
@@ -1478,11 +1478,11 @@ onMounted(() => {
 
           <!-- 思考强度配置 (动态精简与自适应展示) -->
           <div>
-            <label class="block text-[11px] font-bold mb-1" style="color: var(--text-muted);">思考推演强度</label>
+            <label class="block text-[11px] font-bold mb-1" style="color: var(--ink-2);">思考推演强度</label>
             <select
               v-model="modelForm.reasoning_effort"
-              class="w-full rounded-xl px-3.5 py-2 text-xs outline-none border cursor-pointer font-mono"
-              style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-main);"
+              class="w-full rounded-xl px-3.5 py-2 text-xs outline-none border cursor-pointer"
+              style="background-color: var(--surface-1); border-color: var(--line-1); color: var(--ink-1);"
             >
               <option
                 v-for="opt in availableEffortOptions"
@@ -1495,30 +1495,30 @@ onMounted(() => {
           </div>
 
           <div>
-            <label class="block text-[11px] font-bold mb-1" style="color: var(--text-muted);">上下文上限长度 (Tokens)</label>
+            <label class="block text-[11px] font-bold mb-1" style="color: var(--ink-2);">上下文上限长度 (Tokens)</label>
             <input
               v-model.number="modelForm.context_length"
               type="number"
               placeholder="1048576"
-              class="w-full rounded-xl px-3.5 py-2 text-xs outline-none border font-mono"
-              style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-main);"
+              class="w-full rounded-xl px-3.5 py-2 text-xs outline-none border"
+              style="background-color: var(--surface-1); border-color: var(--line-1); color: var(--ink-1);"
             />
           </div>
 
         </div>
 
-        <div class="flex justify-end space-x-2 pt-3 border-t" style="border-color: var(--border-subtle);">
+        <div class="flex justify-end space-x-2 pt-3 border-t" style="border-color: var(--line-1);">
           <button
             @click="modelModalVisible = false"
             class="px-4 py-1.5 rounded-xl border text-xs cursor-pointer"
-            style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-muted);"
+            style="background-color: var(--surface-1); border-color: var(--line-1); color: var(--ink-2);"
           >
             取消
           </button>
           <button
             @click="saveModelForm"
             class="px-5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs btn-primary-text"
-            style="background-color: var(--color-info); color: #FFFFFF;"
+            style="background-color: var(--info); color: #FFFFFF;"
           >
             保存模型
           </button>

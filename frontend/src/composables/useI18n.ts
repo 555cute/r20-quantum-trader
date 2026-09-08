@@ -2,8 +2,8 @@ import { ref, computed } from 'vue'
 import { zhCN } from '../locales/zh'
 import { enUS } from '../locales/en'
 // ---- 迁移期兼容：旧组件仍引用旧键位，深合并保证不断档；旧页面清零后移除 ----
-import { zhCN as zhLegacy } from '../locales/zh-CN'
-import { enUS as enLegacy } from '../locales/en-US'
+import { zhCN as zhLegacy } from '../locales/legacy/zh'
+import { enUS as enLegacy } from '../locales/legacy/en'
 
 export type LocaleType = 'zh-CN' | 'en-US'
 

@@ -16,7 +16,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/doc', redirect: '/docs' },
   {
     path: '/admin',
-    component: () => import('../views/AdminLayout.vue'),
+    component: () => import('../layouts/AdminLayout.vue'),
     meta: { requiresAuth: true, isPublic: false },
     children: [
       { path: '', redirect: '/admin/overview' },

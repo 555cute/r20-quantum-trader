@@ -1,0 +1,20 @@
+export const enAdminOverview = {
+  desc: 'Overall health of the engine, decision brain, data pipeline and physical interceptors',
+  backend: 'Backend',
+  uptime: 'Uptime',
+  brain: 'Decision brain',
+  okxEnv: 'OKX environment',
+  okxEnvHint: 'Manage account & symbol pool',
+  quick: {
+    prompts: 'Variable slots & presets',
+    interceptors: 'Fail-Closed hard pipeline',
+    council: 'Debate & final verdict',
+    llm: 'Providers & reasoning effort',
+  },
+  decisions: 'Latest decision snapshot',
+  decisionsDesc: 'Per-symbol final verdict this cycle; full dossier in decision audit',
+  viewAll: 'View all',
+  dataHealth: 'Data pipeline health',
+  dataHealthDesc: 'Last update and size of key artifacts',
+  recentAudit: 'Recent admin actions',
+};
