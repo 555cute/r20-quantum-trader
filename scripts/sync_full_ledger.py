@@ -22,11 +22,76 @@ from instrument_pool import load_instruments
 
 TARGET_INSTRUMENTS = load_instruments()
 
+# 历史币种白名单缓存：交易所规格回退查询用（进程内一次即可）
+_CTVAL_CACHE = {}
+
+def _sqlite_traded_names():
+    """SQLite 台账里出现过的币种名（已下架币种的历史事实源）。"""
+    names = set()
+    try:
+        import sqlite3
+        db = os.path.join(DATA_DIR, "r20_quant.db")
+        if os.path.exists(db):
+            con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+            for (inst,) in con.execute("SELECT DISTINCT inst FROM trades"):
+                if inst:
+                    names.add(str(inst))
+            con.close()
+    except Exception:
+        pass
+    return names
+
+def allowed_inst_ids(existing_ledger_trades=None):
+    """台账重建允许集合 = 当前标的池 ∪ 历史留痕币种。
+
+    修复(2026-09-09)：此前重建仅认当前池，用户从池中删除币种后，下一次同步
+    会把该币种的全部已平仓历史从 trading_ledger.json 抹掉（SQLite 仍在，但页面
+    台账消失）；持仓中途删币还会让在途仓位在台账里隐身。历史是交易所事实，
+    不随池配置消亡；噪声过滤（拦截 R20 从未交易过的手动单）由并集继续保证。
+    """
+    allowed = {item["instId"] for item in TARGET_INSTRUMENTS}
+    names = _sqlite_traded_names()
+    for t in (existing_ledger_trades or []):
+        inst = str(t.get("inst") or t.get("name") or "")
+        if inst:
+            names.add(inst)
+    try:
+        if os.path.exists(POSITION_TRACKER_FILE):
+            with open(POSITION_TRACKER_FILE, "r", encoding="utf-8") as f:
+                for key in json.load(f):
+                    inst = str(key).rsplit("_", 1)[0]
+                    if inst:
+                        names.add(inst)
+    except Exception:
+        pass
+    for n in names:
+        n = n.strip()
+        if not n:
+            continue
+        allowed.add(n if "-USDT-SWAP" in n or "-USD-SWAP" in n else f"{n}-USDT-SWAP")
+    return allowed
+
 def get_ct_val(inst_name):
     for item in TARGET_INSTRUMENTS:
         if item["name"] == inst_name or item["instId"] == inst_name:
             return item["ctVal"]
-    return 1.0
+    # 已下架币种回退：查 OKX 公共合约规格（免费、无需鉴权），进程内缓存
+    inst_id = inst_name if "-SWAP" in inst_name else f"{inst_name}-USDT-SWAP"
+    if inst_id in _CTVAL_CACHE:
+        return _CTVAL_CACHE[inst_id]
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            f"https://www.okx.com/api/v5/public/instruments?instType=SWAP&instId={inst_id}",
+            headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        rows = payload.get("data") or []
+        ct = float(rows[0].get("ctVal", 1.0) or 1.0) if rows else 1.0
+    except Exception:
+        ct = 1.0
+    _CTVAL_CACHE[inst_id] = ct
+    return ct
 
 def build_lifecycle_ledger():
     reset_time = "1970-01-01 00:00:00"
@@ -39,13 +104,17 @@ def build_lifecycle_ledger():
             pass
 
     existing_closed_ids = set()
+    old_trades = []
     if os.path.exists(LEDGER_JSON_FILE):
         try:
             with open(LEDGER_JSON_FILE, "r", encoding="utf-8") as f:
                 old_trades = json.load(f)
                 existing_closed_ids = {t["id"] for t in old_trades if t.get("status") == "closed"}
         except Exception:
-            pass
+            old_trades = []
+
+    # 重建白名单 = 当前池 ∪ 历史留痕（SQLite/旧台账/持仓追踪），下架币种历史永久保留
+    allowed = allowed_inst_ids(old_trades)
 
     trackers = {}
     if os.path.exists(POSITION_TRACKER_FILE):
@@ -77,7 +146,7 @@ def build_lifecycle_ledger():
         if pos_sz == 0.0:
             continue
         inst_id = p.get("instId", "")
-        if inst_id not in {item["instId"] for item in TARGET_INSTRUMENTS}:
+        if inst_id not in allowed:
             continue
         inst = inst_id.replace("-USDT-SWAP", "")
         side_raw = p.get("posSide", p.get("side", "")).lower()
@@ -144,7 +213,7 @@ def build_lifecycle_ledger():
             continue
 
         inst_id = h.get("instId", "")
-        if inst_id not in {item["instId"] for item in TARGET_INSTRUMENTS}:
+        if inst_id not in allowed:
             continue
         inst = inst_id.replace("-USDT-SWAP", "")
         direction = str(h.get("direction", "")).lower()
