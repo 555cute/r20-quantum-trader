@@ -500,7 +500,7 @@ const showAboutModal = ref(false)
       </header>
 
       <!-- Router View Workspace -->
-      <main class="flex-1 p-3.5 sm:p-5 2xl:p-8 overflow-y-auto max-w-[2048px] w-full mx-auto">
+      <main class="admin-workspace flex-1 p-3.5 sm:p-5 2xl:p-8 overflow-y-auto max-w-[2048px] w-full mx-auto">
         <router-view />
       </main>
     </div>

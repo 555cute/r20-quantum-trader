@@ -842,3 +842,26 @@ select { appearance: none; -webkit-appearance: none; }
   background-color: var(--bg-card); color: var(--text-main);
   box-shadow: 0 1px 2px rgba(0,0,0,.18);
 }
+
+
+/* ==== P4 deep: 后台页头扁平化（PageHeader 语汇，仅 admin-workspace 作用域） ==== */
+.admin-workspace .panel-banner-compact {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 2px 2px 12px;
+  margin-bottom: 14px;
+  border: none !important;
+  border-bottom: 1px solid var(--border-subtle) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.admin-workspace .panel-banner-icon { display: none; }  /* D1: 删装饰图标 */
+.admin-workspace .panel-banner-compact h1,
+.admin-workspace .panel-banner-compact h2 {
+  font-size: 15px;
+  letter-spacing: .02em;
+}
