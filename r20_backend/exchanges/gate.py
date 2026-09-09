@@ -204,7 +204,6 @@ class GateAdapter(BaseExchangeAdapter):
                        body: Optional[Dict[str, Any]] = None,
                        timeout: float = 15.0) -> Any:
         """私有 V4 请求：params→query（GET/DELETE/POST-query 端点通用），body→JSON。"""
-        import os
         key, secret = self._keys()
         clean_params = {k: v for k, v in (params or {}).items() if v not in (None, "")}
         query = urlencode(clean_params, doseq=True) if clean_params else ""

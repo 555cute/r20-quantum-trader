@@ -323,6 +323,8 @@ async function confirmClose() {
 const mx = ref<any>(null)
 const mxForm = ref({ binance_api_key: '', binance_secret_key: '', gate_api_key: '', gate_secret_key: '' })
 const mxTestnet = ref({ binance: false, gate: false })
+const gateExec = ref(false)
+const gateExecPhrase = ref('')
 const savingMx = ref(false)
 
 async function loadMx() {
@@ -331,6 +333,7 @@ async function loadMx() {
     if (mx.value?.venues) {
       mxTestnet.value.binance = !!mx.value.venues.binance?.testnet
       mxTestnet.value.gate = !!mx.value.venues.gate?.testnet
+      gateExec.value = !!mx.value.venues.gate?.execution_open
     }
   } catch { mx.value = null }
 }
@@ -339,6 +342,10 @@ async function saveMx() {
   savingMx.value = true
   try {
     const body: any = { binance_testnet: mxTestnet.value.binance, gate_testnet: mxTestnet.value.gate }
+    if (gateExec.value !== !!mx.value?.venues?.gate?.execution_open) {
+      body.gate_execution = gateExec.value
+      body.confirmation = gateExecPhrase.value.trim()
+    }
     for (const k of ['binance_api_key', 'binance_secret_key', 'gate_api_key', 'gate_secret_key']) {
       const v = (mxForm.value as any)[k]
       if (v && v.trim()) body[k] = v.trim()
@@ -346,6 +353,7 @@ async function saveMx() {
     await api('/api/v1/admin/multi-exchange', { method: 'PUT', body: JSON.stringify(body) })
     toast.ok('多交易所凭证与网络档位已保存')
     mxForm.value = { binance_api_key: '', binance_secret_key: '', gate_api_key: '', gate_secret_key: '' }
+    gateExecPhrase.value = ''
     await loadMx()
   } catch (e: any) {
     toast.err(`保存失败：${e.message}`)

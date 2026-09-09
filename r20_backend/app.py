@@ -162,6 +162,8 @@ class MultiExchangeUpdate(BaseModel):
     gate_secret_key: str | None = None
     binance_testnet: bool | None = None
     gate_testnet: bool | None = None
+    gate_execution: bool | None = None   # R20_GATE_EXECUTION 总开关（真实验田下单）
+    confirmation: str = ""               # 变更执行开关必须精确确认短语
 
 
 class OkxCliInstallRequest(BaseModel):
@@ -1120,6 +1122,12 @@ def admin_multi_exchange_update(payload: MultiExchangeUpdate,
         env_values["R20_BINANCE_TESTNET"] = "1" if payload.binance_testnet else "0"
     if payload.gate_testnet is not None:
         env_values["R20_GATE_TESTNET"] = "1" if payload.gate_testnet else "0"
+    if payload.gate_execution is not None:
+        # 真实下单权限变更需精确确认短语（与 UPDATE CAPITAL 同族纪律）
+        if payload.confirmation.strip().upper() != "OPEN GATE EXECUTION":
+            raise HTTPException(status_code=400,
+                                detail="变更执行开关确认短语必须精确为：OPEN GATE EXECUTION")
+        env_values["R20_GATE_EXECUTION"] = "1" if payload.gate_execution else "0"
     if env_values:
         update_env(env_values)
     try:

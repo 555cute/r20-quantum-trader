@@ -9,7 +9,21 @@
 |---|---|---|---|---|---|
 | **OKX V5**（默认主战场） | ✅ | 主源 | ✅ 全因子 | ✅ 三件套/OAuth/CLI | ✅ 生产链路（`ai_factor_trader`） |
 | **Binance USDT-M** | ✅ 免登录 | ✅（OKX 全断时补 ticker/K线/费率） | ✅ 基差/大户多空比 | ✅ 后台预留 | ⏸ 适配器未实装（独立条件单双轨待建） |
-| **Gate.io V4 永续** | ✅ 免登录 | ✅ | ✅ 基差/费率 | ✅ 后台已收口 | 🔓 **已实装，默认关闸**：`R20_GATE_EXECUTION=1` + 凭证就绪即放行（`execution_router.open_protected_position`） |
+| **Gate.io V4 永续** | ✅ 免登录 | ✅ | ✅ 基差/费率 | ✅ 后台已收口 | 🔓 已实装：`R20_GATE_EXECUTION=1`（后台第5节开关+确认短语）+ `data/venue_routing.json` 配池；**平行试验田** `scripts/gate_lab_trader.py`（dry_run 默认演算） |
+
+## Gate 试验田（平行、隔离、四道闸）
+
+主链（OKX 15 分钟循环）与试验田**零共享写状态**：试验田只读 brain 决策缓存，
+独立台账 `data/gate_lab_trackers.json`。开闸四道：
+
+1. `venue_routing.json` 的 `gate.assets` 非空（币名池）；
+2. 执行开关 `R20_GATE_EXECUTION=1`（后台第 5 节，需确认短语 `OPEN GATE EXECUTION`）；
+3. 池内 `dry_run: false`；
+4. Gate 凭证就绪。任一缺失自动 fail-safe 降为演算或不动作。
+
+预算护栏：`margin_per_trade_usdt`（每笔上限）+ `max_open`（并发笔数）+ 置信度
+门禁（默认 80，与主链同尺）；物理风控（几何/R:R/双腿保护单回读+缺口补挂+
+棘轮先挂新再撤旧）全部走与主链同一套尺子。
 
 「Gate 开闸」三重保险：`R20_GATE_EXECUTION=1`（env 显式）+ 后台凭证就绪（缺失即
 `ExchangeCapabilityError`）+ 路由内物理校验（几何/R:R 底线/100% 保护单回读，任一

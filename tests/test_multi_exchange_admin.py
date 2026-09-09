@@ -66,6 +66,30 @@ class MultiExchangeApiTests(unittest.TestCase):
         self.assertEqual(env_writes, {"R20_GATE_TESTNET": "0"})   # 空串=不保存；未提供=不写
         self.assertEqual(cleared["n"], 1)
 
+    def test_gate_execution_toggle_requires_exact_phrase(self):
+        # 错误短语 → 400 且完全不落 env
+        env_writes: dict = {}
+        with patch.object(app_module, "update_env", lambda v: env_writes.update(v)), \
+                patch.object(app_module, "save_secrets", lambda v: None), \
+                patch.object(app_module, "refresh_settings", lambda: None):
+            r = self.client.put("/api/v1/admin/multi-exchange", json={
+                "gate_execution": True, "confirmation": "open gate"})
+            self.assertEqual(r.status_code, 400)
+            self.assertEqual(env_writes, {})
+            # 正确短语 → 落 env
+            r2 = self.client.put("/api/v1/admin/multi-exchange", json={
+                "gate_execution": True, "confirmation": "OPEN GATE EXECUTION"})
+            self.assertEqual(r2.status_code, 200, r2.text)
+            self.assertEqual(env_writes, {"R20_GATE_EXECUTION": "1"})
+
+    def test_execution_status_field_exposed_in_get(self):
+        with patch.object(ex, "venue_credentials", lambda v: ("", "")), \
+                patch.object(ex, "venue_testnet_enabled", lambda v: False), \
+                patch.object(ex, "execution_open", lambda v: v == "gate"):
+            data = self.client.get("/api/v1/admin/multi-exchange").json()
+        self.assertTrue(data["venues"]["gate"]["execution_open"])
+        self.assertFalse(data["venues"]["binance"]["execution_open"])
+
     def test_put_requires_real_superadmin_session(self):
         for p in self._patches[1:2]:  # 停掉 require_superadmin 打桩，走真实 RBAC
             p.stop()

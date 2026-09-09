@@ -68,6 +68,14 @@ def open_protected_position(decision: Dict[str, Any], *,
     spec = ad.fetch_instrument_spec(asset)
     if spec is None:
         return _fail("specs", f"Gate 无法获取 {asset} 合约规格（下架或网络故障）")
+    # 价格对齐 Gate tick（order_price_round），防 PRICE_INVALID 拒单
+    tick = float(spec.tick_size or 0.1) or 0.1
+
+    def _q(px: float) -> float:
+        import math as _m
+        return round(round(px / tick) * tick, max(0, int(-_m.log10(tick)) + 1))
+
+    entry, tp, sl = _q(entry), _q(tp), _q(sl)
     ref_price = float(price_ref or 0) or 0.0
     if ref_price <= 0:
         tick = ad.fetch_ticker(asset) or {}

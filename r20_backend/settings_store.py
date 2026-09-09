@@ -18,6 +18,8 @@ MANAGED_KEYS = {
     "OKX_IS_SIMULATED",
     # 多交易所网络档位（只读行情/未来的执行路由共用）
     "R20_BINANCE_TESTNET", "R20_GATE_TESTNET",
+    # Gate 试验田执行总开关（真实下单权限，默认关）
+    "R20_GATE_EXECUTION",
     "LLM_BASE_URL",
     "LLM_API_KEY",
     "LLM_MODEL",

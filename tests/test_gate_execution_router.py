@@ -195,6 +195,16 @@ class TestRouter(unittest.TestCase):
         self.assertFalse(r["ok"])
         self.assertEqual(r["stage"], "sizing")
 
+    def test_price_aligned_to_tick(self):
+        # tick 0.1 下 79000.04 必须对齐为 79000.0 再下单（防 Gate PRICE_INVALID）
+        ad = _StubAdapter()
+        with patch.dict(os.environ, {"R20_GATE_EXECUTION": "1"}):
+            r = router.open_protected_position(
+                _decision(entry_price=79000.04, take_profit_price=85000.07,
+                          stop_loss_price=77000.02), adapter=ad, price_ref=79000.0)
+        self.assertTrue(r["ok"], r.get("detail"))
+        self.assertEqual(ad.calls[1][4], 79000.0)   # place price 已对齐
+
     def test_price_ref_missing_falls_back_to_ticker(self):
         ad = _StubAdapter()
         with patch.dict(os.environ, {"R20_GATE_EXECUTION": "1"}):
