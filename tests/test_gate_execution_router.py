@@ -41,15 +41,24 @@ class _StubAdapter(GateAdapter):
     """打桩全部私有 IO 与规格/行情；记录调用序列，支持注入失败。"""
 
     def __init__(self, *, fail_attach=False, fail_verify=False, fail_place=False,
-                 fail_leverage=False):
+                 fail_leverage=False, positions_rows=None, fail_positions=False):
         self.calls = []
         self.price_orders = []
         self._fail = {"attach": fail_attach, "verify": fail_verify,
-                      "place": fail_place, "leverage": fail_leverage}
+                      "place": fail_place, "leverage": fail_leverage,
+                      "positions": fail_positions}
+        self._positions_rows = positions_rows or []
         self._n = 0
 
     def _keys(self):
         return ("k", "s")
+
+    def positions(self):
+        # US-009 precheck 探针：默认无既有仓（己方干净），可注入外部仓/故障
+        self.calls.append(("positions",))
+        if self._fail["positions"]:
+            raise RuntimeError("positions boom")
+        return list(self._positions_rows)
 
     def fetch_instrument_spec(self, symbol, refresh=False):
         from r20_backend.exchanges import InstrumentSpec
@@ -61,7 +70,7 @@ class _StubAdapter(GateAdapter):
         return {"last": 79000.0, "mark_price": 79000.0}
 
     def set_leverage(self, symbol, leverage, margin_mode="cross"):
-        self.calls.append(("leverage", symbol, leverage))
+        self.calls.append(("leverage", symbol, leverage, margin_mode))
         if self._fail["leverage"]:
             raise RuntimeError("leverage refused")
         return {"leverage": str(int(leverage))}
@@ -126,8 +135,10 @@ class TestRouter(unittest.TestCase):
             r = router.open_protected_position(_decision(), adapter=ad,
                                                price_ref=79000.0)
         self.assertTrue(r["ok"], r.get("detail"))
-        self.assertEqual([c[0] for c in ad.calls], ["leverage", "place", "attach", "verify"])
-        self.assertEqual(ad.calls[1], ("place", "BTC", "long", 57, 79000.0))
+        self.assertEqual([c[0] for c in ad.calls],
+                         ["positions", "leverage", "place", "attach", "verify"])
+        self.assertEqual(ad.calls[2], ("place", "BTC", "long", 57, 79000.0))
+        self.assertEqual(ad.calls[1][3], "cross")   # 缺省保持历史行为
         self.assertEqual(r["tp_id"], "tp1")
         self.assertEqual(r["sl_id"], "sl1")
         self.assertGreaterEqual(r["rr"], 2.0)
@@ -141,7 +152,7 @@ class TestRouter(unittest.TestCase):
                 adapter=ad, price_ref=79000.0)
         self.assertTrue(r["ok"], r.get("detail"))
         self.assertEqual(r["size_signed"], -57)
-        self.assertEqual(ad.calls[1][2], "short")
+        self.assertEqual(ad.calls[2][2], "short")   # 序列: positions, leverage, place...
 
     def test_geometry_rejected_before_any_execution(self):
         ad = _StubAdapter()
@@ -203,7 +214,7 @@ class TestRouter(unittest.TestCase):
                 _decision(entry_price=79000.04, take_profit_price=85000.07,
                           stop_loss_price=77000.02), adapter=ad, price_ref=79000.0)
         self.assertTrue(r["ok"], r.get("detail"))
-        self.assertEqual(ad.calls[1][4], 79000.0)   # place price 已对齐
+        self.assertEqual(ad.calls[2][4], 79000.0)   # place price 已对齐（序列含 positions 探针）
 
     def test_price_ref_missing_falls_back_to_ticker(self):
         ad = _StubAdapter()
@@ -221,6 +232,57 @@ class TestRouter(unittest.TestCase):
             r = router.close_position("BTC", adapter=ad)
         self.assertTrue(r["ok"])
         self.assertIn(("close", "BTC"), ad.calls)
+
+
+class TestExternalPositionPrecheck(unittest.TestCase):
+    """US-009：开仓前同合约既有仓探针——外部/不符=连坐拒开，探针失败=fail-closed。"""
+
+    def _env(self):
+        return patch.dict(os.environ, {"R20_GATE_EXECUTION": "1"})
+
+    def test_foreign_position_rejects_entry(self):
+        ad = _StubAdapter(positions_rows=[{"base": "BTC", "side": "long",
+                                           "size_signed": 30}])
+        with self._env():
+            r = router.open_protected_position(_decision(), adapter=ad, price_ref=79000.0)
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["stage"], "precheck")
+        self.assertNotIn("place", [c[0] for c in ad.calls])   # 探针在任何委托之前
+
+    def test_lab_no_record_but_exchange_has_position_rejects(self):
+        # own_position=None（lab 无在管记录）而交易所有仓 → 来源不明，拒开
+        ad = _StubAdapter(positions_rows=[{"base": "BTC", "side": "short",
+                                           "size_signed": -12}])
+        with self._env():
+            r = router.open_protected_position(_decision(), adapter=ad, price_ref=79000.0)
+        self.assertEqual(r["stage"], "precheck")
+        self.assertIn("lab 无在管记录", r["detail"])
+
+    def test_own_matching_position_passes_through(self):
+        # lab 在管记录与交易所一致（如 tracker 恢复场景）→ 己仓放行
+        ad = _StubAdapter(positions_rows=[{"base": "BTC", "side": "long",
+                                           "size_signed": 57}])
+        own = {"size_signed": 57, "side": "long"}
+        with self._env():
+            r = router.open_protected_position(_decision(), adapter=ad,
+                                               price_ref=79000.0, own_position=own)
+        self.assertTrue(r["ok"], r.get("detail"))
+        self.assertIn("place", [c[0] for c in ad.calls])
+
+    def test_probe_failure_fail_closed(self):
+        ad = _StubAdapter(fail_positions=True)
+        with self._env():
+            r = router.open_protected_position(_decision(), adapter=ad, price_ref=79000.0)
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["stage"], "precheck")
+
+    def test_margin_mode_forwarded_to_set_leverage(self):
+        ad = _StubAdapter()
+        with self._env():
+            r = router.open_protected_position(_decision(), adapter=ad,
+                                               price_ref=79000.0, margin_mode="isolated")
+        self.assertTrue(r["ok"], r.get("detail"))
+        self.assertEqual(ad.calls[1], ("leverage", "BTC", 3, "isolated"))
 
 
 class TestAdapterPayloadShapes(unittest.TestCase):

@@ -29,6 +29,9 @@ DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 DECISION_FILE = os.path.join(DATA_DIR, "ai_brain_decisions.json")
 LAB_TRACKER_FILE = os.path.join(DATA_DIR, "gate_lab_trackers.json")
 LAB_LEDGER_FILE = os.path.join(DATA_DIR, "gate_lab_ledger.json")
+# brain 持仓管理指令流（US-009）：与主链 execute_ai_position_management 同源同语义，
+# instructions 数组含 UPDATE_SL/CLOSE_MARKET/HOLD + suggested_sl_price + confidence。
+PM_FILE = os.path.join(DATA_DIR, "ai_position_management.json")
 # 跨所敞口只读源（US-005）：主链本地 tracker + 合约池 ctVal——零新凭证、零新网络。
 # 调研结论：无更干净的只读源（ai_position_management.json 只有指令无名义，
 # position_trackers 是唯一含 currentSz/entryPx/side 的 OKX 在管仓位本地快照）。
@@ -81,6 +84,76 @@ def _is_tighter(pos_side, new_sl, old_sl, mark_px):
     if pos_side == "long":
         return new_sl > old_sl and new_sl < mark_px
     return (old_sl <= 0 or new_sl < old_sl) and new_sl > mark_px
+
+
+def pm_instructions() -> dict:
+    """读 brain 指令流（同款 300s 新鲜度），{裸币名: instruction}。损坏/过期=空。"""
+    doc = _load_json(PM_FILE, {})
+    try:
+        if int(time.time()) - int(doc.get("timestamp") or 0) > DECISION_MAX_AGE_SECONDS:
+            return {}
+        out = {}
+        for row in doc.get("instructions") or []:
+            if not isinstance(row, dict):
+                continue
+            raw = str(row.get("instId") or row.get("asset") or "").strip().upper()
+            asset = raw.split("-")[0].split("_")[0]
+            if asset:
+                out[asset] = row
+        return out
+    except Exception:
+        return {}
+
+
+def _resolve_mgmt(asset: str, dec: dict, pm: dict):
+    """US-009 裁决：position_management 指令流优先、decision 兜底（与主链同语义）。
+
+    返回 (want_close, sl_target, notes[])——notes 为冲突/抑制留痕。
+    CLOSE 阈值 conf≥85 与主链一致；UPDATE_SL 取 suggested_sl_price；
+    HOLD 压制一切管理动作（=指令流要求维持现状）。
+    """
+    notes = []
+    dec_act = str(dec.get("action") or "").upper()
+    if not pm:
+        return (dec_act == "CLOSE_MARKET" and float(dec.get("confidence") or 0) >= 85,
+                float(dec.get("stop_loss_price") or 0), notes)
+    pm_act = str(pm.get("action") or "").upper()
+    pm_conf = float(pm.get("confidence") or 0)
+    if pm_act == "CLOSE_MARKET":
+        if dec_act != "CLOSE_MARKET":
+            notes.append(f"指令流 CLOSE_MARKET 覆盖 decision({dec_act})")
+        if pm_conf < 85:
+            notes.append(f"指令流 CLOSE conf={pm_conf:.0f}<85 压制平仓"
+                         + ("（decision 同为 CLOSE，一并压制）" if dec_act == "CLOSE_MARKET" else ""))
+            return False, 0.0, notes
+        return True, 0.0, notes
+    if pm_act == "UPDATE_SL":
+        sl = float(pm.get("suggested_sl_price") or 0)
+        dsl = float(dec.get("stop_loss_price") or 0)
+        if dsl > 0 and sl > 0 and dsl != sl:
+            notes.append(f"SL 价格冲突: decision={dsl:g} vs 指令流={sl:g}，以指令流为准")
+        return False, sl, notes
+    if pm_act == "HOLD":
+        if dec_act == "CLOSE_MARKET" or float(dec.get("stop_loss_price") or 0) > 0:
+            notes.append("指令流 HOLD 压制 decision 的平仓/止损调整")
+        return False, 0.0, notes
+    notes.append(f"未知指令流 action({pm_act})，忽略")
+    return False, 0.0, notes
+
+
+def _derive_margin_mode(acct: dict, live_positions: dict) -> str:
+    """从账户实况推导保证金模式（勿硬编码 cross）：持仓行 margin_mode 字段优先
+    （Gate 实测形态 cross_mode/isolated_mode，裸值也兼容），无持仓按单双向模式推
+    （dual→isolated 常见配套，单向→cross），全未知回退 cross。"""
+    for p in (live_positions or {}).values():
+        mm = str(p.get("margin_mode") or "").lower()
+        if "isolated" in mm:
+            return "isolated"
+        if "cross" in mm:
+            return "cross"
+    if acct.get("in_dual_mode"):
+        return "isolated"
+    return "cross"
 
 
 # ---------------------------------------------------------------------------
@@ -215,7 +288,7 @@ def _record_main_ledger(t: dict, *, close_px: float = 0.0, pnl=None,
         return False, str(exc)
 
 
-def plan_entry(dry, asset, dec, pool, ad):
+def plan_entry(dry, asset, dec, pool, ad, *, own_position=None, margin_mode=None):
     """dry=全链路演算（规格/张数/双腿触发计划），live=真实受保护开仓。"""
     margin = min(float(dec.get("margin_usdt") or pool["margin_per_trade_usdt"]),
                  float(pool["margin_per_trade_usdt"]))
@@ -229,7 +302,9 @@ def plan_entry(dry, asset, dec, pool, ad):
         "stop_loss_price": float(dec.get("stop_loss_price") or 0),
     }
     if not dry:
-        return router.open_protected_position(decision, adapter=ad)
+        return router.open_protected_position(decision, adapter=ad,
+                                              own_position=own_position,
+                                              margin_mode=margin_mode)
     # ---- dry_run：复刻路由的校验与折算，但不触任何私有端点 ----
     from r20_backend.exchanges.base import canonical_base
     try:
@@ -289,6 +364,22 @@ def run_lab_cycle(ad=None, now_ts=None):
             return actions
 
     my_assets = set(pool["assets"])
+    # ⓪ US-009 live 启动体检：dual 模式下 Gate close=true 语义不可靠（会连坐平掉
+    # 非 lab 名下腿）→ 禁开新仓；快照读不到同样 fail-closed 禁开（管理动作不受限）。
+    margin_mode = None
+    entry_allowed = True
+    if not dry:
+        try:
+            acct = ad.account_snapshot() or {}
+            if acct.get("in_dual_mode"):
+                entry_allowed = False
+                actions.append("[GateLab][PRECHECK] 账户为双向(hedge)持仓模式，close=true 全平语义"
+                               "在双仓下不可靠——本轮禁开新仓（请在 Gate 端切 single/net 模式）")
+            margin_mode = _derive_margin_mode(acct, live_positions)
+        except Exception as exc:
+            entry_allowed = False
+            actions.append(f"[GateLab][PRECHECK] 账户快照不可读，本轮禁开新仓(fail-closed): {exc}")
+    pm_map = pm_instructions()
     # ① 对账：试验田 tracker 有、交易所在途无 → 已平/被撤，落账清理
 
     def _live_pnl_estimate(t):
@@ -343,9 +434,13 @@ def run_lab_cycle(ad=None, now_ts=None):
         conf = float(dec.get("confidence") or 0)
         t = trackers.get(asset)
         if t and t.get("mode") == ("dry" if dry else "live"):
-            if act == "CLOSE_MARKET" and conf >= 85:
+            # US-009：指令流优先裁决（与主链同语义），decision 兜底；冲突留痕
+            want_close, sl_target, mgmt_notes = _resolve_mgmt(asset, dec, pm_map.get(asset))
+            for n in mgmt_notes:
+                actions.append(f"[GateLab] {asset} 指令流裁决：{n}")
+            if want_close:
                 if dry:
-                    actions.append(f"[GateLab] [DRY] {asset} CLOSE_MARKET conf={conf:.0f} → 将市价全平")
+                    actions.append(f"[GateLab] [DRY] {asset} CLOSE_MARKET → 将市价全平（指令流裁决）")
                     trackers.pop(asset, None)
                     continue
                 r = router.close_position(asset, adapter=ad)
@@ -367,7 +462,7 @@ def run_lab_cycle(ad=None, now_ts=None):
                                    "pnl_estimate": pnl, "reason": "close_market"})
                     _atomic_dump(LAB_LEDGER_FILE, ledger)
                 continue
-            new_sl = float(dec.get("stop_loss_price") or 0)
+            new_sl = sl_target
             mark = float(live_positions.get(asset, {}).get("mark_price") or 0) if not dry else 0.0
             if dry:  # 演算态没有真实 mark，用决策入场价近似（棘轮判定偏保守）
                 mark = float(dec.get("entry_price") or 0) or new_sl * 1.01
@@ -404,6 +499,9 @@ def run_lab_cycle(ad=None, now_ts=None):
                 # 已有另一模式的 tracker（如 live 仓位遇到 dry 轮）：绝不越权接管/覆盖
                 actions.append(f"[GateLab] {asset} 已有 {t.get('mode')} 试验田仓位，{mode} 轮跳过")
                 continue
+            if not dry and not entry_allowed:
+                actions.append(f"[GateLab] {asset} 启动体检未通过，本轮禁开新仓")
+                continue
             if open_count >= int(pool["max_open"]):
                 actions.append(f"[GateLab] {asset} 试验田满仓({open_count}/{pool['max_open']})，跳过")
                 continue
@@ -432,7 +530,7 @@ def run_lab_cycle(ad=None, now_ts=None):
                     f"lab同向={lab_notional} + 本单={plan_notional} "
                     f"= {exposure_total} > cap {cap}")
                 continue
-            r = plan_entry(dry, asset, dec, pool, ad)
+            r = plan_entry(dry, asset, dec, pool, ad, own_position=t, margin_mode=margin_mode)
             if r.get("ok"):
                 trackers[asset] = {
                     "mode": "dry" if dry else "live", "venue": "gate", "asset": asset,

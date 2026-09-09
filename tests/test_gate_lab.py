@@ -21,9 +21,16 @@ from r20_backend.exchanges.gate import GateAdapter  # noqa: E402
 
 
 class _StubAd(GateAdapter):
-    def __init__(self, positions_ok=True):
+    def __init__(self, positions_ok=True, positions_rows=None, acct=None):
         self.calls = []
         self._positions_ok = positions_ok
+        # US-009 开仓前置体检桩：默认交易所 BTC 在途 57 张（对账/棘轮用例的既有素材）；
+        # 新开仓用例须传 positions_rows=[]（干净账户），否则 router precheck 判外部连坐拒开。
+        self._positions_rows = positions_rows if positions_rows is not None else [
+            {"base": "BTC", "side": "long", "size_signed": 57, "mark_price": 79500.0,
+             "entry_price": 79000.0}]
+        # US-009 ⓪ 启动体检桩：默认单向净持仓模式（live 放行开仓），可注入 dual/坏账户
+        self._acct = acct if acct is not None else {"in_dual_mode": False}
         self.price_orders = [{"id": "tpA"}, {"id": "slA"}]
         self.open_orders = []          # list_open_orders 返回（G7 清扫源）
 
@@ -62,8 +69,12 @@ class _StubAd(GateAdapter):
 
     def positions(self):
         self.calls.append(("positions",))
-        return [{"base": "BTC", "side": "long", "size_signed": 57, "mark_price": 79500.0,
-                 "entry_price": 79000.0}]
+        return list(self._positions_rows)
+
+    def account_snapshot(self):
+        # US-009 ⓪ live 启动体检（dual_mode 判定 + margin_mode 推导）的只读探针
+        self.calls.append(("acct",))
+        return dict(self._acct)
 
     def amend_stop_loss(self, s, side, old_id, new_sl, expiration=604800):
         self.calls.append(("amend", s, side, old_id, new_sl)); return "slB"
@@ -90,9 +101,11 @@ class LabCase(unittest.TestCase):
         p5 = patch.object(lab, "INSTRUMENT_POOL_FILE", self.pool_f)
         import db_manager as dbm
         p6 = patch.object(dbm, "DB_PATH", self.db)
-        for p in (p1, p2, p3, p4, p5, p6):
+        # US-009 新增写读口：brain 持仓指令流文件——同样钉死到 tmp（默认不存在=无指令）
+        p7 = patch.object(lab, "PM_FILE", os.path.join(self.tmp.name, "pm.json"))
+        for p in (p1, p2, p3, p4, p5, p6, p7):
             p.start()
-        self._patches = [p1, p2, p3, p4, p5, p6]
+        self._patches = [p1, p2, p3, p4, p5, p6, p7]
         self.dbm = dbm
 
     def tearDown(self):
@@ -205,7 +218,8 @@ class TestLabLive(LabCase):
                                   "margin_usdt": 40.0, "entry_price": 79000.0,
                                   "take_profit_price": 85000.0, "stop_loss_price": 77000.0})
         self.use_pool(self.pool(["BTC"], dry=False), "live")
-        ad = _StubAd()
+        # 新开仓用例：交易所须干净（US-009 router precheck 对 lab 无记录的在途仓=连坐拒开）
+        ad = _StubAd(positions_rows=[])
         with patch.dict(os.environ, {"R20_GATE_EXECUTION": "1"}):
             acts = lab.run_lab_cycle(ad=ad)
         self.assertIn("开仓:", acts[0])
