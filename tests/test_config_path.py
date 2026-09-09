@@ -70,11 +70,9 @@ class PersistedEnvFileTests(unittest.TestCase):
         cls.okx_runtime = okx_runtime
         cls.runtime = runtime
 
-    def setUp(self):
-        self.runtime.unfreeze_environment()
-
     def tearDown(self):
         self.runtime.unfreeze_environment()
+
 
     def _isolate(self, env_path: Path, root: Path):
         stack = ExitStack()
