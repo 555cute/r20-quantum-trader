@@ -60,6 +60,12 @@ const groupIcons: Record<string, any> = {
   pyramiding: TrendingUp,
 }
 
+// 杠杆区间合并行的参数引用（schema 缺失时自动退回通用行渲染，不炸页面）
+const levMinP = computed<any>(() => schema.value?.params.find((x: any) => x.key === 'R20_MIN_LEVERAGE') || null)
+const levMaxP = computed<any>(() => schema.value?.params.find((x: any) => x.key === 'R20_MAX_LEVERAGE') || null)
+const levInverted = computed(() => !!levMinP.value && !!levMaxP.value
+  && (draft[levMinP.value.key] ?? 0) > (draft[levMaxP.value.key] ?? 0))
+
 function toDisplay(p: any, native: number): string {
   const v = native * (p.display_scale || 1)
   // 去掉浮点噪声，最多保留 4 位小数
@@ -131,6 +137,14 @@ async function saveChanges() {
   })
   if (bad.length) {
     toast.err(`以下参数越界：${bad.map((p: any) => p.label).join('、')}`)
+    return
+  }
+  if (levInverted.value) {
+    toast.err('杠杆下限不能高于上限，请先修正「单笔杠杆区间」')
+    return
+  }
+  if (levInverted.value) {
+    toast.err('杠杆下限不能高于上限，请调整区间后再保存')
     return
   }
   busy.value = 'save'
@@ -233,8 +247,55 @@ onMounted(loadData)
         </div>
 
         <div class="divide-y" style="border-color: var(--line-1);">
+          <!-- 杠杆区间合并行：下限~上限一体编辑（用户 2026-09-10 明确要求「下限到上限」形态） -->
           <div
-            v-for="p in schema.params.filter((x: any) => x.group === group.id)"
+            v-if="group.id === 'exposure' && levMinP && levMaxP"
+            class="px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4"
+            style="border-color: var(--line-1);"
+          >
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-xs font-bold" style="color: var(--ink-1);">单笔杠杆区间（下限 ~ 上限）</span>
+                <span v-if="isCustomized(levMinP) || isCustomized(levMaxP)" class="text-[11px] px-1.5 py-0.5 rounded border border-amber-500/30 bg-amber-500/10 text-amber-400">已自定义</span>
+                <span v-if="levInverted" class="text-[11px] px-1.5 py-0.5 rounded border border-rose-500/40 bg-rose-500/10 text-rose-400">下限高于上限：保存将被拒绝</span>
+              </div>
+              <p class="text-[11px] mt-1 leading-relaxed" style="color: var(--ink-2);">AI 投委会/主脑在区间内按信号强度自主裁决杠杆；区间外执行层强制钳制。调高下限＝强制放大名义敞口，请配合日亏熔断使用。</p>
+              <p class="text-[11px] mt-0.5 opacity-60" style="color: var(--ink-2);">
+                默认 {{ toDisplay(levMinP, levMinP.default) }} ~ {{ toDisplay(levMaxP, levMaxP.default) }} x · 可配 {{ toDisplay(levMinP, levMinP.min) }} ~ {{ toDisplay(levMaxP, levMaxP.max) }} x · {{ levMinP.key }} / {{ levMaxP.key }}
+              </p>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <div class="flex items-center rounded-lg border overflow-hidden" style="background-color: var(--surface-input); border-color: var(--line-1);">
+                <input
+                  v-model="disp[levMinP.key]"
+                  @input="onFieldInput(levMinP)"
+                  type="number"
+                  :min="toDisplay(levMinP, levMinP.min)"
+                  :max="toDisplay(levMinP, levMinP.max)"
+                  :step="levMinP.step"
+                  class="w-20 sm:w-24 px-2.5 py-2 text-xs outline-none text-right"
+                  style="background: transparent; color: var(--ink-1);"
+                  :class="draft[levMinP.key] < levMinP.min || draft[levMinP.key] > levMinP.max || levInverted ? 'ring-1 ring-rose-500' : ''"
+                />
+                <span class="px-1 text-[11px]" style="color: var(--ink-2);">x</span>
+                <span class="px-0.5 text-[11px]" style="color: var(--ink-3);">~</span>
+                <input
+                  v-model="disp[levMaxP.key]"
+                  @input="onFieldInput(levMaxP)"
+                  type="number"
+                  :min="toDisplay(levMaxP, levMaxP.min)"
+                  :max="toDisplay(levMaxP, levMaxP.max)"
+                  :step="levMaxP.step"
+                  class="w-20 sm:w-24 px-2.5 py-2 text-xs outline-none text-right"
+                  style="background: transparent; color: var(--ink-1);"
+                  :class="draft[levMaxP.key] < levMaxP.min || draft[levMaxP.key] > levMaxP.max || levInverted ? 'ring-1 ring-rose-500' : ''"
+                />
+                <span class="px-2 text-[11px] whitespace-nowrap select-none" style="color: var(--ink-2);">x</span>
+              </div>
+            </div>
+          </div>
+          <div
+            v-for="p in schema.params.filter((x: any) => x.group === group.id && x.key !== 'R20_MIN_LEVERAGE' && x.key !== 'R20_MAX_LEVERAGE')"
             :key="p.key"
             class="px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4"
             style="border-color: var(--line-1);"
