@@ -52,6 +52,21 @@ class LedgerUnionWhitelistTests(unittest.TestCase):
 
 
 class RetiredCoinContractSpecTests(unittest.TestCase):
+    def setUp(self):
+        # 封闭三律·律①（2026-09-09 修复）：本测试原把红绿钉在运行环境的标的池残留上——
+        # 新检出/无 data/instruments.json 时，代码默认池含 XRP(ctVal=100) 使 get_ct_val
+        # 提前返回、永远绕不过 patch 的 urlopen 桩。此处钉扎「池内无 XRP」的确定前提。
+        self._pool = sfl.TARGET_INSTRUMENTS
+        sfl.TARGET_INSTRUMENTS = [
+            item for item in self._pool
+            if item.get("name") != "XRP" and "XRP" not in str(item.get("instId", ""))
+        ]
+        sfl._CTVAL_CACHE.clear()
+
+    def tearDown(self):
+        sfl.TARGET_INSTRUMENTS = self._pool
+        sfl._CTVAL_CACHE.clear()
+
     def test_ct_val_falls_back_to_public_instruments(self):
         sfl._CTVAL_CACHE.clear()
         payload = json.dumps({"code": "0", "data": [{"ctVal": "100.0"}]}).encode()
