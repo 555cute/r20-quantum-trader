@@ -27,6 +27,35 @@ class TestInstrumentPoolBaseUnits(unittest.TestCase):
         with self.assertRaises(ValueError):
             canonical_inst_id("BTC-USD-SWAP")
 
+    def test_stored_wrong_auto_name_uses_canonical_coin_without_changing_risk(self):
+        row = {
+            "instId": "DUSK-USDT-SWAP", "name": "BTC", "ccy": "BTC",
+            "ctVal": 1, "nativeCtVal": 1, "base_qty": 0.0001, "base_sz": 0.0001,
+            "tier": "tier_1_bluechip", "max_leverage": 5, "sl_atr_mult": 1.8,
+            "risk_per_trade_usd": 15.0, "tickSz": "0.10",
+            "venue_symbol": "DUSKUSDT",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "instrument_pool.json"
+            path.write_text(json.dumps({"version": 1, "instruments": [row]}), encoding="utf-8")
+            with patch("scripts.instrument_pool.POOL_FILE", path):
+                loaded = load_instruments()[0]
+            self.assertEqual(loaded["name"], "DUSK")
+            self.assertEqual(loaded["ccy"], "DUSK")
+            self.assertNotIn("venue_symbol", loaded)
+            self.assertEqual(loaded["max_leverage"], 5)
+            self.assertEqual(loaded["risk_per_trade_usd"], 15.0)
+            self.assertEqual(loaded["base_qty"], 0.0001)
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["instruments"], [row])
+
+    def test_coin_identity_repair_preserves_custom_display_name(self):
+        item = normalize_pool_item({
+            "instId": "DUSK-USDT-SWAP", "name": "DUSK观察仓", "ccy": "BTC",
+            "ctVal": 1, "base_qty": 2,
+        })
+        self.assertEqual(item["name"], "DUSK观察仓")
+        self.assertEqual(item["ccy"], "DUSK")
+
     def test_legacy_okx_contracts_migrate_once_to_base_qty(self):
         item = normalize_pool_item({
             "instId": "BTC-USDT-SWAP",

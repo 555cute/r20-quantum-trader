@@ -153,6 +153,7 @@ def _ensure_tier(item: dict[str, Any]) -> dict[str, Any]:
 def normalize_pool_item(item: dict[str, Any]) -> dict[str, Any]:
     """Normalize a pool row to BASE units. Never keeps OKX contract counts as Binance size."""
     out = dict(item)
+    out.pop("venue_symbol", None)
     native = out.get("nativeCtVal")
     ct_val = _decimal(out.get("ctVal"), "1")
     if native in (None, ""):
@@ -181,12 +182,18 @@ def normalize_pool_item(item: dict[str, Any]) -> dict[str, Any]:
 
     tick_size = str(out.get("tickSz") or "0.0001")
     inst_id = str(out.get("instId", "")).upper()
-    name = str(out.get("name") or out.get("ccy") or inst_id.split("-", 1)[0]).upper()
+    base = inst_id.split("-", 1)[0]
+    stored_ccy = str(out.get("ccy") or "").upper()
+    name = str(out.get("name") or stored_ccy or base).upper()
+    # Old Binance rows copied another symbol's baseCcy into both fields.
+    # Repair that automatic label without replacing an explicit custom name.
+    if base and stored_ccy != base and name == stored_ccy:
+        name = base
     out.update({
         "instId": inst_id,
         "name": name,
         "type": out.get("type") or "crypto",
-        "ccy": str(out.get("ccy") or name).upper(),
+        "ccy": base or stored_ccy or name,
         "base_qty": _as_float(base_qty),
         "base_sz": _as_float(base_qty),
         "precision": int(out["precision"]) if out.get("precision") not in (None, "") else _precision(tick_size),
