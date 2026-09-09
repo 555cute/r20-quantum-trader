@@ -1704,12 +1704,6 @@ class BinanceExchange:
             return record, [], False
         if filled <= 0:
             record["protection_status"] = "flat"
-            print(
-                f"[挂单生命周期管理] {record['inst_id']} 开仓单已确认终态: "
-                f"order={record['order_id']}, status={status}, filled={record['entry_filled']}, "
-                f"cancel_requested={record['cancel_requested']}；零成交，未建立本次仓位",
-                flush=True,
-            )
             return record, [], True
         return self._protect_verified_entry(record)
 
@@ -1723,6 +1717,7 @@ class BinanceExchange:
                 return {"pending": 1, "blocked": True, "errors": ["pending entry state is unreadable"]}
         errors: list[str] = []
         remaining: list[dict[str, Any]] = []
+        terminal_events: list[str] = []
         for record in records:
             try:
                 record, rec_errors, retire = self._advance_pending(record)
@@ -1732,6 +1727,13 @@ class BinanceExchange:
                 continue
             errors.extend(rec_errors)
             if retire:
+                if _decimal(record["entry_filled"]) <= 0:
+                    terminal_events.append(
+                        f"{record['inst_id']} 开仓单已确认终态: "
+                        f"order={record['order_id']}, status={record['entry_status']}, "
+                        f"filled={record['entry_filled']}, cancel_requested={record['cancel_requested']}；"
+                        "零成交，未建立本次仓位"
+                    )
                 continue
             remaining.append(record)
         with PENDING_LOCK:
@@ -1743,7 +1745,14 @@ class BinanceExchange:
                     "blocked": True,
                     "errors": errors + ["pending entry state is corrupt"],
                 }
-        return {"pending": len(remaining), "blocked": bool(remaining) or bool(errors), "errors": errors}
+        for event in terminal_events:
+            print(f"[挂单生命周期管理] {event}", flush=True)
+        return {
+            "pending": len(remaining),
+            "blocked": bool(remaining) or bool(errors),
+            "errors": errors,
+            "terminal_events": terminal_events,
+        }
 
     def place_protected_limit_order(
         self,

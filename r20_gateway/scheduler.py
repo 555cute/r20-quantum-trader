@@ -208,6 +208,9 @@ class GatewayScheduler:
                 "blocked": True,
                 "errors": ["maintenance returned a non-dict result"],
             }
+        for detail in result.get("terminal_events") or []:
+            run_id = self.store.begin_job(MAINTENANCE_JOB_NAME)
+            self.store.finish_job(run_id, 0, detail)
         if result.get("status") == "error" or result.get("errors"):
             self._record_maintenance_failure(str(result.get("reason") or result.get("errors")), now)
         return result

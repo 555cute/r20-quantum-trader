@@ -88,6 +88,7 @@ def run_pending_entry_maintenance() -> dict[str, Any]:
             "pending": pending,
             "blocked": blocked,
             "errors": errors,
+            "terminal_events": reconciled.get("terminal_events") or [],
             "reason": "; ".join(errors) if errors else ("blocked" if blocked else "ok"),
         })
         return result
