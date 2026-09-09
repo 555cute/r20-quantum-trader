@@ -498,6 +498,59 @@ class AdminApiTests(unittest.TestCase):
             self.assertEqual(mismatched.status_code, 400)
             run.assert_not_called()
 
+    def test_manual_trader_skip_is_recorded_as_failure(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from r20_gateway.store import GatewayStore
+        root = self.login("admin", "InitialAdmin123456")
+        env = SimpleNamespace(exchange="binance", mode="demo", configured=True, simulated=True)
+        db = Path(self.temp.name) / "gw.db"
+        completed = SimpleNamespace(
+            returncode=0,
+            stdout="[Trader] Skip: another portfolio cycle is still running\n",
+            stderr="",
+        )
+        with patch.object(app_module, "selected_environment", return_value=env), \
+             patch.object(app_module, "GATEWAY_DB_PATH", db), \
+             patch("subprocess.run", return_value=completed):
+            response = self.client.post(
+                "/api/v1/admin/gateway/jobs/trader/run",
+                headers=root,
+                json={"confirmation": "RUN BINANCE DEMO TRADER"},
+            )
+        self.assertEqual(response.status_code, 502, response.text)
+        self.assertIn("Skip", response.json()["detail"])
+        runs = GatewayStore(db).job_runs(5)
+        self.assertEqual(runs[0]["job_name"], "trader")
+        self.assertEqual(runs[0]["status"], "failed")
+        self.assertIn("Skip", runs[0]["detail"])
+
+    def test_manual_trader_abort_is_recorded_as_failure(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from r20_gateway.store import GatewayStore
+        root = self.login("admin", "InitialAdmin123456")
+        env = SimpleNamespace(exchange="binance", mode="demo", configured=True, simulated=True)
+        db = Path(self.temp.name) / "gw-abort.db"
+        completed = SimpleNamespace(
+            returncode=0,
+            stdout="[Trader] Abort: unable to verify/cancel stale open orders: uncertain:Timestamp for this request was 1000ms ahead of the server's time.\n",
+            stderr="",
+        )
+        with patch.object(app_module, "selected_environment", return_value=env), \
+             patch.object(app_module, "GATEWAY_DB_PATH", db), \
+             patch("subprocess.run", return_value=completed):
+            response = self.client.post(
+                "/api/v1/admin/gateway/jobs/trader/run",
+                headers=root,
+                json={"confirmation": "RUN BINANCE DEMO TRADER"},
+            )
+        self.assertEqual(response.status_code, 502, response.text)
+        self.assertIn("Abort", response.json()["detail"])
+        runs = GatewayStore(db).job_runs(5)
+        self.assertEqual(runs[0]["status"], "failed")
+        self.assertIn("Abort", runs[0]["detail"])
+
 
 
 

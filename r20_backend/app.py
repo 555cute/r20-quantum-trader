@@ -1075,6 +1075,14 @@ def replay_gateway_delivery(delivery_id: int, payload: GatewayReplayRequest, x_r
     return {"accepted": True, "delivery_id": delivery_id, "status": "pending"}
 
 
+def _trader_cycle_blocked(stdout: str, stderr: str) -> str:
+    blob = f"{stdout or ''}\n{stderr or ''}"
+    for line in blob.splitlines():
+        text = line.strip()
+        if text.startswith("[Trader] Skip:") or text.startswith("[Trader] Abort:"):
+            return text
+    return ""
+
 @app.post("/api/v1/admin/gateway/jobs/{job_id}/run")
 def run_gateway_job(
     job_id: str,
@@ -1132,6 +1140,8 @@ def run_gateway_job(
         raise HTTPException(status_code=500, detail=f"任务脚本不存在：{script_path}")
 
     cmd = [sys.executable, str(script_path), *job_cfg["args"]]
+    store = GatewayStore(GATEWAY_DB_PATH)
+    run_id = store.begin_job(job_id)
     try:
         result = subprocess.run(
             cmd,
@@ -1141,6 +1151,7 @@ def run_gateway_job(
             timeout=job_cfg["timeout"],
         )
     except subprocess.TimeoutExpired:
+        store.finish_job(run_id, 124, f"timeout after {job_cfg['timeout']}s")
         audit_record(
             f"gateway.job.{job_id}.run",
             "timeout",
@@ -1150,21 +1161,28 @@ def run_gateway_job(
             status_code=504,
             detail=f"任务执行超时（限时 {job_cfg['timeout']} 秒）",
         )
-
+    blocked = _trader_cycle_blocked(result.stdout or "", result.stderr or "")
+    rc = int(result.returncode or 0)
+    detail = ((result.stderr if rc else result.stdout) or "").strip()[-2000:]
+    if blocked and rc == 0:
+        rc = 1
+        detail = blocked
+    store.finish_job(run_id, rc, detail)
     audit_record(
         f"gateway.job.{job_id}.run",
-        "success" if result.returncode == 0 else "failed",
-        {"actor": actor.get("username", "admin"), "returncode": result.returncode},
+        "success" if rc == 0 else "failed",
+        {"actor": actor.get("username", "admin"), "returncode": rc},
     )
-    if result.returncode != 0:
+    if rc != 0:
         err_detail = (
-            result.stderr[-600:].strip()
-            or result.stdout[-600:].strip()
+            blocked
+            or (result.stderr or "").strip()[-600:]
+            or (result.stdout or "").strip()[-600:]
             or "未知错误"
         )
         raise HTTPException(
             status_code=502,
-            detail=f"任务执行异常（退出码 {result.returncode}）：{err_detail}",
+            detail=f"任务执行异常（退出码 {rc}）：{err_detail}",
         )
 
     return {
@@ -1172,8 +1190,9 @@ def run_gateway_job(
         "completed": True,
         "job_id": job_id,
         "detail": f"{job_cfg['label']}已顺利完成",
-        "output": result.stdout[-2000:],
+        "output": (result.stdout or "")[-2000:],
     }
+
 
 
 @app.get("/api/v1/admin/agents")
