@@ -187,10 +187,25 @@ class TestAltVenueDynamicOrder(unittest.TestCase):
         self.assertEqual(mds._alt_venue_order(), ("binance", "gate"))  # 都无有效 failed → 静态原序平局
 
     def test_tie_broken_by_latency(self):
+        # 900/120 = 7.5x > 5x → 慢所后置
         self._write({"venues": {
             "binance": {"ok": [], "failed": {}, "avg_ms": 900},
             "gate": {"ok": [], "failed": {}, "avg_ms": 120}}})
         self.assertEqual(mds._alt_venue_order(), ("gate", "binance"))
+
+    def test_latency_under_5x_keeps_static_order(self):
+        # 550/120 ≈ 4.6x ≤ 5x → 延迟抖动不翻转，保持静态序
+        self._write({"venues": {
+            "binance": {"ok": [], "failed": {}, "avg_ms": 550},
+            "gate": {"ok": [], "failed": {}, "avg_ms": 120}}})
+        self.assertEqual(mds._alt_venue_order(), ("binance", "gate"))
+
+    def test_zero_avg_ms_treated_neutral(self):
+        # avg_ms=0（该所无延迟样本）视为中性，不被当最快也不被降权 → 静态序
+        self._write({"venues": {
+            "binance": {"ok": ["BTC"], "failed": {}, "avg_ms": 0},
+            "gate": {"ok": [], "failed": {}, "avg_ms": 250}}})
+        self.assertEqual(mds._alt_venue_order(), ("binance", "gate"))
 
     def test_ticker_end_to_end_prefers_healthy(self):
         # binance 健康差 → 同一双活 fake 下 ticker 应由 gate 服务（用返回体 venue 标签断言）
