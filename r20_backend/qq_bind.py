@@ -13,10 +13,12 @@ import binascii
 import datetime
 import json
 import secrets
+import sys
 import threading
 import time
 import urllib.parse
 import urllib.request
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -144,25 +146,46 @@ def _gc_tasks() -> None:
         _CAPTURE_SESSIONS.pop(cid, None)
 
 
+_DAEMON_SPAWN_LOCK = threading.Lock()
+
+
+def _stable_python() -> str:
+    """spawn 长驻 daemon 必须用不会被回收的解释器路径。
+    uv run 下 sys.executable 指向 /root/.cache/uv/builds-v0/.tmpXXXX/，
+    目录被清理后进程变成"可执行文件已消失"的孤儿，无法按路径识别与治理。"""
+    exe = sys.executable or "python3"
+    resolved = str(Path(exe).resolve()) if Path(exe).exists() else ""
+    if resolved and "/.cache/uv/" not in resolved and "/tmp/" not in resolved and ".venv" not in resolved:
+        return exe
+    for cand in ("/app/venv/bin/python3", "/usr/bin/python3"):
+        if Path(cand).exists():
+            return cand
+    return "python3"
+
+
 def ensure_qq_gateway_daemon_running() -> None:
-    """Ensure the persistent QQ Gateway daemon is active in background."""
-    import subprocess, sys
-    from pathlib import Path
+    """Ensure the persistent QQ Gateway daemon is active in background.
+
+    并发防护三层：①本进程 threading.Lock 串行化 check-then-act；
+    ②ps 预检去重（廉价快路径）；③daemon 自身 flock 单实例锁兜底——
+    即使竞态漏网 spawn 出多个，除第一个外全部立即自退。"""
+    import subprocess
     root = Path(__file__).resolve().parents[1]
     log_file = root / "logs" / "qq_gateway.log"
     log_file.parent.mkdir(parents=True, exist_ok=True)
     try:
-        output = subprocess.check_output(["ps", "-ef"], text=True)
-        if "r20_backend.qq_gateway_daemon" in output:
-            return
-        with open(log_file, "a", encoding="utf-8") as f:
-            subprocess.Popen(
-                [sys.executable, "-m", "r20_backend.qq_gateway_daemon"],
-                cwd=root,
-                stdin=subprocess.DEVNULL,
-                stdout=f,
-                stderr=subprocess.STDOUT,
-            )
+        with _DAEMON_SPAWN_LOCK:
+            output = subprocess.check_output(["ps", "-ef"], text=True)
+            if "r20_backend.qq_gateway_daemon" in output:
+                return
+            with open(log_file, "a", encoding="utf-8") as f:
+                subprocess.Popen(
+                    [_stable_python(), "-m", "r20_backend.qq_gateway_daemon"],
+                    cwd=root,
+                    stdin=subprocess.DEVNULL,
+                    stdout=f,
+                    stderr=subprocess.STDOUT,
+                )
     except Exception:
         pass
 

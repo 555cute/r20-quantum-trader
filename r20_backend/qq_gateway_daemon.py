@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import fcntl
 import json
 import os
 import signal
@@ -28,6 +29,33 @@ LOG_FILE = ROOT / "logs" / "qq_gateway.log"
 QQ_TOKEN_URL = "https://bots.qq.com/app/getAppAccessToken"
 QQ_API_BASE = "https://api.sgroup.qq.com"
 RUNNING = True
+
+# 单实例锁：qq_bind.ensure_qq_gateway_daemon_running() 的 ps 检查是无锁
+# check-then-act，并发调用（前端轮询/测试/多 worker）会同时 spawn 一批 daemon，
+# 每个都持有一条 QQ 官方网关长连接（实测曾积累 111 个孤儿、3.4GB RSS）。
+# 这里用 flock 兜底：fd 永不关闭，进程退出（含崩溃）自动释放；抢不到锁的实例立即退出。
+LOCK_FILE = ROOT / "data" / ".qq_gateway_daemon.lock"
+_LOCK_FD: Optional[int] = None
+
+
+def acquire_single_instance_lock() -> bool:
+    global _LOCK_FD
+    fd: Optional[int] = None
+    try:
+        LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(LOCK_FILE), os.O_RDWR | os.O_CREAT, 0o644)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        if fd is not None:
+            os.close(fd)
+        return False
+    try:
+        os.ftruncate(fd, 0)
+        os.write(fd, f"{os.getpid()}\n".encode())
+    except OSError:
+        pass
+    _LOCK_FD = fd
+    return True
 
 
 def log(msg: str) -> None:
@@ -237,6 +265,10 @@ async def _run_session():
 
 
 def main():
+    if not acquire_single_instance_lock():
+        # 已有存活实例持有该 AppID 的网关长连接，静默让位（不打扰主日志）
+        print(f"[qq_gateway_daemon] 已有实例在运行（{LOCK_FILE}），本进程退出。", flush=True)
+        return
     signal.signal(signal.SIGTERM, stop_handler)
     signal.signal(signal.SIGINT, stop_handler)
     log("QQ Gateway Daemon 启动中...")

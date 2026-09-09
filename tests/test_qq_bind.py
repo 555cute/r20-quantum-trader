@@ -20,6 +20,43 @@ class QqBindTests(unittest.TestCase):
     def setUp(self):
         qq_bind._TASKS.clear()
         qq_bind._CAPTURE_SESSIONS.clear()
+        # 硬熔断：测试绝不允许 spawn 真实 QQ 网关 daemon（曾一次泄漏 10 个
+        # 持有官方 websocket 长连接的孤儿进程）。需要验证 spawn 行为时显式覆盖此 patch。
+        p = patch.object(qq_bind, "ensure_qq_gateway_daemon_running")
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_daemon_single_instance_lock(self):
+        """flock 兜底：第二个实例抢不到锁必须立即让位，锁释放后可再获取。
+        用临时锁文件，避免与生产 daemon 持有的真实 data/.qq_gateway_daemon.lock 互踩。"""
+        import fcntl
+        import os
+        import tempfile
+        from pathlib import Path
+        from r20_backend import qq_gateway_daemon as d
+
+        with tempfile.TemporaryDirectory() as td:
+            with patch.object(d, "LOCK_FILE", Path(td) / "gw.lock"):
+                self.assertTrue(d.acquire_single_instance_lock(), "首次获取锁应成功")
+                fd2 = os.open(str(d.LOCK_FILE), os.O_RDWR | os.O_CREAT, 0o644)
+                try:
+                    with self.assertRaises(OSError):
+                        fcntl.flock(fd2, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                finally:
+                    os.close(fd2)
+                    # 释放本测试拿到的锁（模拟进程退出）
+                    fcntl.flock(d._LOCK_FD, fcntl.LOCK_UN)
+                    os.close(d._LOCK_FD)
+                    d._LOCK_FD = None
+
+    def test_stable_python_never_points_to_uv_tmp(self):
+        """uv run 环境下 sys.executable 指向会被清理的 .tmp 目录，必须回退稳定路径。"""
+        from pathlib import Path
+        with patch.object(qq_bind.sys, "executable", "/root/.cache/uv/builds-v0/.tmpAbCd/bin/python3"):
+            exe = qq_bind._stable_python()
+        self.assertTrue(Path(exe).exists(), f"回退路径不存在: {exe}")
+        self.assertNotIn("/.cache/uv/", exe)
+        self.assertNotIn("/tmp/", exe)
 
     def test_decrypt_roundtrip_matches_connector_layout(self):
         key = base64.b64encode(os.urandom(32)).decode()
