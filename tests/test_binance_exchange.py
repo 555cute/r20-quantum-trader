@@ -250,6 +250,27 @@ class BinanceExchangeTests(unittest.TestCase):
         account = _calls(self.session, "GET", "/fapi/v2/account")[0]
         self.assertEqual(account["query"].get("timestamp"), str(int(frozen * 1000) - 2500))
 
+    def test_time_offset_uses_request_midpoint_not_pre_request_clock(self):
+        install_defaults(self.session, hedge=True)
+        clock = {"t": 1_700_000_000.0}
+
+        def now():
+            return clock["t"]
+
+        def time_ep(_call):
+            clock["t"] += 2.0
+            return {"serverTime": int((1_700_000_000.0 + 1.0) * 1000)}
+
+        self.session.on("GET", "/fapi/v1/time", time_ep)
+        with patch("r20_exchange.binance.time.time", side_effect=now):
+            exchange = self._exchange()
+            exchange._sync_time_offset(force=True)
+            self.assertEqual(exchange._time_offset_ms, 0)
+            exchange.balance()
+        account = _calls(self.session, "GET", "/fapi/v2/account")[0]
+        self.assertEqual(account["query"].get("timestamp"), str(1_700_000_002_000))
+
+
     def test_timestamp_ahead_error_resyncs_once(self):
         install_defaults(self.session, hedge=True)
         frozen = 1_700_000_000.0

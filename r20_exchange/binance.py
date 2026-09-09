@@ -169,19 +169,22 @@ class BinanceExchange:
         now = time.monotonic()
         if not force and self._time_synced_at and (now - self._time_synced_at) < 30.0:
             return
-        local_ms = int(time.time() * 1000)
+        start_ms = int(time.time() * 1000)
         try:
             row = self._public("/fapi/v1/time")
         except Exception:
             self._time_synced_at = now
             return
+        end_ms = int(time.time() * 1000)
         try:
             server = int((row or {}).get("serverTime"))
         except (TypeError, ValueError, AttributeError):
             self._time_synced_at = now
             return
-        self._time_offset_ms = server - local_ms
+        mid_ms = (start_ms + end_ms) // 2
+        self._time_offset_ms = server - mid_ms
         self._time_synced_at = now
+
 
     def _signed_timestamp_ms(self) -> int:
         self._sync_time_offset()
