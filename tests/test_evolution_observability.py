@@ -14,6 +14,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 from unittest.mock import patch
 
@@ -171,6 +172,27 @@ class PromptConstitutionInjectionTests(unittest.TestCase):
         self.assertEqual(audit["total"], 2)
 
 
+class EvolutionFallbackModelTests(unittest.TestCase):
+    """复盘专属回退：网关 504 主模型时换池内下一模型，交易主脑选模不受影响。"""
+
+    def _cfg(self, active, ids):
+        return {"active_model_id": active, "models": [{"id": i} for i in ids]}
+
+    def test_picks_first_non_active_in_config_order(self):
+        cfg = self._cfg("qwen3.8-flash", ["gemini-3.8-flash-high", "deepseek-v4-flash-0731", "qwen3.8-flash"])
+        with patch("r20_backend.llm_manager.init_llm_config", return_value=cfg):
+            self.assertEqual(sie.evolution_fallback_model(), "gemini-3.8-flash-high")
+
+    def test_none_when_only_active_model_configured(self):
+        cfg = self._cfg("qwen3.8-flash", ["qwen3.8-flash"])
+        with patch("r20_backend.llm_manager.init_llm_config", return_value=cfg):
+            self.assertIsNone(sie.evolution_fallback_model())
+
+    def test_none_on_config_exception(self):
+        with patch("r20_backend.llm_manager.init_llm_config", side_effect=RuntimeError("corrupt")):
+            self.assertIsNone(sie.evolution_fallback_model())
+
+
 class EngineEndToEndTests(unittest.TestCase):
     """临时目录全链路：LLM 提案删除基准 → 宿主补回；NO_CHANGE → 权威库零变化。"""
 
@@ -263,6 +285,120 @@ class EngineEndToEndTests(unittest.TestCase):
         report, texts, _ = self._run("INVALIDATE", ["【基准1】宽止损抗噪"])  # 想删掉基准2
         self.assertIn("【基准2】禁止同向共振", texts)
         self.assertEqual(report["baseline_memory_protected"], 1)
+
+    def _run_with_llm_responses(self, responses, fallback_model):
+        """直连 run_self_evolution，call_llm_evolution_review 按序吐出 responses。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            env = self._env(tmp)
+            mock = unittest.mock.Mock(side_effect=responses)
+            with patch.object(sie, "DATA_DIR", env["data_dir"]), \
+                 patch.object(sie, "LEDGER_JSON_FILE", os.path.join(env["data_dir"], "trading_ledger.json")), \
+                 patch.object(sie, "REPORT_JSON_FILE", env["report"]), \
+                 patch.object(sie, "AI_MEMORY_FILE", env["memory_json"]), \
+                 patch.object(sie, "AI_MEMORY_MD_FILE", env["memory_md"]), \
+                 patch.object(sie, "EVOLUTION_LOCK_FILE", env["lock"]), \
+                 patch.object(sie, "EVOLUTION_LAST_PROMPT_FILE", env["prompt_dump"]), \
+                 patch.object(sie, "LOGS_DIR", os.path.join(env["data_dir"], "logs")), \
+                 patch.object(sie, "LOG_FILE", os.path.join(env["data_dir"], "t.log")), \
+                 patch.object(sie, "call_llm_evolution_review", mock), \
+                 patch.object(sie, "evolution_fallback_model", return_value=fallback_model), \
+                 patch.object(shield, "STRUCTURED_MEMORY_FILE", env["shield_mem"]), \
+                 patch.object(shield, "AI_MEMORY_MD_FILE", env["shield_md"]), \
+                 patch.dict(sys.modules, {"qq_notifier": type(sys)("qq_notifier")}):
+                sys.modules["qq_notifier"].notify_evolution_report = lambda *a, **k: None
+                report = sie.run_self_evolution(force=True)
+            return report, mock
+
+    def test_gateway_504_then_fallback_model_review_succeeds(self):
+        good = {"change_status": "NO_CHANGE", "diagnosis_insights": ["复盘由回退模型完成"],
+                "evolution_actions": [], "ai_long_term_memory": [],
+                "memory_overwrites_reason": "回退后证据仍不足"}
+        report, mock = self._run_with_llm_responses(
+            [{"__llm_error__": "HTTP 504（模型 qwen3.8-flash）"}, good], "gemini-3.8-flash-high")
+        self.assertEqual(mock.call_count, 2)
+        # 第二次调用必须带 model_override=回退模型
+        self.assertEqual(mock.call_args_list[1].kwargs.get("model_override"), "gemini-3.8-flash-high")
+        self.assertEqual(report["llm_error"], "")
+        self.assertEqual(report["change_status"], "NO_CHANGE")
+        self.assertTrue(report["memory_preserved"])
+        self.assertIn("复盘由回退模型完成", report["insights"])
+
+    def test_fallback_also_fails_keeps_error_and_preserves_memory(self):
+        report, mock = self._run_with_llm_responses(
+            [{"__llm_error__": "HTTP 504 A"}, {"__llm_error__": "HTTP 504 B"}], "gemini-3.8-flash-high")
+        self.assertEqual(mock.call_count, 2)  # 只重试一次，不炸调度超时
+        self.assertIn("504", report["llm_error"])   # 错误对报告透明
+        self.assertEqual(report["change_status"], "NO_CHANGE")
+        self.assertTrue(report["memory_preserved"])
+
+    def test_no_fallback_model_configured_single_attempt(self):
+        report, mock = self._run_with_llm_responses([{"__llm_error__": "HTTP 504"}], None)
+        self.assertEqual(mock.call_count, 1)
+        self.assertIn("504", report["llm_error"])
+        self.assertTrue(report["memory_preserved"])
+
+    def test_over_budget_skips_fallback_to_avoid_scheduler_kill(self):
+        """主调用耗时超 EVOLUTION_FALLBACK_BUDGET_SECONDS（调度器 600s 腰斩风险）
+        → 即使有回退模型也放弃，NO_CHANGE + 错误透传照常落报告。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            env = self._env(tmp)
+            mock = unittest.mock.Mock(side_effect=[{"__llm_error__": "HTTP 504 slow"}])
+            clock = iter([1_000.0, 1_500.0, 1_500.0, 1_500.0])  # t0 → elapsed 500s 超预算
+            fake_time = unittest.mock.Mock(wraps=None)
+            fake_time.time = lambda: next(clock)
+            with patch.object(sie, "DATA_DIR", env["data_dir"]), \
+                 patch.object(sie, "LEDGER_JSON_FILE", os.path.join(env["data_dir"], "trading_ledger.json")), \
+                 patch.object(sie, "REPORT_JSON_FILE", env["report"]), \
+                 patch.object(sie, "AI_MEMORY_FILE", env["memory_json"]), \
+                 patch.object(sie, "AI_MEMORY_MD_FILE", env["memory_md"]), \
+                 patch.object(sie, "EVOLUTION_LOCK_FILE", env["lock"]), \
+                 patch.object(sie, "EVOLUTION_LAST_PROMPT_FILE", env["prompt_dump"]), \
+                 patch.object(sie, "LOGS_DIR", os.path.join(env["data_dir"], "logs")), \
+                 patch.object(sie, "LOG_FILE", os.path.join(env["data_dir"], "t.log")), \
+                 patch.object(sie, "call_llm_evolution_review", mock), \
+                 patch.object(sie, "evolution_fallback_model", return_value="gemini-3.8-flash-high"), \
+                 patch.object(sie, "time", fake_time), \
+                 patch.object(shield, "STRUCTURED_MEMORY_FILE", env["shield_mem"]), \
+                 patch.object(shield, "AI_MEMORY_MD_FILE", env["shield_md"]), \
+                 patch.dict(sys.modules, {"qq_notifier": type(sys)("qq_notifier")}):
+                sys.modules["qq_notifier"].notify_evolution_report = lambda *a, **k: None
+                report = sie.run_self_evolution(force=True)
+        self.assertEqual(mock.call_count, 1)   # 未发起回退调用
+        self.assertIn("504 slow", report["llm_error"])
+        self.assertEqual(report["change_status"], "NO_CHANGE")
+        self.assertTrue(report["memory_preserved"])
+
+    def test_llm_gateway_error_preserves_memory_and_no_change(self):
+        # qwen3.8-flash 网关间歇 504（09-09 08:00 / 09-10 实弹复现）：评审失败
+        # 必须收敛为 NO_CHANGE + 权威库零写入，并把错误透传到报告而非静默假缓存。
+        # 本用例钉扎「池内无回退模型」路径；带回退的成功/失败链见
+        # test_gateway_504_then_fallback_model_review_succeeds 等用例。
+        with tempfile.TemporaryDirectory() as tmp:
+            env = self._env(tmp)
+            def fake_err(closed_trades, existing_memory_md="", timestamp_str="", **kwargs):
+                return {"__llm_error__": "HTTPError: 504 网关超时"}
+            with patch.object(sie, "DATA_DIR", env["data_dir"]), \
+                 patch.object(sie, "LEDGER_JSON_FILE", os.path.join(env["data_dir"], "trading_ledger.json")), \
+                 patch.object(sie, "REPORT_JSON_FILE", env["report"]), \
+                 patch.object(sie, "AI_MEMORY_FILE", env["memory_json"]), \
+                 patch.object(sie, "AI_MEMORY_MD_FILE", env["memory_md"]), \
+                 patch.object(sie, "EVOLUTION_LOCK_FILE", env["lock"]), \
+                 patch.object(sie, "EVOLUTION_LAST_PROMPT_FILE", env["prompt_dump"]), \
+                 patch.object(sie, "LOGS_DIR", os.path.join(env["data_dir"], "logs")), \
+                 patch.object(sie, "LOG_FILE", os.path.join(env["data_dir"], "self_improvement_test.log")), \
+                 patch.object(sie, "call_llm_evolution_review", fake_err), \
+                 patch.object(sie, "evolution_fallback_model", return_value=None), \
+                 patch.object(shield, "STRUCTURED_MEMORY_FILE", env["shield_mem"]), \
+                 patch.object(shield, "AI_MEMORY_MD_FILE", env["shield_md"]), \
+                 patch.dict(sys.modules, {"qq_notifier": type(sys)("qq_notifier")}):
+                sys.modules["qq_notifier"].notify_evolution_report = lambda *a, **k: None
+                report = sie.run_self_evolution(force=True)
+            final_mem = json.loads(env["shield_mem"].read_text(encoding="utf-8"))
+        self.assertEqual(report["change_status"], "NO_CHANGE")
+        self.assertTrue(report["memory_preserved"])
+        self.assertIn("504", report["llm_error"])
+        self.assertEqual([l["rule_text"] for l in final_mem["lessons"]],
+                         ["【基准1】宽止损抗噪", "【基准2】禁止同向共振"])
 
 
 if __name__ == "__main__":

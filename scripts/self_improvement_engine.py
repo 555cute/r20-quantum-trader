@@ -188,6 +188,27 @@ def render_observability_brief(audit) -> str:
     )
 
 
+def evolution_fallback_model() -> Optional[str]:
+    """复盘专属回退模型：主模型网关故障（如 qwen3.8-flash 持续 504）时，
+    按后台模型池配置顺序返回第一个非激活位候选。
+
+    刻意只作用于自进化复盘调用——交易主脑的选模与回退链是风险行为，
+    调整需用户批准（fallback_model_ids 属全局配置，本函数绝不改写）。
+    复盘内容不进入下单路径，换模型只影响归因文风，风险面隔离。
+    """
+    try:
+        from r20_backend.llm_manager import init_llm_config
+        cfg = init_llm_config() or {}
+        active = str(cfg.get("active_model_id") or "")
+        for m in cfg.get("models") or []:
+            mid = str((m or {}).get("id") or "").strip()
+            if mid and mid != active:
+                return mid
+    except Exception as exc:
+        log_msg(f"复盘回退模型解析失败: {exc}")
+    return None
+
+
 def load_signal_journal():
     """读取开仓时刻的数理快照日志，按标的分组，供平仓台账 join 真实因果证据。"""
     journal_file = os.path.join(DATA_DIR, "signal_journal.json")
@@ -444,7 +465,8 @@ def compose_evolution_prompts(closed_trades: List[Dict[str, Any]], existing_memo
     return effective_evolution_system, effective_evolution_user, now_bj_str, snapshot_audit
 
 
-def call_llm_evolution_review(closed_trades: List[Dict[str, Any]], existing_memory_md: str = "", timestamp_str: str = "") -> Dict[str, Any]:
+def call_llm_evolution_review(closed_trades: List[Dict[str, Any]], existing_memory_md: str = "", timestamp_str: str = "",
+                              model_override: Optional[str] = None) -> Dict[str, Any]:
     base_url, api_key = get_cpa_client_config()
     if not api_key:
         log_msg("[AI Evolution] Error: CPA API Key not found, using fallback heuristics.")
@@ -476,6 +498,9 @@ def call_llm_evolution_review(closed_trades: List[Dict[str, Any]], existing_memo
     except Exception:
         execute_llm_request = None
         thinking_timeout = max(90.0, float(os.environ.get("LLM_THINKING_TIMEOUT", os.environ.get("LLM_TIMEOUT_SECONDS", 120.0))))
+    if model_override:
+        # 复盘专属回退模型：优先于 env 与主脑激活位（见 evolution_fallback_model）
+        model_name = str(model_override)
 
     telemetry = ModelCallTelemetry(
         "self_improvement", model_name, str(effort), effective_evolution_system, effective_evolution_user
@@ -631,9 +656,30 @@ def run_self_evolution(force: bool = False):
     log_msg("🔬 数理快照可观测性审计: " + render_observability_brief(snapshot_audit))
 
     # 2. Call LLM for Cognitive Review & Memory Overwriting
+    # 复盘预算守卫：调度器对子进程有 600s 硬超时，504 内部重试可达 ~560s。
+    # 主调用超过 EVOLUTION_FALLBACK_BUDGET_SECONDS 后不再回退（回退大概率被腰斩，
+    # 徒耗一池模型调用；本周期照常落 NO_CHANGE + 错误透传）。
+    EVOLUTION_FALLBACK_BUDGET_SECONDS = 400.0
+    cycle_t0 = time.time()
     llm_review = call_llm_evolution_review(closed_trades, existing_memory_md=existing_memory_md, timestamp_str=timestamp_str)
     if not isinstance(llm_review, dict):
         llm_review = {}
+    # 复盘专属单次回退（2026-09-10）：qwen3.8-flash 网关 504 曾连续吞掉 09-09 与
+    # 验证轮复盘；换池内下一个模型重试一次，交易主脑选模不受影响。
+    if llm_review.get("__llm_error__"):
+        fallback_model = evolution_fallback_model()
+        elapsed = time.time() - cycle_t0
+        if fallback_model and elapsed > EVOLUTION_FALLBACK_BUDGET_SECONDS:
+            log_msg(f"⏳ 复盘主模型已耗时 {elapsed:.0f}s 超预算 {EVOLUTION_FALLBACK_BUDGET_SECONDS:.0f}s，"
+                    f"放弃回退避免调度器 600s 腰斩（NO_CHANGE + 错误透传）")
+        elif fallback_model:
+            log_msg(f"⚠️ 复盘主模型失败（{str(llm_review['__llm_error__'])[:120]}），回退 {fallback_model} 重试一次")
+            fb_review = call_llm_evolution_review(
+                closed_trades, existing_memory_md=existing_memory_md,
+                timestamp_str=timestamp_str, model_override=fallback_model)
+            if isinstance(fb_review, dict) and fb_review and not fb_review.get("__llm_error__"):
+                llm_review = fb_review
+                log_msg(f"✅ 回退模型 {fallback_model} 复盘完成（仅本周期；不改全局激活位）")
 
     change_status, _, _ = resolve_memory_update(llm_review.get("change_status", "NO_CHANGE"), [], [])
     insights = llm_review.get("diagnosis_insights", [])
