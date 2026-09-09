@@ -708,18 +708,25 @@ class NewsHarvesterTests(TestCase):
             }],
         }]
         from email.utils import formatdate
-        items_xml = []
-        for i in range(21):
-            items_xml.append(
-                "<item>"
-                f"<title>media flood {i}</title>"
-                f"<link>https://www.coindesk.com/m{i}</link>"
-                f"<guid>cd-m-{i}</guid>"
-                f"<pubDate>{formatdate(FROZEN_TS - 10 - i, usegmt=True)}</pubDate>"
-                "</item>"
-            )
-        rss = "<?xml version='1.0'?><rss version='2.0'><channel>" + "".join(items_xml) + "</channel></rss>"
-        media = {harvester.BINANCE_MEDIA_FEEDS[0]["url"]: rss}
+
+        def _rss(host: str, prefix: str, count: int, start: int) -> str:
+            parts = []
+            for i in range(count):
+                parts.append(
+                    "<item>"
+                    f"<title>media flood {prefix}{i}</title>"
+                    f"<link>https://{host}/m{prefix}{i}</link>"
+                    f"<guid>{prefix}-m-{i}</guid>"
+                    f"<pubDate>{formatdate(FROZEN_TS - 10 - start - i, usegmt=True)}</pubDate>"
+                    "</item>"
+                )
+            return "<?xml version='1.0'?><rss version='2.0'><channel>" + "".join(parts) + "</channel></rss>"
+
+        media = {
+            harvester.BINANCE_MEDIA_FEEDS[0]["url"]: _rss("www.coindesk.com", "cd", 10, 0),
+            harvester.BINANCE_MEDIA_FEEDS[1]["url"]: _rss("cointelegraph.com", "ct", 10, 10),
+        }
+
         with patch.object(harvester.urllib.request, "urlopen", self._binance_urlopen(_cms(catalogs), media=media)), \
              patch.object(harvester.time, "time", return_value=FROZEN_TS):
             payload = harvester.fetch_and_analyze_news_sentiment()

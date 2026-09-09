@@ -523,8 +523,9 @@ def _parse_rss_feed(feed: dict, xml_text: str, target_coins: list) -> list:
             stale=False,
             authority="media",
         ))
-        if len(items) >= 30:
+        if len(items) >= 10:
             break
+
 
     return items
 
