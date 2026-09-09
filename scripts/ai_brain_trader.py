@@ -179,6 +179,7 @@ def fetch_single_instrument_package(item: Dict[str, Any]) -> Dict[str, Any]:
         "askPx": 0.0,
         "fundingRate": 0.0,
         "oiUsd": "N/A",
+        "vol24h": 0.0,
         "lsRatio": "N/A",
         "takerNetUsd": "N/A",
         "atr": 0.0,
@@ -215,6 +216,7 @@ def fetch_single_instrument_package(item: Dict[str, Any]) -> Dict[str, Any]:
                 pkg["askPx"] = float(t.get("askPx", pkg["price"]) or pkg["price"])
                 op = float(t.get("open24h", 0) or 0)
                 pkg["chg24h"] = round(((pkg["price"] - op) / op * 100) if op > 0 else 0, 2)
+                pkg["vol24h"] = round(float(t.get("vol24h", 0) or 0), 2)
     except Exception:
         pass
 
@@ -964,7 +966,8 @@ def assemble_decision_cache(
                 "last": p.get("price"),
                 "bidPx": p.get("bidPx"),
                 "askPx": p.get("askPx"),
-                "chg24h": p.get("chg24h")
+                "chg24h": p.get("chg24h"),
+                "vol24h": p.get("vol24h", 0.0)
             },
             "raw_funding_rate": f"{p['fundingRate']}%" if p.get('fundingRate') else "--",
             "raw_oi": p.get('oiUsd') or "--",

@@ -251,6 +251,7 @@ def _build_factors_from_local_files(positions, timestamp_full):
         rr_ratio = ai_thought.get("risk_reward_evaluation", "盈亏比评估中")
         raw_t = ai_info.get("raw_ticker", {})
         chg_val = raw_t.get("chg24h") if raw_t.get("chg24h") is not None else lib_item.get("chg24h")
+        raw_ticker_vol = raw_t.get("vol24h")
         price_val = ins.get("price") if ins.get("price") not in (None, "--") else lib_item.get("price", "--")
         rsi_val = ins.get("rsi") if ins.get("rsi") is not None else lib_item.get("trend_momentum", {}).get("rsi_14", 50.0)
         adx_val = ai_info.get("adx_1h") if ai_info.get("adx_1h") not in (None, "--") else lib_item.get("trend_momentum", {}).get("adx_1h", "--")
@@ -285,6 +286,14 @@ def _build_factors_from_local_files(positions, timestamp_full):
             "confidence": confidence,
             "smart_money": sm_val,
             "adx_1h": adx_val,
+            "atr_1h": lib_item.get("volatility_channel", {}).get("atr_1h", 0.0),
+            "atr_pct": lib_item.get("volatility_channel", {}).get("atr_1h_pct", lib_item.get("volatility_channel", {}).get("atr_pct", 0.0)),
+            "calculus": {
+                "velocity_1h": lib_item.get("calculus_dynamics", {}).get("velocity"),
+                "accel_1h": lib_item.get("calculus_dynamics", {}).get("acceleration"),
+                "jerk_1h": lib_item.get("calculus_dynamics", {}).get("jerk"),
+                "impulse_1h": lib_item.get("calculus_dynamics", {}).get("impulse"),
+            },
             "leverage": ai_dec.get("leverage", 3),
             "margin_usdt": ai_dec.get("margin_usdt", 0.0),
             "entry_price": ai_dec.get("entry_price", 0.0),
@@ -942,6 +951,7 @@ def update_cache_cycle():
         ls_str = ai_info.get("raw_ls_ratio") or lib_item.get("smart_money_derivatives", {}).get("long_short_ratio", "--")
 
         chg_val = raw_t.get("chg24h") if raw_t.get("chg24h") is not None else lib_item.get("chg24h")
+        raw_ticker_vol = raw_t.get("vol24h")
         price_val = ins.get("price") if ins.get("price") not in (None, "--") else lib_item.get("price", "--")
         rsi_val = ins.get("rsi") if ins.get("rsi") is not None else lib_item.get("trend_momentum", {}).get("rsi_14", 50.0)
         adx_val = ai_info.get("adx_1h") if ai_info.get("adx_1h") not in (None, "--") else lib_item.get("trend_momentum", {}).get("adx_1h", "--")
@@ -956,6 +966,7 @@ def update_cache_cycle():
             "score": score_val,
             "change24h": chg_val,
             "chg24h": chg_val,
+            "vol24h": raw_ticker_vol,
             "bidPx": raw_t.get("bidPx", ins.get("price", lib_item.get("microstructure", {}).get("bid_px", "--"))),
             "askPx": raw_t.get("askPx", ins.get("price", lib_item.get("microstructure", {}).get("ask_px", "--"))),
             "fundingRate": funding_r,
@@ -978,6 +989,14 @@ def update_cache_cycle():
             "confidence": confidence,
             "smart_money": sm_val,
             "adx_1h": adx_val,
+            "atr_1h": lib_item.get("volatility_channel", {}).get("atr_1h", 0.0),
+            "atr_pct": lib_item.get("volatility_channel", {}).get("atr_1h_pct", lib_item.get("volatility_channel", {}).get("atr_pct", 0.0)),
+            "calculus": {
+                "velocity_1h": lib_item.get("calculus_dynamics", {}).get("velocity"),
+                "accel_1h": lib_item.get("calculus_dynamics", {}).get("acceleration"),
+                "jerk_1h": lib_item.get("calculus_dynamics", {}).get("jerk"),
+                "impulse_1h": lib_item.get("calculus_dynamics", {}).get("impulse"),
+            },
             "leverage": ai_dec.get("leverage", 3),
             "margin_usdt": ai_dec.get("margin_usdt", 0.0),
             "entry_price": ai_dec.get("entry_price", 0.0),

@@ -16,8 +16,18 @@ const emit = defineEmits<{ (e: 'close'): void; (e: 'pick-symbol', instId: string
 
 const { t } = useI18n();
 const f = computed(() => props.factor || {});
-const d = computed(() => f.value.decision || {});
+// 后端 /api/all 的因子对象里决策字段是平铺的（action/confidence/entry_price...），
+// 没有嵌套 decision；保留 decision 优先以兼容未来结构变化。
+const d = computed(() => f.value.decision || f.value);
 const tp = computed(() => f.value.thought_process || {});
+
+/** 后端行情字段可能是已格式化的字符串（"0.0054%"、"21.76亿 U"）或 N/A，直接透传展示 */
+function asIs(v: unknown): string {
+  if (v === null || v === undefined) return '--';
+  const s = String(v).trim();
+  if (!s || s === 'N/A' || s === '--') return '--';
+  return s;
+}
 
 const action = computed(() => String(d.value.action || f.value.action || 'WAIT').toUpperCase());
 const dir = computed<'long' | 'short' | 'flat'>(() =>
@@ -30,10 +40,10 @@ function row(label: string, value: string, cls = '') {
 const snapshot = computed(() => [
   row(t('dash.matrix.matrix.col.price'), fmtPrice(f.value.price)),
   row(t('dash.matrix.matrix.col.chg'), `${arrow(f.value.chg24h)} ${fmtPct(f.value.chg24h, 2, false)}`, dirClass(f.value.chg24h)),
-  row('24h ' + t('dash.matrix.chart.vol'), fmtNum(f.value.vol24h, 0)),
-  row('Funding', f.value.fundingRate != null ? fmtPct(Number(f.value.fundingRate) * 100, 4) : '--'),
-  row('OI', f.value.oiUsd != null ? fmtNum(Number(f.value.oiUsd) / 1e6, 1) + 'M' : '--'),
-  row('L/S', f.value.lsRatio != null ? fmtNum(f.value.lsRatio, 2) : '--'),
+  row('24h ' + t('dash.matrix.chart.vol'), f.value.vol24h != null ? fmtNum(f.value.vol24h, 0) : '--'),
+  row('Funding', asIs(f.value.fundingRate)),
+  row('OI', asIs(f.value.oiUsd)),
+  row('L/S', asIs(f.value.lsRatio)),
 ]);
 const calculus = computed(() => [
   row('v (1H)', fmtNum(f.value.calculus?.velocity_1h, 4), dirClass(f.value.calculus?.velocity_1h)),
@@ -44,9 +54,9 @@ const calculus = computed(() => [
   row('ATR%', fmtPct(f.value.atr_pct, 2, false), ''),
 ]);
 const smart = computed(() => [
-  row(t('dash.matrix.matrix.col.ls'), f.value.lsRatio != null && f.value.lsRatio !== 'N/A' ? Number(f.value.lsRatio).toFixed(2) : '--'),
-  row('Funding', f.value.fundingRate != null ? fmtPct(Number(f.value.fundingRate) * 100, 4) : '--'),
-  row('OI', f.value.oiUsd != null ? fmtNum(Number(f.value.oiUsd) / 1e6, 1) + 'M' : '--'),
+  row(t('dash.matrix.matrix.col.ls'), asIs(f.value.lsRatio)),
+  row('Funding', asIs(f.value.fundingRate)),
+  row('OI', asIs(f.value.oiUsd)),
 ]);
 </script>
 

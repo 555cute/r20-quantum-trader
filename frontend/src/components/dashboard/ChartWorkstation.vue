@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useDashboardStore } from '../../stores/dashboard'
+import { symOf, instIdOf } from '../../utils/instId'
 import { useTheme } from '../../composables/useTheme'
 import { useI18n } from '../../composables/useI18n'
 import {
@@ -408,7 +409,7 @@ const riskRewardMetrics = computed(() => {
 })
 
 // 价格精度自适应
-function getSymbolPrecision(sym: string, price: number): number {
+function getSymbolPrecision(price: number): number {
   if (price >= 10000) return 1
   if (price >= 100) return 2
   if (price >= 10) return 3
@@ -910,7 +911,7 @@ async function loadCandles(silent = false, resetTime = false) {
       }))
 
       // 配置标的价格精度
-      const prec = getSymbolPrecision(currentSymbol.value, currentPrice.value)
+      const prec = getSymbolPrecision(currentPrice.value)
       klineChart.setSymbol({
         ticker: `${currentSymbol.value}/USDT`,
         pricePrecision: prec,
