@@ -244,6 +244,64 @@ class LLMResilienceTests(unittest.TestCase):
                 llm_manager.execute_llm_request(messages=[{"role": "user", "content": "hi"}], timeout=10)
         self.assertIn("LLM 网关返回 HTTP 404（模型 primary-m）", str(ctx.exception))
 
+    # ---------- 慢故障快速回退（2026-09-09 事件复盘） ----------
+
+    def test_504_fails_over_fast_when_fallback_present(self):
+        """504 是上游超时：链上有下一模型时不再原地重试，立即回退。"""
+        llm_manager.update_llm_settings(request_attempts=3, fallback_model_ids=["backup-m"])
+        calls = []
+
+        def fake_open(req, timeout=None):
+            calls.append(req.full_url)
+            if "a.example" in req.full_url:
+                raise http_error(504, "error code: 504")
+            return chat_response("FAST BACKUP")
+
+        with patch("r20_backend.llm_manager.urllib.request.urlopen", side_effect=fake_open):
+            content, _, _, _ = llm_manager.execute_llm_request(messages=[{"role": "user", "content": "hi"}], timeout=10)
+        self.assertEqual(content, "FAST BACKUP")
+        self.assertEqual(calls.count("https://a.example/v1/chat/completions"), 1)  # 不烧第二个超时窗口
+
+    def test_504_still_retries_when_no_fallback(self):
+        """未配置回退时保持旧语义：504 仍按请求次数重试同一模型。"""
+        llm_manager.update_llm_settings(request_attempts=2, fallback_model_ids=[])
+        with patch("r20_backend.llm_manager.urllib.request.urlopen", side_effect=http_error(504, "error code: 504")) as mock_open:
+            with self.assertRaises(RuntimeError) as ctx:
+                llm_manager.execute_llm_request(messages=[{"role": "user", "content": "hi"}], timeout=10)
+        self.assertEqual(mock_open.call_count, 2)
+        self.assertIn("HTTP 504", str(ctx.exception))
+
+    def test_timeout_fails_over_fast_when_fallback_present(self):
+        llm_manager.update_llm_settings(request_attempts=3, fallback_model_ids=["backup-m"])
+        calls = []
+
+        def fake_open(req, timeout=None):
+            calls.append(req.full_url)
+            if "a.example" in req.full_url:
+                raise socket.timeout("thinking too long")
+            return chat_response("BACKUP AFTER TIMEOUT")
+
+        with patch("r20_backend.llm_manager.urllib.request.urlopen", side_effect=fake_open):
+            content, _, _, _ = llm_manager.execute_llm_request(messages=[{"role": "user", "content": "hi"}], timeout=10)
+        self.assertEqual(content, "BACKUP AFTER TIMEOUT")
+        self.assertEqual(len(calls), 2)
+
+    def test_unknown_provider_400_is_hard_failover(self):
+        """网关不认识该模型（unknown provider/model_not_found）= 硬故障：1 次即换模型。"""
+        llm_manager.update_llm_settings(request_attempts=3, fallback_model_ids=["backup-m"])
+        calls = []
+
+        def fake_open(req, timeout=None):
+            calls.append(req.full_url)
+            if "a.example" in req.full_url:
+                raise http_error(400, '{"error":{"message":"unknown provider for model primary-m","code":"model_not_found"}}')
+            return chat_response("SAVED BY FALLBACK")
+
+        with patch("r20_backend.llm_manager.urllib.request.urlopen", side_effect=fake_open):
+            content, _, _, _ = llm_manager.execute_llm_request(messages=[{"role": "user", "content": "hi"}], timeout=10)
+        self.assertEqual(content, "SAVED BY FALLBACK")
+        self.assertEqual(calls.count("https://a.example/v1/chat/completions"), 1)
+
     # ---------- 后台事件接口 ----------
 
     def test_failover_events_endpoint(self):

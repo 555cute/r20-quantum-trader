@@ -1591,10 +1591,11 @@ def build_chat_payload(
 
 # Transient upstream faults (gateway route flaps, bot/rate shields, 5xx) must not
 # silently degrade a trading or self-evolution cycle into NO_CHANGE. Retry with backoff.
+# 注：unknown provider / model_not_found 已移出瞬时名单（2026-09-09 事件复盘）——
+# 网关不认识该模型是轮内持续故障，原地重试只会白白烧掉请求窗口，按硬故障立即换模型。
 TRANSIENT_MARKERS = (
-    "unknown provider", "model_not_found", "no provider", "upstream",
-    "temporarily unavailable", "overloaded", "rate limit", "too many requests",
-    "capacity", "busy", "bad gateway", "gateway timeout",
+    "upstream", "temporarily unavailable", "overloaded", "rate limit",
+    "too many requests", "capacity", "busy", "bad gateway", "gateway timeout",
 )
 
 
@@ -1608,11 +1609,15 @@ def _is_transient_http(code: int, body: str) -> bool:
 
 
 class _LLMTransientError(Exception):
-    """可重试错误：瞬时 HTTP、超时、连接层异常（拒绝/重置/DNS/TLS）、坏响应体、空正文。"""
+    """可重试错误：瞬时 HTTP、超时、连接层异常（拒绝/重置/DNS/TLS）、坏响应体、空正文。
 
-    def __init__(self, message: str, timed_out: bool = False):
+    fail_over_now=True：错误本身可再试（末位模型仍会重试），但链上还有下一个模型时
+    立即切换——504/思考超时属"慢故障"，同一轮内原地重试大概率再烧满一个超时窗口。"""
+
+    def __init__(self, message: str, timed_out: bool = False, fail_over_now: bool = False):
         super().__init__(message)
         self.timed_out = timed_out
+        self.fail_over_now = fail_over_now
 
 
 class _LLMHardError(Exception):
@@ -1711,12 +1716,16 @@ def _attempt_llm_call(
                     raise _LLMHardError(f"LLM 网关返回 HTTP {fb_code}（模型 {cand['model']}）：{str(fb_exc)[:280]}") from fb_exc
                 raise _LLMTransientError(f"LLM 网关返回 HTTP {exc.code}（模型 {cand['model']}）：{(err_b or '')[:280]}") from fb_exc
         if _is_transient_http(exc.code, err_b):
-            raise _LLMTransientError(f"LLM 网关返回 HTTP {exc.code}（模型 {cand['model']}）：{(err_b or '')[:280]}") from exc
+            raise _LLMTransientError(
+                f"LLM 网关返回 HTTP {exc.code}（模型 {cand['model']}）：{(err_b or '')[:280]}",
+                fail_over_now=(exc.code == 504),  # 504=上游已超时：链上有下一个模型则立即切换
+            ) from exc
         raise _LLMHardError(f"LLM 网关返回 HTTP {exc.code}（模型 {cand['model']}）：{(err_b or '')[:280]}") from exc
     except (TimeoutError, socket.timeout) as exc:
         raise _LLMTransientError(
             f"LLM 推演超时（已达到思考上限时间 {effective_timeout:.0f}s）：模型思考链过长未在时限内完成响应，可前往后台 AI 模型设置中调大思考上限时间",
             timed_out=True,
+            fail_over_now=True,  # 慢故障：有回退链时立即切换，不再原地烧第二个超时窗口
         ) from exc
     except urllib.error.URLError as exc:
         # 连接层异常（拒绝/重置/DNS/TLS/断线）与超时包装同样属于瞬时故障：
@@ -1726,6 +1735,7 @@ def _attempt_llm_call(
         raise _LLMTransientError(
             f"LLM 连接层异常（模型 {cand['model']}）：{type(reason).__name__ if reason is not None else type(exc).__name__}: {str(reason or exc)[:220]}",
             timed_out=timed_out,
+            fail_over_now=timed_out,  # 连接层包装的超时同样按慢故障快速换模型
         ) from exc
     except (ValueError, OSError) as exc:
         # 响应体非 JSON（如反代 HTML 错误页）、读取中断等：可重试
@@ -1852,6 +1862,8 @@ def execute_llm_request(
                 failures.append(str(exc))
                 last_error = exc
                 last_timed_out = exc.timed_out
+                if exc.fail_over_now and cand_idx < len(candidates) - 1:
+                    break  # 504/超时等慢故障：链上有下一个模型立即回退，末位模型仍按次数重试
             except Exception as exc:  # 兜底：任何未分类异常按瞬时处理，绝不让整链崩在第一次
                 failures.append(f"模型 {cand['model']} 未预期异常：{type(exc).__name__}: {str(exc)[:200]}")
                 last_error = exc
