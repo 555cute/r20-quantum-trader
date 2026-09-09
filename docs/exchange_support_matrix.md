@@ -54,6 +54,28 @@
 
 每 15 分钟决策周期自动落盘三所取数健康（成功币数/失败原因/延迟）：
 后台同一卡片实时展示，原始数据在 `data/venue_health.json`。
+备源容灾顺序是**健康感知**的（失败多者后置、延迟差 >5x 才翻转防抖；
+健康文件缺失/损坏回退静态序）。
+
+## 跨所数据能力矩阵
+
+> 消费点状态为 2026-09-09 代码实测（mission/binance-gate-coordination 合入后）；
+> 「未消费」= 端点已接通但无下游，均有排期（维护者本地 plan_local/R20_VENUE_VALUE_ROADMAP.md，
+> 不入库；社区用户可视为 backlog）。
+
+| 数据项 | Binance | Gate | R20 消费点 | 健康度接入 |
+|---|---|---|---|---|
+| ticker/基差 | ✅ 免费（本机出口 bookTicker 被 WAF 拦→depth 自动回退） | ✅ 免费 | 决策 Prompt 跨所证据行 + OKX 全断备源 | ✅ |
+| K线 | ✅ 免费 ≤1500 根 | ✅ 免费 ≤2000 根 | 备源容灾（形状对齐 OKX 契约） | ✅ |
+| 资金费率（现值） | ✅ premiumIndex | ✅ ticker.funding_rate | 证据行双所费率 + 背离标注 | ✅ |
+| 资金费率（历史） | ✅ /fapi/v1/fundingRate | ✅ contract_stats 序列 | 未消费（W1 三所背离统计） | — |
+| 大户多空比 | ✅ topLongShortPositionRatio | ✅ contract_stats top_lsr_* | 证据行双所大户比 + 分歧标注 | ✅ |
+| Taker 主动比 | ✅ takerlongshortRatio | ✅ lsr_taker | 未消费（W4 候选，OKX 同项已在主链） | — |
+| 清算数据 | ❌ 合约端点无免费等价 | ✅ liq_*（contract_stats 聚合） | 未消费（W2 清算放量雷达；逐笔流需签名——评估为不做） | — |
+| OI（现值/历史） | ✅ openInterest / openInterestHist | ✅ open_interest(_value) | 未消费（主链 OI 用 OKX rubik；W4 多源互证候选） | — |
+| 新币上线公告 | ✅ CMS bapi（实测 2253 篇，免费） | ❌ 网页 403（不做抓取） | 未消费（W3 先做人工读小工具） | — |
+
+三所中位数 oracle（防插针）：所需三所现价端点全部免费可用，门禁改造在 W2 排期。
 
 ## 扩展一个新场所
 
