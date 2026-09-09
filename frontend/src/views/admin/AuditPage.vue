@@ -101,7 +101,7 @@ onMounted(load)
           <template #cell-detail="{ row }">
             <span class="block max-w-[480px] truncate">
               <strong style="color: var(--ink-1);">{{ row.detail?.actor || row.detail?.username || 'system' }}</strong>
-              <span class="ml-1 opacity-70" style="color: var(--ink-2);">· {{ JSON.stringify(row.detail || {}) }}</span>
+              <span class="ml-1 block break-all opacity-70" style="color: var(--ink-2); max-width: 420px">· {{ JSON.stringify(row.detail || {}) }}</span>
             </span>
           </template>
         </DataTable>

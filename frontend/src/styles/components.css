@@ -360,6 +360,9 @@ tr:hover .row-actions, .row-actions:focus-within { opacity: 1; }
 .link { color: var(--accent); cursor: pointer; }
 .link:hover { text-decoration: underline; }
 
+/* —— 表格外层：移动端横向滑动（用户要求：表格类加滑块，不折叠不换行）—— */
+.table-scroll-container { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
 /* —— KPI 带单元：移动端独立描边小卡（双模一致），xl 起单行分隔线 —— */
 .kpi-cell {
   background-color: var(--surface-1);

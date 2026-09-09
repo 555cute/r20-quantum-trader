@@ -142,7 +142,8 @@ function actionLabel(a: string): string {
         </div>
         <div class="section-body">
           <BaseEmpty v-if="!decisions.length" :text="t('common.noData')" />
-          <table v-else class="table">
+          <div v-else class="table-scroll-container">
+          <table class="table">
             <thead>
               <tr>
                 <th>{{ t('dash.matrix.positions.col.symbol') }}</th>
@@ -166,6 +167,7 @@ function actionLabel(a: string): string {
               </tr>
             </tbody>
           </table>
+          </div>
         </div>
       </section>
 
