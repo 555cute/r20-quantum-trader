@@ -16,6 +16,8 @@ import hmac
 import inspect
 import json
 import unittest
+import urllib.parse
+from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 import scripts.okx_rest as okx_rest
@@ -155,6 +157,72 @@ class OKXRestHttpBoundaryTests(unittest.TestCase):
             "tdMode": "cross", "tpTriggerPx": "28000", "tpOrdPx": "-1",
             "slTriggerPx": "26500", "slOrdPx": "-1",
         }])
+
+    # -- US-001 复审修复回归：_fmt 无损十进制、纯记法 --------------------------
+
+    def test_float_price_sizes_lossless_plain_decimal_in_request_body(self):
+        """致命 bug 回归：`:g` 曾把 px=110000.5 静默截断成 "110000"、把
+        1250000.0 渲染成 "1.25e+06"。HTTP 边界捕获真实 body 钉死新契约。"""
+        freeze_environment(DEMO_ENV)
+        self.urlopen.return_value = _response(data=[{"sCode": "0", "ordId": "ord-fmt"}])
+        okx_rest.place_order(
+            "BTC-USDT-SWAP", "buy", 1250000.0, ord_type="limit",
+            px=110000.5, attach_tp=0.02, attach_sl=0.0000012,
+        )
+        _, _, _, data = _captured(self.urlopen)
+        body_text = data.decode("utf-8")
+        body = json.loads(body_text)
+        self.assertEqual(body["sz"], "1250000")        # 不再是 "1.25e+06"
+        self.assertEqual(body["px"], "110000.5")       # 不再是截断的 "110000"
+        leg = body["attachAlgoOrds"][0]
+        self.assertEqual(leg["tpTriggerPx"], "0.02")   # 常规小数语义不变
+        self.assertEqual(leg["slTriggerPx"], "0.0000012")  # 极小值全位展开
+        lowered = body_text.lower()
+        self.assertNotIn("e+", lowered)
+        self.assertNotIn("e-", lowered)
+
+    def test_any_float_never_emits_scientific_notation_in_body_or_querystring(self):
+        """通用不变式：任意 float 入参，POST 请求体与 GET 查询串都必须是纯十进制
+        且可无损读回原值（float(emit) == 原值）。"""
+        freeze_environment(DEMO_ENV)
+        self.urlopen.return_value = _response(data=[])
+        nasty_floats = (1e-07, 1250000.0, 0.0000012, 110000.5, 0.02, 1e+21,
+                        3.0000000000000004e-05, 0.1 + 0.2)
+        for px in nasty_floats:
+            with self.subTest(px=px):
+                # POST 体（amend_order.newPx）
+                self.urlopen.reset_mock()
+                okx_rest.amend_order("BTC-USDT-SWAP", "1", new_px=px)
+                _, _, _, data = _captured(self.urlopen)
+                body_text = data.decode("utf-8").lower()
+                self.assertNotIn("e+", body_text)
+                self.assertNotIn("e-", body_text)
+                emitted = json.loads(data.decode("utf-8"))["newPx"]
+                self.assertIsInstance(emitted, str)
+                self.assertEqual(float(emitted), px)
+                # GET 查询串（orders_history.begin）
+                self.urlopen.reset_mock()
+                okx_rest.orders_history(begin=px)
+                _, url, _, _ = _captured(self.urlopen)
+                query = url.split("?", 1)[1].lower()
+                self.assertNotIn("e+", query)
+                self.assertNotIn("e-", query)
+                emitted_q = urllib.parse.parse_qs(url.split("?", 1)[1])["begin"][0]
+                self.assertEqual(float(emitted_q), px)
+
+    def test_int_and_decimal_format_as_plain_decimal_strings(self):
+        """int/Decimal 行为合理：一律输出无损纯十进制字符串（Decimal 曾直接
+        透传导致 JSON 序列化崩溃，如今归一为 plain 记法）。"""
+        freeze_environment(DEMO_ENV)
+        self.urlopen.return_value = _response(data=[{"algoId": "a-fmt", "sCode": "0"}])
+        okx_rest.place_algo_oco("BTC-USDT-SWAP", "sell", 2, pos_side="long",
+                                tp_trigger_px=Decimal("110000.50"), sl_trigger_px=1250000)
+        _, _, _, data = _captured(self.urlopen)
+        body = json.loads(data.decode("utf-8"))
+        self.assertEqual(body["sz"], "2")
+        self.assertEqual(body["tpTriggerPx"], "110000.5")
+        self.assertEqual(body["slTriggerPx"], "1250000")
+        self.assertEqual(body["reduceOnly"], "true")   # bool 语义不变
 
     # -- algo 面 -------------------------------------------------------------
 

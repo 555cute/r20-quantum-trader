@@ -22,6 +22,7 @@ import hmac
 import json
 import urllib.parse
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any, Mapping, Sequence
 
 from urllib.request import Request, urlopen
@@ -53,11 +54,24 @@ def _timestamp() -> str:
 
 
 def _fmt(value: Any) -> Any:
-    """Normalise scalars for OKX string-typed JSON fields (mirrors the old CLI flags)."""
+    """Normalise scalars for OKX string-typed JSON fields (mirrors the old CLI flags).
+
+    Lossless plain-decimal rendering. The previous ``:g`` default (6 significant
+    digits) silently truncated prices (110000.5 -> "110000") and leaked
+    scientific notation ("1.25e+06") into order payloads — fatal for a trading
+    path. ``repr`` keeps the shortest round-trip precision for floats and the
+    ``f`` presentation forbids exponents. bool -> "true"/"false";
+    int/Decimal -> plain decimal strings; str (and everything else) passes
+    through untouched.
+    """
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, float):
-        return f"{value:g}"
+        return format(Decimal(repr(value)).normalize(), "f")
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, Decimal):
+        return format(value.normalize(), "f")
     return value
 
 
