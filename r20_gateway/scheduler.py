@@ -29,7 +29,9 @@ class JobSpec:
 
 
 JOBS = (
-    JobSpec("trader", "ai_factor_trader.py", 15 * 60, 840),
+    # trader 超时 840→1260s：投委会新预算 240s + 网关故障时单模型内部重试链(~600s)
+    # 最坏 ~1150s，840s 会把整周期腰斩且连降级透明记录都写不出（2026-09-10 05:00 实测）
+    JobSpec("trader", "ai_factor_trader.py", 15 * 60, 1260),
     JobSpec("factor_library", "factor_library.py", 60, 55),
     JobSpec("news", "news_sentiment_harvester.py", 10 * 60, 300, offset_seconds=180),
     JobSpec("daily_briefing", "daily_summary_and_backup.py", None, 600, "briefing_times", ("08:00", "20:00")),

@@ -24,6 +24,11 @@ LOGS = ROOT / "logs"
 LOGS.mkdir(exist_ok=True)
 DATA.mkdir(exist_ok=True)
 
+# 容器系统钟为 UTC，而全站业务日志/台账统一北京时间（UTC+8）——
+# logging 默认用本地钟，这里显式挂 +8 转换器，避免 r20_scheduler.log 混 UTC 时刻
+import logging as _logging
+_BJ = timezone(timedelta(hours=8))
+logging.Formatter.converter = lambda *a: datetime.now(_BJ).timetuple()
 logging.basicConfig(
     filename=LOGS / "r20_scheduler.log",
     level=logging.INFO,
