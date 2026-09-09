@@ -222,6 +222,8 @@ def resolve_memory_update(change_status: str, proposed_memory: Any, existing_mem
     if status not in {"NO_CHANGE", "ADD", "REVISE", "INVALIDATE"}:
         status = "NO_CHANGE"
     proposed = proposed_memory if isinstance(proposed_memory, list) else []
+    # 心法条目同受模型 schema 漂移影响，入库前统一压平为字符串
+    proposed = [s for s in (_coerce_display_str(x) for x in proposed) if s]
     preserve = status == "NO_CHANGE" or not proposed
     return status, list(existing_memory if preserve else proposed), preserve
 
@@ -385,6 +387,51 @@ def call_llm_evolution_review(closed_trades: List[Dict[str, Any]], existing_memo
         # degrading to an unexplained NO_CHANGE (which looks like a stale cache).
         return {"__llm_error__": f"{type(e).__name__}: {e}"}
 
+
+_TEXTISH_KEYS = (
+    "observation", "detail", "text", "action", "content", "analysis",
+    "finding", "summary", "description", "reason", "evidence",
+)
+
+
+def _coerce_display_str(item) -> str:
+    """把复盘数组项归一为展示字符串。
+
+    - 字符串原样；若内容是自序列化的 JSON（模型常见漂移）则解包递归处理；
+    - 对象：优先【dimension/title/category】+ 已知正文字段；action_type 类对象
+      用其作标题；无已知键时按 key:value 拼接，绝不落回 str(dict)。
+    """
+    if isinstance(item, str):
+        s = item.strip()
+        if s.startswith("{") or s.startswith("["):
+            try:
+                parsed = json.loads(s)
+            except Exception:
+                return s
+            if isinstance(parsed, (dict, list)):
+                return _coerce_display_str(parsed)
+        return s
+    if isinstance(item, dict):
+        title = str(item.get("dimension") or item.get("title") or item.get("category")
+                    or item.get("action_type") or "").strip()
+        body = ""
+        for k in _TEXTISH_KEYS:
+            v = item.get(k)
+            if isinstance(v, (str, int, float)) and str(v).strip():
+                body = str(v).strip()
+                break
+        if not body:
+            parts = [f"{k}:{v}" for k, v in item.items()
+                     if not isinstance(v, (dict, list)) and str(v).strip() and k != "dimension"]
+            body = "；".join(parts)
+        if title and body and not body.startswith(f"【{title}】"):
+            return f"【{title}】{body}"
+        return body or title
+    if isinstance(item, list):
+        return "；".join(filter(None, (_coerce_display_str(x) for x in item)))
+    return str(item).strip() if item is not None else ""
+
+
 @single_evolution_cycle
 def run_self_evolution(force: bool = False):
     tz_bj = datetime.timezone(datetime.timedelta(hours=8))
@@ -433,6 +480,11 @@ def run_self_evolution(force: bool = False):
         insights = []
     if not isinstance(actions_taken, list):
         actions_taken = []
+    # 模型 schema 漂移归一：部分模型把数组项输出为对象（{dimension, analysis} /
+    # {action_type, action}）或自序列化 JSON 字符串；不归一则前端渲染成
+    # [object Object] / 原始 JSON（2026-09-09 用户截图）。统一压平成展示字符串。
+    insights = [s for s in (_coerce_display_str(x) for x in insights) if s]
+    actions_taken = [s for s in (_coerce_display_str(x) for x in actions_taken) if s]
     
     raw_asset_mults = llm_review.get("asset_multipliers", {})
     if not isinstance(raw_asset_mults, dict):

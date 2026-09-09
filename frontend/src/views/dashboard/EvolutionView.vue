@@ -45,9 +45,33 @@ function insBody(it: any): string {
     const i = it.indexOf('：');
     return i > 0 && i <= 24 ? it.slice(i + 1) : it;
   }
-  return it?.observation || it?.detail || it?.text || String(it ?? '');
+  const direct = it?.observation || it?.detail || it?.text || it?.action || it?.analysis
+    || it?.content || it?.finding || it?.summary || it?.description || it?.reason;
+  if (direct) return String(direct);
+  if (it && typeof it === 'object') {
+    // 未知对象形态：按 key:value 拼接，绝不渲染 [object Object]
+    return Object.entries(it)
+      .filter(([, v]) => v !== null && v !== undefined && typeof v !== 'object')
+      .map(([k, v]) => `${k}: ${v}`)
+      .join('；');
+  }
+  return String(it ?? '');
 }
-const actions = computed<string[]>(() => review.value.actions_taken || []);
+const actions = computed<any[]>(() => review.value.actions_taken || []);
+
+/** 行动项兼容：字符串直出；对象优先 action/text，未知键拼接 */
+function actText(a: any): string {
+  if (typeof a === 'string') return a;
+  if (a && typeof a === 'object') {
+    const t = a.action || a.text || a.content || a.summary || a.description;
+    if (t) return a.action_type ? `【${a.action_type}】${t}` : String(t);
+    return Object.entries(a)
+      .filter(([, v]) => v !== null && v !== undefined && typeof v !== 'object')
+      .map(([k, v]) => `${k}: ${v}`)
+      .join('；');
+  }
+  return String(a ?? '');
+}
 
 /** 心法解析：【标题】正文 */
 const rules = computed(() => {
@@ -153,7 +177,7 @@ const md = computed(() => (store.data as any)?.ai_trading_memory_md || '');
             <ol v-else class="space-y-2">
               <li v-for="(a, i) in actions" :key="i" class="flex gap-2.5 text-sm leading-relaxed" style="color: var(--ink-1)">
                 <span class="num t-faint shrink-0">{{ i + 1 }}.</span>
-                <span>{{ a }}</span>
+                <span>{{ actText(a) }}</span>
               </li>
             </ol>
           </div>
