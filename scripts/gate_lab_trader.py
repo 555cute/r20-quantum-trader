@@ -29,7 +29,13 @@ DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 DECISION_FILE = os.path.join(DATA_DIR, "ai_brain_decisions.json")
 LAB_TRACKER_FILE = os.path.join(DATA_DIR, "gate_lab_trackers.json")
 LAB_LEDGER_FILE = os.path.join(DATA_DIR, "gate_lab_ledger.json")
+# 跨所敞口只读源（US-005）：主链本地 tracker + 合约池 ctVal——零新凭证、零新网络。
+# 调研结论：无更干净的只读源（ai_position_management.json 只有指令无名义，
+# position_trackers 是唯一含 currentSz/entryPx/side 的 OKX 在管仓位本地快照）。
+OKX_TRACKER_FILE = os.path.join(DATA_DIR, "position_trackers.json")
+INSTRUMENT_POOL_FILE = os.path.join(DATA_DIR, "instrument_pool.json")
 DECISION_MAX_AGE_SECONDS = 300
+DEFAULT_MAX_TOTAL_EXPOSURE_USDT = 500.0
 
 from r20_backend import execution_router as router          # noqa: E402
 from r20_backend.exchanges import get_adapter                # noqa: E402
@@ -75,6 +81,138 @@ def _is_tighter(pos_side, new_sl, old_sl, mark_px):
     if pos_side == "long":
         return new_sl > old_sl and new_sl < mark_px
     return (old_sl <= 0 or new_sl < old_sl) and new_sl > mark_px
+
+
+# ---------------------------------------------------------------------------
+# US-005：主台账写入 / 跨所同向敞口合并 / G7 孤儿挂单清扫
+# ---------------------------------------------------------------------------
+
+def _exposure_cap() -> float:
+    try:
+        return max(1.0, float(os.environ.get("R20_MAX_TOTAL_EXPOSURE_USDT",
+                                             DEFAULT_MAX_TOTAL_EXPOSURE_USDT)))
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_TOTAL_EXPOSURE_USDT
+
+
+def _okx_notional_for(asset: str, side: str):
+    """OKX 主链同资产同向在管名义（USDT）。返回 (notional, ok)。
+
+    只读 data/position_trackers.json（主链子进程维护的本地快照）× instrument_pool ctVal：
+    notional = currentSz(张) * ctVal * entryPx。文件缺失视为 0 且 ok=True；
+    任何解析异常 ok=False（live 据此保守拒开，dry 放行）。
+    """
+    try:
+        if not os.path.exists(OKX_TRACKER_FILE):
+            return 0.0, True
+        try:
+            with open(OKX_TRACKER_FILE, "r", encoding="utf-8") as f:
+                trackers = json.load(f)
+        except Exception:
+            return 0.0, False   # 文件损坏 ≠ 无仓位：live 必须 fail-closed
+        if not isinstance(trackers, dict):
+            return 0.0, False
+        if not os.path.exists(INSTRUMENT_POOL_FILE):
+            pool = []
+        else:
+            with open(INSTRUMENT_POOL_FILE, "r", encoding="utf-8") as f:
+                pool = json.load(f)
+        items = pool if isinstance(pool, list) else pool.get("instruments", [])
+        ct_val = {str(i.get("name") or "").upper(): float(i.get("ctVal") or 0)
+                  for i in items if isinstance(i, dict)}
+        target = f"{asset}-USDT-SWAP"
+        want_side = "long" if str(side).lower().startswith("l") else "short"
+        total = 0.0
+        for key, t in trackers.items():
+            if not isinstance(t, dict) or str(t.get("instId") or "") != target:
+                continue
+            t_side = str(t.get("side") or "").lower()
+            if want_side == "long" and ("short" in t_side):
+                continue
+            if want_side == "short" and ("short" not in t_side):
+                continue
+            sz = abs(float(t.get("currentSz") or t.get("initialSz") or 0))
+            total += sz * ct_val.get(asset, 0.0) * float(t.get("entryPx") or 0)
+        return round(total, 2), True
+    except Exception:
+        return 0.0, False
+
+
+def _lab_same_side_notional(trackers, asset: str, side: str) -> float:
+    want = "long" if str(side).lower().startswith("l") else "short"
+    total = 0.0
+    for a, t in (trackers or {}).items():
+        if a == asset or not isinstance(t, dict):
+            continue
+        if ("long" if str(t.get("side") or "long").lower().startswith("l") else "short") != want:
+            continue
+        try:
+            total += float(t.get("margin_usdt") or 0) * float(t.get("leverage") or 0)
+        except (TypeError, ValueError):
+            continue
+    return round(total, 2)
+
+
+def _sweep_orphan_orders(ad, asset: str, t: dict, actions):
+    """G7：live 对账判「仓位消失」落账前，先撤该合约 lab 名下残留——
+    未成交入场挂单逐笔撤 + 按记录的 tp_id/sl_id 尝试撤触发单。失败不阻塞，记动作行。"""
+    swept = []
+    try:
+        for o in ad.list_open_orders(asset):
+            oid = (o or {}).get("id")
+            if oid in (None, ""):
+                continue
+            try:
+                ad.cancel_order(asset, oid)
+                swept.append(f"order:{oid}")
+            except Exception as exc:
+                actions.append(f"[GateLab] {asset} 孤儿挂单 {oid} 撤销失败(不阻塞落账): {exc}")
+    except Exception as exc:
+        actions.append(f"[GateLab] {asset} 孤儿挂单查询失败(不阻塞落账): {exc}")
+    for leg in ("tp_id", "sl_id"):
+        oid = t.get(leg)
+        if not oid:
+            continue
+        try:
+            ad.cancel_price_order(oid)
+            swept.append(f"{leg}:{oid}")
+        except Exception:
+            pass   # 触发单多已随成交/平仓自然失效，撤不到是常态
+    return swept
+
+
+def _record_main_ledger(t: dict, *, close_px: float = 0.0, pnl=None,
+                        reason: str = "", approx: bool = False):
+    """live 试验田平仓写 trades 主台账（venue=gate）。异常只 log 不炸周期。"""
+    try:
+        try:
+            import db_manager as dbm
+        except ImportError:
+            from scripts import db_manager as dbm
+        asset = str(t.get("asset") or "")
+        side = "long" if str(t.get("side") or "long").lower().startswith("l") else "short"
+        entry = float(t.get("entry_px") or 0)
+        price = float(close_px or 0) or entry
+        pnl_v = 0.0 if pnl is None else round(float(pnl), 4)
+        comment = f"Gate试验田平仓({reason})；lab台账口径,pnl待交易所账单核对"
+        if approx:
+            comment += "；成交价按mark近似"
+        bill_id = f"gatelib-{t.get('mode', 'live')}-{asset}-{int(t.get('entry_ts') or time.time())}"
+        dbm.record_trade_sqlite({
+            "bill_id": bill_id,
+            "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "inst": f"{asset}_USDT",
+            "action": "closed",
+            "direction": "多" if side == "long" else "空",
+            "size": float(t.get("contracts") or 0),
+            "price": price,
+            "pnl": pnl_v, "gross_pnl": pnl_v, "fee": 0.0,
+            "comment": comment,
+            "venue": "gate",
+        })
+        return True, bill_id
+    except Exception as exc:
+        return False, str(exc)
 
 
 def plan_entry(dry, asset, dec, pool, ad):
@@ -152,6 +290,22 @@ def run_lab_cycle(ad=None, now_ts=None):
 
     my_assets = set(pool["assets"])
     # ① 对账：试验田 tracker 有、交易所在途无 → 已平/被撤，落账清理
+
+    def _live_pnl_estimate(t):
+        """平仓 pnl 估算：mark(或现价近似) 与入场差 × 带符号张数 × 每张面值。取不到返回 (0, px, True)。"""
+        try:
+            tick = ad.fetch_ticker(t.get("asset") or "") or {}
+            px = float(tick.get("mark_price") or tick.get("last") or 0)
+            spec = ad.fetch_instrument_spec(t.get("asset") or "")
+            ct = float(getattr(spec, "ct_val", 0) or 0) if spec else 0.0
+            signed = float(t.get("size_signed") or 0)
+            entry = float(t.get("entry_px") or 0)
+            if px > 0 and ct > 0 and signed != 0 and entry > 0:
+                return round((px - entry) * signed * ct, 4), px, True
+        except Exception:
+            pass
+        return 0.0, float(t.get("entry_px") or 0), True
+
     for asset in list(trackers.keys()):
         if asset not in my_assets:
             continue
@@ -161,13 +315,26 @@ def run_lab_cycle(ad=None, now_ts=None):
         gone = (asset not in live_positions) if not dry and t.get("mode") == "live" else \
                (dry and t.get("mode") == "dry" and asset not in decisions)
         if gone:
+            swept: list = []
+            if not dry and t.get("mode") == "live":
+                swept = _sweep_orphan_orders(ad, asset, t, actions)   # G7：落账前先扫孤儿
+                pnl, px, approx = _live_pnl_estimate(t)
+                written, info = _record_main_ledger(t, close_px=px, pnl=pnl,
+                                                    reason="reconcile_no_position",
+                                                    approx=approx)
+                if not written:
+                    actions.append(f"[GateLab] {asset} 主台账写入失败(本地账保留): {info[:100]}")
             ledger = _load_json(LAB_LEDGER_FILE, [])
-            ledger.append({"close_ts": now_ts or int(time.time()), "mode": t.get("mode"),
-                           "asset": asset, "entry_px": t.get("entry_px"),
-                           "contracts": t.get("contracts"), "reason": "reconcile_no_position"})
+            entry_ledger = {"close_ts": now_ts or int(time.time()), "mode": t.get("mode"),
+                            "asset": asset, "entry_px": t.get("entry_px"),
+                            "contracts": t.get("contracts"), "reason": "reconcile_no_position"}
+            if swept:
+                entry_ledger["orphan_swept"] = swept
+            ledger.append(entry_ledger)
             _atomic_dump(LAB_LEDGER_FILE, ledger)
             del trackers[asset]
-            actions.append(f"[GateLab] {asset} 试验田仓位平仓对账落账")
+            actions.append(f"[GateLab] {asset} 试验田仓位平仓对账落账"
+                           + (f"（已撤孤儿挂单 {len(swept)} 笔）" if swept else ""))
 
     open_count = sum(1 for a in trackers if a in my_assets)
     # ② 决策执行 + ③ 持仓管理 + ④ 保护缺口巡检
@@ -184,7 +351,21 @@ def run_lab_cycle(ad=None, now_ts=None):
                 r = router.close_position(asset, adapter=ad)
                 actions.append(f"[GateLab] {asset} 平仓: {r.get('ok')} {r.get('detail', '')[:80]}")
                 if r.get("ok"):
-                    trackers.pop(asset, None)
+                    t = trackers.pop(asset, None) or {}
+                    mark = float(live_positions.get(asset, {}).get("mark_price") or 0)
+                    pnl, px, approx = _live_pnl_estimate(t)
+                    px = mark or px
+                    written, info = _record_main_ledger(
+                        t or {"asset": asset, "mode": "live"}, close_px=px, pnl=pnl,
+                        reason="close_market", approx=approx)
+                    if not written:
+                        actions.append(f"[GateLab] {asset} 平仓主台账写入失败: {info[:100]}")
+                    ledger = _load_json(LAB_LEDGER_FILE, [])
+                    ledger.append({"close_ts": now_ts or int(time.time()), "mode": "live",
+                                   "asset": asset, "entry_px": t.get("entry_px"),
+                                   "contracts": t.get("contracts"),
+                                   "pnl_estimate": pnl, "reason": "close_market"})
+                    _atomic_dump(LAB_LEDGER_FILE, ledger)
                 continue
             new_sl = float(dec.get("stop_loss_price") or 0)
             mark = float(live_positions.get(asset, {}).get("mark_price") or 0) if not dry else 0.0
@@ -225,6 +406,31 @@ def run_lab_cycle(ad=None, now_ts=None):
                 continue
             if open_count >= int(pool["max_open"]):
                 actions.append(f"[GateLab] {asset} 试验田满仓({open_count}/{pool['max_open']})，跳过")
+                continue
+            # US-005：跨所同向敞口合并（OKX 在管 + lab 在途 + 本单计划），超限拒开；
+            # 只拒开新仓不自动平旧仓（自动平仓属主链风控职权，试验田无此权限）
+            side_want = "long" if act == "BUY_LONG" else "short"
+            try:
+                plan_lev = float(dec.get("leverage") or 3) or 3.0
+            except (TypeError, ValueError):
+                plan_lev = 3.0
+            plan_margin = min(float(dec.get("margin_usdt") or pool["margin_per_trade_usdt"]),
+                              float(pool["margin_per_trade_usdt"]))
+            plan_notional = round(plan_margin * plan_lev, 2)
+            okx_notional, okx_ok = _okx_notional_for(asset, side_want)
+            lab_notional = _lab_same_side_notional(trackers, asset, side_want)
+            cap = _exposure_cap()
+            if not okx_ok and not dry:
+                actions.append(f"[GateLab][EXPOSURE] {asset} OKX 敞口源查询失败，"
+                               f"live fail-closed 拒开（dry 不受阻）")
+                continue
+            exposure_total = round((okx_notional if okx_ok else 0.0) + lab_notional + plan_notional, 2)
+            if exposure_total > cap:
+                actions.append(
+                    f"[GateLab][EXPOSURE] {asset} 跨所同向敞超限拒开: "
+                    f"OKX同向={okx_notional if okx_ok else '查询失败按0'} + "
+                    f"lab同向={lab_notional} + 本单={plan_notional} "
+                    f"= {exposure_total} > cap {cap}")
                 continue
             r = plan_entry(dry, asset, dec, pool, ad)
             if r.get("ok"):

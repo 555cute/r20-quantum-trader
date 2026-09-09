@@ -264,6 +264,22 @@ class TestAdapterPayloadShapes(unittest.TestCase):
         self.assertEqual(seen["body"]["price"], "0")
         self.assertEqual(seen["body"]["tif"], "ioc")
 
+    def test_list_open_orders_shape(self):
+        ad = GateAdapter()
+        seen = {}
+
+        def fake(method, path, params=None, body=None, timeout=15.0):
+            seen.update(method=method, path=path, params=params)
+            return [{"id": 1, "contract": "BTC_USDT", "size": 5, "status": "open"}]
+        with patch.object(ad, "_keys", lambda: ("k", "s")), \
+                patch.object(ad, "signed_request", fake):
+            rows = ad.list_open_orders("BTC")
+        self.assertEqual(rows[0]["id"], 1)
+        self.assertEqual(seen["method"], "GET")
+        self.assertEqual(seen["path"], "/api/v4/futures/usdt/orders")
+        self.assertEqual(seen["params"]["status"], "open")
+        self.assertEqual(seen["params"]["contract"], "BTC_USDT")
+
     def test_partial_attach_rolls_back_first_leg(self):
         ad = GateAdapter()
         calls = []

@@ -25,6 +25,7 @@ class _StubAd(GateAdapter):
         self.calls = []
         self._positions_ok = positions_ok
         self.price_orders = [{"id": "tpA"}, {"id": "slA"}]
+        self.open_orders = []          # list_open_orders 返回（G7 清扫源）
 
     def fetch_instrument_spec(self, symbol, refresh=False):
         from r20_backend.exchanges import InstrumentSpec
@@ -49,6 +50,16 @@ class _StubAd(GateAdapter):
     def list_protective_orders(self, s):
         return list(self.price_orders)
 
+    def list_open_orders(self, s):
+        self.calls.append(("list_open", s))
+        return list(self.open_orders)
+
+    def cancel_order(self, s, oid):
+        self.calls.append(("cancel_order", s, str(oid))); return {}
+
+    def cancel_price_order(self, oid):
+        self.calls.append(("cancel_price", str(oid))); return {}
+
     def positions(self):
         self.calls.append(("positions",))
         return [{"base": "BTC", "side": "long", "size_signed": 57, "mark_price": 79500.0,
@@ -62,24 +73,42 @@ class _StubAd(GateAdapter):
 
 
 class LabCase(unittest.TestCase):
-    """基类：三个数据文件全部钉到临时目录。"""
+    """基类：所有数据写口（lab 三文件、OKX 敞口只读源、主台账 DB）全部钉到临时目录。"""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.df = os.path.join(self.tmp.name, "decisions.json")
         self.tf = os.path.join(self.tmp.name, "trackers.json")
         self.lf = os.path.join(self.tmp.name, "ledger.json")
+        self.db = os.path.join(self.tmp.name, "r20_quant.test.db")
+        self.okx_tf = os.path.join(self.tmp.name, "okx_trackers.json")   # 默认不存在→(0, True)
+        self.pool_f = os.path.join(self.tmp.name, "instrument_pool.json")
         p1 = patch.object(lab, "DECISION_FILE", self.df)
         p2 = patch.object(lab, "LAB_TRACKER_FILE", self.tf)
         p3 = patch.object(lab, "LAB_LEDGER_FILE", self.lf)
-        for p in (p1, p2, p3):
+        p4 = patch.object(lab, "OKX_TRACKER_FILE", self.okx_tf)
+        p5 = patch.object(lab, "INSTRUMENT_POOL_FILE", self.pool_f)
+        import db_manager as dbm
+        p6 = patch.object(dbm, "DB_PATH", self.db)
+        for p in (p1, p2, p3, p4, p5, p6):
             p.start()
-        self._patches = [p1, p2, p3]
+        self._patches = [p1, p2, p3, p4, p5, p6]
+        self.dbm = dbm
 
     def tearDown(self):
         for p in self._patches:
             p.stop()
         self.tmp.cleanup()
+
+    def main_db_rows(self):
+        import sqlite3
+        if not os.path.exists(self.db):
+            return []
+        con = sqlite3.connect(self.db)
+        con.row_factory = sqlite3.Row
+        rows = [dict(r) for r in con.execute("SELECT * FROM trades")]
+        con.close()
+        return rows
 
     def write_decisions(self, **per_asset):
         now = int(time.time())
@@ -253,6 +282,110 @@ class TestLabLive(LabCase):
         # dry 轮不得对账/覆盖 live tracker，也不得重复开
         tr2 = json.load(open(self.tf))
         self.assertEqual(tr2["BTC"]["mode"], "live")
+
+
+class TestUS005LedgerAndExposure(LabCase):
+    """主台账归一 / 敞口合并 / G7 孤儿清扫。"""
+
+    LIVE_T = {"mode": "live", "asset": "BTC", "side": "long", "entry_px": 79000.0,
+              "contracts": 57, "size_signed": 57, "margin_usdt": 40.0, "leverage": 3.0,
+              "tp_px": 85000.0, "sl_px": 77000.0, "tp_id": "tpA", "sl_id": "slA",
+              "entry_ts": 1788000000}
+
+    def test_close_market_writes_main_ledger(self):
+        json.dump({"BTC": dict(self.LIVE_T)}, open(self.tf, "w"))
+        self.write_decisions(BTC={"action": "CLOSE_MARKET", "confidence": 92})
+        self.use_pool(self.pool(["BTC"], dry=False), "live")
+        ad = _StubAd()   # mark 79000 → pnl=0
+        with patch.dict(os.environ, {"R20_GATE_EXECUTION": "1"}):
+            acts = lab.run_lab_cycle(ad=ad)
+        self.assertTrue(any("平仓: True" in a for a in acts))
+        rows = self.main_db_rows()
+        self.assertEqual(len(rows), 1)
+        r = rows[0]
+        self.assertEqual(r["venue"], "gate")
+        self.assertEqual(r["inst"], "BTC_USDT")
+        self.assertEqual(r["action"], "closed")
+        self.assertEqual(r["direction"], "多")
+        self.assertTrue(r["bill_id"].startswith("gatelib-live-BTC-1788000000"))
+        self.assertRegex(r["time"], r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
+        self.assertIn("pnl待交易所账单核对", r["comment"])
+        self.assertIn("mark近似", r["comment"])
+        self.assertEqual(json.load(open(self.tf)), {})   # tracker 已清
+
+    def test_reconcile_sweeps_orphans_before_ledger(self):
+        json.dump({"BTC": dict(self.LIVE_T)}, open(self.tf, "w"))
+        self.write_decisions(BTC={"action": "WAIT", "confidence": 50})
+        self.use_pool(self.pool(["BTC"], dry=False), "live")
+
+        class NoPos(_StubAd):
+            def positions(self):
+                self.calls.append(("positions",))
+                return []      # 仓位消失
+        ad = NoPos()
+        ad.open_orders = [{"id": 501}, {"id": 502}]
+        with patch.dict(os.environ, {"R20_GATE_EXECUTION": "1"}):
+            acts = lab.run_lab_cycle(ad=ad)
+        seq = [c[0] for c in ad.calls]
+        self.assertLess(seq.index("list_open"), seq.index("cancel_order"))
+        self.assertEqual(sorted([c[2] for c in ad.calls if c[0] == "cancel_order"]),
+                         ["501", "502"])
+        self.assertIn(("cancel_price", "tpA"), ad.calls)
+        self.assertIn(("cancel_price", "slA"), ad.calls)
+        rows = self.main_db_rows()
+        self.assertEqual(len(rows), 1)
+        self.assertIn("reconcile_no_position", rows[0]["comment"])
+        self.assertTrue(any("已撤孤儿挂单" in a for a in acts))
+        ledger = json.load(open(self.lf))
+        # order 腿 2 笔 + 触发单 tp/sl 各 1 = 4 项清扫记录
+        self.assertEqual(ledger[-1]["orphan_swept"],
+                         ["order:501", "order:502", "tp_id:tpA", "sl_id:slA"])
+
+    def test_dry_close_does_not_touch_main_db(self):
+        json.dump({"BTC": {**self.LIVE_T, "mode": "dry"}}, open(self.tf, "w"))
+        self.write_decisions(BTC={"action": "CLOSE_MARKET", "confidence": 92})
+        self.use_pool(self.pool(["BTC"]), "dry_run")
+        lab.run_lab_cycle(ad=_StubAd())
+        self.assertEqual(self.main_db_rows(), [])   # dry 非真成交，不落主账
+
+    def test_exposure_cap_blocks_open_with_component_detail(self):
+        # OKX 侧已有 BTC 多仓名义 400 + 本单 150 → >500 拒开
+        json.dump({"BTC-USDT-SWAP_long": {"instId": "BTC-USDT-SWAP", "side": "long",
+                                           "currentSz": 40, "entryPx": 10.0}},
+                  open(self.okx_tf, "w"))
+        json.dump([{"name": "BTC", "ctVal": 1.0}], open(self.pool_f, "w"))
+        self.write_decisions(BTC={"action": "BUY_LONG", "confidence": 90, "leverage": 5,
+                                  "margin_usdt": 150.0, "entry_price": 79000.0,
+                                  "take_profit_price": 85000.0, "stop_loss_price": 77000.0})
+        self.use_pool(self.pool(["BTC"], margin_per_trade_usdt=150.0), "dry_run")
+        with patch.dict(os.environ, {"R20_MAX_TOTAL_EXPOSURE_USDT": "500"}):
+            acts = lab.run_lab_cycle(ad=_StubAd())
+        line = next(a for a in acts if "EXPOSURE" in a)
+        self.assertIn("跨所同向敞超限拒开", line)
+        # 分量断言：40张×ctVal1.0×entryPx10 = 400；lab=0；本单=150×5=750 → total 1150>500
+        self.assertIn("OKX同向=400.0", line)
+        self.assertIn("lab同向=0.0", line)
+        self.assertIn("= 1150.0", line)
+        self.assertIn("cap 500.0", line)
+
+    def test_okx_source_broken_live_refuses_dry_passes(self):
+        # OKX tracker 文件损坏（非法 JSON）→ _okx_notional_for 返回 (0, False)
+        with open(self.okx_tf, "w") as f:
+            f.write("{not-json!!")
+        dec = {"action": "BUY_LONG", "confidence": 90, "leverage": 3,
+               "margin_usdt": 40.0, "entry_price": 79000.0,
+               "take_profit_price": 85000.0, "stop_loss_price": 77000.0}
+        self.write_decisions(BTC=dec)
+        # live：fail-closed 拒开
+        self.use_pool(self.pool(["BTC"], dry=False), "live")
+        with patch.dict(os.environ, {"R20_GATE_EXECUTION": "1"}):
+            acts = lab.run_lab_cycle(ad=_StubAd())
+        self.assertTrue(any("fail-closed 拒开" in a for a in acts))
+        self.assertEqual(json.load(open(self.tf)), {})
+        # dry：放行（敞口查询失败不构成演算阻断）
+        self.use_pool(self.pool(["BTC"]), "dry_run")
+        acts2 = lab.run_lab_cycle(ad=_StubAd())
+        self.assertTrue(any("开仓演算" in a for a in acts2))
 
 
 class TestTighterRule(unittest.TestCase):
