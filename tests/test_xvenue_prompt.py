@@ -26,7 +26,10 @@ class _FakeAd:
         return {"last": 99.99, "funding_rate": 0.000032}
 
     def fetch_top_trader_ratio(self, base):
-        return 2.13 if self.venue == "binance" else None
+        return 2.13 if self.venue == "binance" else 1.19
+
+    def fetch_funding_rate(self, base):
+        return 0.000035 if self.venue == "binance" else None
 
 
 class _BoomAd:
@@ -60,7 +63,9 @@ class TestXVenueMatrix(unittest.TestCase):
         self.assertEqual(xv["bin_last"], 100.01)
         self.assertEqual(xv["gate_last"], 99.99)
         self.assertEqual(xv["bin_ls"], 2.13)
+        self.assertEqual(xv["gate_ls"], 1.19)          # US-003 对称化
         self.assertEqual(xv["gate_funding_pct"], 0.0032)
+        self.assertEqual(xv["bin_funding_pct"], 0.0035)  # 小数×100 → %口径
 
     def test_adapter_exception_fail_soft(self):
         pkgs = self._pkgs()
@@ -80,13 +85,18 @@ class TestXVenueMatrix(unittest.TestCase):
 
     def test_prompt_line_full(self):
         pkg = {"name": "BTC", "price": 100.0, "xvenue": {
-            "bin_last": 100.05, "gate_last": 99.9, "bin_ls": 2.13, "gate_funding_pct": 0.0032}}
+            "bin_last": 100.05, "gate_last": 99.9, "bin_ls": 2.13, "gate_ls": 1.19,
+            "bin_funding_pct": 0.001, "gate_funding_pct": 0.0032}}
         line = abt._xvenue_prompt_line(pkg)
         self.assertIn("- 🌐 跨所比对", line)
         self.assertIn("币安:100.05(基差+0.050%)", line)
         self.assertIn("Gate:99.9(基差-0.100%)", line)
-        self.assertIn("币安大户多空比:2.13", line)
+        self.assertIn("币安大户比:2.13", line)
+        self.assertIn("Gate大户比:1.19", line)
+        self.assertIn("币安费率:0.001%", line)
         self.assertIn("Gate费率:0.0032%", line)
+        self.assertIn("大户比分歧2.13vs1.19→币安大户更乐观", line)
+        self.assertIn("费率背离3.2x→Gate费率更高(0.0032%),空向持仓为收费方向", line)
 
     def test_prompt_line_partial_and_absent(self):
         only_bin = {"name": "ETH", "price": 3000.0, "xvenue": {"bin_last": 3001.0}}
@@ -121,6 +131,44 @@ class TestXVenueMatrix(unittest.TestCase):
             self.assertEqual(doc["package_count"], 1)
             self.assertIn("writer_pid", doc)
             self.assertIsInstance(doc["venues"]["okx"]["failed"], dict)
+
+
+class TestDivergenceNotes(unittest.TestCase):
+    """US-003 分歧标注正反例（阈值 50% / 3x，依据价值研究实测基线）。"""
+
+    def test_ls_divergence_positive(self):
+        n = abt._xv_divergence_notes({"bin_ls": 2.13, "gate_ls": 1.19})
+        self.assertIn("大户比分歧", n)
+        self.assertIn("币安大户更乐观", n)
+
+    def test_ls_direction_conflict_triggers(self):
+        n = abt._xv_divergence_notes({"bin_ls": 1.5, "gate_ls": 0.8})
+        # 1.5>1(多主导) vs 0.8<1(空主导) → 方向矛盾触发；1.5>0.8 乐观方=币安
+        self.assertIn("大户比分歧", n)
+        self.assertIn("币安大户更乐观", n)
+
+    def test_ls_close_values_no_note(self):
+        self.assertEqual(abt._xv_divergence_notes({"bin_ls": 2.10, "gate_ls": 1.95}), "")
+
+    def test_funding_divergence_same_sign_only(self):
+        n = abt._xv_divergence_notes({"bin_funding_pct": 0.001, "gate_funding_pct": -0.004})
+        self.assertNotIn("费率背离", n)          # 异号不标
+        n2 = abt._xv_divergence_notes({"bin_funding_pct": -0.004, "gate_funding_pct": -0.0012})
+        self.assertIn("多向持仓为收费方向", n2)   # 负费率所收费方向=多头
+        self.assertIn("币安费率更高", n2)          # hi=绝对值更大的所（-0.004 币安）
+
+    def test_funding_below_threshold_silent(self):
+        self.assertEqual(abt._xv_divergence_notes(
+            {"bin_funding_pct": 0.005, "gate_funding_pct": 0.0065}), "")
+
+    def test_garbage_inputs_never_raise(self):
+        self.assertEqual(abt._xv_divergence_notes(
+            {"bin_ls": "abc", "gate_ls": None, "bin_funding_pct": {}, "gate_funding_pct": "1e2"}),
+            "")   # "1e2" 可转 float 但缺配对 → 无标注
+
+    def test_zero_funding_no_divide_by_zero(self):
+        self.assertEqual(abt._xv_divergence_notes(
+            {"bin_funding_pct": 0.0, "gate_funding_pct": 0.003}), "")
 
 
 if __name__ == "__main__":

@@ -546,6 +546,14 @@ def _xvenue_enabled() -> bool:
     return str(os.environ.get("R20_XVENUE_PROMPT", "1")).strip().lower() not in ("0", "off", "false")
 
 
+# 跨所分歧自动标注阈值（US-003，依据 2026-09-09 价值研究实测：
+# 方向二 同刻同币三所费率分化 2.3 倍属常态噪声 → 标注阈值取 3.0 倍且同号；
+# 方向三 大户比博弈样本 币安2.12 vs Gate1.10 ≈ 93% 差 → 阈值取 50%。
+# 注意：两所大户比口径不同（账户/持仓维度差异），标注定位为「博弈提示」而非绝对事实。）
+XV_FUNDING_DIVERGE_MULT = 3.0
+XV_LS_DIVERGE_RATIO = 0.50
+
+
 import threading
 
 _XV_HEALTH: Dict[str, Dict[str, Any]] = {}
@@ -608,11 +616,17 @@ def _xv_binance_snapshot(base: str):
         ad = _get_xvenue_adapter("binance")
         t = ad.fetch_ticker(base) or {}
         ls = ad.fetch_top_trader_ratio(base)
+        # 费率经适配器实装取 premiumIndex（小数口径，挂载点统一 ×100）
+        try:
+            fund = ad.fetch_funding_rate(base)
+        except Exception:
+            fund = None
         if not t.get("last"):
             _xv_record("binance", base, False, (time.time() - t0) * 1000, "empty ticker (unreachable/blocked?)")
             return None
         _xv_record("binance", base, True, (time.time() - t0) * 1000)
-        return {"venue": "binance", "name": base, "last": t.get("last"), "ls": ls}
+        return {"venue": "binance", "name": base, "last": t.get("last"), "ls": ls,
+                "funding_rate": fund}
     except Exception as exc:
         _xv_record("binance", base, False, (time.time() - t0) * 1000, str(exc))
         return None
@@ -621,20 +635,26 @@ def _xv_binance_snapshot(base: str):
 def _xv_gate_snapshot(base: str):
     t0 = time.time()
     try:
-        t = _get_xvenue_adapter("gate").fetch_ticker(base) or {}
+        ad = _get_xvenue_adapter("gate")
+        t = ad.fetch_ticker(base) or {}
+        # Gate 大户比走 contract_stats top_lsr_size（适配器实装自带容错）
+        try:
+            ls = ad.fetch_top_trader_ratio(base)
+        except Exception:
+            ls = None
         if not t.get("last"):
             _xv_record("gate", base, False, (time.time() - t0) * 1000, "empty ticker (unreachable/blocked?)")
             return None
         _xv_record("gate", base, True, (time.time() - t0) * 1000)
         return {"venue": "gate", "name": base, "last": t.get("last"),
-                "funding_rate": t.get("funding_rate")}
+                "funding_rate": t.get("funding_rate"), "ls": ls}
     except Exception as exc:
         _xv_record("gate", base, False, (time.time() - t0) * 1000, str(exc))
         return None
 
 
 def fetch_cross_venue_matrix(packages: List[Dict[str, Any]]) -> None:
-    """给每个 pkg 就地挂 xvenue：币安现价/大户多空比 + Gate 现价/费率。fail-soft。"""
+    """给每个 pkg 就地挂 xvenue：双所 现价/大户多空比/资金费率（US-003 对称化）。fail-soft。"""
     if not _xvenue_enabled():
         return
     try:
@@ -655,13 +675,14 @@ def fetch_cross_venue_matrix(packages: List[Dict[str, Any]]) -> None:
                 if pkg is None:
                     continue
                 xv = pkg.setdefault("xvenue", {})
+                prefix = "bin" if val.get("venue") == "binance" else "gate"
                 if val.get("last") is not None:
-                    xv["bin_last" if val["venue"] == "binance" else "gate_last"] = val["last"]
+                    xv[f"{prefix}_last"] = val["last"]
                 if val.get("ls") is not None:
-                    xv["bin_ls"] = val["ls"]
+                    xv[f"{prefix}_ls"] = val["ls"]
                 if val.get("funding_rate") is not None:
                     try:
-                        xv["gate_funding_pct"] = round(float(val["funding_rate"]) * 100, 4)
+                        xv[f"{prefix}_funding_pct"] = round(float(val["funding_rate"]) * 100, 4)
                     except (TypeError, ValueError):
                         pass
         _xv_flush_health(packages)
@@ -669,8 +690,40 @@ def fetch_cross_venue_matrix(packages: List[Dict[str, Any]]) -> None:
         pass
 
 
+def _xv_divergence_notes(xv: Dict[str, Any]) -> str:
+    """US-003 跨所分歧自动标注：博弈提示语（可多条，拼接于证据行尾）。"""
+    notes: List[str] = []
+    def _f(v: Any) -> Optional[float]:
+        if v is None:
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+    b_ls, g_ls = _f(xv.get("bin_ls")), _f(xv.get("gate_ls"))
+    if b_ls and g_ls and b_ls > 0 and g_ls > 0:
+        conflict = (b_ls - 1.0) * (g_ls - 1.0) < 0     # 一所以为主导、另一所以空为主导
+        diff_ratio = abs(b_ls - g_ls) / min(b_ls, g_ls)
+        if conflict or diff_ratio >= XV_LS_DIVERGE_RATIO:
+            optimistic = "币安" if b_ls > g_ls else "Gate"
+            notes.append(f"大户比分歧{b_ls:g}vs{g_ls:g}→{optimistic}大户更乐观"
+                         f"(两所口径有异,作博弈提示非绝对)")
+    b_f, g_f = _f(xv.get("bin_funding_pct")), _f(xv.get("gate_funding_pct"))
+    if b_f is not None and g_f is not None and b_f * g_f > 0 \
+            and min(abs(b_f), abs(g_f)) > 0:
+        mult = max(abs(b_f), abs(g_f)) / min(abs(b_f), abs(g_f))
+        if mult >= XV_FUNDING_DIVERGE_MULT:
+            gate_hi = abs(g_f) > abs(b_f)
+            hi = "Gate" if gate_hi else "币安"
+            hi_val = g_f if gate_hi else b_f
+            side = "空" if hi_val > 0 else "多"       # 正费率=多头付费给空头
+            notes.append(f"费率背离{mult:.1f}x→{hi}费率更高({hi_val:g}%),"
+                         f"{side}向持仓为收费方向")
+    return (" | " + " | ".join(notes)) if notes else ""
+
+
 def _xvenue_prompt_line(p: Dict[str, Any]) -> str:
-    """归一跨所证据行；数据不足返回空串（Prompt 不出现残行）。"""
+    """归一跨所证据行（双所现价基差/大户比/费率+分歧标注）；数据不足返回空串。"""
     xv = p.get("xvenue") or {}
     okx_px = safe_float(p.get("price", 0))
     bin_px = safe_float(xv.get("bin_last", 0))
@@ -683,10 +736,15 @@ def _xvenue_prompt_line(p: Dict[str, Any]) -> str:
             basis = (px - okx_px) / okx_px * 100
             seg.append(f"{label}:{px:g}(基差{basis:+.3f}%)")
     if xv.get("bin_ls") is not None:
-        seg.append(f"币安大户多空比:{xv['bin_ls']}")
+        seg.append(f"币安大户比:{xv['bin_ls']}")
+    if xv.get("gate_ls") is not None:
+        seg.append(f"Gate大户比:{xv['gate_ls']}")
+    if xv.get("bin_funding_pct") is not None:
+        seg.append(f"币安费率:{xv['bin_funding_pct']}%")
     if xv.get("gate_funding_pct") is not None:
         seg.append(f"Gate费率:{xv['gate_funding_pct']}%")
-    return "- 🌐 跨所比对 (基差=对OKX偏离，>0.05% 警惕插针/流动性分层): " + " | ".join(seg)
+    return ("- 🌐 跨所比对 (基差=对OKX偏离，>0.05% 警惕插针/流动性分层): "
+            + " | ".join(seg) + _xv_divergence_notes(xv))
 
 
 # System 宪法保持静态：全部动态风控阈值由每轮 construct_full_market_prompt 注入的
