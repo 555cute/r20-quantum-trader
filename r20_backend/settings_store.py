@@ -20,6 +20,8 @@ MANAGED_KEYS = {
     "R20_BINANCE_TESTNET", "R20_GATE_TESTNET",
     # Gate 试验田执行总开关（真实下单权限，默认关）
     "R20_GATE_EXECUTION",
+    # 跨所同向合并敞口上限（US-005 试验田拒开阈值，单位 USDT）
+    "R20_MAX_TOTAL_EXPOSURE_USDT",
     "LLM_BASE_URL",
     "LLM_API_KEY",
     "LLM_MODEL",

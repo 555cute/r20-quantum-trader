@@ -388,6 +388,48 @@ class TestUS005LedgerAndExposure(LabCase):
         self.assertTrue(any("开仓演算" in a for a in acts2))
 
 
+    def test_main_ledger_idempotent_same_bill_id(self):
+        # 同一 tracker 重复落账（对账竞态/重跑）→ INSERT OR REPLACE 幂等，只 1 行
+        t = dict(self.LIVE_T)
+        ok1, bill1 = lab._record_main_ledger(t, close_px=79100.0, pnl=5.7, reason="idempotency")
+        ok2, bill2 = lab._record_main_ledger(t, close_px=79100.0, pnl=5.7, reason="idempotency")
+        self.assertTrue(ok1 and ok2)
+        self.assertEqual(bill1, bill2)
+        rows = self.main_db_rows()
+        self.assertEqual(len(rows), 1)          # 绝不重复成行
+        self.assertEqual(rows[0]["venue"], "gate")
+
+    def test_exposure_cap_env_override(self):
+        # OKX 同向名义=100张×1.0×2.0=200U，本单=40×3=120U → 合计 320U
+        json.dump({"BTC-USDT-SWAP_long": {"instId": "BTC-USDT-SWAP", "side": "long",
+                                          "currentSz": 100.0, "entryPx": 2.0}},
+                  open(self.okx_tf, "w"))
+        json.dump([{"name": "BTC", "ctVal": 1.0}], open(self.pool_f, "w"))
+        dec = {"action": "BUY_LONG", "confidence": 90, "leverage": 3,
+               "margin_usdt": 40.0, "entry_price": 79000.0,
+               "take_profit_price": 85000.0, "stop_loss_price": 77000.0}
+        self.write_decisions(BTC=dec)
+        self.use_pool(self.pool(["BTC"]), "dry_run")
+        # 默认 cap 500：放行
+        acts = lab.run_lab_cycle(ad=_StubAd())
+        self.assertTrue(any("开仓演算" in a for a in acts))
+        # env 压到 300：拒开且明细含三组件（先清第一轮 tracker，避免管理分支短路）
+        json.dump({}, open(self.tf, "w"))
+        acts2 = []
+        with patch.dict(os.environ, {"R20_MAX_TOTAL_EXPOSURE_USDT": "300"}):
+            acts2 = lab.run_lab_cycle(ad=_StubAd())
+        line = next(a for a in acts2 if "EXPOSURE" in a)
+        self.assertIn("200.0", line)
+        self.assertIn("120.0", line)
+        self.assertIn("> cap 300.0", line)
+        self.assertEqual(json.load(open(self.tf)), {})   # 拒开不留 tracker
+        # 非法 env 值回退默认 500（fail-safe 不炸）
+        with patch.dict(os.environ, {"R20_MAX_TOTAL_EXPOSURE_USDT": "banana"}):
+            self.assertEqual(lab._exposure_cap(), 500.0)
+        from r20_backend.settings_store import MANAGED_KEYS
+        self.assertIn("R20_MAX_TOTAL_EXPOSURE_USDT", MANAGED_KEYS)
+
+
 class TestTighterRule(unittest.TestCase):
     def test_long_short_semantics(self):
         self.assertTrue(lab._is_tighter("long", 78000, 77000, 79000))
