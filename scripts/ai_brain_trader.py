@@ -797,7 +797,7 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
     "BTC-USDT-SWAP": {{
       "action": "BUY_LONG" | "SELL_SHORT" | "WAIT",
       "confidence": 0~100,
-      "leverage": 3 (推荐杠杆2~5),
+      "leverage": {int(min(3, MAX_LEVERAGE))} (推荐杠杆 2~{MAX_LEVERAGE:g}，上限以【本周期风险预算】声明为准),
       "margin_usdt": float (必须取自上方【本周期风险预算】的常规单笔区间；示例: 可用余额 80U → 2.4~9.6，可用余额 4000U → 120~480。严禁套用任何固定绝对金额),
       "entry_price": float,
       "take_profit_price": float,
@@ -907,7 +907,10 @@ def assemble_decision_cache(
         take_profit = safe_float(d_item.get("take_profit_price") or d_item.get("take_profit"))
         stop_loss = safe_float(d_item.get("stop_loss_price") or d_item.get("stop_loss"))
         confidence = max(0.0, min(100.0, safe_float(d_item.get("confidence"))))
-        ai_leverage = int(max(2, min(5, round(safe_float(d_item.get("leverage", 3))))))
+        # 杠杆钳制与后台风控页 MAX_LEVERAGE 联动（旧版硬编码 [2,5]，激进套件 7x 配了也透传不下去）
+        lev_hi = max(1, int(MAX_LEVERAGE))
+        lev_lo = min(2, lev_hi)
+        ai_leverage = int(max(lev_lo, min(lev_hi, round(safe_float(d_item.get("leverage", 3))))))
         raw_margin = safe_float(d_item.get("margin_usdt") or d_item.get("margin_usd", 0.0))
 
         # Dynamically apply self-improvement asset multiplier (e.g. BTC 1.2x, DOGE 0.8x)
