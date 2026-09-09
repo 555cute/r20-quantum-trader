@@ -35,6 +35,7 @@ try:
 except Exception:
     __version__ = "7.6.0"
 
+from r20_exchange.binance import ORDER_MAX_AGE_MS
 from r20_exchange.runtime import (
     freeze_environment,
     get_exchange,
@@ -539,12 +540,13 @@ def clean_stale_open_orders() -> Tuple[bool, str]:
     if not ok or not isinstance(orders, list):
         return False, err or "invalid open-orders response"
     now_ts = int(time.time() * 1000)
+    max_age_ms = ORDER_MAX_AGE_MS if selected_environment().exchange == "binance" else 240_000
     for order in orders:
         inst_id = str(order.get("instId") or "")
         order_id = str(order.get("ordId") or "")
         state = str(order.get("state", "live")).lower()
         created_at = int(order.get("cTime", now_ts) or now_ts)
-        if state not in {"live", "partially_filled"} or not order_id or now_ts - created_at <= 240000:
+        if state not in {"live", "partially_filled"} or not order_id or now_ts - created_at <= max_age_ms:
             continue
         canceled_ok, _payload, canceled_err = _call_exchange("cancel_order", inst_id, order_id)
         if not canceled_ok:
@@ -2223,6 +2225,8 @@ def submit_entry_with_confirmed_leverage(
             protection_note = ", protection=sl_only"
         elif protection_status == "awaiting_fill":
             fill_phrase = "已提交待成交"
+            if selected_environment().exchange == "binance":
+                fill_phrase += f"（最长等待 {ORDER_MAX_AGE_MS // 60_000} 分钟，超时撤单）"
             protection_note = ", protection=awaiting_fill"
         elif protection_status == "unknown":
             fill_phrase = "已受理但保护状态未知"

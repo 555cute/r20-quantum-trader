@@ -30,7 +30,7 @@ DEMO_HOST = "https://demo-fapi.binance.com"
 RECV_WINDOW_MS = 5000
 TRADE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 TRADE_LOOKBACK_MS = 90 * 24 * 60 * 60 * 1000
-ORDER_MAX_AGE_MS = 240_000
+ORDER_MAX_AGE_MS = 15 * 60 * 1000
 UNKNOWN_MUTATE_CODES = {-1000, -1006, -1007}
 CLIENT_ID_RE = re.compile(r"^[.A-Z:/a-z0-9_-]{1,36}$")
 INST_RE = re.compile(r"^([A-Z0-9]+)-USDT-SWAP$")
@@ -1704,6 +1704,12 @@ class BinanceExchange:
             return record, [], False
         if filled <= 0:
             record["protection_status"] = "flat"
+            print(
+                f"[挂单生命周期管理] {record['inst_id']} 开仓单已确认终态: "
+                f"order={record['order_id']}, status={status}, filled={record['entry_filled']}, "
+                f"cancel_requested={record['cancel_requested']}；零成交，未建立本次仓位",
+                flush=True,
+            )
             return record, [], True
         return self._protect_verified_entry(record)
 
