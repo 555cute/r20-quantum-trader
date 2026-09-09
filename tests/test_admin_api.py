@@ -456,7 +456,7 @@ class AdminApiTests(unittest.TestCase):
         self.assertEqual(body["exchange"], "binance")
         self.assertEqual(body["instruments"][0]["venue_symbol"], "BTCUSDT")
 
-    def test_add_instrument_accepts_binance_symbol(self):
+    def test_add_instrument_requires_canonical_swap_id(self):
         from types import SimpleNamespace
         from unittest.mock import patch
         headers = self.login("admin", "InitialAdmin123456")
@@ -472,14 +472,17 @@ class AdminApiTests(unittest.TestCase):
              patch.object(app_module, "load_instruments", return_value=[{"instId": "BTC-USDT-SWAP", "name": "BTC"}]), \
              patch.object(app_module, "save_instruments", side_effect=lambda rows: saved.extend(rows)), \
              patch.object(app_module, "audit_record"):
+            ticker = self.client.post("/api/v1/admin/instruments", headers=headers, json={"inst_id": "SOLUSDT"})
+            self.assertEqual(ticker.status_code, 422, ticker.text)
             invalid = self.client.post("/api/v1/admin/instruments", headers=headers, json={"inst_id": "BTC-USD-SWAP"})
             self.assertEqual(invalid.status_code, 422, invalid.text)
-            response = self.client.post("/api/v1/admin/instruments", headers=headers, json={"inst_id": "SOLUSDT"})
+            response = self.client.post("/api/v1/admin/instruments", headers=headers, json={"inst_id": "SOL-USDT-SWAP"})
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
         self.assertEqual(body["added"]["instId"], "SOL-USDT-SWAP")
         self.assertEqual(body["added"]["venue_symbol"], "SOLUSDT")
         self.assertEqual(saved[-1]["instId"], "SOL-USDT-SWAP")
+
 
 
     def test_put_binance_demo_requires_switch_phrase_and_skips_blank_secrets(self):

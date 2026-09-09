@@ -58,7 +58,8 @@ from r20_gateway.scheduler import scheduler_snapshot
 from r20_gateway.secrets import delete_secrets, save_secrets, status as secret_store_status
 from r20_gateway.store import GatewayStore
 from r20_gateway.supervisor import start_supervisor as start_gateway_supervisor, stop_supervisor as stop_gateway_supervisor
-from scripts.instrument_pool import canonical_inst_id, from_okx_instrument, load_instruments, save_instruments, venue_symbol
+from scripts.instrument_pool import from_okx_instrument, load_instruments, save_instruments, venue_symbol
+
 
 from r20_backend.llm_manager import (
     load_llm_config,
@@ -318,15 +319,7 @@ class GatewayReplayRequest(BaseModel):
 
 
 class InstrumentAddRequest(BaseModel):
-    inst_id: str = Field(min_length=3, max_length=32)
-
-    @field_validator("inst_id")
-    @classmethod
-    def validate_inst_id(cls, value: str) -> str:
-        try:
-            return canonical_inst_id(value)
-        except ValueError as exc:
-            raise ValueError(str(exc)) from exc
+    inst_id: str = Field(pattern=r"^[A-Z0-9]{2,15}-USDT-SWAP$")
 
 
 
@@ -2171,7 +2164,8 @@ def admin_instruments(x_r20_admin_token: str | None = Header(default=None)) -> d
 def add_admin_instrument(payload: InstrumentAddRequest, x_r20_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
     refresh_settings()
     require_admin_header(x_r20_admin_token)
-    inst_id = payload.inst_id
+    inst_id = payload.inst_id.upper()
+
     current = load_instruments()
     if any(item["instId"] == inst_id for item in current):
         raise HTTPException(status_code=409, detail="该币种已在交易池中")
@@ -2198,16 +2192,12 @@ def add_admin_instrument(payload: InstrumentAddRequest, x_r20_admin_token: str |
 def delete_admin_instrument(inst_id: str, payload: InstrumentDeleteRequest, x_r20_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
     refresh_settings()
     require_admin_header(x_r20_admin_token)
-    try:
-        inst_id = canonical_inst_id(inst_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    confirmation = payload.confirmation.strip().upper()
-    allowed = {f"REMOVE {inst_id}", f"REMOVE {venue_symbol(inst_id, settings.exchange)}"}
-    if confirmation not in allowed:
+    inst_id = inst_id.upper()
+    if payload.confirmation.strip().upper() != f"REMOVE {inst_id}":
         raise HTTPException(status_code=400, detail=f"确认短语必须精确为：REMOVE {inst_id}")
     if inst_id == "BTC-USDT-SWAP":
         raise HTTPException(status_code=403, detail="BTC 是全局黑天鹅哨兵基准，不允许从交易池删除")
+
 
     current = load_instruments()
     if len(current) <= MIN_POOL_SIZE:
