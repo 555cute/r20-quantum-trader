@@ -297,17 +297,19 @@ class AiFactorTraderPositionProtectionTest(unittest.TestCase):
         self.assertIn("--reduceOnly",run.call_args_list[1].args[0])
 
     def test_stale_order_query_failure_aborts_cleanup(self):
-        with patch.object(ai_factor_trader,"run_cmd_result",return_value={"ok":False,"data":None,"stderr":"timeout","stdout":""}):
+        with patch.object(ai_factor_trader,"okx_rest") as rest:
+            rest.pending_orders.side_effect=RuntimeError("timeout")
             ok,detail=ai_factor_trader.clean_stale_open_orders()
         self.assertFalse(ok); self.assertIn("timeout",detail)
 
-    def test_stale_order_cancel_uses_valid_cli_and_fail_closed(self):
+    def test_stale_order_cancel_fail_closed_after_rest_migration(self):
         order={"instId":"SOL-USDT-SWAP","ordId":"11","state":"live","cTime":"1"}
-        responses=[{"ok":True,"data":[order],"stderr":"","stdout":"[]"},{"ok":False,"data":None,"stderr":"rejected","stdout":""}]
-        with patch.object(ai_factor_trader,"run_cmd_result",side_effect=responses) as run, patch.object(ai_factor_trader.time,"time",return_value=1000):
+        with patch.object(ai_factor_trader,"okx_rest") as rest, patch.object(ai_factor_trader.time,"time",return_value=1000):
+            rest.pending_orders.return_value=[order]
+            rest.cancel_order.side_effect=RuntimeError("rejected")
             ok,detail=ai_factor_trader.clean_stale_open_orders()
         self.assertFalse(ok); self.assertIn("rejected",detail)
-        self.assertIn("swap cancel SOL-USDT-SWAP --ordId 11",run.call_args_list[1].args[0])
+        rest.cancel_order.assert_called_once_with("SOL-USDT-SWAP","11")
 
     def test_cloud_oco_failure_closes_position_fail_closed(self):
         position={"pos":4.0,"side":"long","avgPx":103.55,"upl":-4.0}

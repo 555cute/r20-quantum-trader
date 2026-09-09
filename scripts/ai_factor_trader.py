@@ -35,7 +35,14 @@ try:
 except Exception:
     __version__ = "7.6.0"
 
-from okx_runtime import freeze_environment as freeze_okx_environment, replace_cli_prefix as okx_private_command, unfreeze_environment as unfreeze_okx_environment, selected_environment
+# 必须用 scripts.okx_runtime 包形式：okx_rest 读的是同一模块实例的冻结环境，
+# 裸 okx_runtime 是另一份 _FROZEN_ENVIRONMENT 全局，freeze 周期对其无效（US-002 命门）。
+from scripts.okx_runtime import (
+    freeze_environment as freeze_okx_environment,
+    replace_cli_prefix as okx_private_command,
+    unfreeze_environment as unfreeze_okx_environment,
+    selected_environment,
+)
 import json
 import math
 import time
@@ -46,6 +53,7 @@ import fcntl
 from typing import Tuple, Dict, Any, List, Optional
 from concurrent.futures import ThreadPoolExecutor
 from market_data_service import fetch_candles, fetch_ticker
+import scripts.okx_rest as okx_rest
 
 # 执行层风控参数单一事实源（后台「风控管理页」写入 .env，本进程 import 时读取生效）
 from risk_constants import (
@@ -323,20 +331,22 @@ def load_adaptive_config():
 
 def clean_stale_open_orders() -> Tuple[bool, str]:
     """Cancel stale entry orders; any inability to verify/cancel blocks the trading cycle."""
-    result = run_cmd_result(okx_private_command("okx swap orders --json"), timeout=20)
-    if not result["ok"] or not isinstance(result.get("data"), list):
-        return False, result["stderr"] or result["stdout"] or "invalid open-orders response"
+    try:
+        open_orders = okx_rest.pending_orders()
+    except Exception as exc:
+        return False, f"invalid open-orders response: {exc}"
     now_ts = int(time.time() * 1000)
-    for order in result["data"]:
+    for order in open_orders:
         inst_id = str(order.get("instId") or "")
         order_id = str(order.get("ordId") or "")
         state = str(order.get("state", "live")).lower()
         created_at = int(order.get("cTime", now_ts) or now_ts)
         if state not in {"live", "partially_filled"} or not order_id or now_ts - created_at <= 240000:
             continue
-        canceled = run_cmd_result(okx_private_command(f"okx swap cancel {inst_id} --ordId {order_id} --json"), timeout=20)
-        if not canceled["ok"]:
-            return False, f"failed to cancel stale order {inst_id}/{order_id}: {canceled['stderr'] or canceled['stdout']}"
+        try:
+            okx_rest.cancel_order(inst_id, order_id)
+        except Exception as exc:
+            return False, f"failed to cancel stale order {inst_id}/{order_id}: {exc}"
         print(f"[挂单生命周期管理] 自动撤销超时挂单: {inst_id} (ordId={order_id}, state={state})")
     return True, "open orders verified"
 
@@ -409,33 +419,30 @@ def is_circuit_breaker_active(usdt_available: float = None):
 
 def query_positions() -> Tuple[bool, List[Dict[str, Any]], str]:
     """Distinguish an exchange-confirmed empty account from a failed query."""
-    result = run_cmd_result(okx_private_command("okx account positions --json"), timeout=20)
-    if not result["ok"] or not isinstance(result.get("data"), list):
-        return False, [], result["stderr"] or result["stdout"] or "invalid positions response"
-    return True, result["data"], ""
+    try:
+        rows = okx_rest.positions()
+    except Exception as exc:
+        return False, [], f"invalid positions response: {exc}"
+    return True, rows, ""
 
 
 def close_position_confirmed(inst_id: str, pos_side: str, before_size: float) -> Tuple[bool, str]:
     """Close a position and verify at the exchange before changing local state."""
     # Pre-cancel any conflicting pending/reduce-only orders for this instrument to release available size
     try:
-        ord_res = run_cmd_result(okx_private_command(f"okx swap orders --instId {inst_id} --json"), timeout=10)
-        if ord_res.get("ok") and isinstance(ord_res.get("data"), list):
-            for o in ord_res["data"]:
-                o_side = str(o.get("posSide", "net")).lower()
-                if o_side in (pos_side.lower(), "net"):
-                    o_id = str(o.get("ordId") or "")
-                    if o_id:
-                        run_cmd_result(okx_private_command(f"okx swap cancel {inst_id} --ordId {o_id} --json"), timeout=10)
+        for o in okx_rest.pending_orders(inst_id):
+            o_side = str(o.get("posSide", "net")).lower()
+            if o_side in (pos_side.lower(), "net"):
+                o_id = str(o.get("ordId") or "")
+                if o_id:
+                    okx_rest.cancel_order(inst_id, o_id)
     except Exception as e:
         print(f"[Close Pre-Clean] Warning cancelling pending orders for {inst_id}: {e}")
 
-    result = run_cmd_result(
-        okx_private_command(f"okx swap close --instId {inst_id} --mgnMode cross --posSide {pos_side} --autoCxl --json"),
-        timeout=20,
-    )
-    if not result["ok"]:
-        return False, result["stderr"] or result["stdout"] or "close command failed"
+    try:
+        okx_rest.close_position(inst_id, pos_side, td_mode="cross", auto_cxl=True)
+    except Exception as exc:
+        return False, f"close command failed: {exc}"
 
     saw_successful_query = False
     for _ in range(6):
@@ -481,15 +488,15 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: f
 
     if env.simulated:
         try:
-            demo_ticker = run_json_cmd(f"okx --demo market ticker {inst_id} --json")
-            if demo_ticker and isinstance(demo_ticker, list) and demo_ticker[0].get("last"):
-                demo_last = float(demo_ticker[0]["last"])
+            demo_ticker = fetch_ticker(inst_id)
+            if demo_ticker and demo_ticker.get("last"):
+                demo_last = float(demo_ticker["last"])
                 if demo_last > 0 and price > 0:
                     divergence = abs(price - demo_last) / demo_last
                     # If live market price diverged from demo sandbox by more than 5% (e.g. ASTER / illiquid demo pair)
                     if divergence > 0.05:
                         scale = demo_last / price
-                        prec = len(str(demo_ticker[0]["last"]).split(".")[1]) if "." in str(demo_ticker[0]["last"]) else 4
+                        prec = len(str(demo_ticker["last"]).split(".")[1]) if "." in str(demo_ticker["last"]) else 4
                         effective_px = round(price * scale, prec)
                         effective_tp = round(tp_px * scale, prec)
                         effective_sl = round(sl_px * scale, prec)
@@ -515,25 +522,19 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: f
         print(f"[Order Rejected] 最终有效开仓报价未通过核心安全复验: {reason} (px={effective_px}, tp={effective_tp}, sl={effective_sl})")
         return False, f"最终订单核心安全复验拒绝: {reason}"
 
-    command = okx_private_command(
-        f"okx swap place --instId {inst_id} --tdMode cross --side {side} "
-        f"--posSide {pos_side} --ordType limit --px {effective_px} --sz {size:g} "
-        f"--tpTriggerPx {effective_tp} --tpOrdPx=-1 --slTriggerPx {effective_sl} --slOrdPx=-1 --json"
-    )
-    result = run_cmd_result(command, timeout=20)
-    if not result["ok"]:
-        return False, result["stderr"] or result["stdout"] or "order command failed"
-    payload = result.get("data")
+    try:
+        rows = okx_rest.place_order(
+            inst_id, side, f"{size:g}",
+            pos_side=pos_side, td_mode="cross", ord_type="limit",
+            px=effective_px, attach_tp=effective_tp, attach_sl=effective_sl,
+        )
+    except Exception as exc:
+        return False, str(exc)
     order_id = None
-    if isinstance(payload, dict):
-        order_id = payload.get("ordId") or payload.get("orderId")
-        nested = payload.get("data")
-        if not order_id and isinstance(nested, dict):
-            order_id = nested.get("ordId")
-        elif not order_id and isinstance(nested, list) and nested and isinstance(nested[0], dict):
-            order_id = nested[0].get("ordId")
-    elif isinstance(payload, list) and payload and isinstance(payload[0], dict):
-        order_id = payload[0].get("ordId")
+    for row in rows:
+        order_id = row.get("ordId") or row.get("orderId")
+        if order_id:
+            break
     if not order_id:
         return False, "exchange accepted response without a verifiable order id"
     return True, str(order_id)
@@ -1826,6 +1827,12 @@ def single_trader_cycle(func):
 # =============================================================================
 @single_trader_cycle
 def execute_portfolio():
+    # US-002 fail-closed entry gate: without a static V5 API Key for the selected
+    # LIVE/DEMO environment the engine must physically refuse to trade.
+    _engine_env = selected_environment()
+    if not _engine_env.configured:
+        print(f"[Engine NOT READY] OKX {_engine_env.mode.upper()} API Key 未配置：V5 直签是唯一交易通道，本周期拒绝交易。")
+        return None
     tz_bj = datetime.timezone(datetime.timedelta(hours=8))
     now_dt = datetime.datetime.now(tz_bj)
     timestamp_full = now_dt.strftime("%Y-%m-%d %H:%M:%S")
@@ -1870,11 +1877,11 @@ def execute_portfolio():
     long_count = real_long_count
     short_count = real_short_count
 
-    pending_result = run_cmd_result(okx_private_command("okx swap orders --json"), timeout=20)
-    if not pending_result["ok"] or not isinstance(pending_result.get("data"), list):
-        print(f"[Trader] Abort: unable to verify pending orders: {pending_result['stderr'] or pending_result['stdout']}")
+    try:
+        pending_orders = okx_rest.pending_orders()
+    except Exception as pending_exc:
+        print(f"[Trader] Abort: unable to verify pending orders: {pending_exc}")
         return None
-    pending_orders = pending_result["data"]
     pending_inst_ids = set()
     pending_long_count = 0
     pending_short_count = 0
@@ -1894,12 +1901,13 @@ def execute_portfolio():
     reserved_long_count = long_count + pending_long_count
     reserved_short_count = short_count + pending_short_count
 
-    bal_res = run_json_cmd(okx_private_command("okx account balance --json"))
-    if not isinstance(bal_res, list):
-        print("[Trader] Abort: unable to verify account balance")
+    try:
+        bal_res = okx_rest.balances()
+    except Exception as bal_exc:
+        print(f"[Trader] Abort: unable to verify account balance: {bal_exc}")
         return None
     usdt_available = 0.0
-    if bal_res and isinstance(bal_res, list) and len(bal_res) > 0:
+    if bal_res:
         for d in bal_res[0].get("details", []):
             if d.get("ccy") == "USDT":
                 usdt_available = float(d.get("availBal", 0.0))
@@ -2303,4 +2311,7 @@ def execute_portfolio():
     print(log_entry.strip())
 
 if __name__ == "__main__":
+    if not selected_environment().configured:
+        print("[Engine NOT READY] OKX API Key 未配置（LIVE/DEMO）——退出，不执行任何交易。")
+        sys.exit(3)
     execute_portfolio()
