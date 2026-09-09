@@ -23,6 +23,9 @@ export const enRadar = {
     duration: 'Reasoning took {n}s',
     model: 'Decision model',
   },
+  health: {
+    decisionAge: 'Decision cache',
+  },
   council: {
     title: 'Council status',
     desc: 'Current debate roster and chief-arbiter configuration',

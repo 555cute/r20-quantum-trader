@@ -107,3 +107,13 @@ export function cleanReason(v: string | null | undefined): string {
   if (!v) return '--'
   return v.replace(/^[\p{Extended_Pictographic}\uFE0F\u200D\s]+/u, '').trim() || '--'
 }
+
+/** 后端 UTC 字符串（"YYYY-MM-DD HH:MM:SS"，无时区标记）→ 北京时间显示（用户指令 2026-09-10：全站统一北京时间） */
+export function utcStrToBj(v: string | null | undefined, withDate = false): string {
+  if (!v) return '--'
+  const d = new Date(String(v).trim().replace(' ', 'T') + 'Z')
+  if (Number.isNaN(d.getTime())) return String(v)
+  const opts: Intl.DateTimeFormatOptions = { timeZone: 'Asia/Shanghai', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }
+  if (withDate) Object.assign(opts, { month: '2-digit', day: '2-digit' })
+  return d.toLocaleString('zh-CN', opts)
+}

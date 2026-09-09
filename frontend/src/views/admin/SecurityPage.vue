@@ -14,6 +14,7 @@ import SettingsSection from '../../components/admin/SettingsSection.vue'
 import { useI18n } from '../../composables/useI18n'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
+import { utcStrToBj } from '../../utils/format'
 import { Wallet, Save, KeyRound, RefreshCw, Layers, Trash2, Unlink, Terminal, FlaskConical, Zap } from 'lucide-vue-next'
 
 const { api } = useApi()
@@ -666,7 +667,7 @@ onMounted(() => { loadAll(); loadMx() })
             <button class="btn btn-quiet" @click="loadMx"><RefreshCw class="h-3.5 w-3.5" /> 重新检测</button>
           </template>
           <div v-if="mxHealthChips" class="flex flex-wrap items-center gap-2 text-[11px]">
-            <span style="color: var(--ink-3);">更新于 {{ mx?.health?.updated_utc || '--' }} UTC</span>
+            <span style="color: var(--ink-3);">更新于 {{ utcStrToBj(mx?.health?.updated_utc, true) }} 北京</span>
             <span v-for="h in mxHealthChips" :key="h.name" class="px-2 py-0.5 rounded border font-bold num" :style="h.ok === h.total ? { color: 'var(--up)', borderColor: 'var(--up-line)', backgroundColor: 'var(--up-bg)' } : { color: 'var(--warn)', borderColor: 'var(--warn-line)', backgroundColor: 'var(--warn-bg)' }">
               {{ h.name }} {{ h.ok }}/{{ h.total }} 币{{ h.avg_ms ? ' · ' + h.avg_ms + 'ms' : '' }}{{ h.testnet ? ' · 沙盒' : '' }}
             </span>

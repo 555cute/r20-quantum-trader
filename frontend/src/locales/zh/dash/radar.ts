@@ -29,6 +29,9 @@ export const zhRadar = {
     duration: '推理耗时 {n}s',
     model: '决策模型',
   },
+  health: {
+    decisionAge: '决策缓存',
+  },
   council: {
     title: '委员会状态',
     desc: '多模型参谋辩论与首席仲裁的当前配置',

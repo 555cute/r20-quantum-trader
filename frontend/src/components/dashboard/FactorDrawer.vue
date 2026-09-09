@@ -9,7 +9,7 @@ import BaseCodeBlock from '../base/BaseCodeBlock.vue';
 import ConfBadge from '../base/ConfBadge.vue';
 import DirTag from '../base/DirTag.vue';
 import { useI18n } from '../../composables/useI18n';
-import { fmtNum, fmtPct, fmtPrice, arrow, dirClass } from '../../utils/format';
+import { fmtNum, fmtPct, fmtPrice, arrow, dirClass, utcStrToBj } from '../../utils/format';
 
 const props = defineProps<{ factor: any | null; crossVenue?: any | null }>();
 const emit = defineEmits<{ (e: 'close'): void; (e: 'pick-symbol', instId: string): void }>();
@@ -177,7 +177,7 @@ const cvUpdated = computed(() => String(props.crossVenue?.updated_utc || ''));
       <div class="card-flat p-3">
         <div class="mb-2 flex items-baseline justify-between gap-2">
           <p class="t-label">跨所 · Binance / Gate</p>
-          <span v-if="cvUpdated" class="num text-[10px]" style="color: var(--ink-3)">{{ cvUpdated }} UTC</span>
+          <span v-if="cvUpdated" class="num text-[10px]" style="color: var(--ink-3)">{{ utcStrToBj(cvUpdated, true) }} 北京</span>
         </div>
         <div class="mb-2 flex flex-wrap gap-1.5">
           <span v-for="h in cvHealth" :key="h.key"
