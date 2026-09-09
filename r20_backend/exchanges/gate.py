@@ -310,6 +310,13 @@ class GateAdapter(BaseExchangeAdapter):
         return self.signed_request("DELETE", "/api/v4/futures/usdt/orders",
                                    params={"contract": inst, "id": str(order_id)})
 
+    def list_open_orders(self, symbol: str) -> List[Dict[str, Any]]:
+        """该合约未成交普通挂单（G7 联动：试验田对账前先撤孤儿入场挂单用）。"""
+        inst = self.native_symbol(symbol)
+        data = self.signed_request("GET", "/api/v4/futures/usdt/orders",
+                                   params={"contract": inst, "status": "open", "limit": "100"})
+        return data if isinstance(data, list) else []
+
     def fast_close_position(self, symbol: str, text: str = "") -> Dict[str, Any]:
         inst = self.native_symbol(symbol)
         order = {"contract": inst, "size": 0, "close": True, "price": "0", "tif": "ioc",
