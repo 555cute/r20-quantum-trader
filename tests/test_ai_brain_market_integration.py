@@ -108,6 +108,19 @@ class TestAiBrainMarketIntegration(unittest.TestCase):
             prompt = construct_full_market_prompt([pkg], pos_summary="0多0空", active_positions_detail=[], current_time_str="2026-09-08 12:00:00")
         self.assertIn("0.0%", prompt)
 
+    def test_missing_base_volume_is_not_reported_as_zero(self):
+        ticker = {"last": "2500", "bidPx": "2499", "askPx": "2501", "open24h": "2400"}
+        with patch("scripts.ai_brain_trader.fetch_ticker", return_value=ticker), \
+             patch("scripts.ai_brain_trader.fetch_candles", return_value=[]), \
+             patch("scripts.ai_brain_trader.fetch_funding_rate", return_value=None), \
+             patch("scripts.ai_brain_trader.fetch_open_interest", return_value=None), \
+             patch("scripts.ai_brain_trader.fetch_long_short_ratio", return_value=None), \
+             patch("scripts.ai_brain_trader.fetch_taker_volume", return_value=None), \
+             patch("scripts.ai_brain_trader.fetch_single_indicator", return_value={}):
+            self.assertIsNone(fetch_single_instrument_package(_item())["vol24h"])
+            ticker["vol24h"] = "0"
+            self.assertEqual(fetch_single_instrument_package(_item())["vol24h"], 0.0)
+
     def test_prompt_risk_budget_uses_min_absolute_and_ratio_caps(self):
         eq = 4000.0
         asset = min(MAX_SINGLE_ASSET_MARGIN, max(round(eq * SINGLE_ASSET_EQUITY_RATIO, 2), 1.0))

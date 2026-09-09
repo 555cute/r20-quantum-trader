@@ -1,14 +1,13 @@
 <script setup lang="ts">
 import { computed, reactive, ref, onMounted } from 'vue'
+import { useToast } from '../../composables/useToast'
+import PageHeader from '../../components/admin/PageHeader.vue'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
 import {
-  Newspaper,
   Save,
   Play,
   ExternalLink,
-  CheckCircle2,
-  AlertCircle,
   Loader2,
   Info,
   RefreshCw,
@@ -16,8 +15,8 @@ import {
 
 const { api } = useApi()
 const auth = useAuthStore()
+const toast = useToast()
 
-type BannerType = 'ok' | 'err' | 'warn'
 type BusyState = 'save' | 'harvest' | ''
 
 interface NewsSourceOption {
@@ -53,11 +52,9 @@ interface NewsConfigResponse {
   updated?: boolean
 }
 
-
 const loading = ref(true)
 const loaded = ref(false)
 const busy = ref<BusyState>('')
-const bannerMsg = ref<{ text: string; type: BannerType } | null>(null)
 const effectText = ref('')
 const savedSources = ref<string[]>([])
 const availableSources = ref<NewsSourceOption[]>([])
@@ -202,15 +199,15 @@ function feedStatusLabel(status: string): string {
 
 function statusTone(status: string): Record<string, string> {
   if (status === 'ok') {
-    return { backgroundColor: 'var(--color-up-bg)', borderColor: 'var(--color-up-border)', color: 'var(--color-up)' }
+    return { backgroundColor: 'var(--up-bg)', borderColor: 'var(--up-line)', color: 'var(--up)' }
   }
   if (status === 'error') {
-    return { backgroundColor: 'var(--color-down-bg)', borderColor: 'var(--color-down-border)', color: 'var(--color-down)' }
+    return { backgroundColor: 'var(--down-bg)', borderColor: 'var(--down-line)', color: 'var(--down)' }
   }
   if (status === 'stale' || status === 'pending' || status === 'partial' || status === 'empty') {
-    return { backgroundColor: 'var(--color-warn-bg)', borderColor: 'var(--color-warn-border)', color: 'var(--color-warn)' }
+    return { backgroundColor: 'var(--warn-bg)', borderColor: 'var(--warn-line)', color: 'var(--warn)' }
   }
-  return { backgroundColor: 'var(--bg-badge)', borderColor: 'var(--border-subtle)', color: 'var(--text-muted)' }
+  return { backgroundColor: 'var(--surface-3)', borderColor: 'var(--line-1)', color: 'var(--ink-2)' }
 }
 
 async function loadConfig(silent = false): Promise<boolean> {
@@ -218,11 +215,10 @@ async function loadConfig(silent = false): Promise<boolean> {
   try {
     const res = await api<NewsConfigResponse>('/api/v1/admin/news/config')
     applyPayload(res)
-    if (!silent) bannerMsg.value = null
     return true
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e)
-    bannerMsg.value = { text: `加载失败: ${message}`, type: 'err' }
+    toast.err(`加载失败: ${message}`)
     return false
   } finally {
     loading.value = false
@@ -231,12 +227,11 @@ async function loadConfig(silent = false): Promise<boolean> {
 
 async function saveSources() {
   if (!auth.isSuperadmin) {
-    bannerMsg.value = { text: '仅超级管理员可修改新闻来源', type: 'err' }
+    toast.err('仅超级管理员可修改新闻来源')
     return
   }
   if (busy.value) return
   busy.value = 'save'
-  bannerMsg.value = null
   try {
     const res = await api<NewsConfigResponse>('/api/v1/admin/news/config', {
       method: 'PUT',
@@ -244,15 +239,14 @@ async function saveSources() {
     })
     applyPayload(res)
     const extra = effectText.value ? ` ${effectText.value}` : ''
-    bannerMsg.value = {
-      text: draftSources.value.length
+    toast.ok(
+      draftSources.value.length
         ? `新闻来源已保存，未触发采集。${extra}`
         : `已关闭全部新闻来源，未触发采集。${extra}`,
-      type: 'ok',
-    }
+    )
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e)
-    bannerMsg.value = { text: `保存失败: ${message}`, type: 'err' }
+    toast.err(`保存失败: ${message}`)
   } finally {
     busy.value = ''
   }
@@ -260,7 +254,7 @@ async function saveSources() {
 
 async function harvestNow() {
   if (!auth.isSuperadmin) {
-    bannerMsg.value = { text: '仅超级管理员可手动采集', type: 'err' }
+    toast.err('仅超级管理员可手动采集')
     return
   }
   if (harvestDisabled.value || busy.value) return
@@ -270,21 +264,18 @@ async function harvestNow() {
   )
   if (!ok) return
   busy.value = 'harvest'
-  bannerMsg.value = null
   try {
     await api('/api/v1/admin/gateway/jobs/news/run', {
       method: 'POST',
       body: JSON.stringify({}),
     })
     const refreshed = await loadConfig(true)
-    bannerMsg.value = !refreshed
-      ? { text: '采集已触发，但刷新配置失败。', type: 'warn' }
-      : feed.value.status === 'ok'
-        ? { text: '采集任务已完成，新闻缓存已刷新。', type: 'ok' }
-        : { text: '采集任务已结束，但来源仍有异常。请查看下方状态与错误信息。', type: 'warn' }
+    if (!refreshed) toast.warn('采集已触发，但刷新配置失败。')
+    else if (feed.value.status === 'ok') toast.ok('采集任务已完成，新闻缓存已刷新。')
+    else toast.warn('采集任务已结束，但来源仍有异常。请查看下方状态与错误信息。')
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e)
-    bannerMsg.value = { text: `采集失败: ${message}`, type: 'err' }
+    toast.err(`采集失败: ${message}`)
   } finally {
     busy.value = ''
   }
@@ -297,68 +288,43 @@ onMounted(() => {
 
 <template>
   <div class="space-y-4 max-w-[1400px] mx-auto pb-24 min-w-0">
-    <div class="panel-banner-compact">
-      <div class="flex items-center space-x-2.5 min-w-0">
-        <div class="panel-banner-icon">
-          <Newspaper class="w-3.5 h-3.5" />
-        </div>
-        <div class="min-w-0">
-          <h1 class="text-xs sm:text-[13px] font-black font-mono uppercase tracking-wide break-words" style="color: var(--text-main);">
-            新闻来源 (Public News Feeds)
-          </h1>
-          <p class="text-[11px] font-mono mt-0.5 break-words" style="color: var(--text-muted);">
-            选择进入策略提示词与大屏的公开资讯 · 保存只写配置 · 采集需单独确认
-          </p>
-        </div>
-      </div>
-      <div class="flex flex-wrap items-center gap-2 shrink-0">
+    <PageHeader title="新闻来源" description="选择进入策略提示词与大屏的公开资讯 · 保存只写配置 · 采集需单独确认">
+      <template #actions>
         <span
-          class="badge-lever"
+          class="chip"
           :style="dirty
-            ? { backgroundColor: 'var(--color-warn-bg)', color: 'var(--color-warn)', borderColor: 'var(--color-warn-border)' }
+            ? { backgroundColor: 'var(--warn-bg)', color: 'var(--warn)', borderColor: 'var(--warn-line)' }
             : {}"
         >
           {{ !auth.isSuperadmin ? '只读' : (dirty ? '未保存' : '与线上口径一致') }}
         </span>
         <span
           v-if="feedStatus"
-          class="text-[10px] font-mono px-2 py-0.5 rounded border"
+          class="text-[10px] px-2 py-0.5 rounded border"
           :style="statusTone(feedStatus)"
         >
           缓存 {{ feedStatusLabel(feedStatus) }}
         </span>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
-    <div class="p-3 rounded-lg text-[11px] font-mono border flex items-start gap-2 min-w-0" style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-muted);">
-      <Info class="w-3.5 h-3.5 shrink-0 mt-0.5" style="color: var(--accent, #3875F6);" />
+    <div class="p-3 rounded-lg text-[11px] border flex items-start gap-2 min-w-0" style="background-color: var(--surface-2); border-color: var(--line-1); color: var(--ink-2);">
+      <Info class="w-3.5 h-3.5 shrink-0 mt-0.5" style="color: var(--accent);" />
       <div class="space-y-1 min-w-0 break-words">
         <p>{{ effectText || '保存后立即按勾选过滤禁用源的缓存；下次定时或手动采集才拉新。空选表示关闭全部来源。' }}</p>
         <p class="opacity-80">币安情报中心与 OKX 快讯对齐：官方公告 + 资讯中心媒体标题/链接。不编正文或牛熊分，不需要交易 API Key。媒体标题只进展示和模型；开仓熔断仍只认官方/已验证源。</p>
       </div>
     </div>
 
-    <div
-      v-if="bannerMsg"
-      class="p-3 rounded-lg text-xs font-mono border"
-      :class="bannerMsg.type === 'ok' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : bannerMsg.type === 'warn' ? 'bg-amber-500/10 border-amber-500/20 text-amber-400' : 'bg-rose-500/10 border-rose-500/20 text-rose-400'"
-    >
-      <div class="flex items-center gap-2 min-w-0">
-        <CheckCircle2 v-if="bannerMsg.type === 'ok'" class="w-4 h-4 shrink-0" />
-        <AlertCircle v-else class="w-4 h-4 shrink-0" />
-        <span class="break-words">{{ bannerMsg.text }}</span>
-      </div>
-    </div>
-
     <div v-if="loading" class="flex items-center justify-center py-24">
-      <Loader2 class="w-6 h-6 animate-spin" style="color: var(--text-muted);" />
+      <Loader2 class="w-6 h-6 animate-spin" style="color: var(--ink-2);" />
     </div>
 
     <template v-else-if="loaded">
       <p
         v-if="!auth.isSuperadmin"
-        class="text-[11px] font-mono px-1"
-        style="color: var(--text-muted);"
+        class="text-[11px] px-1"
+        style="color: var(--ink-2);"
       >
         当前为普通管理员，仅可查看来源与采集状态。
       </p>
@@ -371,8 +337,8 @@ onMounted(() => {
           class="rounded-xl border p-4 min-w-0 flex items-start gap-3"
           :class="auth.isSuperadmin && busy === '' ? 'cursor-pointer' : 'cursor-default'"
           :style="selected[opt.id]
-            ? { backgroundColor: 'var(--bg-card)', borderColor: 'var(--color-brand-border)' }
-            : { backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-subtle)' }"
+            ? { backgroundColor: 'var(--surface-2)', borderColor: 'var(--accent-line)' }
+            : { backgroundColor: 'var(--surface-2)', borderColor: 'var(--line-1)' }"
         >
           <input
             :id="`news-src-${opt.id}`"
@@ -383,28 +349,28 @@ onMounted(() => {
           />
           <span class="min-w-0">
             <span class="flex items-center gap-2 flex-wrap">
-              <span class="text-xs font-mono font-bold" style="color: var(--text-main);">{{ opt.name }}</span>
-              <span class="text-[9px] font-mono px-1.5 py-0.5 rounded border" style="border-color: var(--border-subtle); color: var(--text-muted);">{{ opt.id }}</span>
+              <span class="text-xs font-bold" style="color: var(--ink-1);">{{ opt.name }}</span>
+              <span class="text-[9px] px-1.5 py-0.5 rounded border" style="border-color: var(--line-1); color: var(--ink-2);">{{ opt.id }}</span>
             </span>
-            <span class="block text-[10px] font-mono mt-1 leading-relaxed break-words" style="color: var(--text-muted);">{{ opt.description }}</span>
+            <span class="block text-[10px] mt-1 leading-relaxed break-words" style="color: var(--ink-2);">{{ opt.description }}</span>
           </span>
         </label>
       </div>
 
-      <div class="rounded-xl border overflow-hidden min-w-0" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
-        <div class="px-4 py-3 border-b flex flex-wrap items-center justify-between gap-2" style="border-color: var(--border-subtle);">
+      <div class="rounded-xl border overflow-hidden min-w-0" style="background-color: var(--surface-2); border-color: var(--line-1);">
+        <div class="px-4 py-3 border-b flex flex-wrap items-center justify-between gap-2" style="border-color: var(--line-1);">
           <div>
-            <h2 class="text-xs font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">来源状态</h2>
-            <p class="text-[10px] font-mono mt-0.5" style="color: var(--text-muted);">
+            <h2 class="text-xs font-semibold" style="color: var(--ink-1);">来源状态</h2>
+            <p class="text-[10px] mt-0.5" style="color: var(--ink-2);">
               条数 · 最后采集时间 · 错误与过期缓存
-              <span v-if="feed.stale_sections" class="ml-1" style="color: var(--color-warn);">· 含过期缓存</span>
+              <span v-if="feed.stale_sections" class="ml-1" style="color: var(--warn);">· 含过期缓存</span>
             </p>
           </div>
-          <span class="text-[10px] font-mono" style="color: var(--text-faint);">
+          <span class="text-[10px]" style="color: var(--ink-3);">
             {{ feed.updated_at || feed.news_fresh_at || '尚未采集' }}
           </span>
         </div>
-        <div class="divide-y" style="border-color: var(--border-subtle);">
+        <div class="divide-y" style="border-color: var(--line-1);">
           <div
             v-for="row in statusRows"
             :key="row.id"
@@ -412,25 +378,25 @@ onMounted(() => {
           >
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2 flex-wrap">
-                <span class="text-xs font-mono font-bold" style="color: var(--text-main);">{{ row.name }}</span>
-                <span class="text-[9px] font-mono px-1.5 py-0.5 rounded border" :style="statusTone(row.status)">
+                <span class="text-xs font-bold" style="color: var(--ink-1);">{{ row.name }}</span>
+                <span class="text-[9px] px-1.5 py-0.5 rounded border" :style="statusTone(row.status)">
                   {{ statusLabel(row.status) }}
                 </span>
                 <span
                   v-if="row.status === 'stale'"
-                  class="text-[9px] font-mono px-1.5 py-0.5 rounded border"
-                  style="background-color: var(--color-warn-bg); border-color: var(--color-warn-border); color: var(--color-warn);"
+                  class="text-[9px] px-1.5 py-0.5 rounded border"
+                  style="background-color: var(--warn-bg); border-color: var(--warn-line); color: var(--warn);"
                 >
                   过期缓存
                 </span>
               </div>
-              <p v-if="row.error" class="text-[10px] font-mono mt-1 break-words" style="color: var(--color-down);">
+              <p v-if="row.error" class="text-[10px] mt-1 break-words" style="color: var(--down);">
                 {{ row.error }}
               </p>
             </div>
-            <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] font-mono shrink-0" style="color: var(--text-muted);">
-              <span>条数 <strong style="color: var(--text-main);">{{ row.count }}</strong></span>
-              <span>采集 <strong style="color: var(--text-main);">{{ row.updated_at || '--' }}</strong></span>
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] shrink-0" style="color: var(--ink-2);">
+              <span>条数 <strong style="color: var(--ink-1);">{{ row.count }}</strong></span>
+              <span>采集 <strong style="color: var(--ink-1);">{{ row.updated_at || '--' }}</strong></span>
             </div>
           </div>
         </div>
@@ -478,9 +444,9 @@ onMounted(() => {
     <div
       v-else
       class="py-12 text-center border border-dashed rounded-xl space-y-3"
-      style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-muted);"
+      style="background-color: var(--surface-1); border-color: var(--line-1); color: var(--ink-2);"
     >
-      <p class="text-xs font-mono">无法加载新闻来源配置。</p>
+      <p class="text-xs">无法加载新闻来源配置。</p>
       <button type="button" class="btn-admin-secondary" @click="loadConfig()">重新加载</button>
     </div>
   </div>

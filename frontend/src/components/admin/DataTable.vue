@@ -29,19 +29,19 @@ const has = (name: string) => !!slots[name]
 </script>
 
 <template>
-  <div class="overflow-x-auto" :class="flat ? '' : 'rounded-xl border'" :style="flat ? {} : { borderColor: 'var(--border-subtle)', backgroundColor: 'var(--bg-card)' }">
-    <table class="w-full text-xs font-mono border-collapse">
+  <div class="overflow-x-auto" :class="flat ? '' : 'rounded-xl border'" :style="flat ? {} : { borderColor: 'var(--line-1)', backgroundColor: 'var(--surface-2)' }">
+    <table class="w-full text-xs border-collapse">
       <thead>
-        <tr class="sticky top-0 z-10" style="background-color: var(--bg-card);">
+        <tr class="sticky top-0 z-10" style="background-color: var(--surface-2);">
           <th
             v-for="col in columns"
             :key="col.key"
             class="px-3 py-2 text-[11px] font-bold uppercase tracking-wider border-b whitespace-nowrap"
-            :style="{ color: 'var(--text-faint)', borderColor: 'var(--border-subtle)', textAlign: col.align || 'left', width: col.width || 'auto' }"
+            :style="{ color: 'var(--ink-3)', borderColor: 'var(--line-1)', textAlign: col.align || 'left', width: col.width || 'auto' }"
           >
             {{ col.label }}
           </th>
-          <th v-if="has('actions')" class="px-3 py-2 text-[11px] font-bold uppercase tracking-wider border-b text-right" style="color: var(--text-faint); border-color: var(--border-subtle);">
+          <th v-if="has('actions')" class="px-3 py-2 text-[11px] font-bold uppercase tracking-wider border-b text-right" style="color: var(--ink-3); border-color: var(--line-1);">
             ·
           </th>
         </tr>
@@ -50,17 +50,17 @@ const has = (name: string) => !!slots[name]
         <tr
           v-for="(row, i) in rows"
           :key="rowKey ? rowKey(row, i) : i"
-          class="transition-colors hover:bg-[var(--bg-card-hover)]"
+          class="transition-colors hover:bg-[var(--surface-3)]"
           :class="clickable ? 'cursor-pointer' : ''"
-          style="border-bottom: 1px solid var(--border-subtle);"
+          style="border-bottom: 1px solid var(--line-1);"
           @click="$emit('row-click', row)"
         >
           <td
             v-for="col in columns"
             :key="col.key"
             class="px-3 py-[7px] whitespace-nowrap"
-            :class="col.align === 'right' || col.mono ? 'num-tabular' : ''"
-            :style="{ textAlign: col.align || 'left', color: 'var(--text-main)' }"
+            :class="col.align === 'right' || col.mono ? 'num' : ''"
+            :style="{ textAlign: col.align || 'left', color: 'var(--ink-1)' }"
           >
             <slot :name="`cell-${col.key}`" :row="row" :value="row[col.key]">
               {{ row[col.key] ?? '--' }}
@@ -73,7 +73,7 @@ const has = (name: string) => !!slots[name]
           </td>
         </tr>
         <tr v-if="!rows.length">
-          <td :colspan="columns.length + (has('actions') ? 1 : 0)" class="px-3 py-10 text-center" style="color: var(--text-faint);">
+          <td :colspan="columns.length + (has('actions') ? 1 : 0)" class="px-3 py-10 text-center" style="color: var(--ink-3);">
             {{ emptyText || '—' }}
           </td>
         </tr>

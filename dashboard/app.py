@@ -237,6 +237,65 @@ def _safe_float(value, default=0.0):
     except (TypeError, ValueError):
         return default
 
+_UNKNOWN_EVIDENCE = frozenset({"", "--", "UNAVAILABLE", "N/A", "None", "null"})
+
+
+def _is_unknown_evidence(value):
+    if value is None:
+        return True
+    if isinstance(value, str) and value.strip() in _UNKNOWN_EVIDENCE:
+        return True
+    return False
+
+
+def _account_evidence(value, unknown="--"):
+    if _is_unknown_evidence(value):
+        return unknown
+    return value
+
+
+def _account_bid_ask(value):
+    """Bid/ask from the account ticker only; never last price, library, or zero filler."""
+    if _is_unknown_evidence(value):
+        return "--"
+    try:
+        if float(value) == 0.0:
+            return "--"
+    except (TypeError, ValueError):
+        return "--"
+    return value
+
+
+def _current_market_evidence(ai_info, ins):
+    """Current venue quote/derivatives from account ai_info/state only."""
+    raw_t = ai_info.get("raw_ticker") if isinstance(ai_info.get("raw_ticker"), dict) else {}
+    price_val = ins.get("price")
+    if _is_unknown_evidence(price_val):
+        price_val = raw_t.get("last")
+    if _is_unknown_evidence(price_val):
+        price_val = "--"
+    chg_raw = raw_t.get("chg24h")
+    sm_val = ai_info.get("smart_money")
+    if not isinstance(sm_val, dict):
+        sm_val = {}
+    adx_val = ai_info.get("adx_1h")
+    if _is_unknown_evidence(adx_val):
+        adx_val = "--"
+    return {
+        "raw_t": raw_t,
+        "price": price_val,
+        "chg24h": None if _is_unknown_evidence(chg_raw) else chg_raw,
+        "vol24h": raw_t.get("vol24h"),
+        "bidPx": _account_bid_ask(raw_t.get("bidPx")),
+        "askPx": _account_bid_ask(raw_t.get("askPx")),
+        "fundingRate": _account_evidence(ai_info.get("raw_funding_rate")),
+        "oiUsd": _account_evidence(ai_info.get("raw_oi")),
+        "takerNetUsd": _account_evidence(ai_info.get("raw_taker_vol")),
+        "lsRatio": _account_evidence(ai_info.get("raw_ls_ratio")),
+        "adx_1h": adx_val,
+        "smart_money": sm_val,
+    }
+
 
 def load_position_trackers():
     try:
@@ -307,27 +366,17 @@ def _load_local_factor_library():
 
 
 def _build_factors_from_local_files(positions, timestamp_full):
-    """Build factors_list from trading_state.json + ai_brain_decisions.json.
+    """Build factors_list from account-scoped trading_state.json + ai_brain_decisions.json.
 
     These local files do not depend on OKX private endpoints, so they are
     available even when the dashboard is in STALE/OFFLINE degraded mode.
+    Current quote/derivative fields never fall back to the global factor library.
     """
     factors_list = []
     pos_map = {p.get("instId"): p for p in positions} if isinstance(positions, list) else {}
     state_data = {}
     ai_decisions = {}
-    factor_lib_map = {}
     active_pool = load_instruments()
-
-    if os.path.exists(FACTOR_LIBRARY_FILE):
-        try:
-            with open(FACTOR_LIBRARY_FILE, "r", encoding="utf-8") as f_lib:
-                lib_data = json.load(f_lib)
-                for item in lib_data.get("instruments", []):
-                    if isinstance(item, dict) and item.get("instId"):
-                        factor_lib_map[item["instId"]] = item
-        except Exception:
-            pass
 
     if os.path.exists(decisions_file()):
         try:
@@ -350,7 +399,6 @@ def _build_factors_from_local_files(positions, timestamp_full):
     for target in active_pool:
         inst_id = target.get("instId")
         ins = inst_map.get(inst_id) or {}
-        lib_item = factor_lib_map.get(inst_id) or {}
         ai_info = ai_decisions.get(inst_id, {})
         ai_dec = ai_info.get("decision", {})
         ai_thought = ai_info.get("thought_process", {})
@@ -362,42 +410,39 @@ def _build_factors_from_local_files(positions, timestamp_full):
         m_struct = ai_thought.get("market_structure", f"{ins.get('market_regime', 'CHOP')} ({ins.get('trend_1h', '震荡')})")
         v_oi = ai_thought.get("volume_and_oi", f"OBV: {ins.get('obv_flow', 'NEUTRAL')}, 量能: {ins.get('vol_ratio', 1.0)}x")
         rr_ratio = ai_thought.get("risk_reward_evaluation", "盈亏比评估中")
-        raw_t = ai_info.get("raw_ticker", {})
-        chg_val = raw_t.get("chg24h") if raw_t.get("chg24h") is not None else lib_item.get("chg24h")
-        price_val = ins.get("price") if ins.get("price") not in (None, "--") else lib_item.get("price", "--")
-        rsi_val = ins.get("rsi") if ins.get("rsi") is not None else lib_item.get("trend_momentum", {}).get("rsi_14", 50.0)
-        adx_val = ai_info.get("adx_1h") if ai_info.get("adx_1h") not in (None, "--") else lib_item.get("trend_momentum", {}).get("adx_1h", "--")
-        sm_val = ai_info.get("smart_money") or lib_item.get("smart_money_derivatives", {})
+        mkt = _current_market_evidence(ai_info, ins)
+        rsi_val = ins.get("rsi") if ins.get("rsi") is not None else 50.0
         factors_list.append({
             "name": target.get("name") or ins.get("name"),
             "instId": inst_id,
             "position": pos_map.get(inst_id),
             "type": target.get("type", "crypto"),
-            "price": price_val,
+            "price": mkt["price"],
             "score": score_val,
-            "chg24h": chg_val,
-            "bidPx": raw_t.get("bidPx", ins.get("price", lib_item.get("microstructure", {}).get("bid_px", "--"))),
-            "askPx": raw_t.get("askPx", ins.get("price", lib_item.get("microstructure", {}).get("ask_px", "--"))),
-            "fundingRate": ai_info.get("raw_funding_rate") or (f"{lib_item.get('smart_money_derivatives', {}).get('funding_rate_pct', 0.0):.4f}%" if "funding_rate_pct" in lib_item.get("smart_money_derivatives", {}) else "--"),
-            "oiUsd": ai_info.get("raw_oi") or lib_item.get("smart_money_derivatives", {}).get("oi_usd", "--"),
-            "takerNetUsd": ai_info.get("raw_taker_vol") or lib_item.get("volume_money_flow", {}).get("taker_net_usd", "--"),
-            "lsRatio": ai_info.get("raw_ls_ratio") or lib_item.get("smart_money_derivatives", {}).get("long_short_ratio", "--"),
+            "chg24h": mkt["chg24h"],
+            "vol24h": mkt["vol24h"],
+            "bidPx": mkt["bidPx"],
+            "askPx": mkt["askPx"],
+            "fundingRate": mkt["fundingRate"],
+            "oiUsd": mkt["oiUsd"],
+            "takerNetUsd": mkt["takerNetUsd"],
+            "lsRatio": mkt["lsRatio"],
             "rsi": rsi_val,
             "rsi_7": ins.get("rsi_7", 50.0),
             "vwap_bias": ins.get("vwap_bias", 0.0),
             "macd_hist": ins.get("macd_hist", 0.0),
             "macd_accel": ins.get("macd_accel", 0.0),
-            "obv_flow": ins.get("obv_flow", lib_item.get("volume_money_flow", {}).get("obv_flow", "NEUTRAL")),
-            "bb_bandwidth": ins.get("bb_bandwidth", lib_item.get("volatility_channel", {}).get("bb_width_1h", 0.0)),
-            "vol_ratio": ins.get("vol_ratio", lib_item.get("volume_money_flow", {}).get("vol_ratio_15m", 1.0)),
+            "obv_flow": ins.get("obv_flow", "NEUTRAL"),
+            "bb_bandwidth": ins.get("bb_bandwidth", 0.0),
+            "vol_ratio": ins.get("vol_ratio", 1.0),
             "trend_1h": ins.get("trend_1h", "震荡"),
             "trend_4h": ins.get("trend_4h", "震荡"),
             "market_regime": ins.get("market_regime", "CHOP"),
             "strategy_tag": strategy_val,
             "action": action_val,
             "confidence": confidence,
-            "smart_money": sm_val,
-            "adx_1h": adx_val,
+            "smart_money": mkt["smart_money"],
+            "adx_1h": mkt["adx_1h"],
             "leverage": ai_dec.get("leverage", 3),
             "margin_usdt": ai_dec.get("margin_usdt", 0.0),
             "entry_price": ai_dec.get("entry_price", 0.0),
@@ -1012,21 +1057,9 @@ def update_cache_cycle():
         except Exception:
             pass
 
-    factor_lib_map = {}
-    if os.path.exists(FACTOR_LIBRARY_FILE):
-        try:
-            with open(FACTOR_LIBRARY_FILE, "r", encoding="utf-8") as f_lib:
-                lib_data = json.load(f_lib)
-                for item in lib_data.get("instruments", []):
-                    if isinstance(item, dict) and item.get("instId"):
-                        factor_lib_map[item["instId"]] = item
-        except Exception:
-            pass
-
     for target in active_pool:
         inst_id = target.get("instId")
         ins = inst_state_map.get(inst_id) or {}
-        lib_item = factor_lib_map.get(inst_id) or {}
         ai_info = ai_decisions.get(inst_id, {})
         ai_dec = ai_info.get("decision", {})
         ai_thought = ai_info.get("thought_process", {})
@@ -1043,49 +1076,41 @@ def update_cache_cycle():
         v_oi = ai_thought.get("volume_and_oi", f"OBV: {ins.get('obv_flow', 'NEUTRAL')}, 量能: {ins.get('vol_ratio', 1.0)}x")
         rr_ratio = ai_thought.get("risk_reward_evaluation", "盈亏比评估中")
 
-        raw_t = ai_info.get("raw_ticker", {})
-        funding_r = ai_info.get("raw_funding_rate") or (f"{lib_item.get('smart_money_derivatives', {}).get('funding_rate_pct', 0.0):.4f}%" if "funding_rate_pct" in lib_item.get("smart_money_derivatives", {}) else "--")
-        oi_str = ai_info.get("raw_oi") or lib_item.get("smart_money_derivatives", {}).get("oi_usd", "--")
-        taker_str = ai_info.get("raw_taker_vol") or lib_item.get("volume_money_flow", {}).get("taker_net_usd", "--")
-        ls_str = ai_info.get("raw_ls_ratio") or lib_item.get("smart_money_derivatives", {}).get("long_short_ratio", "--")
-
-        chg_val = raw_t.get("chg24h") if raw_t.get("chg24h") is not None else lib_item.get("chg24h")
-        price_val = ins.get("price") if ins.get("price") not in (None, "--") else lib_item.get("price", "--")
-        rsi_val = ins.get("rsi") if ins.get("rsi") is not None else lib_item.get("trend_momentum", {}).get("rsi_14", 50.0)
-        adx_val = ai_info.get("adx_1h") if ai_info.get("adx_1h") not in (None, "--") else lib_item.get("trend_momentum", {}).get("adx_1h", "--")
-        sm_val = ai_info.get("smart_money") or lib_item.get("smart_money_derivatives", {})
+        mkt = _current_market_evidence(ai_info, ins)
+        rsi_val = ins.get("rsi") if ins.get("rsi") is not None else 50.0
 
         factors_list.append({
             "name": target.get("name") or ins.get("name"),
             "instId": inst_id,
             "position": pos_map.get(inst_id),
             "type": target.get("type", "crypto"),
-            "price": price_val,
+            "price": mkt["price"],
             "score": score_val,
-            "change24h": chg_val,
-            "chg24h": chg_val,
-            "bidPx": raw_t.get("bidPx", ins.get("price", lib_item.get("microstructure", {}).get("bid_px", "--"))),
-            "askPx": raw_t.get("askPx", ins.get("price", lib_item.get("microstructure", {}).get("ask_px", "--"))),
-            "fundingRate": funding_r,
-            "oiUsd": oi_str,
-            "takerNetUsd": taker_str,
-            "lsRatio": ls_str,
+            "change24h": mkt["chg24h"],
+            "chg24h": mkt["chg24h"],
+            "vol24h": mkt["vol24h"],
+            "bidPx": mkt["bidPx"],
+            "askPx": mkt["askPx"],
+            "fundingRate": mkt["fundingRate"],
+            "oiUsd": mkt["oiUsd"],
+            "takerNetUsd": mkt["takerNetUsd"],
+            "lsRatio": mkt["lsRatio"],
             "rsi": rsi_val,
             "rsi_7": ins.get("rsi_7", 50.0),
             "vwap_bias": vwap_b,
             "macd_hist": ins.get("macd_hist", 0.0),
             "macd_accel": ins.get("macd_accel", 0.0),
-            "obv_flow": ins.get("obv_flow", lib_item.get("volume_money_flow", {}).get("obv_flow", "NEUTRAL")),
-            "bb_bandwidth": ins.get("bb_bandwidth", lib_item.get("volatility_channel", {}).get("bb_width_1h", 0.0)),
-            "vol_ratio": ins.get("vol_ratio", lib_item.get("volume_money_flow", {}).get("vol_ratio_15m", 1.0)),
+            "obv_flow": ins.get("obv_flow", "NEUTRAL"),
+            "bb_bandwidth": ins.get("bb_bandwidth", 0.0),
+            "vol_ratio": ins.get("vol_ratio", 1.0),
             "trend_1h": ins.get("trend_1h", "震荡"),
             "trend_4h": ins.get("trend_4h", "震荡"),
             "market_regime": ins.get("market_regime", "CHOP"),
             "strategy_tag": strategy_val,
             "action": action_val,
             "confidence": confidence,
-            "smart_money": sm_val,
-            "adx_1h": adx_val,
+            "smart_money": mkt["smart_money"],
+            "adx_1h": mkt["adx_1h"],
             "leverage": ai_dec.get("leverage", 3),
             "margin_usdt": ai_dec.get("margin_usdt", 0.0),
             "entry_price": ai_dec.get("entry_price", 0.0),

@@ -1,0 +1,33 @@
+/** 前台壳层：顶栏 / 页头状态 / 偏好设置 / 决策透视抽屉 */
+export const zhShell = {
+  live: '实盘运行中',
+  demo: '模拟盘运行中',
+  breaker: '三级熔断生效',
+  cycle: '决策周期 {n} 分钟',
+  updated: '更新于 {t}',
+  updatedLabel: '更新',
+  staleWarn: '数据超过 {n} 分钟未更新，链路可能异常',
+  connLost: '与后端的连接中断，正在重试…',
+  settings: {
+    title: '偏好设置',
+    theme: '外观',
+    themeDark: '暗色',
+    themeLight: '浅色',
+    language: '界面语言',
+    cvd: '色盲友好配色',
+    cvdDesc: '涨跌改用蓝/朱显示，方向始终附带 ▲▼',
+    goto: '前往',
+    dataNote: '大屏数据每 3 秒自动同步交易所快照',
+  },
+  peek: {
+    title: '实时提示词',
+    desc: '本周期发送给大模型的完整上下文，逐字与实发一致',
+    compiled: '实发效果',
+    source: '模板源码',
+    empty: '等待下一个决策周期生成提示词',
+    copyAll: '复制全文',
+    chars: '{n} 字符',
+    tokens: '约 {n} tokens',
+    generatedAt: '生成于 {t}',
+  },
+};

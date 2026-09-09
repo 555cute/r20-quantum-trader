@@ -214,6 +214,7 @@ def fetch_single_instrument_package(item: Dict[str, Any]) -> Dict[str, Any]:
         "precision": item["precision"],
         "price": 0.0,
         "chg24h": 0.0,
+        "vol24h": None,
         "bidPx": 0.0,
         "askPx": 0.0,
         "fundingRate": None,
@@ -251,6 +252,9 @@ def fetch_single_instrument_package(item: Dict[str, Any]) -> Dict[str, Any]:
             pkg["askPx"] = float(t.get("askPx", pkg["price"]) or pkg["price"])
             op = float(t.get("open24h", 0) or 0)
             pkg["chg24h"] = round(((pkg["price"] - op) / op * 100) if op > 0 else 0, 2)
+            # Adapter volume is BASE quantity, not quote-currency turnover.
+            volume = safe_float(t.get("vol24h"), -1.0)
+            pkg["vol24h"] = volume if volume >= 0 else None
     except Exception:
         pass
 
@@ -1003,6 +1007,7 @@ def assemble_decision_cache(
                 "last": p.get("price"),
                 "bidPx": p.get("bidPx"),
                 "askPx": p.get("askPx"),
+                "vol24h": p.get("vol24h"),
                 "chg24h": p.get("chg24h")
             },
             "raw_funding_rate": f"{p['fundingRate']}%" if p.get('fundingRate') is not None else "--",

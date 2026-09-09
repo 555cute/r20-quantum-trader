@@ -10,14 +10,19 @@ export function useApi() {
     loading.value = true
     error.value = null
     try {
-      const resp = await fetch(path, {
-        ...options,
-        headers: {
-          'Content-Type': 'application/json',
-          ...(auth.token ? { 'X-R20-Session': auth.token } : {}),
-          ...(options.headers || {}),
-        },
-      })
+      let resp: Response
+      try {
+        resp = await fetch(path, {
+          ...options,
+          headers: {
+            'Content-Type': 'application/json',
+            ...(auth.token ? { 'X-R20-Session': auth.token } : {}),
+            ...(options.headers || {}),
+          },
+        })
+      } catch {
+        throw new Error('网络错误，请稍后重试')
+      }
       let data: any = {}
       try {
         data = await resp.json()
@@ -29,9 +34,10 @@ export function useApi() {
         throw new Error('会话已过期，请重新登录')
       }
       if (!resp.ok) {
-        const detail = Array.isArray(data.detail)
-          ? data.detail.map((x: any) => `${(x.loc || []).slice(1).join('.') || '请求'}：${x.msg}`).join('；')
-          : data.detail
+        const raw = data.detail ?? data.message
+        const detail = Array.isArray(raw)
+          ? raw.map((x: any) => `${(x.loc || []).slice(1).join('.') || '请求'}：${x.msg}`).join('；')
+          : raw
         throw new Error(detail || `HTTP ${resp.status}`)
       }
       return data as T

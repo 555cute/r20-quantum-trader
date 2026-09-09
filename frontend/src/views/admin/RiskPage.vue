@@ -1,32 +1,26 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { useToast } from '../../composables/useToast'
+const toast = useToast()
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from '../../composables/useI18n'
 const { t } = useI18n()
 import { useApi } from '../../composables/useApi'
 import PageHeader from '../../components/admin/PageHeader.vue'
-import SaveBar from '../../components/admin/SaveBar.vue'
 import DangerZone from '../../components/admin/DangerZone.vue'
-import {
-  ShieldAlert,
+import {ShieldAlert,
   Save,
   RotateCcw,
-  CheckCircle2,
-  AlertCircle,
   Loader2,
   Info,
   Layers,
   Target,
   Flame,
-  TrendingUp,
-} from 'lucide-vue-next'
+  TrendingUp} from 'lucide-vue-next'
 
 const { api } = useApi()
 
 const loading = ref(true)
 const busy = ref<'save' | 'reset' | ''>('')
-const bannerMsg = ref<{ text: string; type: 'ok' | 'err' | 'warn' } | null>(null)
-const bannerSeq = ref(0)
-watch(bannerMsg, () => { bannerSeq.value++ })
 
 const schema = ref<{ groups: any[]; params: any[] } | null>(null)
 const suites = ref<any[]>([])
@@ -48,13 +42,12 @@ const activeSuiteId = computed(() => {
 async function applySuite(s: any) {
   if (busy.value) return
   busy.value = 'save'
-  bannerMsg.value = null
   try {
     const res = await api('/api/v1/admin/risk', { method: 'POST', body: JSON.stringify({ suite_id: s.id }) })
     syncFromServer(res.values)
-    bannerMsg.value = { text: `已一键应用「${s.name}」预设 ✓ ${res.effect}`, type: 'ok' }
+    toast.ok(`已一键应用「${s.name}」预设 ✓ ${res.effect}`)
   } catch (e: any) {
-    bannerMsg.value = { text: `应用预设失败: ${e.message}`, type: 'err' }
+    toast.err(`应用预设失败: ${e.message}`)
   } finally {
     busy.value = ''
   }
@@ -100,7 +93,7 @@ async function loadData() {
     effectText.value = res.effect || ''
     syncFromServer(res.values)
   } catch (e: any) {
-    bannerMsg.value = { text: `加载失败: ${e.message}`, type: 'err' }
+    toast.err(`加载失败: ${e.message}`)
   } finally {
     loading.value = false
   }
@@ -137,19 +130,18 @@ async function saveChanges() {
     return dirtyKeys.value.includes(p.key) && (v < p.min || v > p.max)
   })
   if (bad.length) {
-    bannerMsg.value = { text: `以下参数越界：${bad.map((p: any) => p.label).join('、')}`, type: 'err' }
+    toast.err(`以下参数越界：${bad.map((p: any) => p.label).join('、')}`)
     return
   }
   busy.value = 'save'
-  bannerMsg.value = null
   try {
     const values: Record<string, number> = {}
     for (const k of dirtyKeys.value) values[k] = draft[k]
     const res = await api('/api/v1/admin/risk', { method: 'POST', body: JSON.stringify({ values }) })
     syncFromServer(res.values)
-    bannerMsg.value = { text: `已保存 ${res.updated.length} 项修改 ✓ ${res.effect}`, type: 'ok' }
+    toast.ok(`已保存 ${res.updated.length} 项修改 ✓ ${res.effect}`)
   } catch (e: any) {
-    bannerMsg.value = { text: `保存失败: ${e.message}`, type: 'err' }
+    toast.err(`保存失败: ${e.message}`)
   } finally {
     busy.value = ''
   }
@@ -157,13 +149,12 @@ async function saveChanges() {
 
 async function resetAll() {
   busy.value = 'reset'
-  bannerMsg.value = null
   try {
     const res = await api('/api/v1/admin/risk/reset', { method: 'POST', body: JSON.stringify({ confirmation: 'RESET RISK' }) })
     syncFromServer(res.values)
-    bannerMsg.value = { text: `已恢复代码默认基线 ✓ ${res.effect}`, type: 'ok' }
+    toast.ok(`已恢复代码默认基线 ✓ ${res.effect}`)
   } catch (e: any) {
-    bannerMsg.value = { text: `重置失败: ${e.message}`, type: 'err' }
+    toast.err(`重置失败: ${e.message}`)
   } finally {
     busy.value = ''
   }
@@ -175,8 +166,8 @@ onMounted(loadData)
 <template>
   <div class="space-y-4 max-w-[1400px] mx-auto pb-24">
     <PageHeader
-      :title="t('admin.nRisk')"
-      description="执行层风控管理 (Fail-Closed Hard Risk Gates) —— 仓位敞口 · 单笔风险 · 止损熔断 · 金字塔加仓，全部硬门禁集中配置"
+      :title="t('nav.admin.risk')"
+      description="执行层硬风控集中配置：仓位敞口 · 单笔风险 · 止损熔断 · 金字塔加仓"
     >
       <template #actions>
         <span class="badge-lever">
@@ -186,23 +177,16 @@ onMounted(loadData)
     </PageHeader>
 
     <!-- Effect banner -->
-    <div class="p-3 rounded-lg text-[11px] font-mono border flex items-start gap-2" style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-muted);">
-      <Info class="w-3.5 h-3.5 shrink-0 mt-0.5" style="color: var(--accent, var(--color-info));" />
+    <div class="p-3 rounded-lg text-[11px] border flex items-start gap-2" style="background-color: var(--surface-2); border-color: var(--line-1); color: var(--ink-2);">
+      <Info class="w-3.5 h-3.5 shrink-0 mt-0.5" style="color: var(--accent, var(--info));" />
       <div class="space-y-1">
         <p>{{ effectText || '保存后下一巡检周期自动生效，无需重启。' }}</p>
         <p class="opacity-80">注：本页为执行层代码硬拦截；「物理拦截插件」与「提示词工坊」中的 AI 侧门禁（如置信度、顺势铁律）在各自页面独立配置，双层防线互为兜底。</p>
       </div>
     </div>
 
-    <SaveBar
-      :type="bannerMsg?.type || 'ok'"
-      :text="bannerMsg?.text || ''"
-      :nonce="bannerSeq"
-      @dismiss="bannerMsg = null"
-    />
-
     <div v-if="loading" class="flex items-center justify-center py-24">
-      <Loader2 class="w-6 h-6 animate-spin" style="color: var(--text-muted);" />
+      <Loader2 class="w-6 h-6 animate-spin" style="color: var(--ink-2);" />
     </div>
 
     <template v-else-if="schema">
@@ -213,20 +197,20 @@ onMounted(loadData)
           :key="s.id"
           class="rounded-xl border p-4 flex flex-col gap-2 transition-all"
           :style="activeSuiteId === s.id
-            ? { backgroundColor: 'var(--bg-card)', borderColor: 'var(--text-main)', boxShadow: '0 0 0 1px var(--text-main)' }
-            : { backgroundColor: 'var(--bg-card)', borderColor: 'var(--border-subtle)' }"
+            ? { backgroundColor: 'var(--surface-2)', borderColor: 'var(--ink-1)', boxShadow: '0 0 0 1px var(--ink-1)' }
+            : { backgroundColor: 'var(--surface-2)', borderColor: 'var(--line-1)' }"
         >
           <div class="flex items-center justify-between gap-2">
-            <h3 class="text-xs font-black font-mono" style="color: var(--text-main);">{{ s.name }}</h3>
-            <span v-if="activeSuiteId === s.id" class="text-[11px] font-mono px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-400">当前生效</span>
-            <span v-else class="text-[11px] font-mono opacity-60" style="color: var(--text-muted);">{{ s.tagline }}</span>
+            <h3 class="text-xs font-semibold" style="color: var(--ink-1);">{{ s.name }}</h3>
+            <span v-if="activeSuiteId === s.id" class="text-[11px] px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-400">当前生效</span>
+            <span v-else class="text-[11px] opacity-60" style="color: var(--ink-2);">{{ s.tagline }}</span>
           </div>
-          <p class="text-[11px] font-mono leading-relaxed flex-1" style="color: var(--text-muted);">{{ s.desc }}</p>
+          <p class="text-[11px] leading-relaxed flex-1" style="color: var(--ink-2);">{{ s.desc }}</p>
           <button
             @click="applySuite(s)"
             :disabled="busy !== '' || activeSuiteId === s.id"
-            class="self-start mt-1 px-3 py-1.5 rounded-lg text-[11px] font-mono font-bold border transition-colors disabled:opacity-40"
-            style="border-color: var(--border-subtle); color: var(--text-main);"
+            class="self-start mt-1 px-3 py-1.5 rounded-lg text-[11px] font-bold border transition-colors disabled:opacity-40"
+            style="border-color: var(--line-1); color: var(--ink-1);"
           >
             {{ activeSuiteId === s.id ? '已应用' : '一键应用此预设' }}
           </button>
@@ -238,35 +222,35 @@ onMounted(loadData)
         v-for="group in schema.groups"
         :key="group.id"
         class="rounded-xl border overflow-hidden"
-        style="background-color: var(--bg-card); border-color: var(--border-subtle);"
+        style="background-color: var(--surface-2); border-color: var(--line-1);"
       >
-        <div class="px-4 py-3 border-b flex items-center gap-2" style="border-color: var(--border-subtle);">
-          <component :is="groupIcons[group.id] || ShieldAlert" class="w-4 h-4" style="color: var(--text-main);" />
+        <div class="px-4 py-3 border-b flex items-center gap-2" style="border-color: var(--line-1);">
+          <component :is="groupIcons[group.id] || ShieldAlert" class="w-4 h-4" style="color: var(--ink-1);" />
           <div>
-            <h2 class="text-xs font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">{{ group.label }}</h2>
-            <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);">{{ group.desc }}</p>
+            <h2 class="text-xs font-semibold" style="color: var(--ink-1);">{{ group.label }}</h2>
+            <p class="text-[11px] mt-0.5" style="color: var(--ink-2);">{{ group.desc }}</p>
           </div>
         </div>
 
-        <div class="divide-y" style="border-color: var(--border-subtle);">
+        <div class="divide-y" style="border-color: var(--line-1);">
           <div
             v-for="p in schema.params.filter((x: any) => x.group === group.id)"
             :key="p.key"
             class="px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4"
-            style="border-color: var(--border-subtle);"
+            style="border-color: var(--line-1);"
           >
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2 flex-wrap">
-                <span class="text-xs font-mono font-bold" style="color: var(--text-main);">{{ p.label }}</span>
-                <span v-if="isCustomized(p)" class="text-[11px] font-mono px-1.5 py-0.5 rounded border border-amber-500/30 bg-amber-500/10 text-amber-400">已自定义</span>
+                <span class="text-xs font-bold" style="color: var(--ink-1);">{{ p.label }}</span>
+                <span v-if="isCustomized(p)" class="text-[11px] px-1.5 py-0.5 rounded border border-amber-500/30 bg-amber-500/10 text-amber-400">已自定义</span>
               </div>
-              <p class="text-[11px] font-mono mt-1 leading-relaxed" style="color: var(--text-muted);">{{ p.desc }}</p>
-              <p class="text-[11px] font-mono mt-0.5 opacity-60" style="color: var(--text-muted);">
+              <p class="text-[11px] mt-1 leading-relaxed" style="color: var(--ink-2);">{{ p.desc }}</p>
+              <p class="text-[11px] mt-0.5 opacity-60" style="color: var(--ink-2);">
                 默认 {{ toDisplay(p, p.default) }} {{ p.unit }} · 范围 {{ toDisplay(p, p.min) }} ~ {{ toDisplay(p, p.max) }} {{ p.unit }} · <span class="opacity-70">{{ p.key }}</span>
               </p>
             </div>
             <div class="flex items-center gap-2 shrink-0">
-              <div class="flex items-center rounded-lg border overflow-hidden" style="background-color: var(--bg-input); border-color: var(--border-subtle);">
+              <div class="flex items-center rounded-lg border overflow-hidden" style="background-color: var(--surface-input); border-color: var(--line-1);">
                 <input
                   v-model="disp[p.key]"
                   @input="onFieldInput(p)"
@@ -274,17 +258,17 @@ onMounted(loadData)
                   :min="toDisplay(p, p.min)"
                   :max="toDisplay(p, p.max)"
                   :step="p.step * (p.display_scale || 1)"
-                  class="w-24 sm:w-28 px-2.5 py-2 text-xs font-mono outline-none text-right"
-                  style="background: transparent; color: var(--text-main);"
+                  class="w-24 sm:w-28 px-2.5 py-2 text-xs outline-none text-right"
+                  style="background: transparent; color: var(--ink-1);"
                   :class="draft[p.key] < p.min || draft[p.key] > p.max ? 'ring-1 ring-rose-500' : ''"
                 />
-                <span class="px-2 text-[11px] font-mono whitespace-nowrap select-none" style="color: var(--text-muted);">{{ p.unit }}</span>
+                <span class="px-2 text-[11px] whitespace-nowrap select-none" style="color: var(--ink-2);">{{ p.unit }}</span>
               </div>
               <button
                 v-if="Math.abs((draft[p.key] ?? 0) - p.default) > 1e-9"
                 @click="revertOne(p)"
-                class="p-2 rounded-lg border transition-colors hover:bg-[var(--bg-card-hover)]"
-                style="border-color: var(--border-subtle); color: var(--text-muted);"
+                class="p-2 rounded-lg border transition-colors hover:bg-[var(--surface-3)]"
+                style="border-color: var(--line-1); color: var(--ink-2);"
                 title="恢复该项默认值"
               >
                 <RotateCcw class="w-3.5 h-3.5" />
@@ -308,14 +292,14 @@ onMounted(loadData)
     <div
       v-if="schema && dirtyKeys.length"
       class="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 px-4 py-3 rounded-2xl border shadow-2xl flex items-center gap-3"
-      style="background-color: var(--bg-card); border-color: var(--border-subtle);"
+      style="background-color: var(--surface-2); border-color: var(--line-1);"
     >
-      <span class="text-xs font-mono" style="color: var(--text-main);">{{ dirtyKeys.length }} 项修改未保存</span>
+      <span class="text-xs" style="color: var(--ink-1);">{{ dirtyKeys.length }} 项修改未保存</span>
       <button
         @click="saveChanges"
         :disabled="busy !== ''"
-        class="px-4 py-2 rounded-lg text-xs font-mono font-bold flex items-center gap-1.5 disabled:opacity-50"
-        style="background-color: var(--text-main); color: var(--bg-card);"
+        class="px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 disabled:opacity-50"
+        style="background-color: var(--accent); color: var(--accent-ink);"
       >
         <Save class="w-3.5 h-3.5" />
         {{ busy === 'save' ? '保存中…' : '保存并生效' }}

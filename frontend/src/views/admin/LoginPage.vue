@@ -1,146 +1,104 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { LogIn, AlertCircle, Loader2, Eye, EyeOff, ArrowLeft } from 'lucide-vue-next'
 import { useAuthStore } from '../../stores/auth'
 import { useTheme } from '../../composables/useTheme'
 import { useI18n } from '../../composables/useI18n'
-import CryptoLogo from '../../components/CryptoLogo.vue'
-import { LogIn, AlertCircle, RefreshCw, Sun, Moon, ArrowLeft, Globe } from 'lucide-vue-next'
+import { APP_VERSION } from '../../config/version'
 
 const auth = useAuthStore()
 const router = useRouter()
 const { theme, toggleTheme } = useTheme()
-const { t, isEn, toggleLocale } = useI18n()
+const { t } = useI18n()
 
-const username = ref('admin')
+const username = ref('')
 const password = ref('')
+const showPwd = ref(false)
 const loading = ref(false)
 
 async function handleLogin() {
+  if (!username.value || !password.value || loading.value) return
   loading.value = true
   const ok = await auth.login(username.value, password.value)
   loading.value = false
-  if (ok) {
-    router.push('/admin/overview')
-  }
+  if (ok) router.push('/admin/overview')
 }
 </script>
 
 <template>
-  <div
-    class="min-h-screen flex flex-col justify-between p-4 sm:p-6 transition-colors selection:bg-blue-500/30"
-    style="background-color: var(--bg-app); color: var(--text-main);"
-  >
-    <!-- Top Bar: Back to Terminal & Theme Toggle -->
-    <div class="max-w-md w-full mx-auto flex items-center justify-between">
-      <a
-        href="/"
-        class="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border text-xs font-mono transition-colors shadow-xs"
-        style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-muted);"
-      >
-        <ArrowLeft class="w-3.5 h-3.5" />
-        <span>{{ isEn ? 'Back to Terminal' : '返回实盘终端' }}</span>
+  <div class="relative flex min-h-screen flex-col items-center justify-center p-4" style="background-color: var(--surface-0); color: var(--ink-1)">
+    <!-- 角落工具 -->
+    <div class="absolute inset-x-4 top-4 flex items-center justify-between">
+      <a href="/" class="btn btn-ghost btn-sm">
+        <ArrowLeft />{{ t('admin.login.backToScreen') }}
       </a>
-
-      <div class="flex items-center space-x-2">
-        <button
-          @click="toggleLocale"
-          class="flex items-center h-8 space-x-1 px-2.5 rounded-lg border transition-all cursor-pointer shadow-xs font-bold text-xs font-mono select-none"
-          style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-main);"
-          :title="t('nav.switchLang')"
-        >
-          <Globe class="w-3.5 h-3.5 text-indigo-400" />
-          <span class="text-[11px] tracking-tight">{{ isEn ? 'en/中' : '中/en' }}</span>
-        </button>
-
-        <button
-          @click="toggleTheme"
-          class="flex items-center justify-center w-8 h-8 rounded-lg border transition-all cursor-pointer shadow-xs"
-          style="background-color: var(--bg-card); border-color: var(--border-subtle); color: var(--text-main);"
-          :title="theme === 'dark' ? '切换为亮色模式' : '切换为暗色模式'"
-        >
-          <Sun v-if="theme === 'dark'" class="w-4 h-4 text-amber-400 hover:rotate-45 transition-transform" />
-          <Moon v-else class="w-4 h-4 text-slate-700 hover:-rotate-12 transition-transform" />
-        </button>
-      </div>
+      <button class="btn btn-quiet btn-icon" :title="t('dash.shell.settings.theme')" @click="toggleTheme">
+        <svg v-if="theme === 'dark'" viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4m11.4-11.4 1.4-1.4"/></svg>
+        <svg v-else viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+      </button>
     </div>
 
-    <!-- Center: Login Card -->
-    <div class="w-full max-w-md mx-auto my-auto py-8">
-      <!-- Brand Header -->
-      <div class="flex flex-col items-center mb-6 text-center">
-        <CryptoLogo :size="48" class="w-12 h-12 rounded-xl shadow-md mb-3" />
-        <div class="text-base font-black font-mono tracking-wide" style="color: var(--text-main);">
-          {{ t('admin.loginTitle') }}
-        </div>
-        <div class="text-xs font-mono mt-0.5" style="color: var(--text-muted);">
-          {{ t('admin.loginSubtitle') }}
-        </div>
+    <!-- 登录卡 -->
+    <div class="w-full max-w-[380px]">
+      <div class="mb-5 flex flex-col items-center text-center">
+        <img src="/favicon.svg" class="mb-3 h-12 w-12 rounded-xl" alt="" />
+        <h1 class="text-xl font-bold tracking-tight" style="color: var(--ink-strong)">{{ t('admin.login.title') }}</h1>
+        <p class="mt-1 text-xs" style="color: var(--ink-2)">{{ t('admin.login.desc') }}</p>
       </div>
 
-      <!-- Main Login Panel -->
-      <div
-        class="rounded-xl border p-6 sm:p-7 shadow-sm transition-colors"
-        style="background-color: var(--bg-card); border-color: var(--border-subtle);"
-      >
+      <div class="card p-5 sm:p-6">
         <div
           v-if="auth.error"
-          class="mb-4 p-3 rounded-lg border text-xs font-mono flex items-start gap-2"
-          style="background-color: var(--color-down-bg); border-color: var(--color-down-border); color: var(--color-down);"
+          class="mb-4 flex items-start gap-2 rounded-lg border p-3 text-xs leading-relaxed"
+          style="background-color: var(--down-bg); border-color: var(--down-line); color: var(--down)"
+          role="alert"
         >
-          <AlertCircle class="w-4 h-4 shrink-0 mt-0.5" />
+          <AlertCircle class="mt-0.5 h-4 w-4 shrink-0" />
           <span>{{ auth.error }}</span>
         </div>
 
-        <div class="space-y-4">
+        <form class="space-y-4" @submit.prevent="handleLogin">
           <div>
-            <label class="block text-xs font-mono font-bold mb-1.5" style="color: var(--text-muted);">
-              {{ t('admin.username') }}
-            </label>
-            <input
-              v-model="username"
-              type="text"
-              autocomplete="username"
-              class="w-full rounded-lg px-3.5 py-2.5 text-xs font-mono outline-none border transition-colors "
-              style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);"
-            />
+            <label class="form-label" for="login-user">{{ t('admin.login.username') }}</label>
+            <input id="login-user" v-model="username" type="text" autocomplete="username" class="field" :placeholder="t('admin.shell.common.inputPlaceholder')" />
           </div>
-
           <div>
-            <label class="block text-xs font-mono font-bold mb-1.5" style="color: var(--text-muted);">
-              {{ t('admin.password') }}
-            </label>
-            <input
-              v-model="password"
-              type="password"
-              autocomplete="current-password"
-              :placeholder="t('admin.password')"
-              class="w-full rounded-lg px-3.5 py-2.5 text-xs font-mono outline-none border transition-colors "
-              style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);"
-              @keyup.enter="handleLogin"
-            />
+            <label class="form-label" for="login-pwd">{{ t('admin.login.password') }}</label>
+            <div class="relative">
+              <input
+                id="login-pwd"
+                v-model="password"
+                :type="showPwd ? 'text' : 'password'"
+                autocomplete="current-password"
+                class="field pe-10"
+              />
+              <button
+                type="button"
+                class="btn btn-quiet btn-icon absolute end-1 top-1/2 h-7 w-7 -translate-y-1/2"
+                :aria-label="showPwd ? 'hide password' : 'show password'"
+                @click="showPwd = !showPwd"
+              >
+                <EyeOff v-if="showPwd" class="h-3.5 w-3.5" />
+                <Eye v-else class="h-3.5 w-3.5" />
+              </button>
+            </div>
           </div>
-
-          <button
-            @click="handleLogin"
-            :disabled="loading"
-            class="w-full flex items-center justify-center space-x-2 font-mono font-bold text-xs py-2.5 rounded-lg border-0 transition-all cursor-pointer shadow-xs disabled:opacity-50 disabled:cursor-not-allowed mt-2 hover:opacity-90"
-            style="background-color: var(--color-brand); border-color: var(--color-brand); color: #FFFFFF;"
-          >
-            <LogIn v-if="!loading" class="w-3.5 h-3.5" />
-            <RefreshCw v-else class="w-3.5 h-3.5 animate-spin" />
-            <span>{{ loading ? t('admin.loggingIn') : t('admin.loginBtn') }}</span>
+          <button type="submit" class="btn btn-primary w-full" :disabled="loading || !username || !password">
+            <LogIn v-if="!loading" />
+            <Loader2 v-else class="animate-spin" />
+            {{ loading ? t('admin.login.submitting') : t('admin.login.submit') }}
           </button>
-        </div>
+        </form>
 
-        <p class="mt-4 text-[11px] font-mono leading-relaxed" style="color: var(--text-faint);">
-          {{ isEn ? '5 consecutive failures lock for 15 min. All attempts are audit-logged.' : '连续失败 5 次锁定 15 分钟；全部登录行为计入审计日志。' }}
-        </p>      </div>
-    </div>
+        <p class="mt-4 text-xs leading-relaxed" style="color: var(--ink-3)">
+          {{ t('admin.login.rateHint') }}
+        </p>
+      </div>
 
-    <!-- Bottom Footer -->
-    <div class="max-w-md w-full mx-auto text-center text-[11px] font-mono" style="color: var(--text-faint);">
-      R20 QUANTUM TRADER · ENTERPRISE CONTROL PLANE
+      <p class="num mt-5 text-center text-2xs" style="color: var(--ink-3)">
+        R20 Quantum Trader · {{ APP_VERSION }} · {{ t('admin.login.secured') }}
+      </p>
     </div>
   </div>
 </template>

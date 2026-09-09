@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import { ref, onMounted , watch} from 'vue'
+import { useToast } from '../../composables/useToast'
+const toast = useToast()
+import { ref, onMounted } from 'vue'
+import PageHeader from '../../components/admin/PageHeader.vue'
 import { useI18n } from '../../composables/useI18n'
-import SaveBar from '../../components/admin/SaveBar.vue'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
-import {
-  ShieldCheck, ArrowUp, ArrowDown, Plus, Code, Trash2,
-  ToggleLeft, ToggleRight, Play, CheckCircle2, AlertTriangle,
-  X, Save, Download, FileCode, Sparkles
-} from 'lucide-vue-next'
+import {ArrowUp, ArrowDown, Plus, Code, Trash2,
+  ToggleLeft, ToggleRight, Play, AlertTriangle,
+  X, Save, Download, FileCode, Sparkles} from 'lucide-vue-next'
 
 const { api } = useApi()
 const auth = useAuthStore()
@@ -16,9 +16,6 @@ const { t } = useI18n()
 
 const plugins = ref<any[]>([])
 const loading = ref(true)
-const bannerMsg = ref<{ text: string; type: 'ok' | 'err' | 'warn' } | null>(null)
-const bannerSeq = ref(0)
-watch(bannerMsg, () => { bannerSeq.value++ })
 
 // Code Editor Modal State
 const editorVisible = ref(false)
@@ -45,7 +42,7 @@ async function loadPlugins() {
     const res = await api('/api/v1/admin/interceptors')
     plugins.value = res.plugins || []
   } catch (e: any) {
-    bannerMsg.value = { text: `加载插件失败：${e.message}`, type: 'err' }
+    toast.err(`加载插件失败：${e.message}`)
   } finally {
     loading.value = false
   }
@@ -59,12 +56,9 @@ async function togglePlugin(p: any) {
       body: JSON.stringify({ enabled: nextState }),
     })
     p.enabled = nextState
-    bannerMsg.value = {
-      text: `已${nextState ? '启用' : '停用'}拦截插件「${p.name || p.filename}」`,
-      type: 'ok',
-    }
+    toast.ok(`已${nextState ? '启用' : '停用'}拦截插件「${p.name || p.filename}」`)
   } catch (e: any) {
-    bannerMsg.value = { text: `操作失败：${e.message}`, type: 'err' }
+    toast.err(`操作失败：${e.message}`)
   }
 }
 
@@ -82,9 +76,9 @@ async function movePlugin(idx: number, dir: -1 | 1) {
       body: JSON.stringify({ pipeline_order: newOrder }),
     })
     plugins.value = res.plugins || arr
-    bannerMsg.value = { text: '已更新拦截管线执行优先级顺序', type: 'ok' }
+    toast.ok('已更新拦截管线执行优先级顺序')
   } catch (e: any) {
-    bannerMsg.value = { text: `排序更新失败：${e.message}`, type: 'err' }
+    toast.err(`排序更新失败：${e.message}`)
     await loadPlugins()
   }
 }
@@ -98,7 +92,7 @@ async function openEditor(p: any) {
     codeError.value = ''
     editorVisible.value = true
   } catch (e: any) {
-    bannerMsg.value = { text: `读取插件源码失败：${e.message}`, type: 'err' }
+    toast.err(`读取插件源码失败：${e.message}`)
   }
 }
 
@@ -110,7 +104,7 @@ async function saveCode() {
       method: 'PUT',
       body: JSON.stringify({ code: editingCode.value }),
     })
-    bannerMsg.value = { text: `✅ 插件「${editingFilename.value}」代码已保存并热加载生效`, type: 'ok' }
+    toast.ok(`插件「${editingFilename.value}」代码已保存并热加载生效`)
     editorVisible.value = false
     await loadPlugins()
   } catch (e: any) {
@@ -134,10 +128,10 @@ async function deletePlugin(p: any) {
   if (!confirm(`确定删除拦截插件「${p.name || p.filename}」？\n文件将被从磁盘彻底移除。`)) return
   try {
     await api(`/api/v1/admin/interceptors/${encodeURIComponent(p.filename)}`, { method: 'DELETE' })
-    bannerMsg.value = { text: `已删除插件「${p.filename}」`, type: 'ok' }
+    toast.ok(`已删除插件「${p.filename}」`)
     await loadPlugins()
   } catch (e: any) {
-    bannerMsg.value = { text: `删除失败：${e.message}`, type: 'err' }
+    toast.err(`删除失败：${e.message}`)
   }
 }
 
@@ -150,7 +144,7 @@ async function runSandbox() {
     })
     testModalVisible.value = true
   } catch (e: any) {
-    bannerMsg.value = { text: `沙箱回归测试执行失败：${e.message}`, type: 'err' }
+    toast.err(`沙箱回归测试执行失败：${e.message}`)
   } finally {
     testing.value = false
   }
@@ -204,7 +198,7 @@ async function submitCreate() {
         code: newCode.value,
       }),
     })
-    bannerMsg.value = { text: `🎉 成功创建拦截插件「${res.name || res.filename}」！`, type: 'ok' }
+    toast.ok(`成功创建拦截插件「${res.name || res.filename}」！`)
     createModalVisible.value = false
     await loadPlugins()
   } catch (e: any) {
@@ -216,20 +210,10 @@ onMounted(loadPlugins)
 </script>
 
 <template>
-  <div class="space-y-4 font-mono text-xs max-w-[2048px] mx-auto">
+  <div class="space-y-4 text-xs max-w-[2048px] mx-auto">
     <!-- Header & Action Bar -->
-    <div class="panel-banner-compact">
-      <div class="flex items-center space-x-2.5">
-        <div class="panel-banner-icon">
-          <ShieldCheck class="w-3.5 h-3.5" style="color: var(--color-up);" />
-        </div>
-        <div>
-          <h1 class="text-xs sm:text-[13px] font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
-            {{ t('admin.nInterceptors') }}
-          </h1>
-          <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);"> 物理拦截插件配置中心 —— 交易决策发出前必须通过 Python 物理拦截插件管线 (Fail-Closed) </p>
-        </div>
-      </div>
+    <PageHeader :title="t('nav.admin.interceptors')" description="交易决策发出前必须逐层通过 Python 物理拦截管线，任何异常默认拒单">
+      <template #actions>
       <div class="flex items-center space-x-2">
         <button
           @click="runSandbox"
@@ -247,21 +231,14 @@ onMounted(loadPlugins)
           <Plus class="w-3.5 h-3.5" />
           <span>新建插件</span>
         </button>
-        <span class="badge-lever" style="color: var(--color-up); border-color: var(--color-up-border); background-color: var(--color-up-bg);">
-          FAIL-CLOSED 物理防线
-        </span>
+        <span class="chip"><span class="dot dot-up" />Fail-Closed 防线</span>
       </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <!-- Alert / Banner Message -->
-    <SaveBar
-          :type="bannerMsg?.type || 'ok'"
-          :text="bannerMsg?.text || ''"
-          :nonce="bannerSeq"
-          @dismiss="bannerMsg = null"
-        />
     <!-- Loading State -->
-    <div v-if="loading" class="py-12 text-center text-xs font-mono" style="color: var(--text-muted);">正在扫描加载物理拦截插件...</div>
+    <div v-if="loading" class="py-12 text-center text-xs" style="color: var(--ink-2);">正在扫描加载物理拦截插件...</div>
 
     <!-- Plugins Pipeline List -->
     <div v-else class="space-y-3">
@@ -270,8 +247,8 @@ onMounted(loadPlugins)
         :key="p.filename"
         class="border rounded-xl p-4 sm:p-5 transition-all shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4"
         :style="{
-          backgroundColor: 'var(--bg-card)',
-          borderColor: p.enabled ? 'var(--border-medium)' : 'var(--border-subtle)',
+          backgroundColor: 'var(--surface-2)',
+          borderColor: p.enabled ? 'var(--line-2)' : 'var(--line-1)',
           opacity: p.enabled ? '1' : '0.6'
         }"
       >
@@ -283,7 +260,7 @@ onMounted(loadPlugins)
               @click="movePlugin(idx, -1)"
               :disabled="idx === 0"
               class="p-1 rounded disabled:opacity-20 cursor-pointer transition-colors"
-              style="color: var(--text-muted);"
+              style="color: var(--ink-2);"
               title="提高执行优先级"
             >
               <ArrowUp class="w-3.5 h-3.5" />
@@ -292,7 +269,7 @@ onMounted(loadPlugins)
               @click="movePlugin(idx, 1)"
               :disabled="idx === plugins.length - 1"
               class="p-1 rounded disabled:opacity-20 cursor-pointer transition-colors"
-              style="color: var(--text-muted);"
+              style="color: var(--ink-2);"
               title="降低执行优先级"
             >
               <ArrowDown class="w-3.5 h-3.5" />
@@ -302,24 +279,24 @@ onMounted(loadPlugins)
           <!-- Title, Description & Tags -->
           <div class="space-y-1.5 min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-2">
-              <span class="w-6 h-6 rounded-md border font-bold flex items-center justify-center text-[11px]" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-main);">
+              <span class="w-6 h-6 rounded-md border font-bold flex items-center justify-center text-[11px]" style="background-color: var(--surface-1); border-color: var(--line-1); color: var(--ink-1);">
                 #{{ idx + 1 }}
               </span>
-              <h3 class="text-sm font-bold tracking-wide truncate" style="color: var(--text-main);">
+              <h3 class="text-sm font-bold tracking-wide truncate" style="color: var(--ink-1);">
                 {{ p.name || p.filename }}
               </h3>
-              <span class="px-2 py-0.5 rounded text-[11px] font-mono border" style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--text-muted);">
+              <span class="px-2 py-0.5 rounded text-[11px] border" style="background-color: var(--surface-3); border-color: var(--line-1); color: var(--ink-2);">
                 {{ p.filename }}
               </span>
-              <span v-if="p.version" class="px-1.5 py-0.2 rounded text-[11px] font-bold border" style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);">
+              <span v-if="p.version" class="px-1.5 py-0.2 rounded text-[11px] font-bold border" style="background-color: var(--accent-bg); color: var(--accent); border-color: var(--accent-line);">
                 v{{ p.version }}
               </span>
-              <span v-if="p.author" class="text-[11px]" style="color: var(--text-faint);">
+              <span v-if="p.author" class="text-[11px]" style="color: var(--ink-3);">
                 by {{ p.author }}
               </span>
             </div>
 
-            <p class="text-xs font-sans leading-relaxed" style="color: var(--text-muted);">
+            <p class="text-xs font-sans leading-relaxed" style="color: var(--ink-2);">
               {{ p.description || '暂无详细描述' }}
             </p>
 
@@ -328,8 +305,8 @@ onMounted(loadPlugins)
               <span
                 v-for="t in p.tags"
                 :key="t"
-                class="px-2 py-0.5 rounded text-[11px] border font-mono"
-                style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-muted);"
+                class="px-2 py-0.5 rounded text-[11px] border"
+                style="background-color: var(--surface-1); border-color: var(--line-1); color: var(--ink-2);"
               >
                 {{ t }}
               </span>
@@ -343,14 +320,14 @@ onMounted(loadPlugins)
         </div>
 
         <!-- Right: Controls & Actions -->
-        <div class="flex items-center justify-end space-x-2 shrink-0 border-t md:border-t-0 pt-3 md:pt-0" style="border-color: var(--border-subtle);">
+        <div class="flex items-center justify-end space-x-2 shrink-0 border-t md:border-t-0 pt-3 md:pt-0" style="border-color: var(--line-1);">
           <button
             @click="openEditor(p)"
             class="flex items-center space-x-1 px-3 py-1.5 rounded-lg border font-bold cursor-pointer transition-all shadow-xs"
-            style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-main);"
+            style="background-color: var(--surface-1); border-color: var(--line-2); color: var(--ink-1);"
             title="查看或修改 Python 源码"
           >
-            <Code class="w-3.5 h-3.5" style="color: var(--color-brand);" />
+            <Code class="w-3.5 h-3.5" style="color: var(--accent);" />
             <span>源码与规则</span>
           </button>
 
@@ -382,26 +359,26 @@ onMounted(loadPlugins)
       class="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-2.5 sm:p-4"
       @click.self="editorVisible = false"
     >
-      <div class="border rounded-2xl p-4 sm:p-6 w-full max-w-4xl max-h-[94dvh] flex flex-col shadow-2xl space-y-3 sm:space-y-4 transition-colors" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
+      <div class="border rounded-2xl p-4 sm:p-6 w-full max-w-4xl max-h-[94dvh] flex flex-col shadow-2xl space-y-3 sm:space-y-4 transition-colors" style="background-color: var(--surface-2); border-color: var(--line-1);">
         <!-- Modal Header -->
-        <div class="flex items-start justify-between gap-2.5 pb-3 border-b" style="border-color: var(--border-subtle);">
+        <div class="flex items-start justify-between gap-2.5 pb-3 border-b" style="border-color: var(--line-1);">
           <div class="flex items-center space-x-2.5 min-w-0 flex-1">
-            <div class="w-8 h-8 rounded-lg shrink-0 flex items-center justify-center border shadow-xs" style="background-color: var(--color-brand-bg); border-color: var(--color-brand-border); color: var(--color-brand);">
+            <div class="w-8 h-8 rounded-lg shrink-0 flex items-center justify-center border shadow-xs" style="background-color: var(--accent-bg); border-color: var(--accent-line); color: var(--accent);">
               <FileCode class="w-4 h-4" />
             </div>
             <div class="min-w-0 flex-1">
-              <h3 class="text-xs sm:text-sm font-bold flex flex-wrap items-center gap-1.5" style="color: var(--text-main);">
+              <h3 class="text-xs sm:text-sm font-bold flex flex-wrap items-center gap-1.5" style="color: var(--ink-1);">
                 <span class="truncate max-w-[180px] sm:max-w-[320px]">{{ editingName }}</span>
-                <span class="text-[11px] sm:text-xs font-normal font-mono truncate max-w-[140px] sm:max-w-[200px]" style="color: var(--text-faint);">({{ editingFilename }})</span>
+                <span class="text-[11px] sm:text-xs font-normal truncate max-w-[140px] sm:max-w-[200px]" style="color: var(--ink-3);">({{ editingFilename }})</span>
               </h3>
-              <p class="text-[11px] hidden sm:block truncate mt-0.5" style="color: var(--text-muted);">Python 源码热更新，保存后下一轮决策实时执行</p>
+              <p class="text-[11px] hidden sm:block truncate mt-0.5" style="color: var(--ink-2);">Python 源码热更新，保存后下一轮决策实时执行</p>
             </div>
           </div>
           <div class="flex items-center space-x-1.5 shrink-0">
             <button
               @click="exportPluginCode(editingFilename, editingCode)"
               class="flex items-center space-x-1 px-2 sm:px-2.5 py-1 rounded-lg border text-[11px] sm:text-xs cursor-pointer shadow-xs transition-colors"
-              style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-main);"
+              style="background-color: var(--surface-1); border-color: var(--line-2); color: var(--ink-1);"
               title="导出当前 .py 脚本文件"
             >
               <Download class="w-3.5 h-3.5" />
@@ -410,14 +387,14 @@ onMounted(loadPlugins)
             <button
               @click="editorVisible = false"
               class="p-1 rounded-lg hover:bg-zinc-500/10 cursor-pointer transition-colors"
-              style="color: var(--text-muted);"
+              style="color: var(--ink-2);"
             >
               <X class="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        <div v-if="codeError" class="p-2.5 rounded-lg text-xs border font-mono break-all" style="background-color: var(--color-down-bg); border-color: var(--color-down-border); color: var(--color-down);">
+        <div v-if="codeError" class="p-2.5 rounded-lg text-xs border break-all" style="background-color: var(--down-bg); border-color: var(--down-line); color: var(--down);">
           {{ codeError }}
         </div>
 
@@ -425,22 +402,22 @@ onMounted(loadPlugins)
         <div class="flex-1 min-h-[220px] sm:min-h-[380px] h-[50dvh] flex flex-col">
           <textarea
             v-model="editingCode"
-            class="flex-1 w-full border rounded-xl p-3 sm:p-4 font-mono text-[11px] sm:text-xs leading-relaxed outline-none resize-none select-text transition-colors"
-            style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);"
+            class="flex-1 w-full border rounded-xl p-3 sm:p-4 text-[11px] sm:text-xs leading-relaxed outline-none resize-none select-text transition-colors"
+            style="background-color: var(--surface-input); border-color: var(--line-1); color: var(--ink-1);"
             spellcheck="false"
           ></textarea>
         </div>
 
         <!-- Modal Footer -->
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-3 border-t" style="border-color: var(--border-subtle);">
-          <div class="text-[11px] sm:text-[11px] font-mono truncate" style="color: var(--text-faint);" title="def check_risk(package, decision, context) -> tuple[bool, str]">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-3 border-t" style="border-color: var(--line-1);">
+          <div class="text-[11px] sm:text-[11px] truncate" style="color: var(--ink-3);" title="def check_risk(package, decision, context) -> tuple[bool, str]">
             <span class="font-bold">接口契约:</span> <code class="opacity-80">check_risk(package, decision, ctx)</code>
           </div>
           <div class="flex items-center justify-end space-x-2 shrink-0">
             <button
               @click="editorVisible = false"
               class="px-3.5 sm:px-4 py-1.5 sm:py-2 rounded-xl border text-xs cursor-pointer shadow-xs transition-colors"
-              style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-muted);"
+              style="background-color: var(--surface-1); border-color: var(--line-2); color: var(--ink-2);"
             >
               取消
             </button>
@@ -448,7 +425,7 @@ onMounted(loadPlugins)
               @click="saveCode"
               :disabled="savingCode"
               class="flex items-center space-x-1.5 px-4 sm:px-5 py-1.5 sm:py-2 rounded-xl font-bold text-xs cursor-pointer transition-all shadow-xs disabled:opacity-50"
-              style="background-color: var(--text-main); color: var(--bg-card);"
+              style="background-color: var(--accent); color: var(--accent-ink);"
             >
               <Save class="w-4 h-4" />
               <span>{{ savingCode ? '正在保存...' : '保存代码并热加载' }}</span>
@@ -464,59 +441,59 @@ onMounted(loadPlugins)
       class="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-2.5 sm:p-4"
       @click.self="createModalVisible = false"
     >
-      <div class="border rounded-2xl p-4 sm:p-6 w-full max-w-2xl max-h-[94dvh] overflow-y-auto flex flex-col shadow-2xl space-y-3 sm:space-y-4 transition-colors" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
-        <div class="flex items-center justify-between pb-3 border-b" style="border-color: var(--border-subtle);">
+      <div class="border rounded-2xl p-4 sm:p-6 w-full max-w-2xl max-h-[94dvh] overflow-y-auto flex flex-col shadow-2xl space-y-3 sm:space-y-4 transition-colors" style="background-color: var(--surface-2); border-color: var(--line-1);">
+        <div class="flex items-center justify-between pb-3 border-b" style="border-color: var(--line-1);">
           <div class="flex items-center space-x-2.5">
-            <div class="w-7 h-7 rounded-lg flex items-center justify-center border shadow-xs" style="background-color: var(--color-brand-bg); border-color: var(--color-brand-border); color: var(--color-brand);">
+            <div class="w-7 h-7 rounded-lg flex items-center justify-center border shadow-xs" style="background-color: var(--accent-bg); border-color: var(--accent-line); color: var(--accent);">
               <Sparkles class="w-4 h-4" />
             </div>
             <div>
-              <h3 class="text-xs sm:text-sm font-bold" style="color: var(--text-main);">新建物理拦截插件</h3>
-              <p class="text-[11px] hidden sm:block" style="color: var(--text-muted);">编写自定义 Python 拦截规则，适配策略广场规范</p>
+              <h3 class="text-xs sm:text-sm font-bold" style="color: var(--ink-1);">新建物理拦截插件</h3>
+              <p class="text-[11px] hidden sm:block" style="color: var(--ink-2);">编写自定义 Python 拦截规则，适配策略广场规范</p>
             </div>
           </div>
-          <button @click="createModalVisible = false" class="cursor-pointer p-1" style="color: var(--text-muted);">
+          <button @click="createModalVisible = false" class="cursor-pointer p-1" style="color: var(--ink-2);">
             <X class="w-4 h-4" />
           </button>
         </div>
 
-        <div v-if="createError" class="p-2.5 rounded-lg text-xs border font-mono break-all" style="background-color: var(--color-down-bg); border-color: var(--color-down-border); color: var(--color-down);">
+        <div v-if="createError" class="p-2.5 rounded-lg text-xs border break-all" style="background-color: var(--down-bg); border-color: var(--down-line); color: var(--down);">
           {{ createError }}
         </div>
 
         <div>
-          <label class="block text-xs font-bold mb-1.5" style="color: var(--text-main);">插件文件名 (.py)</label>
+          <label class="block text-xs font-bold mb-1.5" style="color: var(--ink-1);">插件文件名 (.py)</label>
           <input
             v-model="newFilename"
             type="text"
-            class="w-full border rounded-xl px-3 py-2 text-xs outline-none transition-colors font-mono"
-            style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);"
+            class="w-full border rounded-xl px-3 py-2 text-xs outline-none transition-colors"
+            style="background-color: var(--surface-input); border-color: var(--line-1); color: var(--ink-1);"
             placeholder="如: my_volatility_filter.py"
           />
         </div>
 
         <div class="flex-1 min-h-[200px] sm:min-h-[280px] flex flex-col">
-          <label class="block text-xs font-bold mb-1.5" style="color: var(--text-main);">插件 Python 源码</label>
+          <label class="block text-xs font-bold mb-1.5" style="color: var(--ink-1);">插件 Python 源码</label>
           <textarea
             v-model="newCode"
-            class="flex-1 w-full border rounded-xl p-3 sm:p-3.5 font-mono text-[11px] sm:text-xs leading-relaxed outline-none resize-y transition-colors min-h-[160px]"
-            style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);"
+            class="flex-1 w-full border rounded-xl p-3 sm:p-3.5 text-[11px] sm:text-xs leading-relaxed outline-none resize-y transition-colors min-h-[160px]"
+            style="background-color: var(--surface-input); border-color: var(--line-1); color: var(--ink-1);"
             spellcheck="false"
           ></textarea>
         </div>
 
-        <div class="flex items-center justify-end space-x-2 pt-3 border-t" style="border-color: var(--border-subtle);">
+        <div class="flex items-center justify-end space-x-2 pt-3 border-t" style="border-color: var(--line-1);">
           <button
             @click="createModalVisible = false"
             class="px-3.5 sm:px-4 py-1.5 sm:py-2 rounded-xl border text-xs cursor-pointer shadow-xs"
-            style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-muted);"
+            style="background-color: var(--surface-1); border-color: var(--line-2); color: var(--ink-2);"
           >
             取消
           </button>
           <button
             @click="submitCreate"
             class="px-4 sm:px-5 py-1.5 sm:py-2 rounded-xl font-bold text-xs cursor-pointer transition-all shadow-xs"
-            style="background-color: var(--text-main); color: var(--bg-card);"
+            style="background-color: var(--accent); color: var(--accent-ink);"
           >
             创建并加入管线
           </button>
@@ -530,20 +507,20 @@ onMounted(loadPlugins)
       class="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-2.5 sm:p-4"
       @click.self="testModalVisible = false"
     >
-      <div class="border rounded-2xl p-4 sm:p-6 w-full max-w-3xl max-h-[92dvh] overflow-y-auto shadow-2xl space-y-3 sm:space-y-4 transition-colors" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
-        <div class="flex items-center justify-between pb-3 border-b" style="border-color: var(--border-subtle);">
+      <div class="border rounded-2xl p-4 sm:p-6 w-full max-w-3xl max-h-[92dvh] overflow-y-auto shadow-2xl space-y-3 sm:space-y-4 transition-colors" style="background-color: var(--surface-2); border-color: var(--line-1);">
+        <div class="flex items-center justify-between pb-3 border-b" style="border-color: var(--line-1);">
           <div class="flex items-center space-x-2.5">
-            <div class="w-7 h-7 rounded-lg flex items-center justify-center border shadow-xs" style="background-color: var(--color-up-bg); border-color: var(--color-up-border); color: var(--color-up);">
+            <div class="w-7 h-7 rounded-lg flex items-center justify-center border shadow-xs" style="background-color: var(--up-bg); border-color: var(--up-line); color: var(--up);">
               <Play class="w-4 h-4" />
             </div>
             <div>
-              <h3 class="text-xs sm:text-sm font-bold" style="color: var(--text-main);">沙箱拦截回归测试报告</h3>
-              <p class="text-[11px]" style="color: var(--text-muted);">
+              <h3 class="text-xs sm:text-sm font-bold" style="color: var(--ink-1);">沙箱拦截回归测试报告</h3>
+              <p class="text-[11px]" style="color: var(--ink-2);">
                 已激活 {{ testResults.enabled_plugins_count }}/{{ testResults.total_plugins_count }} 个拦截插件 · 总执行耗时 {{ testResults.duration_total_ms }}ms
               </p>
             </div>
           </div>
-          <button @click="testModalVisible = false" class="cursor-pointer p-1" style="color: var(--text-muted);">
+          <button @click="testModalVisible = false" class="cursor-pointer p-1" style="color: var(--ink-2);">
             <X class="w-4 h-4" />
           </button>
         </div>
@@ -554,39 +531,39 @@ onMounted(loadPlugins)
             :key="i"
             class="p-3 sm:p-3.5 rounded-xl border transition-all"
             :style="r.intercepted
-              ? { backgroundColor: 'var(--color-warn-bg)', borderColor: 'var(--color-warn-border)' }
-              : { backgroundColor: 'var(--color-up-bg)', borderColor: 'var(--color-up-border)' }"
+              ? { backgroundColor: 'var(--warn-bg)', borderColor: 'var(--warn-line)' }
+              : { backgroundColor: 'var(--up-bg)', borderColor: 'var(--up-line)' }"
           >
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 mb-1.5">
-              <span class="text-xs font-bold" style="color: var(--text-main);">{{ r.scenario }}</span>
+              <span class="text-xs font-bold" style="color: var(--ink-1);">{{ r.scenario }}</span>
               <div class="flex items-center space-x-2">
-                <span class="text-[11px] font-mono" style="color: var(--text-faint);">{{ r.duration_ms }}ms</span>
+                <span class="text-[11px]" style="color: var(--ink-3);">{{ r.duration_ms }}ms</span>
                 <span
                   class="px-2 py-0.5 rounded text-[11px] font-bold border"
                   :style="r.intercepted
-                    ? { backgroundColor: 'var(--bg-card)', borderColor: 'var(--color-warn-border)', color: 'var(--color-warn)' }
-                    : { backgroundColor: 'var(--bg-card)', borderColor: 'var(--color-up-border)', color: 'var(--color-up)' }"
+                    ? { backgroundColor: 'var(--surface-2)', borderColor: 'var(--warn-line)', color: 'var(--warn)' }
+                    : { backgroundColor: 'var(--surface-2)', borderColor: 'var(--up-line)', color: 'var(--up)' }"
                 >
                   {{ r.intercepted ? '🛑 已成功物理拦截 (WAIT)' : '🟢 顺势放行通过' }}
                 </span>
               </div>
             </div>
-            <div class="text-[11px] font-mono flex flex-wrap items-center gap-x-3 gap-y-1" style="color: var(--text-muted);">
-              <span>原始意向: <strong style="color: var(--text-main);">{{ r.raw_action }}</strong></span>
-              <span>最终指令: <strong :style="{ color: r.final_action === 'WAIT' ? 'var(--color-warn)' : 'var(--color-up)' }">{{ r.final_action }}</strong></span>
+            <div class="text-[11px] flex flex-wrap items-center gap-x-3 gap-y-1" style="color: var(--ink-2);">
+              <span>原始意向: <strong style="color: var(--ink-1);">{{ r.raw_action }}</strong></span>
+              <span>最终指令: <strong :style="{ color: r.final_action === 'WAIT' ? 'var(--warn)' : 'var(--up)' }">{{ r.final_action }}</strong></span>
               <span v-if="r.risk_reward !== '--'">盈亏比: {{ r.risk_reward }}</span>
             </div>
-            <div v-if="r.reason" class="text-[11px] mt-1 font-sans break-words" style="color: var(--color-warn);">
+            <div v-if="r.reason" class="text-[11px] mt-1 font-sans break-words" style="color: var(--warn);">
               拦截审计：{{ r.reason }}
             </div>
           </div>
         </div>
 
-        <div class="flex justify-end pt-3 border-t" style="border-color: var(--border-subtle);">
+        <div class="flex justify-end pt-3 border-t" style="border-color: var(--line-1);">
           <button
             @click="testModalVisible = false"
             class="px-4 sm:px-5 py-1.5 sm:py-2 rounded-xl text-xs font-bold cursor-pointer transition-all shadow-xs"
-            style="background-color: var(--text-main); color: var(--bg-card);"
+            style="background-color: var(--accent); color: var(--accent-ink);"
           >
             关闭测试报告
           </button>

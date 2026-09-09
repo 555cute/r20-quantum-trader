@@ -42,36 +42,36 @@ onMounted(load)
 <template>
   <div class="space-y-4 max-w-[2048px] mx-auto">
     <div class="flex items-center justify-between">
-      <p class="text-xs font-mono" style="color: var(--text-muted);">只追加的操作审计流水；登录、配置变更、交易动作全部留痕。</p>
+      <p class="text-xs" style="color: var(--ink-2);">只追加的操作审计流水；登录、配置变更、交易动作全部留痕。</p>
       <span
-        class="text-[11px] font-mono px-2 py-1 rounded border font-bold"
-        style="background-color: var(--color-brand-bg); color: var(--color-brand); border-color: var(--color-brand-border);"
+        class="text-[11px] px-2 py-1 rounded border font-bold"
+        style="background-color: var(--accent-bg); color: var(--accent); border-color: var(--accent-line);"
       >
         治理 · 1/3
       </span>
     </div>
 
     <!-- Toolbar -->
-    <div class="rounded-xl border p-3 flex items-center gap-3 shadow-xs transition-colors" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
-      <div class="flex items-center space-x-2 flex-1 rounded-lg px-3 py-2 border transition-colors" style="background-color: var(--bg-input); border-color: var(--border-subtle);">
-        <Search class="w-3.5 h-3.5" style="color: var(--text-faint);" />
-        <input v-model="search" placeholder="搜索动作 / 状态 / 账号 / 详情..." class="flex-1 bg-transparent text-xs font-mono outline-none" style="color: var(--text-main);" />
+    <div class="rounded-xl border p-3 flex items-center gap-3 shadow-xs transition-colors" style="background-color: var(--surface-2); border-color: var(--line-1);">
+      <div class="flex items-center space-x-2 flex-1 rounded-lg px-3 py-2 border transition-colors" style="background-color: var(--surface-input); border-color: var(--line-1);">
+        <Search class="w-3.5 h-3.5" style="color: var(--ink-3);" />
+        <input v-model="search" placeholder="搜索动作 / 状态 / 账号 / 详情..." class="flex-1 bg-transparent text-xs outline-none" style="color: var(--ink-1);" />
       </div>
-      <button @click="load" class="flex items-center space-x-1 px-3 py-2 rounded-lg border text-xs font-mono font-bold cursor-pointer transition-all shadow-xs" style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-main);">
+      <button @click="load" class="flex items-center space-x-1 px-3 py-2 rounded-lg border text-xs font-bold cursor-pointer transition-all shadow-xs" style="background-color: var(--surface-1); border-color: var(--line-2); color: var(--ink-1);">
         <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': loading }" /><span>刷新</span>
       </button>
     </div>
 
     <!-- Audit Rows -->
-    <div class="rounded-xl border overflow-hidden shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
-      <div class="px-4 py-3 border-b flex items-center justify-between" style="border-color: var(--border-subtle); background-color: var(--bg-card-subtle);">
+    <div class="rounded-xl border overflow-hidden shadow-xs" style="background-color: var(--surface-2); border-color: var(--line-1);">
+      <div class="px-4 py-3 border-b flex items-center justify-between" style="border-color: var(--line-1); background-color: var(--surface-1);">
         <div class="flex items-center space-x-2">
           <Scroll class="w-4 h-4 text-purple-400" />
-          <h2 class="text-xs font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
-            {{ t('admin.nAudit') }} ({{ filtered().length }} {{ t('admin.auditEntries') }})
+          <h2 class="text-xs font-semibold" style="color: var(--ink-1);">
+            {{ t('nav.admin.audit') }} ({{ filtered().length }} {{ t('admin.auditEntries') }})
           </h2>
         </div>
-        <span class="text-[11px] font-mono" style="color: var(--text-faint);">点击任意行穿透查看原始参数 JSON</span>
+        <span class="text-[11px]" style="color: var(--ink-3);">点击任意行穿透查看原始参数 JSON</span>
       </div>
 
       <div class="max-h-[580px] overflow-y-auto">
@@ -85,23 +85,23 @@ onMounted(load)
             { key: 'detail', label: '操作者与审计详情' },
           ]"
           :rows="filtered()"
-          :row-key="(r: any, i: number) => i"
+          :row-key="(_r: any, i: number) => i"
           empty-text="暂无符合条件的审计记录"
           @row-click="detailRec = $event"
         >
           <template #cell-timestamp="{ row }">
-            <span class="num-tabular" style="color: var(--text-faint);">{{ row.timestamp }}</span>
+            <span class="num" style="color: var(--ink-3);">{{ row.timestamp }}</span>
           </template>
           <template #cell-action="{ row }">
-            <span class="font-bold" style="color: var(--color-brand);">{{ row.action }}</span>
+            <span class="font-bold" style="color: var(--accent);">{{ row.action }}</span>
           </template>
           <template #cell-status="{ row }">
             <span class="font-bold" :class="statusColor(row.status)">{{ row.status }}</span>
           </template>
           <template #cell-detail="{ row }">
             <span class="block max-w-[480px] truncate">
-              <strong style="color: var(--text-main);">{{ row.detail?.actor || row.detail?.username || 'system' }}</strong>
-              <span class="ml-1 opacity-70" style="color: var(--text-muted);">· {{ JSON.stringify(row.detail || {}) }}</span>
+              <strong style="color: var(--ink-1);">{{ row.detail?.actor || row.detail?.username || 'system' }}</strong>
+              <span class="ml-1 block break-all opacity-70" style="color: var(--ink-2); max-width: 420px">· {{ JSON.stringify(row.detail || {}) }}</span>
             </span>
           </template>
         </DataTable>
@@ -110,11 +110,11 @@ onMounted(load)
 
     <!-- Detail Modal -->
     <div v-if="detailRec" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4" @click.self="detailRec = null">
-      <div class="rounded-xl border p-5 sm:p-6 w-full max-w-[640px] max-h-[88dvh] overflow-y-auto shadow-2xl transition-colors" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
-        <h3 class="text-sm font-bold mb-3 font-mono" style="color: var(--text-main);">审计详情 · {{ detailRec.action }}</h3>
-        <pre class="border rounded-lg p-3 text-xs font-mono whitespace-pre-wrap max-h-[400px] overflow-y-auto select-text" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle); color: var(--text-main);">{{ JSON.stringify(detailRec, null, 2) }}</pre>
+      <div class="rounded-xl border p-5 sm:p-6 w-full max-w-[640px] max-h-[88dvh] overflow-y-auto shadow-2xl transition-colors" style="background-color: var(--surface-2); border-color: var(--line-1);">
+        <h3 class="text-sm font-bold mb-3" style="color: var(--ink-1);">审计详情 · {{ detailRec.action }}</h3>
+        <pre class="border rounded-lg p-3 text-xs whitespace-pre-wrap max-h-[400px] overflow-y-auto select-text" style="background-color: var(--surface-1); border-color: var(--line-1); color: var(--ink-1);">{{ JSON.stringify(detailRec, null, 2) }}</pre>
         <div class="flex justify-end mt-4">
-          <button @click="detailRec = null" class="px-4 py-2 rounded-lg border text-xs font-mono font-bold cursor-pointer transition-all shadow-xs" style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-main);">关闭</button>
+          <button @click="detailRec = null" class="px-4 py-2 rounded-lg border text-xs font-bold cursor-pointer transition-all shadow-xs" style="background-color: var(--surface-1); border-color: var(--line-2); color: var(--ink-1);">关闭</button>
         </div>
       </div>
     </div>

@@ -1,440 +1,221 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { useI18n } from '../../composables/useI18n'
-import { useRouter } from 'vue-router'
-import { useApi } from '../../composables/useApi'
-import { APP_VERSION } from '../../config/version'
+/** 运行总览：服务健康四卡 → 快捷入口 → 决策快照 + 数据管道 + 最近审计 */
+import { computed, onMounted, ref } from 'vue';
 import {
-  Cpu,
-  Database,
-  Activity,
-  Server,
-  ShieldCheck,
-  RefreshCw,
-  ArrowRight,
-  FileText,
-  Users,
-  Layers,
-  Clock,
-  CheckCircle2,
-  AlertCircle,
-} from 'lucide-vue-next'
+  Server, Activity, Cpu, Wallet, Braces, Crosshair, Landmark,
+  RefreshCw, ArrowRight, Database, ScrollText,
+} from 'lucide-vue-next';
+import { useApi } from '../../composables/useApi';
+import { useI18n } from '../../composables/useI18n';
+import { APP_VERSION } from '../../config/version';
+import PageHeader from '../../components/admin/PageHeader.vue';
+import BaseEmpty from '../../components/base/BaseEmpty.vue';
+import TimeAgo from '../../components/base/TimeAgo.vue';
+import { fmtNum } from '../../utils/format';
 
-const router = useRouter()
-const { t } = useI18n()
-const { api } = useApi()
-const runtime = ref<any>(null)
-const loading = ref(true)
+const { t } = useI18n();
+const { api } = useApi();
 
-function duration(s: number | null): string {
-  if (s == null) return '--'
-  if (s < 60) return `${s}s`
-  if (s < 3600) return `${Math.floor(s / 60)}m`
-  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
-}
+const runtime = ref<any>(null);
+const loading = ref(false);
 
-const formattedDecisions = computed(() => {
-  const d = runtime.value?.full_decisions
-  if (!d) return []
-  if (Array.isArray(d)) return d
-  if (typeof d === 'object') {
-    return Object.entries(d).map(([k, v]: [string, any]) => ({
-      instId: v.instId || k,
-      action: v.decision?.action || v.action || 'WAIT',
-      confidence: (v.decision?.confidence ?? v.confidence ?? 0) > 1 ? (v.decision?.confidence ?? v.confidence ?? 0) / 100 : (v.decision?.confidence ?? v.confidence ?? 0),
-      timestamp: v.time_str || (v.timestamp ? String(v.timestamp) : '--'),
-      reason: v.decision?.summary_reason || v.thought_process?.market_structure || v.reason || '',
-    }))
-  }
-  return []
-})
-
-const dataHealthFiles = computed(() => {
-  const dh = runtime.value?.data_health
-  if (!dh) return []
-  if (Array.isArray(dh)) return dh
-  if (Array.isArray(dh.files)) return dh.files
-  return []
-})
-
-const dataHealthOverall = computed(() => {
-  const dh = runtime.value?.data_health
-  if (!dh) return 'UNKNOWN'
-  if (typeof dh === 'object' && dh.overall) return dh.overall
-  if (Array.isArray(dh)) {
-    return dh.every((f: any) => f.fresh) ? 'LIVE' : 'STALE'
-  }
-  return 'UNKNOWN'
-})
-
-async function loadRuntime() {
-  loading.value = true
+async function load() {
+  loading.value = true;
   try {
     const [rt, cfg] = await Promise.all([
       api('/api/v1/admin/runtime').catch(() => null),
       api('/api/v1/admin/config').catch(() => null),
-    ])
-    if (rt) {
-      if (cfg?.configuration) {
-        rt.configuration = { ...cfg.configuration, ...(rt?.configuration || {}) }
-      }
-      runtime.value = rt
-    }
-  } catch (e: any) {
-    console.error('Failed to load runtime:', e)
+    ]);
+    if (rt && cfg?.configuration) rt.configuration = { ...cfg.configuration, ...(rt.configuration || {}) };
+    runtime.value = rt;
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
+onMounted(load);
 
-onMounted(() => {
-  loadRuntime()
-})
+const service = computed(() => runtime.value?.service || {});
+const uptime = computed(() => {
+  const s = Number(service.value.uptime_seconds || 0);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+});
+const llm = computed(() => runtime.value?.llm_runtime || {});
+const creds = computed(() => runtime.value?.credentials || {});
+const exchangeName = computed(() => String(creds.value.exchange || '').toUpperCase() || 'EXCHANGE');
+const envLabel = computed(() => {
+  const env = String(creds.value.environment || (creds.value.simulated_trading ? 'demo' : '') || '').toUpperCase();
+  return env || '--';
+});
+const isDemo = computed(() => envLabel.value.includes('DEMO') || envLabel.value.includes('模拟'));
+const credentialsReady = computed(() => Boolean(creds.value.configured));
+const health = computed(() => runtime.value?.data_health || {});
+const healthFiles = computed<any[]>(() => health.value.files || []);
+const decisions = computed<any[]>(() => (runtime.value?.decisions || []).slice(0, 8));
+const audits = computed<any[]>(() => (runtime.value?.audit || []).slice(0, 6));
 
-const quickNav = [
-  { label: '提示词策略工作室', desc: '语义变量与预设方案', route: '/admin/promptlib', icon: FileText },
-  { label: '物理拦截插件', desc: 'Fail-Closed 风险拦截器', route: '/admin/interceptors', icon: ShieldCheck },
-  { label: '多模型决策委员会', desc: '博弈仲裁与思考链透视', route: '/admin/council', icon: Users },
-  { label: '模型连接配置', desc: '供应商与思考强度', route: '/admin/llm', icon: Cpu },
-]
+const quickNavs = computed(() => [
+  { to: '/admin/promptlib', icon: Braces, title: t('nav.admin.prompts'), desc: t('admin.overview.quick.prompts') },
+  { to: '/admin/interceptors', icon: Crosshair, title: t('nav.admin.interceptors'), desc: t('admin.overview.quick.interceptors') },
+  { to: '/admin/council', icon: Landmark, title: t('nav.admin.council'), desc: t('admin.overview.quick.council') },
+  { to: '/admin/llm', icon: Cpu, title: t('nav.admin.llm'), desc: t('admin.overview.quick.llm') },
+]);
+
+function actionLabel(a: string): string {
+  return String(a || '').replace('admin.', '');
+}
 </script>
 
 <template>
-  <div class="space-y-4 2xl:space-y-6 max-w-[2048px] mx-auto">
-    <!-- Top Executive Header Strip -->
-    <div class="panel-banner-compact">
-      <div class="flex items-center space-x-2.5">
-        <div class="panel-banner-icon">
-          <Activity class="w-3.5 h-3.5" />
+  <div>
+    <PageHeader :title="t('nav.admin.overview')" :description="t('admin.overview.desc')">
+      <template #actions>
+        <span class="badge badge-mono">{{ APP_VERSION }}</span>
+        <button class="btn btn-ghost btn-sm" :disabled="loading" @click="load">
+          <RefreshCw :class="loading && 'animate-spin'" />{{ t('common.refresh') }}
+        </button>
+      </template>
+    </PageHeader>
+
+    <!-- 健康四卡 -->
+    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div class="card card-pad">
+        <div class="flex items-center justify-between">
+          <span class="t-label">{{ t('admin.overview.backend') }}</span>
+          <Server class="h-4 w-4" style="color: var(--ink-3)" />
         </div>
-        <div>
-          <div class="flex items-center space-x-2">
-            <h1 class="text-xs sm:text-[13px] 2xl:text-sm font-black font-mono tracking-wide" style="color: var(--text-main);">
-              {{ t('admin.nOverview') }}
-            </h1>
-            <span class="badge-lever">
-              {{ APP_VERSION }}
-            </span>
-          </div>
-          <p class="text-[11px] 2xl:text-xs font-mono mt-0.5" style="color: var(--text-muted);"> R20 QUANTUM CONTROL CENTER —— 交易引擎、微积分动力学、数据健康与物理拦截门禁全景监控 </p>
-        </div>
+        <p class="num mt-1.5 text-xl font-bold" style="color: var(--up)">{{ service.pid ? 'ONLINE' : '--' }}</p>
+        <p class="t-faint num mt-0.5 text-xs">PID {{ service.pid || '--' }} · FastAPI</p>
       </div>
 
-      <div class="flex items-center space-x-2">
-        <button
-          @click="loadRuntime"
-          :disabled="loading"
-          class="btn-admin-secondary text-xs disabled:opacity-50"
-        >
-          <RefreshCw class="w-3 h-3" :class="loading ? 'animate-spin' : ''" />
-          <span>刷新状态</span>
-        </button>
+      <div class="card card-pad">
+        <div class="flex items-center justify-between">
+          <span class="t-label">{{ t('admin.overview.uptime') }}</span>
+          <Activity class="h-4 w-4" style="color: var(--ink-3)" />
+        </div>
+        <p class="num mt-1.5 text-xl font-bold" style="color: var(--ink-strong)">{{ uptime }}</p>
+        <p class="t-faint mt-0.5 text-xs">{{ t('status.running') }}</p>
       </div>
+
+      <a class="card card-pad block transition-colors hover:bg-[var(--surface-3)]" href="/admin/llm">
+        <div class="flex items-center justify-between">
+          <span class="t-label">{{ t('admin.overview.brain') }}</span>
+          <Cpu class="h-4 w-4" style="color: var(--ink-3)" />
+        </div>
+        <p class="num mt-1.5 truncate text-md font-bold" style="color: var(--ink-strong)">{{ llm.model || t('common.notConfigured') }}</p>
+        <p class="t-faint mt-0.5 truncate text-xs">{{ llm.provider_name || '--' }} · {{ (llm.reasoning_effort || '').toUpperCase() }}</p>
+      </a>
+
+      <a class="card card-pad block transition-colors hover:bg-[var(--surface-3)]" href="/admin/security">
+        <div class="flex items-center justify-between">
+          <span class="t-label">{{ t('admin.overview.exchangeEnv') }}</span>
+          <Wallet class="h-4 w-4" style="color: var(--ink-3)" />
+        </div>
+        <p class="mt-1.5 text-md font-bold" :style="{ color: isDemo ? 'var(--warn)' : 'var(--up)' }">{{ exchangeName }} {{ envLabel }}</p>
+        <p class="t-faint mt-0.5 text-xs">{{ credentialsReady ? t('admin.overview.exchangeReady') : t('admin.overview.exchangeMissing') }} · {{ t('admin.overview.exchangeEnvHint') }}</p>
+      </a>
     </div>
 
-    <!-- Loading State -->
-    <div v-if="loading" class="py-16 text-center text-xs font-mono" style="color: var(--text-muted);">
-      <RefreshCw class="w-6 h-6 animate-spin mx-auto mb-2" style="color: var(--color-brand);" />
-      <span>正在拉取最新控制面运行态...</span>
-    </div>
-
-    <!-- Runtime Data -->
-    <template v-else-if="runtime">
-      <!-- 4 High-Density Metric Bento Cards -->
-      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 2xl:gap-4">
-        <!-- 1. 服务状态 -->
-        <div
-          class="rounded-xl border p-4 2xl:p-5 shadow-xs transition-colors"
-          style="background-color: var(--bg-card); border-color: var(--border-subtle);"
-        >
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-[11px] 2xl:text-xs font-mono" style="color: var(--text-muted);">后台服务进程</span>
-            <div
-              class="w-6 h-6 2xl:w-7 2xl:h-7 rounded-md flex items-center justify-center border"
-              style="background-color: var(--color-up-bg); border-color: var(--color-up-border); color: var(--color-up);"
-            >
-              <Server class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
-            </div>
-          </div>
-          <div class="text-xl sm:text-2xl 2xl:text-3xl font-black font-mono tracking-tight" style="color: var(--color-up);">
-            ONLINE
-          </div>
-          <div class="text-[11px] 2xl:text-[11px] font-mono mt-1" style="color: var(--text-faint);">
-            PID {{ runtime.service?.pid || '--' }} · FastAPI V5
-          </div>
-        </div>
-
-        <!-- 2. 运行时间 -->
-        <div
-          class="rounded-xl border p-4 2xl:p-5 shadow-xs transition-colors"
-          style="background-color: var(--bg-card); border-color: var(--border-subtle);"
-        >
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-[11px] 2xl:text-xs font-mono" style="color: var(--text-muted);">引擎持续运行</span>
-            <div
-              class="w-6 h-6 2xl:w-7 2xl:h-7 rounded-md flex items-center justify-center border"
-              style="background-color: var(--color-brand-bg); border-color: var(--color-brand-border); color: var(--color-brand);"
-            >
-              <Activity class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
-            </div>
-          </div>
-          <div class="text-xl sm:text-2xl 2xl:text-3xl font-black font-mono tracking-tight num-tabular" style="color: var(--text-main);">
-            {{ duration(runtime.service?.uptime_seconds) }}
-          </div>
-          <div class="text-[11px] 2xl:text-[11px] font-mono mt-1" style="color: var(--text-faint);">
-            已运行秒数 {{ runtime.service?.uptime_seconds || 0 }}s
-          </div>
-        </div>
-
-        <!-- 3. LLM 核心主脑 -->
-        <div
-          class="rounded-xl border p-4 2xl:p-5 shadow-xs transition-colors cursor-pointer group"
-          style="background-color: var(--bg-card); border-color: var(--border-subtle);"
-          @click="router.push('/admin/llm')"
-        >
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-[11px] 2xl:text-xs font-mono" style="color: var(--text-muted);">决策主脑模型</span>
-            <div
-              class="w-6 h-6 2xl:w-7 2xl:h-7 rounded-md flex items-center justify-center border"
-              style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--text-main);"
-            >
-              <Cpu class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
-            </div>
-          </div>
-          <div class="text-sm sm:text-base 2xl:text-lg font-black font-mono truncate" style="color: var(--text-main);" :title="runtime.llm_runtime?.model || runtime.llm_runtime?.name || '未配置模型'">
-            {{ runtime.llm_runtime?.model || runtime.llm_runtime?.name || '未配置模型' }}
-          </div>
-          <div class="text-[11px] 2xl:text-[11px] font-mono mt-1 flex items-center space-x-1.5" style="color: var(--text-faint);">
-            <span>{{ runtime.llm_runtime?.provider_name || '未配置供应商' }}</span>
-            <span>·</span>
-            <span>推理思考: {{ (runtime.llm_runtime?.reasoning_effort || '未设置').toString().toUpperCase() }}</span>
-            <span class="text-indigo-400 group-hover:underline ml-1">配置通道 →</span>
-          </div>
-        </div>
-
-        <!-- 4. 交易所环境与授权 -->
-        <div
-          class="rounded-xl border p-4 2xl:p-5 shadow-xs transition-colors cursor-pointer group"
-          style="background-color: var(--bg-card); border-color: var(--border-subtle);"
-          @click="router.push('/admin/security')"
-        >
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-[11px] 2xl:text-xs font-mono" style="color: var(--text-muted);">{{ (runtime.credentials?.exchange || 'exchange').toUpperCase() }} 连接环境</span>
-            <div
-              class="w-6 h-6 2xl:w-7 2xl:h-7 rounded-md flex items-center justify-center border"
-              style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--text-main);"
-            >
-              <Database class="w-3.5 h-3.5 2xl:w-4 2xl:h-4" />
-            </div>
-          </div>
-          <div class="text-xl sm:text-2xl 2xl:text-3xl font-black font-mono tracking-tight" style="color: var(--color-brand);">
-            {{ (runtime.credentials?.environment || (runtime.credentials?.simulated_trading ? 'demo' : 'live') || 'demo').toUpperCase() }}
-          </div>
-          <div class="text-[11px] 2xl:text-[11px] font-mono mt-1 flex items-center space-x-1" style="color: var(--text-faint);">
-            <span :class="runtime.credentials?.configured ? 'text-emerald-400' : 'text-amber-400'">
-              ● {{ runtime.credentials?.configured ? 'API 凭证就绪' : '未配置凭证' }}
-            </span>
-
-            <span>·</span>
-            <span class="text-indigo-400 group-hover:underline">账户管理 →</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Quick Nav Action Deck -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 2xl:gap-4">
-        <button
-          v-for="nav in quickNav"
-          :key="nav.route"
-          @click="router.push(nav.route)"
-          class="p-3.5 2xl:p-4 rounded-xl border flex items-center justify-between transition-all cursor-pointer text-left group"
-          style="background-color: var(--bg-card); border-color: var(--border-subtle);"
-        >
-          <div class="flex items-center space-x-3">
-            <div
-              class="w-8 h-8 2xl:w-9 2xl:h-9 rounded-lg flex items-center justify-center border shrink-0 transition-transform group-hover:scale-105"
-              style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-main);"
-            >
-              <component :is="nav.icon" class="w-4 h-4 2xl:w-4.5 2xl:h-4.5" />
-            </div>
-            <div>
-              <div class="text-xs 2xl:text-sm font-black font-mono group-hover:text-blue-500 transition-colors" style="color: var(--text-main);">
-                {{ nav.label }}
-              </div>
-              <div class="text-[11px] 2xl:text-[11px] font-mono truncate" style="color: var(--text-faint);">
-                {{ nav.desc }}
-              </div>
-            </div>
-          </div>
-          <ArrowRight class="w-3.5 h-3.5 shrink-0 transition-transform group-hover:translate-x-0.5" style="color: var(--text-faint);" />
-        </button>
-      </div>
-
-      <!-- Main Dual Panel: LLM Decision Audit & Data Freshness -->
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 2xl:gap-5">
-        <!-- Left: Full Decisions Audit (2 Columns) -->
-        <div
-          class="lg:col-span-2 rounded-xl border p-4 sm:p-5 2xl:p-6 shadow-xs transition-colors flex flex-col justify-between"
-          style="background-color: var(--bg-card); border-color: var(--border-subtle);"
-        >
-          <div>
-            <div class="flex items-center justify-between pb-3 mb-3 border-b" style="border-color: var(--border-subtle);">
-              <div class="flex items-center space-x-2">
-                <Layers class="w-4 h-4" style="color: var(--color-brand);" />
-                <h2 class="text-xs font-black font-mono uppercase tracking-wider" style="color: var(--text-main);">
-                  大模型决策态势全景 (Realtime Brain Status)
-                </h2>
-              </div>
-              <button
-                @click="router.push('/admin/decisions')"
-                class="text-xs font-mono flex items-center space-x-1 cursor-pointer transition-colors"
-                style="color: var(--color-brand);"
-              >
-                <span>完整推演日志</span>
-                <ArrowRight class="w-3 h-3" />
-              </button>
-            </div>
-
-            <!-- Decisions List -->
-            <div v-if="formattedDecisions.length" class="space-y-2">
-              <div
-                v-for="d in formattedDecisions"
-                :key="d.instId"
-                class="p-3 rounded-lg border font-mono text-xs transition-colors"
-                style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);"
-              >
-                <div class="flex items-center justify-between">
-                  <div class="flex items-center space-x-2">
-                    <span class="font-black text-sm" style="color: var(--text-main);">{{ d.instId }}</span>
-                    <span
-                      class="px-2 py-0.5 rounded-[3px] text-[11px] font-mono font-bold border"
-                      :style="{
-                        backgroundColor: d.action?.includes('BUY') ? 'var(--color-up-bg)' : d.action?.includes('SELL') ? 'var(--color-down-bg)' : 'var(--bg-badge)',
-                        borderColor: d.action?.includes('BUY') ? 'var(--color-up-border)' : d.action?.includes('SELL') ? 'var(--color-down-border)' : 'var(--border-subtle)',
-                        color: d.action?.includes('BUY') ? 'var(--color-up)' : d.action?.includes('SELL') ? 'var(--color-down)' : 'var(--text-muted)'
-                      }"
-                    >
-                      {{ d.action || '观望 HOLD' }}
-                    </span>
-                    <span v-if="d.confidence" class="text-[11px]" style="color: var(--text-faint);">
-                      置信度 {{ Math.round(d.confidence * 100) }}%
-                    </span>
-                  </div>
-                  <div class="text-[11px]" style="color: var(--text-faint);">
-                    {{ d.timestamp ? d.timestamp.substring(11, 19) : '--' }}
-                  </div>
-                </div>
-                <div class="mt-2 text-xs font-sans line-clamp-2 leading-relaxed" style="color: var(--text-muted);">
-                  {{ d.reason || '大模型评估当前动能结构未达到击穿阈值，顺势风控保持被动防御。' }}
-                </div>
-              </div>
-            </div>
-            <div v-else class="py-12 text-center text-xs font-mono" style="color: var(--text-muted);">
-              暂无巡检决策记录，等待下轮 15M 定时任务...
-            </div>
-          </div>
-        </div>
-
-        <!-- Right: Data Health Monitor (1 Column) -->
-        <div
-          class="rounded-xl border p-4 sm:p-5 2xl:p-6 shadow-xs transition-colors flex flex-col justify-between"
-          style="background-color: var(--bg-card); border-color: var(--border-subtle);"
-        >
-          <div>
-            <div class="flex items-center justify-between pb-3 mb-3 border-b" style="border-color: var(--border-subtle);">
-              <div class="flex items-center space-x-2">
-                <Clock class="w-4 h-4" style="color: var(--color-brand);" />
-                <h2 class="text-xs font-black font-mono uppercase tracking-wider" style="color: var(--text-main);">
-                  关键数据管道时效 (Data Health)
-                </h2>
-              </div>
-              <span
-                class="px-2 py-0.5 rounded text-[11px] font-mono font-bold border"
-                :style="{
-                  backgroundColor: dataHealthOverall === 'LIVE' ? 'var(--color-up-bg)' : 'var(--color-down-bg)',
-                  borderColor: dataHealthOverall === 'LIVE' ? 'var(--color-up-border)' : 'var(--color-down-border)',
-                  color: dataHealthOverall === 'LIVE' ? 'var(--color-up)' : 'var(--color-down)'
-                }"
-              >
-                {{ dataHealthOverall }}
-              </span>
-            </div>
-
-            <table class="w-full text-left font-mono text-xs border-collapse">
-              <thead>
-                <tr class="border-b text-[11px] uppercase" style="border-color: var(--border-subtle); color: var(--text-faint);">
-                  <th class="pb-2 font-medium">通道来源</th>
-                  <th class="pb-2 font-medium">状态</th>
-                  <th class="pb-2 font-medium">更新延时</th>
-                  <th class="pb-2 text-right font-medium">字节数</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y" style="border-color: var(--border-subtle);">
-                <tr
-                  v-for="(x, idx) in dataHealthFiles"
-                  :key="idx"
-                  class="hover:bg-[var(--bg-card-subtle)] transition-colors"
-                >
-                  <td class="py-2.5 font-bold" style="color: var(--text-main);">
-                    {{ x.file || x.name }}
-                  </td>
-                  <td class="py-2.5">
-                    <span
-                      class="px-2 py-0.5 rounded-[3px] text-[11px] font-mono font-bold border inline-flex items-center space-x-1"
-                      :style="{
-                        backgroundColor: x.fresh ? 'var(--color-up-bg)' : 'var(--color-down-bg)',
-                        borderColor: x.fresh ? 'var(--color-up-border)' : 'var(--color-down-border)',
-                        color: x.fresh ? 'var(--color-up)' : 'var(--color-down)'
-                      }"
-                    >
-                      <CheckCircle2 v-if="x.fresh" class="w-2.5 h-2.5" />
-                      <AlertCircle v-else class="w-2.5 h-2.5" />
-                      <span>{{ x.fresh ? '正常' : '延迟' }}</span>
-                    </span>
-                  </td>
-                  <td class="py-2.5 num-tabular" style="color: var(--text-muted);">
-                    {{ duration(x.age_seconds) }}
-                  </td>
-                  <td class="py-2.5 text-right font-mono num-tabular" style="color: var(--text-muted);">
-                    {{ x.bytes ? Math.round(x.bytes / 1024) + ' KB' : '--' }}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <!-- Security & Config Cards -->
-      <div
-        class="rounded-xl border p-4 sm:p-5 shadow-xs transition-colors"
-        style="background-color: var(--bg-card); border-color: var(--border-subtle);"
+    <!-- 快捷入口 -->
+    <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <RouterLink
+        v-for="q in quickNavs"
+        :key="q.to"
+        :to="q.to"
+        class="card card-pad group flex items-center gap-3 transition-colors hover:bg-[var(--surface-3)]"
       >
-        <div class="flex items-center justify-between pb-3 mb-3 border-b" style="border-color: var(--border-subtle);">
-          <div class="flex items-center space-x-2">
-            <ShieldCheck class="w-4 h-4 text-emerald-500" />
-            <h2 class="text-xs font-black font-mono uppercase tracking-wider" style="color: var(--text-main);">
-              生产环境核心安全配置
-            </h2>
-          </div>
-          <span class="text-[11px] font-mono" style="color: var(--text-faint);">敏感 Key 已脱敏防泄露保护</span>
-        </div>
+        <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border" style="background-color: var(--surface-1); border-color: var(--line-1)">
+          <component :is="q.icon" class="h-4 w-4" style="color: var(--accent)" />
+        </span>
+        <span class="min-w-0 flex-1">
+          <span class="block truncate text-sm font-semibold" style="color: var(--ink-strong)">{{ q.title }}</span>
+          <span class="block truncate text-xs" style="color: var(--ink-2)">{{ q.desc }}</span>
+        </span>
+        <ArrowRight class="h-4 w-4 shrink-0 opacity-0 transition-opacity group-hover:opacity-60" style="color: var(--ink-2)" />
+      </RouterLink>
+    </div>
 
-        <div v-if="runtime.configuration && Object.keys(runtime.configuration).length" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
-          <div
-            v-for="(v, k) in runtime.configuration"
-            :key="k"
-            class="rounded-lg border p-3 font-mono transition-colors"
-            style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);"
-          >
-            <div class="text-[11px] uppercase truncate font-medium" style="color: var(--text-faint);">{{ k }}</div>
-            <div class="text-xs font-bold truncate mt-1.5" style="color: var(--text-main);" :title="String(v)">{{ v || '未配置' }}</div>
+    <!-- 决策快照 + 数据管道 -->
+    <div class="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-12">
+      <section class="section xl:col-span-7">
+        <div class="section-head">
+          <div>
+            <h2 class="section-title"><ScrollText class="h-4 w-4" style="color: var(--accent)" />{{ t('admin.overview.decisions') }}</h2>
+            <p class="section-desc">{{ t('admin.overview.decisionsDesc') }}</p>
+          </div>
+          <RouterLink to="/admin/decisions" class="link text-xs">{{ t('admin.overview.viewAll') }} →</RouterLink>
+        </div>
+        <div class="section-body">
+          <BaseEmpty v-if="!decisions.length" :text="t('common.noData')" />
+          <div v-else class="table-scroll-container">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>{{ t('dash.matrix.positions.col.symbol') }}</th>
+                <th>{{ t('dash.radar.col.action') }}</th>
+                <th class="col-num">{{ t('dash.matrix.matrix.col.conf') }}</th>
+                <th>{{ t('dash.radar.detail.macro') }}</th>
+                <th class="col-num">{{ t('dash.matrix.orders.decisionTime') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="d in decisions" :key="d.instId + d.updated_at">
+                <td class="num font-semibold">{{ String(d.instId).split('-')[0] }}</td>
+                <td>
+                  <span class="dir" :class="d.action === 'BUY_LONG' ? 'dir-long' : d.action === 'SELL_SHORT' ? 'dir-short' : 'dir-flat'">
+                    {{ d.action === 'BUY_LONG' ? t('common.dir.long') : d.action === 'SELL_SHORT' ? t('common.dir.short') : d.action }}
+                  </span>
+                </td>
+                <td class="col-num">{{ fmtNum(d.confidence, 0) }}%</td>
+                <td class="max-w-[280px] truncate text-xs" style="color: var(--ink-2)" :title="d.summary">{{ d.summary }}</td>
+                <td class="col-num text-xs" style="color: var(--ink-3)">{{ String(d.updated_at).slice(11, 19) }}</td>
+              </tr>
+            </tbody>
+          </table>
           </div>
         </div>
-        <div v-else class="py-6 text-center text-xs font-mono" style="color: var(--text-muted);">
-          正在拉取核心安全配置...
+      </section>
+
+      <section class="section xl:col-span-5">
+        <div class="section-head">
+          <div>
+            <h2 class="section-title">
+              <Database class="h-4 w-4" style="color: var(--accent)" />{{ t('admin.overview.dataHealth') }}
+              <span class="badge" :class="health.overall === 'LIVE' ? 'badge-up' : 'badge-warn'">{{ health.overall || '--' }}</span>
+            </h2>
+            <p class="section-desc">{{ t('admin.overview.dataHealthDesc') }}</p>
+          </div>
+        </div>
+        <div class="section-body">
+          <div v-for="f in healthFiles" :key="f.name" class="flex items-center gap-3 border-b py-2 last:border-b-0" style="border-color: var(--line-1)">
+            <span class="dot" :class="f.fresh ? 'dot-up' : 'dot-warn'" />
+            <span class="num min-w-0 flex-1 truncate text-xs" style="color: var(--ink-1)">{{ f.name }}</span>
+            <span class="num w-16 text-right text-xs" style="color: var(--ink-3)">{{ f.age_seconds != null ? Math.round(f.age_seconds / 60) + 'm' : '--' }}</span>
+            <span class="num w-14 text-right text-xs" style="color: var(--ink-3)">{{ fmtNum((f.bytes || 0) / 1024, 0) }}K</span>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- 最近审计 -->
+    <section class="section mt-3">
+      <div class="section-head">
+        <h2 class="section-title">{{ t('admin.overview.recentAudit') }}</h2>
+        <RouterLink to="/admin/audit" class="link text-xs">{{ t('admin.overview.viewAll') }} →</RouterLink>
+      </div>
+      <div class="section-body">
+        <BaseEmpty v-if="!audits.length" :text="t('common.noRecords')" />
+        <div v-else class="space-y-1.5">
+          <div v-for="(a, i) in audits" :key="i" class="flex items-center gap-3 text-xs">
+            <span class="dot" :class="a.status === 'success' ? 'dot-up' : 'dot-down'" />
+            <span class="num w-36 shrink-0" style="color: var(--ink-3)">{{ a.timestamp }}</span>
+            <span class="num font-semibold" style="color: var(--ink-1)">{{ actionLabel(a.action) }}</span>
+            <span class="min-w-0 flex-1 truncate" style="color: var(--ink-2)">{{ JSON.stringify(a.detail || {}) }}</span>
+            <TimeAgo :time="a.timestamp" />
+          </div>
         </div>
       </div>
-    </template>
+    </section>
   </div>
 </template>

@@ -1,0 +1,212 @@
+/* =========================================================================
+   R20 Design Tokens · "Quant Ops Console" 视觉语言基座
+   命名规范：--surface-* 表面台阶 / --line-* 描边 / --ink-* 文字层级 /
+            --accent 品牌 / --up --down --warn --info 语义 / --chart-* 图表序列
+   运行时切换：:root[data-theme="light"] 与 :root[data-cvd="true"] 覆写
+   ========================================================================= */
+
+:root {
+  /* —— 字体 —— */
+  --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* —— 字阶（行高随附 1.45~1.6）—— */
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 15px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 26px;
+
+  /* —— 圆角 / 控件高度 —— */
+  --r-ctl: 6px;
+  --r-card: 10px;
+  --r-float: 14px;
+  --r-pill: 999px;
+  --h-sm: 28px;
+  --h-md: 32px;
+  --h-lg: 36px;
+
+  /* —— 层级 —— */
+  --z-header: 40;
+  --z-float: 50;
+  --z-drawer: 60;
+  --z-dialog: 70;
+  --z-toast: 80;
+  --z-cmdk: 90;
+
+  /* —— 动效 —— */
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 240ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* —— 暗色（默认）：Binance 实测台阶值，边框=再上一级表面 —— */
+  --surface-0: #0b0e11; /* canvas */
+  --surface-header: rgba(11, 14, 17, 0.96);
+  --surface-1: #171b21; /* card-subtle */
+  --surface-2: #1e2329; /* card */
+  --surface-3: #2b3139; /* elevated / hover */
+  --surface-input: #0b0e11;
+  --overlay-scrim: rgba(2, 4, 6, 0.72);
+
+  --line-1: #2b3139;
+  --line-2: #39404b;
+  --line-3: #4a5262;
+
+  --ink-1: #eaecef; /* 正文 */
+  --ink-2: #929aa5; /* 辅助 */
+  --ink-3: #707a8a; /* 列头/微标签，禁用于正文 */
+  --ink-strong: #ffffff; /* 仅限关键数字/标题 */
+
+  --accent: #f7931a; /* BTC 橙 */
+  --accent-ink: #0b0e11;
+  --accent-bg: rgba(247, 147, 26, 0.13);
+  --accent-line: rgba(247, 147, 26, 0.34);
+  --accent-hover: #ffab2e;
+
+  --up: #0ecb81;
+  --up-bg: rgba(14, 203, 129, 0.12);
+  --up-line: rgba(14, 203, 129, 0.28);
+  --down: #f6465d;
+  --down-bg: rgba(246, 70, 93, 0.12);
+  --down-line: rgba(246, 70, 93, 0.28);
+  --warn: #f0b90b;
+  --warn-bg: rgba(240, 185, 11, 0.12);
+  --warn-line: rgba(240, 185, 11, 0.28);
+  --info: #4c8fff;
+  --info-bg: rgba(76, 143, 255, 0.12);
+  --info-line: rgba(76, 143, 255, 0.28);
+
+  --chart-1: #0ecb81;
+  --chart-2: #f6465d;
+  --chart-3: #f0b90b;
+  --chart-4: #4c8fff;
+  --chart-5: #a78bfa;
+
+  /* 暗色禁投影分层，浮层例外 */
+  --shadow-float: 0 20px 35px -8px rgba(0, 0, 0, 0.7);
+  --shadow-dialog: 0 24px 64px -12px rgba(0, 0, 0, 0.8);
+  --ring-accent: 0 0 0 3px rgba(247, 147, 26, 0.22);
+}
+
+/* —— 色盲友好（Wong 板 / Bloomberg 蓝朱先例；方向永远另带 ▲▼）—— */
+:root[data-cvd='true'] {
+  --up: #56b4e9;
+  --up-bg: rgba(86, 180, 233, 0.14);
+  --up-line: rgba(86, 180, 233, 0.32);
+  --down: #d55e00;
+  --down-bg: rgba(213, 94, 0, 0.14);
+  --down-line: rgba(213, 94, 0, 0.32);
+  --chart-1: #56b4e9;
+  --chart-2: #d55e00;
+}
+
+/* —— 浅色：语义色加深一档保 AA —— */
+:root[data-theme='light'] {
+  --surface-0: #f4f6f8;
+  --surface-header: rgba(255, 255, 255, 0.94);
+  --surface-1: #ffffff;
+  --surface-2: #ffffff;
+  --surface-3: #eef1f4;
+  --surface-input: #ffffff;
+  --overlay-scrim: rgba(15, 23, 42, 0.45);
+
+  --line-1: #e2e8f0;
+  --line-2: #cbd5e1;
+  --line-3: #94a3b8;
+
+  --ink-1: #14202e;
+  --ink-2: #475569;
+  --ink-3: #5b6472;
+  --ink-strong: #0b1220;
+
+  --accent: #c2600c;
+  --accent-ink: #ffffff;
+  --accent-bg: #fdf0dc;
+  --accent-line: #f3ce9a;
+  --accent-hover: #a95208;
+
+  --up: #059669;
+  --up-bg: rgba(16, 185, 129, 0.08);
+  --up-line: rgba(16, 185, 129, 0.25);
+  --down: #e11d48;
+  --down-bg: rgba(225, 29, 72, 0.08);
+  --down-line: rgba(225, 29, 72, 0.25);
+  --warn: #d97706;
+  --warn-bg: rgba(217, 119, 6, 0.08);
+  --warn-line: rgba(217, 119, 6, 0.25);
+  --info: #2563eb;
+  --info-bg: rgba(37, 99, 235, 0.08);
+  --info-line: rgba(37, 99, 235, 0.25);
+
+  --chart-1: #059669;
+  --chart-2: #e11d48;
+  --chart-3: #d97706;
+  --chart-4: #2563eb;
+  --chart-5: #7c3aed;
+
+  --shadow-float: 0 10px 25px -5px rgba(15, 23, 42, 0.08);
+  --shadow-dialog: 0 16px 48px -12px rgba(15, 23, 42, 0.18);
+  --ring-accent: 0 0 0 3px rgba(194, 96, 12, 0.18);
+}
+
+:root[data-theme='light'][data-cvd='true'] {
+  --up: #0072b2;
+  --up-bg: rgba(0, 114, 178, 0.08);
+  --up-line: rgba(0, 114, 178, 0.25);
+  --down: #b34700;
+  --down-bg: rgba(179, 71, 0, 0.08);
+  --down-line: rgba(179, 71, 0, 0.25);
+}
+
+/* =========================================================================
+   Tailwind 4 桥接：语义色生成 bg-surface-2 / text-ink-2 / border-line-1 等价utility
+   ========================================================================= */
+@theme inline {
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-mono);
+
+  --color-app: var(--surface-0);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line-1: var(--line-1);
+  --color-line-2: var(--line-2);
+  --color-line-3: var(--line-3);
+  --color-ink-1: var(--ink-1);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-ink-strong: var(--ink-strong);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-bg: var(--accent-bg);
+  --color-up: var(--up);
+  --color-down: var(--down);
+  --color-warn: var(--warn);
+  --color-info: var(--info);
+
+  --radius-ctl: var(--r-ctl);
+  --radius-card: var(--r-card);
+  --radius-float: var(--r-float);
+
+  --text-2xs: var(--text-2xs);
+  --text-2xs--line-height: 1.5;
+  --text-xs: var(--text-xs);
+  --text-xs--line-height: 1.5;
+  --text-sm: var(--text-sm);
+  --text-sm--line-height: 1.55;
+  --text-base: var(--text-base);
+  --text-base--line-height: 1.55;
+  --text-md: var(--text-md);
+  --text-md--line-height: 1.5;
+  --text-lg: var(--text-lg);
+  --text-lg--line-height: 1.45;
+  --text-xl: var(--text-xl);
+  --text-xl--line-height: 1.35;
+  --text-2xl: var(--text-2xl);
+  --text-2xl--line-height: 1.25;
+}
