@@ -5,6 +5,7 @@
  */
 import { computed, ref, watch } from 'vue';
 import { useDashboardStore } from '../../stores/dashboard';
+import { symOf } from '../../utils/instId';
 import { useI18n } from '../../composables/useI18n';
 import { useUi } from '../../composables/useUi';
 import PageHead from '../../components/dashboard/PageHead.vue';
@@ -22,7 +23,7 @@ const chart = ref<InstanceType<typeof ChartWorkstation> | null>(null);
 /** 初始选中：优先当前持仓，其次 BTC（池内恒定存在） */
 const initialSymbol = computed(() => {
   const p = store.positions[0];
-  return p ? String(p.instId).split('-')[0] : 'BTC';
+  return p ? symOf(String(p.instId)) : 'BTC';
 });
 
 function pick(instId: string) {

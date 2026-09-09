@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { pairLabel } from '../../utils/instId';
 /** 因子详情抽屉：行情快照 / 动力学 / 聪明钱 / AI 裁决与理由 */
 import { computed } from 'vue';
 import { LineChart } from 'lucide-vue-next';
@@ -53,7 +54,7 @@ const smart = computed(() => [
   <BaseDrawer
     :open="!!factor"
     width="620px"
-    :title="t('dash.matrix.matrix.detailTitle', undefined, { sym: (factor?.name || '') + '/USDT' })"
+    :title="t('dash.matrix.matrix.detailTitle', undefined, { sym: pairLabel(factor?.name || '') })"
     :subtitle="factor?.desc || ''"
     @close="emit('close')"
   >

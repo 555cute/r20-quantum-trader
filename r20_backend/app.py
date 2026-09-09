@@ -1577,9 +1577,7 @@ def admin_test_council_debate(payload: CouncilTestRequest, x_r20_session: str | 
     else:
         # Pull live factor snapshot or default to all 6 active instruments
         active_insts = load_instruments()
-        symbols = [x.get("instId", "") for x in active_insts] if active_insts else [
-            "BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP", "DOGE-USDT-SWAP", "SUI-USDT-SWAP", "ASTER-USDT-SWAP"
-        ]
+        symbols = [x.get("instId", "") for x in active_insts]
         
         factor_snap_file = ROOT / "data" / "factor_library_snapshot.json"
         factor_data = {}
@@ -1603,7 +1601,8 @@ def admin_test_council_debate(payload: CouncilTestRequest, x_r20_session: str | 
         ]
         for sym in symbols:
             f = factor_data.get(sym, {})
-            c_px = f.get("close", 78000.0 if "BTC" in sym else (2400.0 if "ETH" in sym else (100.0 if "SOL" in sym else 1.0)))
+            # 价格取真实快照（close/price），缺失即 0 标注无数据——不再按币种写死假价
+            c_px = float(f.get("close") or f.get("price") or 0.0)
             v_val = f.get("v_1h", 0.05)
             a_val = f.get("a_1h", 0.12)
             adx_val = f.get("adx_1h", 22.5)

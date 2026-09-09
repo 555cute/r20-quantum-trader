@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { pairLabel } from '../../utils/instId';
 /** 单笔生命周期抽屉：开平仓 / 费用构成 / 盈亏结构 / 策略与归因 */
 import { computed } from 'vue';
 import BaseDrawer from '../base/BaseDrawer.vue';
@@ -29,7 +30,7 @@ const cells = computed(() => [
   <BaseDrawer
     :open="!!trade"
     width="560px"
-    :title="t('dash.ledger.lifecycle.title', undefined, { sym: (x.inst || '') + '/USDT', dir: x.side || '' })"
+    :title="t('dash.ledger.lifecycle.title', undefined, { sym: pairLabel(x.inst || ''), dir: x.side || '' })"
     :subtitle="`${x.strategy || ''} · ${x.lever || ''}`"
     @close="emit('close')"
   >

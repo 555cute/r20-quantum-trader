@@ -273,6 +273,20 @@ def _load_module_from_file(file_path: Path) -> Any:
     return module
 
 
+
+def _conf_floor_for(inst_id: str) -> float:
+    """置信度安全底线：读标的池每标的 conf_floor（如 DOGE=80），未配置回退全局 75。
+    池文件读取失败时同样 fail-closed 到 75（不低于历史全局底线）。"""
+    try:
+        from scripts.instrument_pool import load_instruments
+        for item in load_instruments():
+            if str(item.get("instId", "")).upper() == inst_id.upper():
+                return float(item.get("conf_floor", 75.0) or 75.0)
+    except Exception:
+        pass
+    return 75.0
+
+
 def run_interceptor_pipeline(package: dict[str, Any], decision: dict[str, Any], context: dict[str, Any]) -> tuple[str, str, float]:
     """
     Executes core deterministic non-bypassable risk checks, then all enabled interceptor plugins in sequence.
@@ -314,13 +328,13 @@ def run_interceptor_pipeline(package: dict[str, Any], decision: dict[str, Any], 
     if not quote_valid:
         return "WAIT", quote_reason, rr
 
-    # 3. Non-Bypassable Core Safety Floor: Confidence threshold (Global Floor: 75%, DOGE floor: 80%)
+    # 3. Non-Bypassable Core Safety Floor: Confidence threshold (per-instrument conf_floor from pool, global default 75%)
     try:
         conf = float(decision.get("confidence", 0) or 0)
     except (TypeError, ValueError):
         return "WAIT", "核心风控拦截：置信度必须是有效数字", rr
 
-    conf_floor = 80.0 if "DOGE" in inst_id.upper() else 75.0
+    conf_floor = _conf_floor_for(inst_id)
     if conf < conf_floor:
         return "WAIT", f"核心风控拦截：置信度低于安全底线 ({conf:.1f}% < {conf_floor:.1f}%)", rr
 
