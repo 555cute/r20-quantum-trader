@@ -32,6 +32,18 @@ ADAPTER_EXECUTION_ENABLED: Dict[str, bool] = {
     "okx": False, "binance": False, "gate": False,
 }
 
+
+def execution_open(venue: str) -> bool:
+    """场所执行开闸的统一判定（运行时读 env，支持热切换无需改码）。
+
+    gate：私有面已实装，但默认关闸——需显式 ``R20_GATE_EXECUTION=1``；
+    其余场所：静态表（binance 等未实装，恒关）。
+    """
+    key = str(venue or "").strip().lower()
+    if key == "gate":
+        return str(os.environ.get("R20_GATE_EXECUTION", "0")).strip().lower() in ("1", "true", "yes", "on")
+    return ADAPTER_EXECUTION_ENABLED.get(key, False)
+
 _INSTANCES: Dict[str, BaseExchangeAdapter] = {}
 
 
@@ -78,12 +90,14 @@ def require_execution(venue: str) -> None:
     """执行门禁：任何场所经适配器下单前先问这里。未开闸一律 fail-closed。"""
     adapter = get_adapter(venue)
     cap = adapter.capabilities
-    if not ADAPTER_EXECUTION_ENABLED.get(cap.venue, False):
+    if not execution_open(cap.venue):
         raise ExchangeCapabilityError(
-            f"{cap.display_name}: 适配器执行未开闸（Phase 3 门槛：单所 ≥100 笔可信样本）。"
-            f"当前该场所仅提供只读行情"
-            + ("。注：OKX 实盘执行走 ai_factor_trader 遗留链路，不经本路由。"
-               if cap.venue == "okx" else "。")
+            f"{cap.display_name}: 适配器执行未开闸。"
+            + ("Gate 需显式设 R20_GATE_EXECUTION=1（后台凭证就绪后再开）。"
+               if cap.venue == "gate" else
+               "当前该场所仅提供只读行情。")
+            + ("注：OKX 实盘执行走 ai_factor_trader 遗留链路，不经本路由。"
+               if cap.venue == "okx" else "")
         )
     if not cap.supports_orders:
         raise ExchangeCapabilityError(f"{cap.display_name}: supports_orders=False，适配器未实装下单")

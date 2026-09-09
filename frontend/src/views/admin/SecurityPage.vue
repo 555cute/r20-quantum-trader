@@ -666,7 +666,7 @@ onMounted(() => { loadAll(); loadMx() })
           <button @click="loadMx" class="px-2.5 py-1.5 rounded-lg border text-[11px] cursor-pointer transition-all shadow-xs" style="background-color: var(--surface-1); border-color: var(--line-2); color: var(--ink-1);">重新检测</button>
         </div>
         <p class="text-[11px] leading-relaxed" style="color: var(--ink-3);">
-          跨所行情比对与断流容灾<strong style="color: var(--ink-2);">无需任何密钥即已生效</strong>（公共免登录端点）。此处 API 凭证为未来多所执行路由（Phase 3）预留——单所可信样本门槛前不会向币安/Gate 发起真实下单。密钥留空表示不修改。
+          跨所行情比对与断流容灾<strong style="color: var(--ink-2);">无需任何密钥即已生效</strong>（公共免登录端点）。Gate 执行路由已实装（带符号张数 + price_orders 双腿云端 TP/SL + 覆盖回读，缺口自动撤单回滚），默认关闸——录入凭证并设 R20_GATE_EXECUTION=1 才放行；Binance 执行待独立条件单双轨工程。密钥留空表示不修改。
         </p>
 
         <!-- 行情健康度 -->

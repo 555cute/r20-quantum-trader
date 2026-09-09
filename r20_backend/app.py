@@ -1078,7 +1078,8 @@ def admin_config(x_r20_admin_token: str | None = Header(default=None)) -> dict[s
 def admin_multi_exchange_status(x_r20_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
     """多所凭证与档位状态（永不回显密钥值）+ 行情健康度快照。"""
     require_admin_header(x_r20_admin_token)
-    from r20_backend.exchanges import registered_venues, venue_credentials, venue_testnet_enabled
+    from r20_backend.exchanges import (execution_open, registered_venues,
+                                        venue_credentials, venue_testnet_enabled)
     venues: dict[str, Any] = {}
     for v in registered_venues():
         if v == "okx":
@@ -1088,6 +1089,7 @@ def admin_multi_exchange_status(x_r20_admin_token: str | None = Header(default=N
             "has_api_key": bool(api_key),
             "has_secret": bool(secret),
             "testnet": venue_testnet_enabled(v),
+            "execution_open": execution_open(v),
         }
     health: dict[str, Any] = {}
     try:

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 from r20_backend.exchanges import (
     BinanceAdapter,
@@ -96,7 +97,7 @@ class TestCapabilityTable(unittest.TestCase):
 
 class TestFailClosedPrivateFacets(unittest.TestCase):
     def test_orders_rejected_on_readonly_adapters(self):
-        for adapter in (BinanceAdapter(), GateAdapter()):
+        for adapter in (BinanceAdapter(),):
             with self.assertRaises(ExchangeCapabilityError):
                 adapter.place_order()
             with self.assertRaises(ExchangeCapabilityError):
@@ -105,6 +106,16 @@ class TestFailClosedPrivateFacets(unittest.TestCase):
                 adapter.account_snapshot()
             with self.assertRaises(ExchangeCapabilityError):
                 adapter.positions()
+
+    def test_gate_private_requires_credentials_fail_closed(self):
+        # Gate 私有面已实装但仍 fail-closed：无凭证 → 显式拒绝，绝不静默
+        import r20_gateway.secrets as gw_secrets
+        with patch.object(gw_secrets, "load_secrets", lambda: {}):
+            gt = GateAdapter()
+            with self.assertRaises(ExchangeCapabilityError):
+                gt.account_snapshot()
+            with self.assertRaises(ExchangeCapabilityError):
+                gt.place_order("BTC", "long", 5, price=78000)
 
     def test_registry_execution_gate(self):
         with self.assertRaises(ExchangeCapabilityError):
