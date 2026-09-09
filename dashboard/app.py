@@ -312,6 +312,34 @@ def _build_factors_from_local_files(positions, timestamp_full):
     return factors_list, state_data
 
 
+def build_ai_health(ai_history_list):
+    """AI 决策健康度（2026-09-10）：用户反馈"委员会不能正常运行"却无从判断——
+    把决策缓存年龄、委员会开关态、最近周期结果直接摆上推演页，失败可见。"""
+    out: dict = {}
+    try:
+        _dec_file = os.path.join(DATA_DIR, "ai_brain_decisions.json")
+        if os.path.exists(_dec_file):
+            with open(_dec_file, "r", encoding="utf-8") as f:
+                _dec = json.load(f)
+            _ts = [int(v.get("timestamp") or 0) for v in _dec.values() if isinstance(v, dict)]
+            if _ts:
+                out["decision_age_seconds"] = max(0, int(time.time() - max(_ts)))
+    except Exception:
+        pass
+    try:
+        with open(os.path.join(DATA_DIR, "council_config.json"), "r", encoding="utf-8") as f:
+            _cc = json.load(f)
+        out["council_enabled"] = bool(_cc.get("enabled"))
+        out["council_timeout"] = _cc.get("timeout_seconds")
+    except Exception:
+        pass
+    if ai_history_list:
+        out["last_cycle_time"] = ai_history_list[0].get("time")
+        _cs = ai_history_list[0].get("council_status")
+        out["last_council_status"] = _cs if isinstance(_cs, dict) else None
+    return out
+
+
 def _inject_local_data_into_stale(stale, positions, timestamp_full):
     """Inject local-only data (factor library, factors, news, review) into a stale cache.
 
@@ -349,6 +377,12 @@ def _inject_local_data_into_stale(stale, positions, timestamp_full):
                 stale["ai_brain_history"] = json.load(f)
         except Exception:
             pass
+
+    # AI 决策健康度同为本地口径：STALE 模式下也必须新鲜（决策停更的原因正在这里）
+    try:
+        stale["ai_health"] = build_ai_health(stale.get("ai_brain_history") or [])
+    except Exception:
+        pass
 
     # Review report — local file
     if os.path.exists(REPORT_JSON_FILE):
@@ -1319,6 +1353,7 @@ def update_cache_cycle():
         "trades": trades_table,
         "news_intelligence": news_data,
         "ai_brain_history": ai_history_list,
+        "ai_health": build_ai_health(ai_history_list),
         "factor_library": factor_lib_snapshot,
         "cross_venue": _load_cross_venue_data()
     }
