@@ -97,9 +97,10 @@ def _position_match(positions: list[dict[str, Any]], intent: dict[str, Any]) -> 
 
 
 def fast_close_confirmed(close_token: str, confirmation: str) -> dict[str, Any]:
-    intent=_consume_intent(close_token); env=current_environment()
-    if env.identity!=intent["environment_id"]: raise ValueError("OKX 环境或凭证已变化，请刷新当前持仓")
+    env=current_environment()
     if not env.configured: raise OKXNotConfigured(f"OKX {env.mode.upper()} 静态 API Key 未配置，请在后台配置 V5 API Key 后重试（禁止应急平仓）")
+    intent=_consume_intent(close_token)
+    if env.identity!=intent["environment_id"]: raise ValueError("OKX 环境或凭证已变化，请刷新当前持仓")
     if confirmation.strip().upper()!=intent["confirmation"]: raise ValueError(f"确认短语必须精确为：{intent['confirmation']}")
     target=_position_match(_request("GET","/api/v5/account/positions",{"instType":"SWAP","instId":intent["instId"]},env),intent)
     if not target: raise ValueError("目标仓位已不存在，请刷新")

@@ -48,15 +48,23 @@ class OKXEnvironmentTests(unittest.TestCase):
         snapshot_env = okx_runtime.OKXEnvironment("demo", "A", "B", "C")
         changed_env = okx_runtime.OKXEnvironment("live", "L", "S", "P")
         token, confirmation = trade_service._create_intent(snapshot_env, {"instId":"BTC-USDT-SWAP","posSide":"long","posId":"1","pos":"2"})
-        with patch.object(trade_service, "selected_environment", return_value=changed_env), patch.object(trade_service, "_request") as request:
+        with patch.object(trade_service, "current_environment", return_value=changed_env), patch.object(trade_service, "_request") as request:
             with self.assertRaises(ValueError): trade_service.fast_close_confirmed(token, confirmation)
             request.assert_not_called()
 
-    def test_cli_cancel_uses_positional_instrument_argument(self):
+    def test_unconfigured_key_fails_closed_without_any_fallback(self):
+        # 旧 CLI 回退契约已随 US-008 删除（封闭三律③）：空键必须 OKXNotConfigured 且零网络。
+        import scripts.okx_rest as okx_rest
         env = okx_runtime.OKXEnvironment("demo", "", "", "")
-        with patch.object(trade_service, "_run_cli", return_value=[]) as run:
-            trade_service._request("POST", "/api/v5/trade/cancel-order", {"instId":"SOL-USDT-SWAP","ordId":"123"}, env)
-        self.assertEqual(run.call_args.args[0], ["okx","--demo","swap","cancel","SOL-USDT-SWAP","--ordId","123","--json"])
+        with patch.object(trade_service.urllib.request, "urlopen") as net:
+            with self.assertRaises(okx_rest.OKXNotConfigured):
+                trade_service._request("POST", "/api/v5/trade/cancel-order", {"instId":"SOL-USDT-SWAP","ordId":"123"}, env)
+            net.assert_not_called()
+        with patch.object(trade_service, "current_environment", return_value=env):
+            with self.assertRaises(okx_rest.OKXNotConfigured):
+                trade_service.account_snapshot()
+            with self.assertRaises(okx_rest.OKXNotConfigured):
+                trade_service.fast_close_confirmed("any-token", "CLOSE DEMO X LONG 1")
 
     def test_fast_close_cancels_all_same_position_orders_before_close(self):
         env = okx_runtime.OKXEnvironment("demo", "A", "B", "C")
@@ -67,10 +75,14 @@ class OKXEnvironmentTests(unittest.TestCase):
             [{"instId":"SOL-USDT-SWAP","posSide":"long","ordId":"11","reduceOnly":"true","side":"sell"}],
             [], [], [],
         ]
-        with patch.object(trade_service,"selected_environment",return_value=env), patch.object(trade_service,"_request",side_effect=responses) as request, patch.object(trade_service.time,"sleep"):
+        with patch.object(trade_service,"current_environment",return_value=env), patch.object(trade_service,"_request",side_effect=responses) as request, patch.object(trade_service.time,"sleep"), \
+             patch.object(trade_service, "pending_algo_orders", return_value=[{"algoId":"777","posSide":"long","instId":"SOL-USDT-SWAP"}]) as algo_scan, \
+             patch.object(trade_service, "cancel_algo_orders", return_value=[]) as algo_cancel:
             result=trade_service.fast_close_confirmed(token,confirmation)
         self.assertEqual(result["status"],"confirmed_closed")
-        self.assertEqual(result["canceled_entry_orders"],["11"])
+        self.assertEqual(result["canceled_entry_orders"],["11","algo:777"])
+        algo_scan.assert_called_once_with("SOL-USDT-SWAP")
+        algo_cancel.assert_called_once_with(["777"])
         calls=[(c.args[0],c.args[1],c.args[2]) for c in request.call_args_list]
         self.assertIn(("POST","/api/v5/trade/cancel-order",{"instId":"SOL-USDT-SWAP","ordId":"11"}),calls)
         self.assertTrue(any(path=="/api/v5/trade/close-position" for _,path,_ in calls))
