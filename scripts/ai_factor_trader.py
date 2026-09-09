@@ -38,6 +38,7 @@ except Exception:
 # 必须用 scripts.okx_runtime 包形式：okx_rest 读的是同一模块实例的冻结环境，
 # 裸 okx_runtime 是另一份 _FROZEN_ENVIRONMENT 全局，freeze 周期对其无效（US-002 命门）。
 from scripts.okx_runtime import (
+    current_environment,
     freeze_environment as freeze_okx_environment,
     replace_cli_prefix as okx_private_command,
     unfreeze_environment as unfreeze_okx_environment,
@@ -1827,9 +1828,12 @@ def single_trader_cycle(func):
 # =============================================================================
 @single_trader_cycle
 def execute_portfolio():
-    # US-002 fail-closed entry gate: without a static V5 API Key for the selected
-    # LIVE/DEMO environment the engine must physically refuse to trade.
-    _engine_env = selected_environment()
+    # US-002 fail-closed entry gate: without a static V5 API Key for the frozen
+    # cycle environment the engine must physically refuse to trade.
+    # current_environment (not selected_environment): the decorator froze the env
+    # for this cycle and okx_rest reads the same frozen instance — the gate must
+    # judge the very environment the REST channel will sign with.
+    _engine_env = current_environment()
     if not _engine_env.configured:
         print(f"[Engine NOT READY] OKX {_engine_env.mode.upper()} API Key 未配置：V5 直签是唯一交易通道，本周期拒绝交易。")
         return None
