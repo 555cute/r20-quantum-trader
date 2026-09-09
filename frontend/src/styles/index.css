@@ -1,6 +1,8 @@
-/* R20 新设计系统入口：Tailwind 4 + tokens + base + components */
+/* R20 新设计系统入口：Tailwind 4 + tokens + base + components
+   注意：components/compat 必须进 @layer，否则层外样式优先级高于 utilities，
+   会压掉 md:hidden / hidden 等响应式工具类（汉堡按钮 PC 端误显示事故根因） */
 @import 'tailwindcss';
 @import './tokens.css';
-@import './base.css';
-@import './components.css';
-@import './compat.css';
+@import './base.css' layer(base);
+@import './components.css' layer(components);
+@import './compat.css' layer(components);

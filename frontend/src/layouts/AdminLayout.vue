@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 控制台壳层：可折叠侧栏（5 组 / nav.ts 单一来源）+ 顶栏（面包屑/⌘K/主题/CVD/返回大屏/退出）。
+ * 控制台壳层：可折叠侧栏（5 组 / nav.ts 单一来源）+ 顶栏（面包屑/主题/返回大屏/退出）。
  * 登录守卫在 router；此处只管呈现。
  */
 import { computed, onMounted, ref, watch } from 'vue';
@@ -19,7 +19,7 @@ import { APP_VERSION, APP_NAME } from '../config/version';
 const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
-const { theme, toggleTheme, cvd, toggleCvd } = useTheme();
+const { theme, toggleTheme } = useTheme();
 const { t } = useI18n();
 
 const collapsed = useLocalStorage('r20_admin_sidebar', false);
@@ -160,14 +160,6 @@ watch(() => route.path, () => (drawerOpen.value = false));
           </p>
         </div>
         <div class="ms-auto flex items-center gap-1">
-          <button
-            class="btn h-8 px-2 text-2xs"
-            :class="cvd ? 'btn-primary' : 'btn-ghost'"
-            :title="t('dash.shell.settings.cvd')"
-            @click="toggleCvd"
-          >
-            CVD
-          </button>
           <button class="btn btn-quiet btn-icon" :title="t('dash.shell.settings.theme')" @click="toggleTheme">
             <Sun v-if="theme === 'dark'" class="h-4 w-4" />
             <Moon v-else class="h-4 w-4" />

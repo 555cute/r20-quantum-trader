@@ -17,7 +17,7 @@ defineProps<{
         {{ description }}
       </p>
     </div>
-    <div class="flex items-center gap-2 shrink-0 flex-wrap">
+    <div class="flex max-w-full items-center gap-2 shrink-0 overflow-x-auto">
       <slot name="actions" />
     </div>
   </div>

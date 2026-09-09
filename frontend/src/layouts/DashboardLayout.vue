@@ -19,7 +19,6 @@ import NewsView from '../views/dashboard/NewsView.vue';
 import EvolutionView from '../views/dashboard/EvolutionView.vue';
 import LedgerView from '../views/dashboard/LedgerView.vue';
 import AboutModal from '../components/dashboard/AboutModal.vue';
-import DataStatus from '../components/dashboard/DataStatus.vue';
 
 const route = useRoute();
 const store = useDashboardStore();
@@ -47,10 +46,7 @@ onUnmounted(() => store.stopPolling());
     <TopBar />
     <div class="h-12 shrink-0" />
 
-    <div class="mx-auto flex w-full max-w-[2048px] justify-end px-3 pt-2 sm:px-5">
-      <DataStatus />
-    </div>
-    <main class="mx-auto w-full max-w-[2048px] space-y-3 px-3 pb-20 pt-1 sm:px-5 md:pb-6">
+    <main class="mx-auto w-full max-w-[2048px] space-y-3 px-3 pb-20 pt-3 sm:px-5 md:pb-6">
       <KeepAlive :max="5">
         <MatrixView v-if="activeTab === 'trading'" key="trading" />
         <RadarView v-else-if="activeTab === 'factors'" key="factors" />

@@ -2,7 +2,7 @@
 /** 前台顶栏：品牌 / 5 tab / 决策透视 / ⌘K / 主题 / 偏好弹层 */
 import { computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { Moon, Sun, Eye } from 'lucide-vue-next';
+import { Moon, Sun, Eye, BookOpen, LayoutDashboard } from 'lucide-vue-next';
 import { publicTabs } from '../../config/nav';
 import { useI18n } from '../../composables/useI18n';
 import { useTheme } from '../../composables/useTheme';
@@ -65,7 +65,14 @@ function go(path: string) {
       </nav>
 
       <!-- 右侧动作区 -->
-      <div class="ms-auto flex items-center gap-1 md:ms-0">
+      <div class="ms-auto flex items-center gap-1">
+        <button class="btn btn-quiet btn-icon" :title="t('nav.actions.docs')" @click="go('/docs')">
+          <BookOpen class="h-4 w-4" />
+        </button>
+        <button class="btn btn-quiet btn-icon" :title="t('nav.actions.console')" @click="go('/admin')">
+          <LayoutDashboard class="h-4 w-4" />
+        </button>
+        <span class="mx-1 h-5 w-px" style="background-color: var(--line-2)" />
         <button class="btn btn-quiet btn-icon" :title="t('nav.actions.promptPeek')" @click="peekOpen = true">
           <Eye class="h-4 w-4" />
         </button>

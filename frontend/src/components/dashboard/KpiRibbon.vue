@@ -6,6 +6,7 @@ import { useDashboardStore } from '../../stores/dashboard';
 import { useI18n } from '../../composables/useI18n';
 import { fmtNum, fmtSigned, fmtPct, arrow } from '../../utils/format';
 import BaseStat from '../base/BaseStat.vue';
+import DataStatus from './DataStatus.vue';
 import BaseSparkline from '../base/BaseSparkline.vue';
 
 const store = useDashboardStore();
@@ -57,7 +58,9 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="card grid grid-cols-2 gap-2 p-2 md:grid-cols-3 xl:grid-cols-6 xl:gap-0 xl:p-0">
+  <div class="card space-y-2 p-2 xl:p-2.5">
+    <div class="flex justify-end px-1"><DataStatus /></div>
+    <div class="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6 xl:gap-0">
     <BaseStat
       :label="t('dash.matrix.kpi.equity')"
       :value="equity"
@@ -117,5 +120,6 @@ onMounted(async () => {
         <ShieldCheck class="h-4 w-4 shrink-0" :style="{ color: ocoCoverage.pct === 100 ? 'var(--up)' : 'var(--warn)' }" />
       </template>
     </BaseStat>
+    </div>
   </div>
 </template>

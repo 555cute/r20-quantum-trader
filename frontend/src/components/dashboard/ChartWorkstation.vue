@@ -85,10 +85,9 @@ const isDark = computed(() => theme.value === 'dark')
 
 /* P4: mobile hides the always-on legend to stop multi-line overlay on narrow screens;
    desktop keeps it (data always readable). Re-applied when crossing the 640px breakpoint. */
-function legendRule(): 'follow_cross' {
-  // klinecharts v10：follow_cross = 图例不常驻（不再遮挡 K 线），
-  // 鼠标悬停或点按出十字光标时跟随显示指标数值（移动端点按可见）
-  return 'follow_cross'
+function legendRule(): 'always' {
+  // 用户要求图例常驻左上角；副图压缩 + 容器加高缓解遮挡
+  return 'always'
 }
 
 /* P1: resolve design-token value at render time — chart follows theme & CVD switches */
@@ -654,7 +653,7 @@ function syncIndicators() {
     const currentOnChart = klineChart?.getIndicators({ id: `sub_${ind.key}` }) || []
     if (isActive) {
       if (currentOnChart.length === 0) {
-        klineChart?.createIndicator(
+        const paneId = klineChart?.createIndicator(
           {
             id: `sub_${ind.key}`,
             name: ind.name,
@@ -662,6 +661,8 @@ function syncIndicators() {
           },
           false // 独立副图 Pane
         )
+        // 副图压缩到 64px，把高度还给主图（用户反馈主图太小）
+        if (paneId) klineChart?.setPaneOptions({ id: paneId, height: 64, minHeight: 48 })
       }
     } else {
       if (currentOnChart.length > 0) {
@@ -1211,7 +1212,7 @@ onUnmounted(() => {
     <div
       ref="chartContainer"
       class="relative w-full"
-      :style="{ height: isFullscreen ? 'calc(100vh - 108px)' : '480px' }"
+      :style="{ height: isFullscreen ? 'calc(100vh - 108px)' : '560px' }"
     ></div>
 
     <!-- 试算控制台 -->
