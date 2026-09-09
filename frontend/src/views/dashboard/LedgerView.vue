@@ -162,7 +162,7 @@ function dirOf(side: string): 'long' | 'short' {
                 <th class="col-num">{{ t('dash.ledger.col.exit') }}</th>
                 <th class="col-num">{{ t('dash.ledger.col.pnl') }}</th>
                 <th class="col-num">{{ t('dash.ledger.col.fees') }}</th>
-                <th class="hidden md:table-cell">{{ t('dash.ledger.col.hold') }}</th>
+                <th>{{ t('dash.ledger.col.hold') }}</th>
                 <th>{{ t('dash.ledger.col.exitReason') }}</th>
                 <th>{{ t('dash.ledger.col.time') }}</th>
               </tr>
