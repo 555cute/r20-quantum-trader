@@ -36,7 +36,17 @@ const currentMode = computed({
     else config.value.editable.okx_environment = value
   },
 })
-const accountReady = computed(() => !!exchangeRt.value?.configured)
+const accountReady = computed(() => {
+  const ed = config.value?.editable
+  const ex = draftExchange.value
+  const mode = currentMode.value === 'live' ? 'live' : 'demo'
+  if (!ed || (ex !== 'okx' && ex !== 'binance')) return false
+  const keysReady = Boolean(ed[`${ex}_${mode}_configured`])
+  if (ex === 'binance') return keysReady
+  const oauth = runtime.value?.oauth
+  const oauthReady = Boolean(oauth?.ready_for_selected_mode) && String(runtime.value?.selected_mode || '') === mode
+  return keysReady || oauthReady
+})
 
 async function ensureOkxRuntime() {
   try {
