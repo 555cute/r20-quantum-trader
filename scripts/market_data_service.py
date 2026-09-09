@@ -144,12 +144,19 @@ _ALT_ORDER_LOCK = threading.Lock()
 
 
 def _alt_venue_order() -> tuple:
-    """健康感知备源顺序（US-004）：按 venue_health.json 失败数升序 → avg_ms 升序 → 静态原序。
+    """健康感知备源顺序（US-004）：本轮 failed 数升序 → 延迟后置（差 >5x 才翻转）→ 静态原序。
+
+    与 AC「近3条记录内 failed 多的场所后置」的语义对应：
+    ai_brain_trader._xv_flush_health 每周期整文件覆盖写，文件内容即「最近记录」
+    级别的本轮快照（failed 为 name->reason dict，无逐次历史）——故以本轮 failed
+    数为主排序键，不另造历史文件。avg_ms 仅当与全场最快所差距 >5 倍时才参与
+    翻转（防毫秒级抖动让备源序反复横跳）；avg_ms 缺失/为 0（该所本周期无延迟
+    样本）视为中性，不降权。
 
     缓存理由：备源路径在 OKX 全断时会爆发几十次请求（因子轮询/brain/回测），
-    而健康文件每 15 分钟周期至多更新一次——stat + 60s TTL 避免每次读盘解析；
-    mtime 在 TTL 外变化才重新解析。任何缺失/损坏/结构异常一律回退静态 ALT_VENUES，
-    绝不抛（热文件纪律：本模块被生产 trader 子进程直接加载）。
+    而健康文件每 15 分钟周期至多更新一次——60s TTL 读内存吸收 IO，防放大。
+    任何缺失/损坏/结构异常一律回退静态 ALT_VENUES，绝不抛（热文件纪律：本模块
+    被生产 trader 子进程直接加载；OKX 正常时本函数根本不被调用，主路径零感知）。
     """
     try:
         now = time.time()
@@ -165,8 +172,8 @@ def _alt_venue_order() -> tuple:
                 venues = raw.get("venues") if isinstance(raw, dict) else None
                 if isinstance(venues, dict):
                     base_idx = {v: i for i, v in enumerate(ALT_VENUES)}
-
-                    def _key(v):
+                    stats: Dict[str, Any] = {}
+                    for v in ALT_VENUES:
                         rec = venues.get(v)
                         rec = rec if isinstance(rec, dict) else {}
                         failed = rec.get("failed")
@@ -174,8 +181,15 @@ def _alt_venue_order() -> tuple:
                         try:
                             avg = float(rec.get("avg_ms"))
                         except (TypeError, ValueError):
-                            avg = 1e9
-                        return (nf, avg if avg >= 0 else 1e9, base_idx.get(v, 99))
+                            avg = 0.0
+                        stats[v] = (nf, avg if avg > 0 else 0.0)
+                    samples = [a for _, a in stats.values() if a > 0]
+                    min_lat = min(samples) if samples else 0.0
+
+                    def _key(v):
+                        nf, avg = stats[v]
+                        slow = 1 if (avg > 0 and min_lat > 0 and avg > 5.0 * min_lat) else 0
+                        return (nf, slow, base_idx.get(v, 99))
 
                     order = tuple(sorted(ALT_VENUES, key=_key))
         except Exception:
