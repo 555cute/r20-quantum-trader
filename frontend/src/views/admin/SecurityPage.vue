@@ -6,7 +6,7 @@ import PageHeader from '../../components/admin/PageHeader.vue'
 import { useI18n } from '../../composables/useI18n'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
-import {ShieldAlert, Wallet, Save, KeyRound, RefreshCw, Layers, Trash2, Unlink} from 'lucide-vue-next'
+import {ShieldAlert, Wallet, Save, KeyRound, RefreshCw, Layers, Trash2, Unlink, Globe} from 'lucide-vue-next'
 
 const { api } = useApi()
 const auth = useAuthStore()
@@ -319,7 +319,42 @@ async function confirmClose() {
   }
 }
 
-onMounted(loadAll)
+// ---- 5. 多交易所数据源与凭证 (Binance / Gate) ----
+const mx = ref<any>(null)
+const mxForm = ref({ binance_api_key: '', binance_secret_key: '', gate_api_key: '', gate_secret_key: '' })
+const mxTestnet = ref({ binance: false, gate: false })
+const savingMx = ref(false)
+
+async function loadMx() {
+  try {
+    mx.value = await api('/api/v1/admin/multi-exchange')
+    if (mx.value?.venues) {
+      mxTestnet.value.binance = !!mx.value.venues.binance?.testnet
+      mxTestnet.value.gate = !!mx.value.venues.gate?.testnet
+    }
+  } catch { mx.value = null }
+}
+
+async function saveMx() {
+  savingMx.value = true
+  try {
+    const body: any = { binance_testnet: mxTestnet.value.binance, gate_testnet: mxTestnet.value.gate }
+    for (const k of ['binance_api_key', 'binance_secret_key', 'gate_api_key', 'gate_secret_key']) {
+      const v = (mxForm.value as any)[k]
+      if (v && v.trim()) body[k] = v.trim()
+    }
+    await api('/api/v1/admin/multi-exchange', { method: 'PUT', body: JSON.stringify(body) })
+    toast.ok('多交易所凭证与网络档位已保存')
+    mxForm.value = { binance_api_key: '', binance_secret_key: '', gate_api_key: '', gate_secret_key: '' }
+    await loadMx()
+  } catch (e: any) {
+    toast.err(`保存失败：${e.message}`)
+  } finally {
+    savingMx.value = false
+  }
+}
+
+onMounted(() => { loadAll(); loadMx() })
 </script>
 
 <template>
@@ -620,6 +655,64 @@ onMounted(loadAll)
           <div v-else class="py-6 text-center text-xs" style="color: var(--ink-3);">点击"刷新持仓与挂单"从 OKX 读取最新实时状态</div>
         </div>
         <p class="px-4 py-2 border-t text-[11px]" style="border-color: var(--line-1); color: var(--ink-3);">平仓流程：复核环境与仓位 → 撤销同标的冲突委托 → autoCxl 市价平仓 → 轮询确认仓位归零。需先启用上方手动平仓开关。</p>
+      </div>
+      <!-- 5. 多交易所数据源与凭证 (Binance / Gate) -->
+      <div class="rounded-xl border p-4 sm:p-5 space-y-4 shadow-xs transition-colors" style="background-color: var(--surface-2); border-color: var(--line-1);">
+        <div class="flex items-center justify-between pb-3 border-b" style="border-color: var(--line-1);">
+          <div class="flex items-center space-x-2">
+            <Globe class="w-4 h-4" style="color: var(--accent);" />
+            <h2 class="text-sm font-bold" style="color: var(--ink-1);">5. 多交易所数据源与凭证 · Binance / Gate</h2>
+          </div>
+          <button @click="loadMx" class="px-2.5 py-1.5 rounded-lg border text-[11px] cursor-pointer transition-all shadow-xs" style="background-color: var(--surface-1); border-color: var(--line-2); color: var(--ink-1);">重新检测</button>
+        </div>
+        <p class="text-[11px] leading-relaxed" style="color: var(--ink-3);">
+          跨所行情比对与断流容灾<strong style="color: var(--ink-2);">无需任何密钥即已生效</strong>（公共免登录端点）。此处 API 凭证为未来多所执行路由（Phase 3）预留——单所可信样本门槛前不会向币安/Gate 发起真实下单。密钥留空表示不修改。
+        </p>
+
+        <!-- 行情健康度 -->
+        <div v-if="mx?.health?.venues" class="flex flex-wrap items-center gap-2">
+          <span class="text-[11px]" style="color: var(--ink-3);">取数健康（更新于 {{ mx.health.updated_utc }} UTC）：</span>
+          <span v-for="(v, name) in mx.health.venues" :key="String(name)"
+                class="text-[11px] px-2 py-0.5 rounded border font-bold"
+                :class="Object.keys(v.failed || {}).length === 0 ? 'text-emerald-500 border-emerald-500/30 bg-emerald-500/10' : 'text-amber-500 border-amber-500/30 bg-amber-500/10'">
+            {{ name }} {{ (v.ok || []).length }}/{{ (v.ok || []).length + Object.keys(v.failed || {}).length }} 币{{ v.avg_ms ? ' · ' + v.avg_ms + 'ms' : '' }}{{ v.testnet ? ' · TESTNET' : '' }}
+          </span>
+        </div>
+        <div v-else class="text-[11px]" style="color: var(--ink-3);">尚无健康度数据——等待下一个 15 分钟决策周期自动写入。</div>
+
+        <div class="grid sm:grid-cols-2 gap-4">
+          <div class="space-y-2">
+            <div class="flex items-center justify-between">
+              <h3 class="text-xs font-bold" style="color: #F0B90B;">Binance 币安 · USDT-M</h3>
+              <span v-if="mx?.venues?.binance?.has_api_key" class="text-[10px] px-1.5 py-0.5 rounded border border-emerald-500/30 text-emerald-500">● 凭证已配置</span>
+              <span v-else class="text-[10px] px-1.5 py-0.5 rounded border" style="border-color: var(--line-2); color: var(--ink-3);">○ 免登录行情就绪</span>
+            </div>
+            <input v-model="mxForm.binance_api_key" type="text" placeholder="API Key（可选，Phase 3 执行用）" class="w-full rounded-lg px-3 py-2 text-xs outline-none border" style="background-color: var(--surface-input); border-color: var(--line-1); color: var(--ink-1);" />
+            <input v-model="mxForm.binance_secret_key" type="password" placeholder="API Secret（可选）" class="w-full rounded-lg px-3 py-2 text-xs outline-none border" style="background-color: var(--surface-input); border-color: var(--line-1); color: var(--ink-1);" />
+            <label class="flex items-center gap-2 text-[11px] cursor-pointer" style="color: var(--ink-2);">
+              <input v-model="mxTestnet.binance" type="checkbox" class="accent-[var(--accent)]" />
+              官方 Demo 沙盒端点（demo-fapi）；勾选后行情与未来下单全部走测试网
+            </label>
+          </div>
+          <div class="space-y-2">
+            <div class="flex items-center justify-between">
+              <h3 class="text-xs font-bold" style="color: #56B4E9;">Gate.io 芝麻开门 · V4 永续</h3>
+              <span v-if="mx?.venues?.gate?.has_api_key" class="text-[10px] px-1.5 py-0.5 rounded border border-emerald-500/30 text-emerald-500">● 凭证已配置</span>
+              <span v-else class="text-[10px] px-1.5 py-0.5 rounded border" style="border-color: var(--line-2); color: var(--ink-3);">○ 免登录行情就绪</span>
+            </div>
+            <input v-model="mxForm.gate_api_key" type="text" placeholder="API Key（可选，Phase 3 执行用）" class="w-full rounded-lg px-3 py-2 text-xs outline-none border" style="background-color: var(--surface-input); border-color: var(--line-1); color: var(--ink-1);" />
+            <input v-model="mxForm.gate_secret_key" type="password" placeholder="API Secret（可选）" class="w-full rounded-lg px-3 py-2 text-xs outline-none border" style="background-color: var(--surface-input); border-color: var(--line-1); color: var(--ink-1);" />
+            <label class="flex items-center gap-2 text-[11px] cursor-pointer" style="color: var(--ink-2);">
+              <input v-model="mxTestnet.gate" type="checkbox" class="accent-[var(--accent)]" />
+              官方永续沙盒端点（fx-api-testnet，实测偶发 502，谨慎用于容灾链）
+            </label>
+          </div>
+        </div>
+        <div class="flex justify-end pt-1">
+          <button @click="saveMx" :disabled="savingMx" class="px-4 py-2 rounded-lg text-xs font-bold cursor-pointer disabled:opacity-50 transition-all shadow-xs flex items-center gap-1.5" style="background-color: var(--accent); color: var(--accent-ink, #fff);">
+            <Save class="w-3.5 h-3.5" /> {{ savingMx ? '保存中…' : '保存多交易所凭证' }}
+          </button>
+        </div>
       </div>
     </template>
 

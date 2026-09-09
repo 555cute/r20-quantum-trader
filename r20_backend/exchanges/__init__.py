@@ -17,11 +17,14 @@ from .gate import GateAdapter
 from .okx import OKXPublicAdapter
 from .registry import (
     ADAPTER_EXECUTION_ENABLED,
+    clear_instances,
     get_adapter,
     is_registered,
     registered_venues,
     require_execution,
     resolve_symbol,
+    venue_credentials,
+    venue_testnet_enabled,
 )
 
 __all__ = [
@@ -29,5 +32,6 @@ __all__ = [
     "InstrumentSpec", "canonical_base", "BinanceAdapter", "GateAdapter",
     "OKXPublicAdapter", "ADAPTER_EXECUTION_ENABLED",
     "get_adapter", "is_registered", "registered_venues", "require_execution",
-    "resolve_symbol",
+    "resolve_symbol", "clear_instances", "venue_credentials",
+    "venue_testnet_enabled",
 ]

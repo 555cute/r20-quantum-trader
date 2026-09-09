@@ -2,10 +2,17 @@
 
 上层（因子聚合 / ExecutionRouter / 后台配置）只认 venue 字符串；任何执行类请求
 先过 ``require_execution``，未开闸场所 fail-closed 显式拒绝。
+
+凭证与网络档位（2026-09-09 Phase 2 起）：
+- ``venue_credentials(venue)``：从加密密钥库读 API Key/Secret（只读行情用不到，
+  Phase 3 执行与更高限频档消费；后台「多所凭证」面板负责录入）；
+- ``R20_BINANCE_TESTNET`` / ``R20_GATE_TESTNET``=1 且该所适配器声明 test_url 时，
+  注册表实例化即指向官方沙盒端点。
 """
 from __future__ import annotations
 
-from typing import Dict, Optional
+import os
+from typing import Dict, Optional, Tuple
 
 from .base import BaseExchangeAdapter, ExchangeCapabilityError, canonical_base
 from .binance import BinanceAdapter
@@ -28,6 +35,11 @@ ADAPTER_EXECUTION_ENABLED: Dict[str, bool] = {
 _INSTANCES: Dict[str, BaseExchangeAdapter] = {}
 
 
+def venue_testnet_enabled(venue: str) -> bool:
+    key = str(venue or "").strip().lower()
+    return str(os.environ.get(f"R20_{key.upper()}_TESTNET", "0")).strip().lower() in ("1", "true", "yes", "on")
+
+
 def get_adapter(venue: str) -> BaseExchangeAdapter:
     key = str(venue or "").strip().lower()
     cls = _ADAPTERS.get(key)
@@ -36,6 +48,22 @@ def get_adapter(venue: str) -> BaseExchangeAdapter:
     if key not in _INSTANCES:
         _INSTANCES[key] = cls()
     return _INSTANCES[key]
+
+
+def clear_instances() -> None:
+    """档位/凭证热切换后丢弃缓存实例，下次 get_adapter 按新环境重建。"""
+    _INSTANCES.clear()
+
+
+def venue_credentials(venue: str) -> Tuple[str, str]:
+    """从加密密钥库读该场所 (api_key, secret_key)；未配置返回 ("", "")。"""
+    key = str(venue or "").strip().upper()
+    try:
+        from r20_gateway.secrets import load_secrets
+        vals = load_secrets()
+    except Exception:
+        vals = {}
+    return (str(vals.get(f"{key}_API_KEY") or ""), str(vals.get(f"{key}_SECRET_KEY") or ""))
 
 
 def registered_venues() -> list:

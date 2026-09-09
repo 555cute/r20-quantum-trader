@@ -23,6 +23,8 @@ INTERVAL_MAP = {
 
 class GateAdapter(BaseExchangeAdapter):
     base_url = "https://api.gateio.ws"
+    live_url = "https://api.gateio.ws"
+    test_url = "https://fx-api-testnet.gateio.ws"   # 官方永续沙盒（09-08 实测偶发 502，慎用于容灾链）
     capabilities = ExchangeCapabilities(
         venue="gate",
         display_name="Gate.io 芝麻开门 USDT 永续",

@@ -65,6 +65,7 @@ AI_DECISION_CACHE_FILE = os.path.join(DATA_DIR, "ai_brain_decisions.json")
 AI_DECISION_HISTORY_FILE = os.path.join(DATA_DIR, "ai_brain_history.json")
 AI_POSITION_MANAGEMENT_FILE = os.path.join(DATA_DIR, "ai_position_management.json")
 AI_LAST_PROMPT_FILE = os.path.join(DATA_DIR, "ai_brain_last_prompt.txt")
+VENUE_HEALTH_FILE = os.path.join(DATA_DIR, "venue_health.json")
 FACTOR_LIBRARY_FILE = os.path.join(DATA_DIR, "factor_library_snapshot.json")
 NEWS_SENTIMENT_FILE = os.path.join(DATA_DIR, "news_sentiment.json")
 AI_MEMORY_MD_FILE = os.path.join(DATA_DIR, "AI_TRADING_MEMORY.md")
@@ -545,6 +546,54 @@ def _xvenue_enabled() -> bool:
     return str(os.environ.get("R20_XVENUE_PROMPT", "1")).strip().lower() not in ("0", "off", "false")
 
 
+import threading
+
+_XV_HEALTH: Dict[str, Dict[str, Any]] = {}
+_XV_HEALTH_LOCK = threading.Lock()
+
+
+def _xv_record(venue: str, name: str, ok: bool, latency_ms: float, err: str = "") -> None:
+    """记录场所级取数健康度（每 15 分钟周期覆盖式累计），落盘 venue_health.json。"""
+    with _XV_HEALTH_LOCK:
+        v = _XV_HEALTH.setdefault(venue, {"latency": {}, "failed": {}})
+        if ok:
+            v["latency"][name] = int(round(latency_ms))
+            v["failed"].pop(name, None)
+        else:
+            v["failed"][name] = (err or "unknown")[:160]
+
+
+def _xv_flush_health(packages: List[Dict[str, Any]]) -> None:
+    try:
+        with _XV_HEALTH_LOCK:
+            snapshot = {k: {"latency": dict(v.get("latency", {})),
+                            "failed": dict(v.get("failed", {}))}
+                        for k, v in _XV_HEALTH.items()}
+        okx_ok = [p["name"] for p in packages if safe_float(p.get("price", 0)) > 0]
+        venues = {
+            "okx": {"ok": okx_ok, "failed": [p["name"] for p in packages
+                                             if safe_float(p.get("price", 0)) <= 0],
+                    "latency_ms": {}, "testnet": False},
+        }
+        for venue, v in snapshot.items():
+            failed = v["failed"]
+            venues[venue] = {
+                "ok": sorted(n for n in v["latency"] if n not in failed),
+                "failed": failed,
+                "latency_ms": v["latency"],
+                "avg_ms": round(sum(v["latency"].values()) / len(v["latency"])) if v["latency"] else 0,
+                "testnet": str(os.environ.get(f"R20_{venue.upper()}_TESTNET", "0")) == "1",
+            }
+        out = {
+            "updated_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            "venues": venues,
+        }
+        with open(VENUE_HEALTH_FILE, "w", encoding="utf-8") as f:
+            json.dump(out, f, ensure_ascii=False, indent=1)
+    except Exception:
+        pass
+
+
 def _get_xvenue_adapter(venue: str):
     # 测试与故障注入缝：mock 此函数即可完全离线
     from r20_backend.exchanges import get_adapter
@@ -552,21 +601,27 @@ def _get_xvenue_adapter(venue: str):
 
 
 def _xv_binance_snapshot(base: str):
+    t0 = time.time()
     try:
         ad = _get_xvenue_adapter("binance")
         t = ad.fetch_ticker(base) or {}
         ls = ad.fetch_top_trader_ratio(base)
+        _xv_record("binance", base, True, (time.time() - t0) * 1000)
         return {"venue": "binance", "name": base, "last": t.get("last"), "ls": ls}
-    except Exception:
+    except Exception as exc:
+        _xv_record("binance", base, False, (time.time() - t0) * 1000, str(exc))
         return None
 
 
 def _xv_gate_snapshot(base: str):
+    t0 = time.time()
     try:
         t = _get_xvenue_adapter("gate").fetch_ticker(base) or {}
+        _xv_record("gate", base, True, (time.time() - t0) * 1000)
         return {"venue": "gate", "name": base, "last": t.get("last"),
                 "funding_rate": t.get("funding_rate")}
-    except Exception:
+    except Exception as exc:
+        _xv_record("gate", base, False, (time.time() - t0) * 1000, str(exc))
         return None
 
 
@@ -601,6 +656,7 @@ def fetch_cross_venue_matrix(packages: List[Dict[str, Any]]) -> None:
                         xv["gate_funding_pct"] = round(float(val["funding_rate"]) * 100, 4)
                     except (TypeError, ValueError):
                         pass
+        _xv_flush_health(packages)
     except Exception:
         pass
 

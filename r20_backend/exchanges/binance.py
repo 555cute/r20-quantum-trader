@@ -22,6 +22,8 @@ INTERVAL_MAP = {  # 内部周期 → Binance interval
 
 class BinanceAdapter(BaseExchangeAdapter):
     base_url = "https://fapi.binance.com"
+    live_url = "https://fapi.binance.com"
+    test_url = "https://demo-fapi.binance.com"   # 官方 Demo Trading 新域名（旧 testnet.binancefuture.com 已过时）
     capabilities = ExchangeCapabilities(
         venue="binance",
         display_name="Binance 币安 USDT-M 合约",

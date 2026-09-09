@@ -86,12 +86,24 @@ def canonical_base(symbol: str) -> str:
 
 
 class BaseExchangeAdapter:
-    """交易所适配器基类。子类必须声明 capabilities 并设置 base_url。"""
+    """交易所适配器基类。子类必须声明 capabilities 并设置 base_url。
+
+    端点档位：类属性 live_url/test_url 声明；实例化时若环境变量
+    ``R20_{VENUE}_TESTNET``=1 且该所声明了 test_url，则 base_url 指向沙盒。
+    """
 
     capabilities: ExchangeCapabilities
     base_url: str = ""
+    live_url: str = ""
+    test_url: str = ""
 
     def __init__(self, session: Optional[requests.Session] = None) -> None:
+        import os
+        cap_venue = str(getattr(self.capabilities, "venue", "") or "").upper()
+        if self.test_url and str(os.environ.get(f"R20_{cap_venue}_TESTNET", "0")).strip().lower() in ("1", "true", "yes", "on"):
+            self.base_url = self.test_url
+        elif self.live_url:
+            self.base_url = self.live_url
         self._session = session
         self._specs_cache: Dict[str, InstrumentSpec] = {}
 

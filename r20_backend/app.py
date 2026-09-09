@@ -155,6 +155,15 @@ class AdminUnlockRequest(BaseModel):
     confirmation: str = Field(min_length=12, max_length=100)
 
 
+class MultiExchangeUpdate(BaseModel):
+    binance_api_key: str | None = None
+    binance_secret_key: str | None = None
+    gate_api_key: str | None = None
+    gate_secret_key: str | None = None
+    binance_testnet: bool | None = None
+    gate_testnet: bool | None = None
+
+
 class OkxCliInstallRequest(BaseModel):
     confirmation: str = Field(min_length=8, max_length=80)
 
@@ -1063,6 +1072,66 @@ def admin_config(x_r20_admin_token: str | None = Header(default=None)) -> dict[s
             "audit_records_ip": True,
         },
     }
+
+
+@app.get("/api/v1/admin/multi-exchange")
+def admin_multi_exchange_status(x_r20_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
+    """多所凭证与档位状态（永不回显密钥值）+ 行情健康度快照。"""
+    require_admin_header(x_r20_admin_token)
+    from r20_backend.exchanges import registered_venues, venue_credentials, venue_testnet_enabled
+    venues: dict[str, Any] = {}
+    for v in registered_venues():
+        if v == "okx":
+            continue
+        api_key, secret = venue_credentials(v)
+        venues[v] = {
+            "has_api_key": bool(api_key),
+            "has_secret": bool(secret),
+            "testnet": venue_testnet_enabled(v),
+        }
+    health: dict[str, Any] = {}
+    try:
+        health_path = DATA_DIR / "venue_health.json"
+        if health_path.exists():
+            health = json.loads(health_path.read_text(encoding="utf-8"))
+    except Exception:
+        health = {}
+    return {"venues": venues, "health": health}
+
+
+@app.put("/api/v1/admin/multi-exchange")
+def admin_multi_exchange_update(payload: MultiExchangeUpdate,
+                                x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
+    """保存币安/Gate 凭证与测试网档位。凭证只入加密库；档位热切换后重建适配器实例。"""
+    actor = require_superadmin(x_r20_session)
+    secret_map = {
+        "BINANCE_API_KEY": payload.binance_api_key,
+        "BINANCE_SECRET_KEY": payload.binance_secret_key,
+        "GATE_API_KEY": payload.gate_api_key,
+        "GATE_SECRET_KEY": payload.gate_secret_key,
+    }
+    secret_values = {k: str(v).strip() for k, v in secret_map.items() if v and str(v).strip()}
+    if secret_values:
+        save_secrets(secret_values)
+    env_values: dict[str, Any] = {}
+    if payload.binance_testnet is not None:
+        env_values["R20_BINANCE_TESTNET"] = "1" if payload.binance_testnet else "0"
+    if payload.gate_testnet is not None:
+        env_values["R20_GATE_TESTNET"] = "1" if payload.gate_testnet else "0"
+    if env_values:
+        update_env(env_values)
+    try:
+        from r20_backend.exchanges import clear_instances
+        clear_instances()
+    except Exception:
+        pass
+    audit_record("multi_exchange.update", "success", {
+        "actor": actor["username"],
+        "secret_keys_saved": sorted(secret_values.keys()),
+        "env_updated": sorted(env_values.keys()),
+    })
+    refresh_settings()
+    return {"ok": True, "saved_secret_keys": sorted(secret_values.keys())}
 
 
 @app.put("/api/v1/admin/account-baseline")
