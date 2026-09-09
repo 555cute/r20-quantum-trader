@@ -1,7 +1,9 @@
 <script setup lang="ts">
 /** 偏好弹层：主题 / 语言 / 色盲配色 —— 收进一个 ⚙，顶栏不再散落按钮 */
 import { onBeforeUnmount, onMounted, ref } from 'vue';
-import { SlidersHorizontal } from 'lucide-vue-next';
+import { SlidersHorizontal, BookOpen, LayoutDashboard, Eye } from 'lucide-vue-next';
+import { useRouter } from 'vue-router';
+import { useUi } from '../../composables/useUi';
 import { useI18n } from '../../composables/useI18n';
 import { useTheme } from '../../composables/useTheme';
 import BaseSegmented from '../base/BaseSegmented.vue';
@@ -10,6 +12,8 @@ import BaseSwitch from '../base/BaseSwitch.vue';
 const { t, currentLocale, setLocale } = useI18n();
 const { theme, setTheme, cvd, toggleCvd } = useTheme();
 
+const router = useRouter();
+const { peekOpen } = useUi();
 const open = ref(false);
 const trigger = ref<HTMLElement | null>(null);
 const panel = ref<HTMLElement | null>(null);
@@ -82,6 +86,18 @@ onBeforeUnmount(() => {
             </span>
             <BaseSwitch :model-value="cvd" @update:model-value="toggleCvd()" />
           </label>
+          <div class="border-t pt-2" style="border-color: var(--line-1)">
+            <p class="form-label mb-1">{{ t('dash.shell.settings.goto') }}</p>
+            <button class="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-[var(--surface-3)]" style="color: var(--ink-1)" @click="open = false; router.push('/docs')">
+              <BookOpen class="h-4 w-4" style="color: var(--ink-3)" />{{ t('nav.actions.docs') }}
+            </button>
+            <button class="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-[var(--surface-3)]" style="color: var(--ink-1)" @click="open = false; router.push('/admin')">
+              <LayoutDashboard class="h-4 w-4" style="color: var(--ink-3)" />{{ t('nav.actions.console') }}
+            </button>
+            <button class="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-[var(--surface-3)]" style="color: var(--ink-1)" @click="open = false; peekOpen = true">
+              <Eye class="h-4 w-4" style="color: var(--ink-3)" />{{ t('nav.actions.promptPeek') }}
+            </button>
+          </div>
           <p class="t-faint border-t pt-2 text-xs" style="border-color: var(--line-1)">
             {{ t('dash.shell.settings.dataNote') }}
           </p>

@@ -185,7 +185,7 @@ function dirOf(side: string): 'long' | 'short' {
                 </td>
                 <td class="col-num t-faint">{{ fmtNum(Math.abs(Number(x.fee) || 0), 2) }}</td>
                 <td class="num text-xs" style="color: var(--ink-2)">{{ x.duration || '--' }}</td>
-                <td class="text-xs" style="color: var(--ink-2); white-space: normal; max-width: 220px">{{ cleanReason(x.exit_reason) }}</td>
+                <td class="text-xs" style="color: var(--ink-2)">{{ cleanReason(x.exit_reason) }}</td>
                 <td class="num text-xs" style="color: var(--ink-3)">{{ String(x.close_time || '').slice(5, 16) }}</td>
               </tr>
             </tbody>

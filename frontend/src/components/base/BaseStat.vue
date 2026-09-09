@@ -26,7 +26,7 @@ const toneVar = {
     <div class="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0">
       <span class="num truncate text-lg font-bold leading-tight xl:text-xl" style="color: var(--ink-strong)">{{ value }}</span>
       <span v-if="delta" class="num shrink-0 text-xs font-semibold" :style="{ color: toneVar[deltaTone] }">{{ delta }}</span>
-      <slot name="extra" />
+      <div class="ms-auto flex shrink-0 items-center"><slot name="extra" /></div>
     </div>
   </div>
 </template>

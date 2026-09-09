@@ -58,8 +58,8 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="card space-y-2 p-2 xl:p-2.5">
-    <div class="flex justify-end px-1"><DataStatus /></div>
+  <div class="card space-y-2.5 p-2.5 xl:p-3">
+    <div class="flex items-center justify-between border-b px-2.5 pb-2" style="border-color: var(--line-1)"><DataStatus /></div>
     <div class="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6 xl:gap-0">
     <BaseStat
       :label="t('dash.matrix.kpi.equity')"

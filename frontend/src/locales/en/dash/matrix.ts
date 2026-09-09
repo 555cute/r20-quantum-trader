@@ -58,6 +58,7 @@ export const enMatrix = {
       placed: 'Placed',
       state: 'State',
     },
+    decisionTime: 'Inference time',
     cancel: 'Cancel',
     aiManaged: 'Orders are AI-managed: they get canceled or re-priced when the tape shifts',
     cancelTitle: 'Cancel order',

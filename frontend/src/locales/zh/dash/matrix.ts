@@ -62,6 +62,7 @@ export const zhMatrix = {
       placed: '挂单时间',
       state: '状态',
     },
+    decisionTime: '推理时间',
     cancel: '撤销',
     aiManaged: '挂单由 AI 动态管理：行情偏离或时机变化时会自动撤改',
     cancelTitle: '撤销挂单',

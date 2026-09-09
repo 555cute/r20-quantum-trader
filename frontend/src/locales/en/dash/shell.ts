@@ -15,6 +15,7 @@ export const enShell = {
     language: 'Language',
     cvd: 'Color-blind palette',
     cvdDesc: 'Up/down rendered blue/orange; ▲▼ always shown',
+    goto: 'Go to',
     dataNote: 'Screen data syncs with exchange snapshots every 3s',
   },
   peek: {

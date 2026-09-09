@@ -282,7 +282,7 @@ onMounted(loadData)
     <!-- 1. Top Control Station: Switch, Consensus Mode & Actions -->
     <div class="rounded-2xl border p-4 sm:p-5 shadow-xs space-y-4" style="background-color: var(--surface-2); border-color: var(--line-1);">
       <!-- Header row -->
-      <PageHeader :title="t('nav.admin.council')" description="多交易员独立提案、交叉质询，首席仲裁官统筹资金与敞口后终审发单">
+      <PageHeader :title="t('nav.admin.council')" description="多交易员独立提案、交叉质询，首席仲裁官统筹资金与敞口后终审发单" stacked>
         <template #actions>
         <div class="flex shrink-0 items-center justify-end gap-2">
           <span class="chip"><span class="dot" :class="councilConfig.enabled ? 'dot-up' : ''" />{{ councilConfig.enabled ? '议事中' : '单模型直连' }}</span>

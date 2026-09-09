@@ -4,11 +4,12 @@
 defineProps<{
   title: string
   description?: string
+  stacked?: boolean
 }>()
 </script>
 
 <template>
-  <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-2 sm:gap-4 pb-3 mb-3.5 border-b" style="border-color: var(--line-1);">
+  <div :class="stacked ? 'flex flex-col gap-2 pb-3 mb-3.5 border-b' : 'flex flex-col sm:flex-row sm:items-start justify-between gap-2 sm:gap-4 pb-3 mb-3.5 border-b'" style="border-color: var(--line-1);">
     <div class="min-w-0">
       <h1 class="text-md font-semibold tracking-tight" style="color: var(--ink-1);">
         {{ title }}
@@ -17,7 +18,7 @@ defineProps<{
         {{ description }}
       </p>
     </div>
-    <div class="flex max-w-full items-center gap-2 shrink-0 overflow-x-auto">
+    <div class="flex max-w-full items-center gap-2 shrink-0 overflow-x-auto pt-0.5">
       <slot name="actions" />
     </div>
   </div>

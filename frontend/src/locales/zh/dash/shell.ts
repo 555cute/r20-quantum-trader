@@ -16,6 +16,7 @@ export const zhShell = {
     language: '界面语言',
     cvd: '色盲友好配色',
     cvdDesc: '涨跌改用蓝/朱显示，方向始终附带 ▲▼',
+    goto: '前往',
     dataNote: '大屏数据每 3 秒自动同步交易所快照',
   },
   peek: {

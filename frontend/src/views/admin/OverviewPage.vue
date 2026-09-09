@@ -150,7 +150,7 @@ function actionLabel(a: string): string {
                 <th>{{ t('dash.radar.col.action') }}</th>
                 <th class="col-num">{{ t('dash.matrix.matrix.col.conf') }}</th>
                 <th>{{ t('dash.radar.detail.macro') }}</th>
-                <th class="col-num">{{ t('dash.matrix.orders.col.placed') }}</th>
+                <th class="col-num">{{ t('dash.matrix.decisionTime') }}</th>
               </tr>
             </thead>
             <tbody>
