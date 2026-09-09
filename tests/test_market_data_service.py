@@ -97,20 +97,41 @@ class TestLocalMathIndicatorFallback(unittest.TestCase):
         self.assertGreater(float(out["CMF"]["cmf"]), 0.0)  # 收在振幅上半区 → 正资金流
         self.assertGreater(float(out["BBWIDTH"]["bbWidth"]), 0.0)
 
-    def test_batch_falls_back_to_local_when_mcp_and_cli_dead(self):
-        import subprocess as sp
+    def test_batch_falls_back_to_local_when_mcp_dead(self):
         with patch("scripts.market_data_service._public_post", return_value=None), \
-             patch("scripts.market_data_service.subprocess.run", side_effect=FileNotFoundError("no okx cli")), \
              patch("scripts.market_data_service.fetch_candles", return_value=_synth_candles_1h()):
             inds = fetch_indicators_batch("FAKE-USDT-SWAP", ["adx", "kdj", "bbwidth", "cmf"], bar="1h")
         self.assertEqual(set(inds.keys()) >= {"ADX", "KDJ", "BBWIDTH", "CMF"}, True)
 
     def test_single_indicator_falls_back_to_local(self):
         with patch("scripts.market_data_service._public_post", return_value=None), \
-             patch("scripts.market_data_service.subprocess.run", side_effect=FileNotFoundError("no okx cli")), \
              patch("scripts.market_data_service.fetch_candles", return_value=_synth_candles_1h()):
             adx = fetch_single_indicator("FAKE-USDT-SWAP", "ADX", bar="1h")
         self.assertIn("adx", adx)
+
+
+class TestZeroProcessGuarantee(unittest.TestCase):
+    """US-004 契约：行情容灾链 www→aws→异所→纯 Python，进程派生层已物理删除。
+
+    律③反钉：这里钉的是「不存在进程层」的架构不变式，不是历史 CLI 行为。
+    """
+
+    def test_module_has_no_process_spawning_layer(self):
+        import inspect
+        import scripts.market_data_service as mds
+        src = inspect.getsource(mds)
+        for forbidden in ("subprocess", "okx market", "okx --", "replace_cli_prefix"):
+            self.assertNotIn(forbidden, src, f"行情模块禁止出现进程派生残留：{forbidden}")
+        self.assertFalse(hasattr(mds, "subprocess"))
+
+    def test_ticker_and_candles_dead_rest_no_process_escape_hatch(self):
+        """REST 双域全断 + 备源全断时安静落空/落本地数学，绝不派生任何进程。"""
+        import scripts.market_data_service as mds
+        with patch("scripts.market_data_service._public_get", return_value=None), \
+                patch("scripts.market_data_service._alt_venue_ticker", return_value=None), \
+                patch("scripts.market_data_service._alt_venue_candles", return_value=[]):
+            self.assertIsNone(mds.fetch_ticker("FAKE-USDT-SWAP"))
+            self.assertEqual(mds.fetch_candles("FAKE-USDT-SWAP"), [])
 
 
 class TestMarketDataServiceLive(unittest.TestCase):
