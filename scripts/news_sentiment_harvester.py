@@ -523,8 +523,9 @@ def _parse_rss_feed(feed: dict, xml_text: str, target_coins: list) -> list:
             stale=False,
             authority="media",
         ))
-        if len(items) >= 10:
+        if len(items) >= 30:
             break
+
     return items
 
 
@@ -851,12 +852,13 @@ def fetch_and_analyze_news_sentiment():
     source_status = {}
     coin_sentiments = {}
     sentiment_stale = False
-
+    breaker_rows = []
 
     if "okx" in enabled:
         okx = _harvest_okx(target_coins)
         if okx["status"] == "ok":
             rows = _cap_source_rows(okx["items"])
+            breaker_rows.extend(okx["items"])
             status = "ok"
         elif okx["status"] == "empty":
             rows = []
@@ -888,6 +890,7 @@ def fetch_and_analyze_news_sentiment():
         bn = _harvest_binance(target_coins)
         if bn["status"] == "ok":
             rows = _cap_source_rows(bn["items"])
+            breaker_rows.extend(bn["items"])
             status = "ok"
         elif bn["status"] == "empty":
             rows = []
@@ -912,10 +915,8 @@ def fetch_and_analyze_news_sentiment():
             collected.extend(source_news[source])
     latest_news = select_news_items(collected, enabled, 10)
 
-    _evaluate_black_swans(
-        [row for source in enabled for row in source_news[source]],
-        now_ts,
-    )
+    _evaluate_black_swans(breaker_rows, now_ts)
+
 
     cb_active, cb_info = is_circuit_breaker_active()
     if "okx" not in enabled:

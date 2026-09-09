@@ -694,6 +694,43 @@ class NewsHarvesterTests(TestCase):
         self.notify.assert_not_called()
         self.assertFalse(self.cb.exists())
 
+    def test_official_swan_arms_breaker_when_newer_media_fills_display_quota(self):
+        self.selected.return_value = ("binance",)
+        now_ms = int(FROZEN_TS * 1000)
+        catalogs = [{
+            "catalogId": 49,
+            "catalogName": "Latest Binance News",
+            "articles": [{
+                "id": "official-swan",
+                "code": "official-swan",
+                "title": SWAN_TITLE,
+                "releaseDate": now_ms - 200_000,
+            }],
+        }]
+        from email.utils import formatdate
+        items_xml = []
+        for i in range(21):
+            items_xml.append(
+                "<item>"
+                f"<title>media flood {i}</title>"
+                f"<link>https://www.coindesk.com/m{i}</link>"
+                f"<guid>cd-m-{i}</guid>"
+                f"<pubDate>{formatdate(FROZEN_TS - 10 - i, usegmt=True)}</pubDate>"
+                "</item>"
+            )
+        rss = "<?xml version='1.0'?><rss version='2.0'><channel>" + "".join(items_xml) + "</channel></rss>"
+        media = {harvester.BINANCE_MEDIA_FEEDS[0]["url"]: rss}
+        with patch.object(harvester.urllib.request, "urlopen", self._binance_urlopen(_cms(catalogs), media=media)), \
+             patch.object(harvester.time, "time", return_value=FROZEN_TS):
+            payload = harvester.fetch_and_analyze_news_sentiment()
+        display_ids = [row["id"] for row in payload["source_news"]["binance"]]
+        self.assertNotIn("binance:official-swan", display_ids)
+        self.assertEqual(len(display_ids), 20)
+        self.assertTrue(payload["circuit_breaker"].get("active"))
+        self.notify.assert_called_once()
+        self.assertTrue(self.cb.exists())
+
+
 
 
 if __name__ == "__main__":
