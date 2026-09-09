@@ -624,6 +624,15 @@ def execute_council_debate(
     """
     from r20_backend.llm_manager import execute_llm_request, get_active_llm_runtime, load_llm_config
 
+    # 杠杆契约与后台风控页联动（避免委员会路径被静态"2~5"钉死）
+    try:
+        from risk_constants import MAX_LEVERAGE as _R20_MAX_LEVERAGE
+    except Exception:
+        try:
+            from scripts.risk_constants import MAX_LEVERAGE as _R20_MAX_LEVERAGE
+        except Exception:
+            _R20_MAX_LEVERAGE = 5.0
+
     config = load_council_config()
     roles = config.get("roles", {})
     consensus_mode = str(config.get("consensus_mode", DEFAULT_CONSENSUS_MODE)).strip().lower()
@@ -865,7 +874,7 @@ def execute_council_debate(
         '       "stop_loss_price": 76500.0,  // 止损价同义兼容\n'
         '       "take_profit": 81750.0,  // 至少 2.0R 盈亏比的目标止盈价（数字）\n'
         '       "take_profit_price": 81750.0,  // 止盈价同义兼容\n'
-        '       "leverage": 3,  // 杠杆倍数（整型 2~5）\n'
+        f'       "leverage": {int(min(3, _R20_MAX_LEVERAGE))},  // 杠杆倍数（整型 2~{_R20_MAX_LEVERAGE:g}）\n'
         '       "margin_usdt": 150.0,  // 拟投入保证金（须在可用余额安全范围内）\n'
         '       "reasoning": "【CIO批复】采纳/驳回了哪位交易员的提案，资金与风控考量"\n'
         "     }\n"
