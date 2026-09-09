@@ -40,8 +40,15 @@ def _fail(stage: str, detail: str, **extra: Any) -> RouteResult:
 def open_protected_position(decision: Dict[str, Any], *,
                             price_ref: Optional[float] = None,
                             trigger_expiration: int = 604800,
-                            adapter: Any = None) -> RouteResult:
-    """标准决策 → Gate 受保护开仓。全程 fail-closed：任何缺口先撤后抛。"""
+                            adapter: Any = None,
+                            own_position: Optional[Dict[str, Any]] = None,
+                            margin_mode: Optional[str] = None) -> RouteResult:
+    """标准决策 → Gate 受保护开仓。全程 fail-closed：任何缺口先撤后抛。
+
+    own_position：调用方（lab）在该合约上的在管仓位记录（含 size_signed/side）；
+    交易所既有仓与之一致视为己仓放行，否则视为外部连坐风险拒开（stage=precheck）。
+    margin_mode：由账户实况推导传入（cross/isolated）；缺省维持历史行为 cross。
+    """
     ad = adapter or get_adapter("gate")
     asset = canonical_base(str(decision.get("asset") or decision.get("name") or ""))
     action = str(decision.get("action") or "").upper()
@@ -92,9 +99,30 @@ def open_protected_position(decision: Dict[str, Any], *,
     side = "long" if action == "BUY_LONG" else "short"
     signed = int(contracts) if side == "long" else -int(contracts)
 
-    # 杠杆档位（失败即止，未下单无风险）
+    # —— 外部持仓前置体检（US-009）：同合约存在来源不明/尺寸不符既有仓 = 连坐风险
+    #    （close=true 双腿会平掉全部仓位，含非 lab 名下部分）→ 拒开。
+    #    探针失败连外部仓是否存在都不可见，同样 fail-closed。——
     try:
-        ad.set_leverage(asset, leverage)
+        existing = [p for p in ad.positions()
+                    if str(p.get("base") or "").upper() == asset
+                    and abs(float(p.get("size_signed") or 0)) > 1e-9]
+    except ExchangeCapabilityError:
+        raise
+    except Exception as exc:
+        return _fail("precheck", f"{asset} 既有持仓探针失败，无法排除外部仓，拒开: {exc}")
+    for p in existing:
+        ex_signed = int(p.get("size_signed") or 0)
+        own_match = bool(own_position) and ex_signed == int(own_position.get("size_signed") or 0) \
+            and str(own_position.get("side") or "") == str(p.get("side") or "")
+        if not own_match:
+            return _fail("precheck",
+                         f"{asset} 交易所存在非 lab 在管既有仓 size_signed={ex_signed}({p.get('side')})"
+                         + ("，与 lab 记录不符" if own_position else "，lab 无在管记录")
+                         + "——外部仓连坐拒开", existing_size=ex_signed)
+
+    # 杠杆档位（失败即止，未下单无风险）；margin_mode 由账户实况推导，缺省 cross
+    try:
+        ad.set_leverage(asset, leverage, margin_mode=margin_mode or "cross")
     except ExchangeCapabilityError:
         raise
     except Exception as exc:

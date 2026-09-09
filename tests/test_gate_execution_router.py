@@ -41,11 +41,13 @@ class _StubAdapter(GateAdapter):
     """打桩全部私有 IO 与规格/行情；记录调用序列，支持注入失败。"""
 
     def __init__(self, *, fail_attach=False, fail_verify=False, fail_place=False,
-                 fail_leverage=False):
+                 fail_leverage=False, positions_list=None):
         self.calls = []
         self.price_orders = []
         self._fail = {"attach": fail_attach, "verify": fail_verify,
                       "place": fail_place, "leverage": fail_leverage}
+        self._positions_list = positions_list
+        self.leverage_modes = []
         self._n = 0
 
     def _keys(self):
@@ -60,7 +62,12 @@ class _StubAdapter(GateAdapter):
     def fetch_ticker(self, symbol):
         return {"last": 79000.0, "mark_price": 79000.0}
 
+    def positions(self):
+        # US-009 precheck 探针：默认无既有仓；可注入外部仓形态
+        return list(self._positions_list or [])
+
     def set_leverage(self, symbol, leverage, margin_mode="cross"):
+        self.leverage_modes.append(margin_mode)
         self.calls.append(("leverage", symbol, leverage))
         if self._fail["leverage"]:
             raise RuntimeError("leverage refused")
@@ -204,6 +211,53 @@ class TestRouter(unittest.TestCase):
                           stop_loss_price=77000.02), adapter=ad, price_ref=79000.0)
         self.assertTrue(r["ok"], r.get("detail"))
         self.assertEqual(ad.calls[1][4], 79000.0)   # place price 已对齐
+
+    # ---------------- US-009：开仓前置体检 / margin_mode 传参 ----------------
+
+    def test_precheck_external_position_refuses(self):
+        # G6 连坐风险：交易所同合约存在非 lab 在管既有仓 → precheck 拒开，零下单
+        ad = _StubAdapter(positions_list=[
+            {"base": "BTC", "side": "long", "size_signed": 10, "mark_price": 79000.0}])
+        with patch.dict(os.environ, {"R20_GATE_EXECUTION": "1"}):
+            r = router.open_protected_position(_decision(), adapter=ad, price_ref=79000.0)
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["stage"], "precheck")
+        self.assertIn("size_signed=10", r["detail"])
+        self.assertEqual([c[0] for c in ad.calls if c[0] in ("leverage", "place")], [])
+
+    def test_precheck_probe_failure_refuses(self):
+        class DeadProbe(_StubAdapter):
+            def positions(self):
+                raise RuntimeError("502")
+        ad = DeadProbe()
+        with patch.dict(os.environ, {"R20_GATE_EXECUTION": "1"}):
+            r = router.open_protected_position(_decision(), adapter=ad, price_ref=79000.0)
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["stage"], "precheck")
+
+    def test_precheck_own_matching_position_passes(self):
+        # own_position 与交易所实况一致（size/side 匹配）→ 视为己仓放行
+        ad = _StubAdapter(positions_list=[
+            {"base": "BTC", "side": "long", "size_signed": 57, "mark_price": 79000.0}])
+        own = {"size_signed": 57, "side": "long"}
+        with patch.dict(os.environ, {"R20_GATE_EXECUTION": "1"}):
+            r = router.open_protected_position(_decision(), adapter=ad,
+                                               price_ref=79000.0, own_position=own)
+        self.assertTrue(r["ok"], r.get("detail"))
+
+    def test_margin_mode_passthrough_and_default(self):
+        ad = _StubAdapter()
+        with patch.dict(os.environ, {"R20_GATE_EXECUTION": "1"}):
+            r = router.open_protected_position(_decision(), adapter=ad,
+                                               price_ref=79000.0)   # 缺省
+        self.assertTrue(r["ok"], r.get("detail"))
+        self.assertEqual(ad.leverage_modes, ["cross"])              # 默认行为不变
+        ad2 = _StubAdapter()
+        with patch.dict(os.environ, {"R20_GATE_EXECUTION": "1"}):
+            r2 = router.open_protected_position(_decision(), adapter=ad2,
+                                                price_ref=79000.0, margin_mode="isolated")
+        self.assertTrue(r2["ok"], r2.get("detail"))
+        self.assertEqual(ad2.leverage_modes, ["isolated"])
 
     def test_price_ref_missing_falls_back_to_ticker(self):
         ad = _StubAdapter()

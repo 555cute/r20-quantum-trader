@@ -21,9 +21,11 @@ from r20_backend.exchanges.gate import GateAdapter  # noqa: E402
 
 
 class _StubAd(GateAdapter):
-    def __init__(self, positions_ok=True):
+    def __init__(self, positions_ok=True, positions_list=None, dual_mode=False):
         self.calls = []
         self._positions_ok = positions_ok
+        self._positions_list = positions_list      # None=默认 BTC 在管仓形态
+        self._dual_mode = dual_mode
         self.price_orders = [{"id": "tpA"}, {"id": "slA"}]
         self.open_orders = []          # list_open_orders 返回（G7 清扫源）
 
@@ -38,8 +40,12 @@ class _StubAd(GateAdapter):
     def _keys(self):
         return ("k", "s")
 
+    def account_snapshot(self):
+        self.calls.append(("account",))
+        return {"in_dual_mode": self._dual_mode, "total": 1000.0, "currency": "USDT"}
+
     def set_leverage(self, s, lev, margin_mode="cross"):
-        self.calls.append(("lev", s, lev)); return {}
+        self.calls.append(("lev", s, lev, margin_mode)); return {}
 
     def place_order(self, s, side, c, price=None, tif="gtc", text=""):
         self.calls.append(("place", s, side, c, price)); return {"id": 777}
@@ -62,6 +68,8 @@ class _StubAd(GateAdapter):
 
     def positions(self):
         self.calls.append(("positions",))
+        if self._positions_list is not None:
+            return list(self._positions_list)
         return [{"base": "BTC", "side": "long", "size_signed": 57, "mark_price": 79500.0,
                  "entry_price": 79000.0}]
 
@@ -90,9 +98,11 @@ class LabCase(unittest.TestCase):
         p5 = patch.object(lab, "INSTRUMENT_POOL_FILE", self.pool_f)
         import db_manager as dbm
         p6 = patch.object(dbm, "DB_PATH", self.db)
-        for p in (p1, p2, p3, p4, p5, p6):
+        self.pmf = os.path.join(self.tmp.name, "pm_missing.json")   # 默认不存在→pm 空，decision 兜底语义
+        p7 = patch.object(lab, "PM_FILE", self.pmf)
+        for p in (p1, p2, p3, p4, p5, p6, p7):
             p.start()
-        self._patches = [p1, p2, p3, p4, p5, p6]
+        self._patches = [p1, p2, p3, p4, p5, p6, p7]
         self.dbm = dbm
 
     def tearDown(self):
@@ -205,7 +215,7 @@ class TestLabLive(LabCase):
                                   "margin_usdt": 40.0, "entry_price": 79000.0,
                                   "take_profit_price": 85000.0, "stop_loss_price": 77000.0})
         self.use_pool(self.pool(["BTC"], dry=False), "live")
-        ad = _StubAd()
+        ad = _StubAd(positions_list=[])   # 新仓场景：交易所该合约无既有仓（US-009 precheck 语义）
         with patch.dict(os.environ, {"R20_GATE_EXECUTION": "1"}):
             acts = lab.run_lab_cycle(ad=ad)
         self.assertIn("开仓:", acts[0])
@@ -438,6 +448,136 @@ class TestTighterRule(unittest.TestCase):
         self.assertTrue(lab._is_tighter("short", 80000, 81000, 79000))
         self.assertTrue(lab._is_tighter("short", 80000, 0, 79000))       # 首次设置
         self.assertFalse(lab._is_tighter("long", 0, 77000, 79000))
+
+
+class TestUS009PositionManagement(LabCase):
+    """position_management 指令流接入 + live 前置体检（dual/外部仓/margin_mode）。"""
+
+    def write_pm(self, **per_asset):
+        doc = {"timestamp": int(time.time()), "time_str": "test", "instructions": []}
+        for asset, row in per_asset.items():
+            inst = {"instId": f"{asset}-USDT-SWAP", "action": "HOLD",
+                    "suggested_sl_price": 0.0, "confidence": 0.0, "reason": "t"}
+            inst.update(row)
+            doc["instructions"].append(inst)
+        with open(self.pmf, "w") as f:
+            json.dump(doc, f)
+
+    def _live_tracker(self):
+        tr = {"BTC": {"mode": "live", "asset": "BTC", "side": "long", "entry_px": 79000.0,
+                      "contracts": 57, "tp_px": 85000.0, "sl_px": 77000.0,
+                      "tp_id": "tpA", "sl_id": "slA", "margin_usdt": 40.0, "leverage": 3,
+                      "size_signed": 57, "entry_ts": int(time.time())}}
+        json.dump(tr, open(self.tf, "w"))
+
+    def live_env(self):
+        return patch.dict(os.environ, {"R20_GATE_EXECUTION": "1"})
+
+    def test_update_sl_routes_to_amend(self):
+        self._live_tracker()
+        self.write_pm(BTC={"action": "UPDATE_SL", "suggested_sl_price": 79300.0, "confidence": 90})
+        self.write_decisions(BTC={"action": "HOLD", "confidence": 50})
+        self.use_pool(self.pool(["BTC"], dry=False), "live")
+        ad = _StubAd()
+        with self.live_env():
+            acts = lab.run_lab_cycle(ad=ad)
+        self.assertIn(("amend", "BTC", "long", "slA", 79300.0), ad.calls)
+        self.assertTrue(any("止损上移" in a for a in acts))
+        self.assertEqual(json.load(open(self.tf))["BTC"]["sl_px"], 79300.0)
+
+    def test_pm_close_overrides_decision_and_ledgers(self):
+        self._live_tracker()
+        self.write_pm(BTC={"action": "CLOSE_MARKET", "confidence": 90})
+        self.write_decisions(BTC={"action": "BUY_LONG", "confidence": 99})   # 冲突样本
+        self.use_pool(self.pool(["BTC"], dry=False), "live")
+        ad = _StubAd()
+        with self.live_env():
+            acts = lab.run_lab_cycle(ad=ad)
+        self.assertIn(("close", "BTC"), ad.calls)
+        self.assertTrue(any("覆盖" in a for a in acts))           # 冲突留痕
+        self.assertNotIn("BTC", json.load(open(self.tf)))
+        rows = self.main_db_rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["venue"], "gate")
+        self.assertIn("close_market", rows[0]["comment"])
+
+    def test_pm_low_conf_close_suppressed(self):
+        self._live_tracker()
+        self.write_pm(BTC={"action": "CLOSE_MARKET", "confidence": 70})
+        self.write_decisions(BTC={"action": "CLOSE_MARKET", "confidence": 95})
+        self.use_pool(self.pool(["BTC"], dry=False), "live")
+        ad = _StubAd()
+        with self.live_env():
+            acts = lab.run_lab_cycle(ad=ad)
+        self.assertNotIn(("close", "BTC"), ad.calls)              # <85 一并压制
+        self.assertTrue(any("压制平仓" in a for a in acts))
+        self.assertIn("BTC", json.load(open(self.tf)))
+
+    def test_pm_hold_suppresses_decision_close(self):
+        self._live_tracker()
+        self.write_pm(BTC={"action": "HOLD"})
+        self.write_decisions(BTC={"action": "CLOSE_MARKET", "confidence": 92})
+        self.use_pool(self.pool(["BTC"], dry=False), "live")
+        ad = _StubAd()
+        with self.live_env():
+            acts = lab.run_lab_cycle(ad=ad)
+        self.assertNotIn(("close", "BTC"), ad.calls)
+        self.assertTrue(any("HOLD 压制" in a for a in acts))
+
+    def test_dry_round_consumes_pm(self):
+        tr = {"BTC": {"mode": "dry", "asset": "BTC", "side": "long", "entry_px": 79000.0,
+                      "contracts": 15, "tp_px": 85000.0, "sl_px": 77000.0}}
+        json.dump(tr, open(self.tf, "w"))
+        self.write_pm(BTC={"action": "CLOSE_MARKET", "confidence": 88})
+        self.write_decisions(BTC={"action": "HOLD", "confidence": 50})
+        self.use_pool(self.pool(["BTC"]), "dry_run")
+        lab.run_lab_cycle(ad=_StubAd())
+        self.assertNotIn("BTC", json.load(open(self.tf)))         # dry 也接指令流
+
+    def test_dual_mode_refuses_live_open(self):
+        self.write_decisions(BTC={"action": "BUY_LONG", "confidence": 90, "leverage": 3,
+                                  "margin_usdt": 40.0, "entry_price": 79000.0,
+                                  "take_profit_price": 85000.0, "stop_loss_price": 77000.0})
+        self.use_pool(self.pool(["BTC"], dry=False), "live")
+        ad = _StubAd(positions_list=[], dual_mode=True)
+        with self.live_env():
+            acts = lab.run_lab_cycle(ad=ad)
+        self.assertTrue(any("[PRECHECK]" in a and "双向" in a for a in acts))
+        self.assertNotIn("place", [c[0] for c in ad.calls])
+        self.assertEqual(json.load(open(self.tf)), {})
+
+    def test_account_snapshot_failure_fail_closed(self):
+        class DeadAcct(_StubAd):
+            def account_snapshot(self):
+                raise RuntimeError("boom")
+        self.write_decisions(BTC={"action": "BUY_LONG", "confidence": 90, "leverage": 3,
+                                  "margin_usdt": 40.0, "entry_price": 79000.0,
+                                  "take_profit_price": 85000.0, "stop_loss_price": 77000.0})
+        self.use_pool(self.pool(["BTC"], dry=False), "live")
+        with self.live_env():
+            acts = lab.run_lab_cycle(ad=DeadAcct(positions_list=[]))
+        self.assertTrue(any("账户快照不可读" in a for a in acts))
+        self.assertTrue(any("禁开新仓" in a for a in acts))
+
+    def test_external_position_refuses_open_at_lab_layer(self):
+        self.write_decisions(BTC={"action": "BUY_LONG", "confidence": 90, "leverage": 3,
+                                  "margin_usdt": 40.0, "entry_price": 79000.0,
+                                  "take_profit_price": 85000.0, "stop_loss_price": 77000.0})
+        self.use_pool(self.pool(["BTC"], dry=False), "live")
+        ad = _StubAd()   # 默认 stub：交易所挂 57 张 BTC 但 lab 无 tracker → 连坐拒开
+        with self.live_env():
+            acts = lab.run_lab_cycle(ad=ad)
+        self.assertTrue(any("开仓被拒[precheck]" in a for a in acts))
+        self.assertNotIn("place", [c[0] for c in ad.calls])
+
+    def test_margin_mode_derivation_rules(self):
+        # 纯函数直测：持仓行 margin_mode 优先、dual 推 isolated、未知回退 cross
+        self.assertEqual(lab._derive_margin_mode({}, {}), "cross")
+        self.assertEqual(lab._derive_margin_mode({"in_dual_mode": True}, {}), "isolated")
+        self.assertEqual(lab._derive_margin_mode(
+            {}, {"BTC": {"margin_mode": "isolated_mode"}}), "isolated")
+        self.assertEqual(lab._derive_margin_mode(
+            {"in_dual_mode": True}, {"BTC": {"margin_mode": "cross_mode"}}), "cross")
 
 
 if __name__ == "__main__":

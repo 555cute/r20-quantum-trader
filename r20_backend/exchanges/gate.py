@@ -272,6 +272,7 @@ class GateAdapter(BaseExchangeAdapter):
                 "mark_price": float(p.get("mark_price") or 0),
                 "leverage": float(p.get("leverage") or 0),
                 "margin": float(p.get("margin") or 0),
+                "margin_mode": str(p.get("margin_mode") or ""),
                 "unrealized_pnl": float(p.get("unrealised_pnl") or 0),
                 "liq_price": float(p.get("liq_price") or 0) or None,
                 "raw": p,
