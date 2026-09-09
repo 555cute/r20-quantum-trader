@@ -1103,6 +1103,77 @@ def admin_multi_exchange_status(x_r20_admin_token: str | None = Header(default=N
     return {"venues": venues, "health": health}
 
 
+@app.get("/api/v1/admin/multi-exchange/lab-status")
+def admin_multi_exchange_lab_status(x_r20_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
+    """Gate 试验田实时状态：模式 + 四道闸逐项 + 在途仓位 + 最近落账。
+
+    数据文件缺失/损坏一律降级为空态（200，不抛）——后端重启前的占位渲染依赖此契约。
+    """
+    require_admin_header(x_r20_admin_token)
+    from r20_backend.exchanges import execution_open, venue_credentials
+    from r20_backend.exchanges import routing_policy
+    pool: dict[str, Any] = {}
+    mode = "off"
+    error = ""
+    try:
+        pool = routing_policy.load_gate_pool()
+        mode = routing_policy.effective_mode()
+    except Exception as exc:
+        error = f"routing_policy 读取失败: {type(exc).__name__}"
+    api_key, secret = ("", "")
+    try:
+        api_key, secret = venue_credentials("gate")
+    except Exception:
+        pass
+    exec_on = execution_open("gate")
+    gates = {
+        "pool_nonempty": bool(pool.get("assets")),
+        "execution_open": exec_on,
+        "credentials_ready": bool(api_key and secret),
+        "dry_run_off": (pool.get("dry_run") is False),
+        # US-006 AC 键名别名（同一判定，双键名防前端/审计漂移）
+        "execution_switch": exec_on,
+        "credentials": bool(api_key and secret),
+    }
+    positions: list[dict[str, Any]] = []
+    try:
+        tp_ = DATA_DIR / "gate_lab_trackers.json"
+        raw = json.loads(tp_.read_text(encoding="utf-8")) if tp_.exists() else {}
+        if isinstance(raw, dict):
+            for asset, t in raw.items():
+                if not isinstance(t, dict):
+                    continue
+                positions.append({
+                    "asset": str(asset), "mode": str(t.get("mode") or ""),
+                    "side": str(t.get("side") or ""), "venue": str(t.get("venue") or "gate"),
+                    "contracts": t.get("contracts"), "size_signed": t.get("size_signed"),
+                    "entry_px": t.get("entry_px"), "tp_px": t.get("tp_px"),
+                    "sl_px": t.get("sl_px"), "margin_usdt": t.get("margin_usdt"),
+                    "leverage": t.get("leverage"), "entry_ts": t.get("entry_ts"),
+                    "tp_id": t.get("tp_id"), "sl_id": t.get("sl_id"),
+                })
+    except Exception as exc:
+        positions = []
+        error = error or f"trackers 读取失败: {type(exc).__name__}"
+    ledger: list[dict[str, Any]] = []
+    try:
+        lp_ = DATA_DIR / "gate_lab_ledger.json"
+        raw = json.loads(lp_.read_text(encoding="utf-8")) if lp_.exists() else []
+        if isinstance(raw, list):
+            ledger = [row for row in raw[-5:] if isinstance(row, dict)][::-1]  # 最新在前
+    except Exception as exc:
+        ledger = []
+        error = error or f"ledger 读取失败: {type(exc).__name__}"
+    out: dict[str, Any] = {"mode": mode, "gates": gates, "pool": {
+        "assets": pool.get("assets", []), "margin_per_trade_usdt": pool.get("margin_per_trade_usdt"),
+        "max_open": pool.get("max_open"), "min_confidence": pool.get("min_confidence")},
+        "positions": positions, "recent_ledger": ledger,
+        "trackers": positions, "ledger_tail": ledger}
+    if error:
+        out["error"] = error
+    return out
+
+
 @app.put("/api/v1/admin/multi-exchange")
 def admin_multi_exchange_update(payload: MultiExchangeUpdate,
                                 x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:

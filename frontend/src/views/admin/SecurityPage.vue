@@ -336,6 +336,13 @@ async function loadMx() {
       gateExec.value = !!mx.value.venues.gate?.execution_open
     }
   } catch { mx.value = null }
+  await loadLab()
+}
+
+// ---- Gate 试验田状态（US-006）：模式/四道闸/在途/落账，纯本地只读 ----
+const lab = ref<any>(null)
+async function loadLab() {
+  try { lab.value = await api('/api/v1/admin/multi-exchange/lab-status') } catch { lab.value = null }
 }
 
 async function saveMx() {
@@ -687,6 +694,50 @@ onMounted(() => { loadAll(); loadMx() })
           </span>
         </div>
         <div v-else class="text-[11px]" style="color: var(--ink-3);">尚无健康度数据——等待下一个 15 分钟决策周期自动写入。</div>
+
+        <!-- Gate 试验田实时状态 -->
+        <div class="rounded-lg border p-3 space-y-2.5" style="border-color: var(--line-1); background-color: var(--surface-1);">
+          <div class="flex items-center justify-between">
+            <h4 class="text-xs font-bold" style="color: var(--ink-1);">Gate 试验田状态</h4>
+            <span v-if="lab" class="text-[10px] px-2 py-0.5 rounded border font-bold"
+                  :class="lab.mode === 'live' ? 'text-emerald-500 border-emerald-500/30 bg-emerald-500/10' : lab.mode === 'dry_run' ? 'text-amber-500 border-amber-500/30 bg-amber-500/10' : 'text-neutral-400 border-neutral-500/30 bg-neutral-500/10'">
+              {{ lab.mode === 'live' ? 'LIVE 实单' : lab.mode === 'dry_run' ? 'DRY 演算' : 'OFF 停用' }}
+            </span>
+            <span v-else class="text-[10px]" style="color: var(--ink-3);">状态接口未就绪（随下次后端重启生效）</span>
+          </div>
+          <template v-if="lab">
+            <div class="flex flex-wrap gap-3 text-[11px]">
+              <span :class="lab.gates?.pool_nonempty ? 'text-emerald-500' : 'text-rose-400'">{{ lab.gates?.pool_nonempty ? '✓' : '✗' }} 币池 {{ (lab.pool?.assets || []).join('/') || '空' }}</span>
+              <span :class="lab.gates?.execution_switch ? 'text-emerald-500' : 'text-rose-400'">{{ lab.gates?.execution_switch ? '✓' : '✗' }} 执行开关</span>
+              <span :class="lab.gates?.credentials ? 'text-emerald-500' : 'text-rose-400'">{{ lab.gates?.credentials ? '✓' : '✗' }} 凭证</span>
+              <span :class="lab.gates?.dry_run_off ? 'text-emerald-500' : 'text-amber-500'">{{ lab.gates?.dry_run_off ? '✓' : '○' }} dry_run 关闭</span>
+            </div>
+            <div v-if="lab.error" class="text-[10px] text-amber-500">{{ lab.error }}</div>
+            <div v-if="(lab.trackers || []).length" class="overflow-x-auto">
+              <table class="w-full text-[11px]" style="color: var(--ink-2);">
+                <thead><tr class="text-left" style="color: var(--ink-3);">
+                  <th class="py-1 pr-3 font-normal">币</th><th class="pr-3 font-normal">方向</th><th class="pr-3 font-normal">张数</th><th class="pr-3 font-normal">入场</th><th class="pr-3 font-normal">TP</th><th class="pr-3 font-normal">SL</th><th class="pr-3 font-normal">保证金U</th><th class="font-normal">模式</th>
+                </tr></thead>
+                <tbody>
+                  <tr v-for="t in lab.trackers" :key="t.asset + (t.mode || '')" class="num" style="border-top: 1px solid var(--line-1);">
+                    <td class="py-1 pr-3 font-bold" style="color: var(--ink-1);">{{ t.asset }}</td>
+                    <td class="pr-3" :class="t.side === 'long' ? 'text-emerald-500' : 'text-rose-400'">{{ t.side === 'long' ? '多' : '空' }}</td>
+                    <td class="pr-3">{{ t.contracts ?? t.size_signed ?? '--' }}</td>
+                    <td class="pr-3">{{ t.entry_px ?? '--' }}</td>
+                    <td class="pr-3">{{ t.tp_px ?? '--' }}</td>
+                    <td class="pr-3">{{ t.sl_px ?? '--' }}</td>
+                    <td class="pr-3">{{ t.margin_usdt ?? '--' }}</td>
+                    <td>{{ t.mode === 'live' ? '实单' : '演算' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div v-else class="text-[10px]" style="color: var(--ink-3);">试验田当前无在途仓位。</div>
+            <div v-if="(lab.ledger_tail || []).length" class="text-[10px] space-y-0.5" style="color: var(--ink-3);">
+              <div v-for="(l, i) in lab.ledger_tail" :key="i">落账 · {{ l.asset }} {{ l.reason || 'closed' }} · 入场 {{ l.entry_px ?? '--' }} × {{ l.contracts ?? '--' }} 张 · {{ l.close_ts ? new Date(l.close_ts * 1000).toLocaleString('zh-CN', { hour12: false }) : '' }}</div>
+            </div>
+          </template>
+        </div>
 
         <div class="grid sm:grid-cols-2 gap-4">
           <div class="space-y-2">
