@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -37,6 +38,17 @@ class _BoomAd:
 
 
 class TestXVenueMatrix(unittest.TestCase):
+    def setUp(self):
+        # 测试封闭性铁律：fetch_cross_venue_matrix 末尾会 flush 健康度落盘，
+        # 必须把写入口钉到临时文件，严禁覆盖生产 data/venue_health.json。
+        self._tmp = tempfile.TemporaryDirectory()
+        self._vh = patch.object(abt, "VENUE_HEALTH_FILE", os.path.join(self._tmp.name, "vh.json"))
+        self._vh.start()
+
+    def tearDown(self):
+        self._vh.stop()
+        self._tmp.cleanup()
+
     def _pkgs(self):
         return [{"name": "BTC", "instId": "BTC-USDT-SWAP", "price": 100.0}]
 
@@ -83,6 +95,32 @@ class TestXVenueMatrix(unittest.TestCase):
         self.assertNotIn("Gate", line)
         self.assertEqual(abt._xvenue_prompt_line({"name": "X", "price": 0}), "")
         self.assertEqual(abt._xvenue_prompt_line({"name": "X", "price": 100.0}), "")
+
+    def test_empty_ticker_recorded_as_failure(self):
+        # 端点被墙/拒连时 fetch_ticker 返回 None——必须记 failed，不得伪装 0ms 成功
+        class EmptyAd:
+            def fetch_ticker(self, base):
+                return None
+
+            def fetch_top_trader_ratio(self, base):
+                return None
+        with patch.object(abt, "_get_xvenue_adapter", lambda v: EmptyAd()):
+            r = abt._xv_binance_snapshot("BTC")
+        self.assertIsNone(r)
+        h = abt._XV_HEALTH.get("binance", {})
+        self.assertIn("BTC", h.get("failed", {}))
+        self.assertNotIn("BTC", h.get("latency", {}))
+
+    def test_flush_carries_provenance(self):
+        import json as _json
+        with tempfile.TemporaryDirectory() as td:
+            f = os.path.join(td, "vh.json")
+            with patch.object(abt, "VENUE_HEALTH_FILE", f):
+                abt._xv_flush_health([{"name": "BTC", "price": 100.0}])
+            doc = _json.load(open(f))
+            self.assertEqual(doc["package_count"], 1)
+            self.assertIn("writer_pid", doc)
+            self.assertIsInstance(doc["venues"]["okx"]["failed"], dict)
 
 
 if __name__ == "__main__":

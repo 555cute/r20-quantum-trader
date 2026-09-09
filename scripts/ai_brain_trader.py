@@ -586,6 +586,8 @@ def _xv_flush_health(packages: List[Dict[str, Any]]) -> None:
             }
         out = {
             "updated_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            "writer_pid": os.getpid(),
+            "package_count": len(packages),
             "venues": venues,
         }
         with open(VENUE_HEALTH_FILE, "w", encoding="utf-8") as f:
@@ -606,6 +608,9 @@ def _xv_binance_snapshot(base: str):
         ad = _get_xvenue_adapter("binance")
         t = ad.fetch_ticker(base) or {}
         ls = ad.fetch_top_trader_ratio(base)
+        if not t.get("last"):
+            _xv_record("binance", base, False, (time.time() - t0) * 1000, "empty ticker (unreachable/blocked?)")
+            return None
         _xv_record("binance", base, True, (time.time() - t0) * 1000)
         return {"venue": "binance", "name": base, "last": t.get("last"), "ls": ls}
     except Exception as exc:
@@ -617,6 +622,9 @@ def _xv_gate_snapshot(base: str):
     t0 = time.time()
     try:
         t = _get_xvenue_adapter("gate").fetch_ticker(base) or {}
+        if not t.get("last"):
+            _xv_record("gate", base, False, (time.time() - t0) * 1000, "empty ticker (unreachable/blocked?)")
+            return None
         _xv_record("gate", base, True, (time.time() - t0) * 1000)
         return {"venue": "gate", "name": base, "last": t.get("last"),
                 "funding_rate": t.get("funding_rate")}
