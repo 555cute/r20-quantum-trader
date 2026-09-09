@@ -75,8 +75,10 @@ def get_market_session() -> requests.Session:
                 s.headers.update(DEFAULT_HEADERS)
                 retries = Retry(
                     total=2,
-                    backoff_factor=0.2,
-                    status_forcelist=[500, 502, 503, 504],
+                    backoff_factor=0.35,
+                    # 429：OKX 公共行情按 IP 限频 40req/2s，引擎+面板共出口 IP 的部署
+                    # 易触发——重试（尊重 Retry-After）吸收突发，避免 1H/4H K线偶发拿空
+                    status_forcelist=[429, 500, 502, 503, 504],
                     raise_on_status=False,
                 )
                 adapter = HTTPAdapter(
