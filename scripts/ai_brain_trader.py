@@ -571,8 +571,8 @@ def _xv_flush_health(packages: List[Dict[str, Any]]) -> None:
                         for k, v in _XV_HEALTH.items()}
         okx_ok = [p["name"] for p in packages if safe_float(p.get("price", 0)) > 0]
         venues = {
-            "okx": {"ok": okx_ok, "failed": [p["name"] for p in packages
-                                             if safe_float(p.get("price", 0)) <= 0],
+            "okx": {"ok": okx_ok, "failed": {p["name"]: "ticker/price unavailable" for p in packages
+                                              if safe_float(p.get("price", 0)) <= 0},
                     "latency_ms": {}, "testnet": False},
         }
         for venue, v in snapshot.items():
