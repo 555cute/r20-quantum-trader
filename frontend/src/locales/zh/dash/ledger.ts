@@ -72,6 +72,11 @@ export const zhLedger = {
     empty: '暂无日志',
     download: '下载完整日志',
   },
+  council: {
+    ran: '投委会裁决',
+    adopted: '投委会裁决 · 采纳席位 {seat}',
+    degraded: '委员会未运行 · 单模型裁决',
+  },
   exportCsv: '导出 CSV',
   exported: '台账已导出',
   empty: '暂无平仓记录——AI 还在等待第一笔像样的机会',

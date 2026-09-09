@@ -54,8 +54,12 @@ MAX_MARGIN_EQUITY_RATIO = _env_float("R20_MAX_MARGIN_EQUITY_RATIO", 0.20)
 SINGLE_ASSET_EQUITY_RATIO = _env_float("R20_SINGLE_ASSET_EQUITY_RATIO", 0.30)
 # 单标的累计保证金绝对封顶（USDT，小资金账户按上面的比例自动收紧）。
 MAX_SINGLE_ASSET_MARGIN = _env_float("R20_MAX_SINGLE_ASSET_MARGIN_USDT", 600.0)
-# 单笔杠杆上限（AI 自主裁决杠杆，但执行层强制钳制不超过此值）。
+# 单笔杠杆区间（AI 在 [下限, 上限] 内按信心自主裁决，执行层强制钳制到区间）。
 MAX_LEVERAGE = _env_float("R20_MAX_LEVERAGE", 5.0)
+MIN_LEVERAGE = _env_float("R20_MIN_LEVERAGE", 2.0)
+# 交叉守卫：下限只允许更保守，不允许越过上限（后台分次保存时的中间态兜底）。
+if MIN_LEVERAGE > MAX_LEVERAGE:
+    MIN_LEVERAGE = MAX_LEVERAGE
 
 # ── 组2 · 单笔风险 ────────────────────────────────────────────────
 # 单笔 1R 风险额占可用余额比例（与池内绝对值取小）。
@@ -95,6 +99,7 @@ DEFAULTS = {
     "R20_MAX_MARGIN_EQUITY_RATIO": 0.20,
     "R20_SINGLE_ASSET_EQUITY_RATIO": 0.30,
     "R20_MAX_SINGLE_ASSET_MARGIN_USDT": 600.0,
+    "R20_MIN_LEVERAGE": 2.0,
     "R20_MAX_LEVERAGE": 5.0,
     "R20_RISK_PER_TRADE_RATIO": 0.02,
     "R20_MIN_RISK_REWARD": 2.0,

@@ -35,7 +35,7 @@ const testing = ref(false)
 const councilConfig = ref<any>({
   enabled: false,
   consensus_mode: 'standard',
-  timeout_seconds: 60.0,
+  timeout_seconds: 240.0,
   roles: {},
 })
 
@@ -109,7 +109,7 @@ async function saveConfig() {
       body: JSON.stringify({
         enabled: councilConfig.value.enabled,
         consensus_mode: councilConfig.value.consensus_mode || 'standard',
-        timeout_seconds: Number(councilConfig.value.timeout_seconds) || 60.0,
+        timeout_seconds: Number(councilConfig.value.timeout_seconds) || 240.0,
         roles: councilConfig.value.roles,
       }),
     })
@@ -420,8 +420,8 @@ onMounted(loadData)
             v-model="councilConfig.timeout_seconds"
             type="number"
             min="10"
-            max="180"
-            step="5"
+            max="300"
+            step="10"
             class="w-16 rounded-lg px-2 py-1 text-xs outline-none border text-center"
             style="background-color: var(--surface-input); border-color: var(--line-1); color: var(--ink-1);"
             :disabled="!auth.isSuperadmin"

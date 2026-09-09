@@ -46,9 +46,13 @@ _PARAMS: list[dict[str, Any]] = [
      "label": "单标的保证金绝对封顶", "label_en": "Single-Asset Margin Hard Cap",
      "desc": "单标的累计保证金的绝对金额封顶（USDT）。实际生效取 min(本值, 余额×占比上限)，小资金账户自动收紧。",
      "type": "float", "min": 1.0, "max": 100000.0, "step": 10.0, "unit": "USDT", "display_scale": 1},
+    {"key": "R20_MIN_LEVERAGE", "group": "exposure",
+     "label": "单笔杠杆下限", "label_en": "Min Leverage",
+     "desc": "AI 自主裁决杠杆的区间下限：模型须在 [下限, 上限] 内按信号强度取值，低于下限会被执行层抬升钳制。调高下限 = 强制放大名义敞口，请配合日亏熔断使用。",
+     "type": "float", "min": 1.0, "max": 20.0, "step": 1.0, "unit": "x", "display_scale": 1},
     {"key": "R20_MAX_LEVERAGE", "group": "exposure",
      "label": "单笔杠杆上限", "label_en": "Max Leverage",
-     "desc": "AI 自主裁决杠杆，但执行层强制钳制不超过此倍数。",
+     "desc": "AI 自主裁决杠杆的区间上限：执行层强制钳制不超过此倍数。与「单笔杠杆下限」共同构成模型的自主取值区间。",
      "type": "float", "min": 1.0, "max": 20.0, "step": 1.0, "unit": "x", "display_scale": 1},
     # ── 组2 单笔风险门禁 ──
     {"key": "R20_RISK_PER_TRADE_RATIO", "group": "per_trade",
@@ -109,7 +113,7 @@ SUITES: list[dict[str, Any]] = [
      "values": {
          "R20_MAX_CONCURRENT_POSITIONS": 4, "R20_MAX_SAME_DIRECTION_POSITIONS": 2,
          "R20_MAX_MARGIN_EQUITY_RATIO": 0.10, "R20_SINGLE_ASSET_EQUITY_RATIO": 0.20,
-         "R20_MAX_SINGLE_ASSET_MARGIN_USDT": 300.0, "R20_MAX_LEVERAGE": 3.0,
+         "R20_MAX_SINGLE_ASSET_MARGIN_USDT": 300.0, "R20_MIN_LEVERAGE": 2.0, "R20_MAX_LEVERAGE": 3.0,
          "R20_RISK_PER_TRADE_RATIO": 0.01, "R20_MIN_RISK_REWARD": 2.5, "R20_MIN_ENTRY_CONFIDENCE": 85.0,
          "R20_DAILY_LOSS_EQUITY_RATIO": 0.03, "R20_MAX_DAILY_LOSS_USDT": 100.0,
          "R20_TIME_STOP_HOURS": 12.0, "R20_TIME_STOP_ATR_BAND": 0.10, "R20_STOP_COOLDOWN_MINUTES": 60,
@@ -125,7 +129,7 @@ SUITES: list[dict[str, Any]] = [
      "values": {
          "R20_MAX_CONCURRENT_POSITIONS": 0, "R20_MAX_SAME_DIRECTION_POSITIONS": 4,
          "R20_MAX_MARGIN_EQUITY_RATIO": 0.25, "R20_SINGLE_ASSET_EQUITY_RATIO": 0.40,
-         "R20_MAX_SINGLE_ASSET_MARGIN_USDT": 800.0, "R20_MAX_LEVERAGE": 7.0,
+         "R20_MAX_SINGLE_ASSET_MARGIN_USDT": 800.0, "R20_MIN_LEVERAGE": 5.0, "R20_MAX_LEVERAGE": 7.0,
          "R20_RISK_PER_TRADE_RATIO": 0.03, "R20_MIN_RISK_REWARD": 2.0, "R20_MIN_ENTRY_CONFIDENCE": 72.0,
          "R20_DAILY_LOSS_EQUITY_RATIO": 0.08, "R20_MAX_DAILY_LOSS_USDT": 300.0,
          "R20_TIME_STOP_HOURS": 16.0, "R20_TIME_STOP_ATR_BAND": 0.20, "R20_STOP_COOLDOWN_MINUTES": 15,
@@ -205,6 +209,11 @@ def normalize(values: Mapping[str, Any]) -> dict[str, str]:
     same = parsed.get("R20_MAX_SAME_DIRECTION_POSITIONS", current_values().get("R20_MAX_SAME_DIRECTION_POSITIONS", 3))
     if isinstance(total, (int, float)) and total > 0 and isinstance(same, (int, float)) and same > total:
         errors.append(f"同向持仓上限 ({same:g}) 不能高于最高持仓数 ({total:g})")
+    # 杠杆区间一致性：下限不得越过上限（执行层虽有读时兜底钳制，配置面必须显式拒绝）
+    lev_min = parsed.get("R20_MIN_LEVERAGE", current_values().get("R20_MIN_LEVERAGE", DEFAULTS["R20_MIN_LEVERAGE"]))
+    lev_max = parsed.get("R20_MAX_LEVERAGE", current_values().get("R20_MAX_LEVERAGE", DEFAULTS["R20_MAX_LEVERAGE"]))
+    if isinstance(lev_min, (int, float)) and isinstance(lev_max, (int, float)) and lev_min > lev_max:
+        errors.append(f"杠杆下限 ({lev_min:g}x) 不能高于杠杆上限 ({lev_max:g}x)")
     if errors:
         raise ValueError("；".join(errors))
     return {k: str(v) for k, v in parsed.items()}

@@ -175,6 +175,8 @@ function dirOf(side: string): 'long' | 'short' {
                     <span class="num font-semibold" style="color: var(--ink-strong)">{{ x.inst }}</span>
                     <DirTag :dir="dirOf(x.side)" />
                     <span class="badge badge-mono hidden xl:inline-flex">{{ x.lever }}</span>
+                    <span v-if="x.council?.ran" class="badge badge-up" :title="x.council.adopted_role ? t('dash.ledger.council.adopted', { seat: x.council.adopted_role }) : t('dash.ledger.council.ran')">🏛️</span>
+                    <span v-else-if="x.council" class="badge badge-warn" :title="t('dash.ledger.council.degraded')">⚡</span>
                   </div>
                 </td>
                 <td class="col-num">{{ fmtPrice(x.open_px) }}</td>

@@ -14,6 +14,18 @@ const { t } = useI18n();
 const x = computed(() => props.trade || {});
 const holding = computed(() => x.value.status === 'holding');
 
+/** 投委会溯源（仅持仓行有该数据；历史平仓行无开仓期委员会记录，诚实留空） */
+const SEAT_LABELS: Record<string, string> = {
+  trader_trend: 'A·顺势', trader_momentum: 'B·动能', trader_quant: 'C·数理', cio: 'CIO', REJECT_ALL: '驳回',
+};
+const councilNote = computed(() => {
+  const cc = x.value.council;
+  if (!cc || !holding.value) return '';
+  if (!cc.ran) return t('dash.ledger.council.degraded');
+  const seat = SEAT_LABELS[String(cc.adopted_role || '')] || String(cc.adopted_role || '');
+  return seat ? t('dash.ledger.council.adopted', { seat }) : t('dash.ledger.council.ran');
+});
+
 const cells = computed(() => [
   { label: t('dash.ledger.col.entry'), value: fmtPrice(x.value.open_px), cls: '' },
   { label: t('dash.ledger.col.exit'), value: holding.value ? t('status.running') : fmtPrice(x.value.close_px), cls: '' },
@@ -31,7 +43,7 @@ const cells = computed(() => [
     :open="!!trade"
     width="560px"
     :title="t('dash.ledger.lifecycle.title', undefined, { sym: pairLabel(x.inst || ''), dir: x.side || '' })"
-    :subtitle="`${x.strategy || ''} · ${x.lever || ''}`"
+    :subtitle="`${x.strategy || ''} · ${x.lever || ''}${councilNote ? ' · ' + councilNote : ''}`"
     @close="emit('close')"
   >
     <div class="space-y-4">

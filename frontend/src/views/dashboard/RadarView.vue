@@ -93,6 +93,8 @@ function actionsOf(c: any): { inst: string; dir: string; conf: number }[] {
                 <span v-if="!actionsOf(c).length" class="t-faint text-2xs">{{ t('dash.radar.detail.waitNote') }}</span>
               </span>
             </span>
+            <span v-if="c.council_transcript" class="badge badge-up hidden shrink-0 sm:inline-flex" :title="t('dash.radar.council.done')">🏛️</span>
+            <span v-else-if="c.council_status && !c.council_status.ran" class="badge badge-warn hidden shrink-0 sm:inline-flex" :title="`${t('dash.radar.council.degraded')}：${c.council_status.reason || ''}`">⚡</span>
             <span v-if="c.policy_hash" class="badge badge-mono hidden shrink-0 sm:inline-flex" :title="c.policy_version">
               {{ c.policy_hash.slice(0, 8) }}
             </span>

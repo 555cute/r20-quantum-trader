@@ -71,6 +71,11 @@ export const enLedger = {
     empty: 'No logs',
     download: 'Download full log',
   },
+  council: {
+    ran: 'Council verdict',
+    adopted: 'Council verdict · adopted {seat}',
+    degraded: 'Council skipped · single-model verdict',
+  },
   exportCsv: 'Export CSV',
   exported: 'Ledger exported',
   empty: 'No closed trades yet — the AI is waiting for its first worthy setup',

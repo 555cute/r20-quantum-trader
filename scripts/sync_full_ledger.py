@@ -124,6 +124,22 @@ def build_lifecycle_ledger():
         except Exception:
             pass
 
+    # 投委会溯源（2026-09-10）：持仓行的决策来源徽章来自最新 per-symbol 决策缓存。
+    # 历史平仓行不伪造该数据——开仓当周期的委员会状态从未持久化，缺失就显示缺失。
+    council_by_inst = {}
+    try:
+        with open(os.path.join(DATA_DIR, "ai_brain_decisions.json"), "r", encoding="utf-8") as f:
+            _brain_cache = json.load(f)
+        for _k, _v in (_brain_cache or {}).items():
+            if not isinstance(_v, dict):
+                continue
+            _c = _v.get("council")
+            if isinstance(_c, dict):
+                _name = str(_v.get("name") or str(_k).split("-")[0])
+                council_by_inst[_name] = _c
+    except Exception:
+        council_by_inst = {}
+
     tz_bj = datetime.timezone(datetime.timedelta(hours=8))
 
     # 1. Fetch OKX Official Positions History (Official position-level closed trades)
@@ -199,7 +215,8 @@ def build_lifecycle_ledger():
             "roi_pct": roi_pct,
             "duration": duration_str,
             "status": "holding",
-            "exit_reason": "⏳ 运行监控中"
+            "exit_reason": "⏳ 运行监控中",
+            "council": council_by_inst.get(inst),
         })
 
     # Process Official Closed Positions

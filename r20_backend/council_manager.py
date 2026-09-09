@@ -35,7 +35,9 @@ COUNCIL_CONFIG_FILE = DATA_DIR / "council_config.json"
 VALID_CONSENSUS_MODES = {"standard", "cross_examination"}
 DEFAULT_CONSENSUS_MODE = "standard"
 MIN_SAFE_REASONING_TIME: float = 5.0
-DEFAULT_COUNCIL_TIMEOUT: float = 60.0
+# 60s 总预算在真实网关 RT（单席 20~250s、参谋并行+CIO 至少两段串行）下必然整体
+# 超时静默降级（50 周期 0 成功实测，2026-09-10）；240s 兼顾决策时效与调度器 600s 硬超时。
+DEFAULT_COUNCIL_TIMEOUT: float = 240.0
 
 DEFAULT_PRESET_TEMPLATES: Dict[str, Dict[str, Any]] = {
     "trader_trend": {
@@ -605,7 +607,7 @@ def _call_single_trader_critique(
 def execute_council_debate(
     market_prompt: str,
     original_system_prompt: str,
-    timeout: float = 60.0,
+    timeout: float = 240.0,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Execute Hedge Fund Investment Committee Deliberation:
 
@@ -624,14 +626,15 @@ def execute_council_debate(
     """
     from r20_backend.llm_manager import execute_llm_request, get_active_llm_runtime, load_llm_config
 
-    # 杠杆契约与后台风控页联动（避免委员会路径被静态"2~5"钉死）
+    # 杠杆契约与后台风控页联动（避免委员会路径被静态"2~5"钉死；2026-09-10 补下限）
     try:
-        from risk_constants import MAX_LEVERAGE as _R20_MAX_LEVERAGE
+        from risk_constants import MAX_LEVERAGE as _R20_MAX_LEVERAGE, MIN_LEVERAGE as _R20_MIN_LEVERAGE
     except Exception:
         try:
-            from scripts.risk_constants import MAX_LEVERAGE as _R20_MAX_LEVERAGE
+            from scripts.risk_constants import MAX_LEVERAGE as _R20_MAX_LEVERAGE, MIN_LEVERAGE as _R20_MIN_LEVERAGE
         except Exception:
             _R20_MAX_LEVERAGE = 5.0
+            _R20_MIN_LEVERAGE = 2.0
 
     config = load_council_config()
     roles = config.get("roles", {})
@@ -874,7 +877,7 @@ def execute_council_debate(
         '       "stop_loss_price": 76500.0,  // 止损价同义兼容\n'
         '       "take_profit": 81750.0,  // 至少 2.0R 盈亏比的目标止盈价（数字）\n'
         '       "take_profit_price": 81750.0,  // 止盈价同义兼容\n'
-        f'       "leverage": {int(min(3, _R20_MAX_LEVERAGE))},  // 杠杆倍数（整型 2~{_R20_MAX_LEVERAGE:g}）\n'
+        f'       "leverage": {int(max(_R20_MIN_LEVERAGE, min(_R20_MAX_LEVERAGE, (_R20_MIN_LEVERAGE + _R20_MAX_LEVERAGE) / 2)))},  // 杠杆整数：必须落在 [{_R20_MIN_LEVERAGE:g}~{_R20_MAX_LEVERAGE:g}] 区间按信心自主裁决，严禁照抄模板占位值\n'
         '       "margin_usdt": 150.0,  // 拟投入保证金（须在可用余额安全范围内）\n'
         '       "reasoning": "【CIO批复】采纳/驳回了哪位交易员的提案，资金与风控考量"\n'
         "     }\n"

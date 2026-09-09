@@ -22,6 +22,7 @@ from okx_runtime import replace_cli_prefix as okx_private_command
 from risk_constants import (
     DAILY_LOSS_EQUITY_RATIO,
     MAX_LEVERAGE,
+    MIN_LEVERAGE,
     MAX_MARGIN_EQUITY_RATIO,
     MAX_SAME_DIRECTION_POSITIONS,
     MAX_SCALE_IN_COUNT,
@@ -955,7 +956,7 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
             f"- 当日累计亏损熔断线: -{_daily_stop} USDT (可用余额 {DAILY_LOSS_EQUITY_RATIO:.0%})\n"
             f"- 全系统同向持仓上限: {MAX_SAME_DIRECTION_POSITIONS} 笔 (多/空各自封顶，执行层硬拦截)\n"
             f"- 最长持仓时间: {TIME_STOP_HOURS:g} 小时 (超时且横盘无突破将被时间止损离场)\n"
-            f"- 单笔杠杆上限: {MAX_LEVERAGE:g}x (超出部分执行层自动钳制)\n"
+            f"- 单笔杠杆区间: {MIN_LEVERAGE:g}x ~ {MAX_LEVERAGE:g}x (在区间内按信号强度自主裁决；区间外执行层自动钳制)\n"
             f"- 盈亏比 R:R 硬底线: {MIN_RISK_REWARD_RATIO:.1f} (低于此值的报价执行层物理拒绝)\n"
             f"- 新开仓最低置信度门禁: {MIN_ENTRY_CONFIDENCE:g}% (低于此值禁止新开仓)\n"
             + (
@@ -1011,7 +1012,7 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
 3. 【多空开仓与顺势浮盈加仓全权裁决 (Opening & Pyramiding)】：
    - 【首发开仓】：自主判断未持仓品种是否具备确定性爆发机会，结合最新资讯、多周期形态与筹码，决定多空方向 (action: BUY_LONG / SELL_SHORT / WAIT)；
    - 【顺势浮盈金字塔加仓申请】：已有多仓仅可输出同向 BUY_LONG，已有空仓仅可输出同向 SELL_SHORT；这只是加仓申请，执行层仍将复核底仓 ROI/保本、最多{MAX_SCALE_IN_COUNT}次、累计保证金≤【本周期风险预算】单标的上限、置信度≥{MIN_SCALE_IN_CONFIDENCE:g}%、加速度与延续/击穿概率门禁。任何不确定均输出 WAIT；
-   - 自主规划拟开仓/加仓保证金 (margin_usdt: 可用余额的 5%~{MAX_MARGIN_EQUITY_RATIO:.0%}，且不得超过系统上限) 与杠杆 (2~{MAX_LEVERAGE:g}x)；
+   - 自主规划拟开仓/加仓保证金 (margin_usdt: 可用余额的 5%~{MAX_MARGIN_EQUITY_RATIO:.0%}，且不得超过系统上限) 与杠杆 ({MIN_LEVERAGE:g}~{MAX_LEVERAGE:g}x 内按信心强弱自主裁决)；
    - 自主规划 entry_price、take_profit_price 与 stop_loss_price；目标 R:R ≥ 2.5，且任何 R:R < {MIN_RISK_REWARD_RATIO:g} 的报价会被执行层拒绝。
 4. 必须输出严格 JSON，格式如下：
 {{
@@ -1037,7 +1038,7 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
     "BTC-USDT-SWAP": {{
       "action": "BUY_LONG" | "SELL_SHORT" | "WAIT",
       "confidence": 0~100,
-      "leverage": {int(min(3, MAX_LEVERAGE))} (推荐杠杆 2~{MAX_LEVERAGE:g}，上限以【本周期风险预算】声明为准),
+      "leverage": {int(max(MIN_LEVERAGE, min(MAX_LEVERAGE, (MIN_LEVERAGE + MAX_LEVERAGE) / 2)))} (杠杆必须落在 {MIN_LEVERAGE:g}~{MAX_LEVERAGE:g} 区间内按信心强弱自主取值：一般信号取下限侧、P0 全通过且概率优势显著才取上限侧；本模板数字仅为占位，严禁无差别照抄),
       "margin_usdt": float (必须取自上方【本周期风险预算】的常规单笔区间；示例: 可用余额 80U → 2.4~9.6，可用余额 4000U → 120~480。严禁套用任何固定绝对金额),
       "entry_price": float,
       "take_profit_price": float,
@@ -1118,6 +1119,7 @@ def assemble_decision_cache(
     time_str: str,
     macro_summary: str,
     policy_snapshot: Optional[Dict[str, Any]] = None,
+    council_status: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Pure assembly of validated decisions into the standard cache contract, bound to policy snapshot."""
     policy_snapshot = policy_snapshot or {}
@@ -1147,10 +1149,11 @@ def assemble_decision_cache(
         take_profit = safe_float(d_item.get("take_profit_price") or d_item.get("take_profit"))
         stop_loss = safe_float(d_item.get("stop_loss_price") or d_item.get("stop_loss"))
         confidence = max(0.0, min(100.0, safe_float(d_item.get("confidence"))))
-        # 杠杆钳制与后台风控页 MAX_LEVERAGE 联动（旧版硬编码 [2,5]，激进套件 7x 配了也透传不下去）
-        lev_hi = max(1, int(MAX_LEVERAGE))
-        lev_lo = min(2, lev_hi)
-        ai_leverage = int(max(lev_lo, min(lev_hi, round(safe_float(d_item.get("leverage", 3))))))
+        # 杠杆钳制与后台风控页杠杆区间 [MIN, MAX] 联动（2026-09-10：
+        # 旧版下限钉死 2 且提示词示例 min(3,MAX) 锚定，导致上限配 7 仍单单一律 3x）
+        lev_hi = max(1, int(round(MAX_LEVERAGE)))
+        lev_lo = max(1, min(int(round(MIN_LEVERAGE)), lev_hi))
+        ai_leverage = int(max(lev_lo, min(lev_hi, round(safe_float(d_item.get("leverage", lev_lo))))))
         raw_margin = safe_float(d_item.get("margin_usdt") or d_item.get("margin_usd", 0.0))
 
         # Dynamically apply self-improvement asset multiplier (e.g. BTC 1.2x, DOGE 0.8x)
@@ -1184,6 +1187,11 @@ def assemble_decision_cache(
                 "summary": p_summary,
             },
             "macro_assessment": macro_summary,
+            # 投委会溯源（2026-09-10 前台适配数据契约）：ran/reason + CIO 采纳席位
+            "council": {
+                **(council_status or {"ran": False}),
+                "adopted_role": (d_item or {}).get("adopted_role"),
+            },
             "thought_process": {
                 "market_structure": d_item.get("market_structure", "多周期结构中性"),
                 "calculus_dynamics": d_item.get("calculus_dynamics", "模型未提供具体微积分证据"),
@@ -1399,16 +1407,32 @@ def execute_batch_ai_brain_cycle(
         except Exception:
             council_enabled = False
 
+        # 委员会运行状态对前台透明（2026-09-10）：此前静默降级——50 周期 0 成功也
+        # 无处诊断。ran=False 必带降级原因，进 per-symbol 缓存与历史审计。
+        council_status: Dict[str, Any] = {"ran": False, "reason": "未启用（后台投委会开关关闭）"}
         if council_enabled:
+            council_status = {"ran": False, "reason": "辩论未返回"}
             print(f"[AI Brain Council] 🏛️ 多模型委员会已开启，正在启动各专家参谋现场辩论与首席仲裁...")
             try:
                 brain_output, council_transcript = execute_council_debate(
                     market_prompt=prompt,
                     original_system_prompt=effective_system_prompt,
-                    timeout=float(c_cfg.get("timeout_seconds", 60.0)),
+                    timeout=float(c_cfg.get("timeout_seconds", 240.0)),
                 )
-                print(f"[AI Brain Council] ✅ 委员会辩论与终审完成，耗时: {council_transcript.get('total_duration_ms', 0)}ms")
+                council_status = {
+                    "ran": True,
+                    "duration_ms": int(council_transcript.get("total_duration_ms") or 0),
+                    "consensus_mode": council_transcript.get("consensus_mode"),
+                    "advisors_ok": sum(
+                        1 for v in (council_transcript.get("advisors") or {}).values()
+                        if isinstance(v, dict) and v.get("status") != "error"
+                    ),
+                    "advisors_total": len(council_transcript.get("advisors") or {}),
+                }
+                print(f"[AI Brain Council] ✅ 委员会辩论与终审完成，耗时: {council_status['duration_ms']}ms"
+                      f"（参谋 {council_status['advisors_ok']}/{council_status['advisors_total']} 提案有效）")
             except Exception as e:
+                council_status = {"ran": False, "reason": f"{type(e).__name__}: {str(e)[:300]}"}
                 print(f"[AI Brain Council] ⚠️ 委员会决策超时或异常: {e}，自动降级为单模型极速决策！")
                 brain_output = None
 
@@ -1524,6 +1548,7 @@ def execute_batch_ai_brain_cycle(
             time_str=time_str,
             macro_summary=macro_summary,
             policy_snapshot=policy_snapshot,
+            council_status=council_status,
         )
 
         atomic_write_json(AI_DECISION_CACHE_FILE, standard_cache)
@@ -1544,6 +1569,8 @@ def execute_batch_ai_brain_cycle(
             "policy_snapshot": policy_snapshot,
             "policy_snapshot_summary": policy_summary,
             "macro_assessment": macro_summary,
+            # 投委会周期级状态（ran/降级原因/参谋有效率）；逐单采纳席位在各缓存条目 "council" 内
+            "council_status": council_status,
             "ai_last_prompt": full_prompt_text,
             "position_management": pos_mgmt_list,
             "council_transcript": brain_output.get("council_transcript") if isinstance(brain_output, dict) else None,
@@ -1553,6 +1580,7 @@ def execute_batch_ai_brain_cycle(
                     "action": standard_cache[p["instId"]]["decision"]["action"],
                     "confidence": standard_cache[p["instId"]]["decision"]["confidence"],
                     "leverage": standard_cache[p["instId"]]["decision"].get("leverage", 3),
+                    "council_adopted": (standard_cache[p["instId"]].get("council") or {}).get("adopted_role"),
                     "margin_usdt": standard_cache[p["instId"]]["decision"].get("margin_usdt", 0.0),
                     "risk_reward_ratio": standard_cache[p["instId"]]["decision"]["risk_reward_ratio"],
                     "data_quality": standard_cache[p["instId"]]["data_quality"],
