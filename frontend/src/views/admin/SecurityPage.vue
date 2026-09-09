@@ -38,6 +38,20 @@ const currentMode = computed({
 })
 const accountReady = computed(() => !!exchangeRt.value?.configured)
 
+async function ensureOkxRuntime() {
+  try {
+    const rt = await api('/api/v1/admin/okx/runtime')
+    applyRuntime(rt)
+    oauthSite.value = rt?.oauth?.site || oauthSite.value || 'global'
+  } catch {
+    if (!runtime.value) applyRuntime({ oauth: { status: 'unknown' } })
+  }
+}
+
+watch(draftExchange, (ex) => {
+  if (ex === 'okx') void ensureOkxRuntime()
+})
+
 
 // ---- OAuth ----
 const oauthSite = ref('global')
@@ -438,10 +452,10 @@ onMounted(loadAll)
           </span>
         </div>
 
-        <div v-if="!isBinance && runtime" class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-4">
+        <div v-if="!isBinance" class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-4">
 
           <!-- runtime detail -->
-          <div>
+          <div v-if="runtime">
             <div class="text-xs font-mono leading-relaxed space-y-1" style="color: var(--text-muted);">
               <div>当前环境：<strong style="color: var(--text-main);">{{ (runtime.selected_mode || 'demo').toUpperCase() }}</strong></div>
               <div>CLI：<span style="color: var(--text-main);">{{ runtime.cli?.installed ? (runtime.cli.version || '已安装') : '未安装' }} · {{ runtime.cli?.path || 'PATH 中不可见' }}</span></div>
