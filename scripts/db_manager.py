@@ -33,11 +33,17 @@ def init_database():
         gross_pnl REAL,
         pnl REAL,
         comment TEXT,
+        venue TEXT NOT NULL DEFAULT 'okx',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """)
+    # 多交易所 Phase 1.5：存量库幂等补 venue 列（历史成交全部归属 okx）
+    _cols = [r[1] for r in cursor.execute("PRAGMA table_info(trades)").fetchall()]
+    if "venue" not in _cols:
+        cursor.execute("ALTER TABLE trades ADD COLUMN venue TEXT NOT NULL DEFAULT 'okx'")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_time ON trades(time);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_inst ON trades(inst);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_venue ON trades(venue);")
 
     # 2. Daily Backups log
     cursor.execute("""
@@ -77,8 +83,8 @@ def sync_json_to_sqlite():
         
         cursor.execute("""
         INSERT OR REPLACE INTO trades 
-        (bill_id, time, inst, action, direction, size, price, fee, gross_pnl, pnl, comment)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (bill_id, time, inst, action, direction, size, price, fee, gross_pnl, pnl, comment, venue)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             bill_id,
             t_time,
@@ -90,7 +96,8 @@ def sync_json_to_sqlite():
             float(t.get("fee", 0.0) or 0.0),
             float(t.get("gross_pnl", 0.0) or t.get("pnl", 0.0) or 0.0),
             float(t.get("pnl", 0.0) or 0.0),
-            str(t.get("exit_reason") or t.get("remark") or t.get("comment") or "")
+            str(t.get("exit_reason") or t.get("remark") or t.get("comment") or ""),
+            str(t.get("venue") or "okx"),
         ))
         if cursor.rowcount > 0:
             inserted += 1
@@ -112,8 +119,8 @@ def record_trade_sqlite(trade_data: dict):
 
     cursor.execute("""
     INSERT OR REPLACE INTO trades 
-    (bill_id, time, inst, action, direction, size, price, fee, gross_pnl, pnl, comment)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (bill_id, time, inst, action, direction, size, price, fee, gross_pnl, pnl, comment, venue)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         bill_id,
         t_time,
@@ -125,7 +132,8 @@ def record_trade_sqlite(trade_data: dict):
         float(trade_data.get("fee", 0.0) or 0.0),
         float(trade_data.get("gross_pnl", 0.0) or 0.0),
         float(trade_data.get("pnl", 0.0) or 0.0),
-        str(trade_data.get("comment") or trade_data.get("remark") or "")
+        str(trade_data.get("comment") or trade_data.get("remark") or ""),
+        str(trade_data.get("venue") or "okx"),
     ))
     conn.commit()
     conn.close()

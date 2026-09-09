@@ -42,7 +42,7 @@ import subprocess
 import tempfile
 import fcntl
 from typing import Dict, Any, List, Optional, Tuple
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 try:
     from r20_backend.config import settings as standalone_settings
@@ -535,6 +535,96 @@ _SYSTEM_JSON_CONTRACT = """==== 【严格 JSON 规范契约与完整输出骨架
 - decisions 只包含有明确结论的标的，未涉及的标的不得出现；
 - 每个决策的 calculus_dynamics 与 math_prob_rationale 必须明确引用具体 1H v, a 与概率数值，严禁只写空泛定性词句！"""
 
+# ---------------------------------------------------------------------------
+# 跨所比对矩阵（Phase 2 · 币安/Gate 只读备源）
+# 纯证据增益：任何失败一律 fail-soft，绝不阻塞决策主循环。
+# 熔断开关 R20_XVENUE_PROMPT=0 时整段跳过（网络故障预案/测试封闭性）。
+# ---------------------------------------------------------------------------
+
+def _xvenue_enabled() -> bool:
+    return str(os.environ.get("R20_XVENUE_PROMPT", "1")).strip().lower() not in ("0", "off", "false")
+
+
+def _get_xvenue_adapter(venue: str):
+    # 测试与故障注入缝：mock 此函数即可完全离线
+    from r20_backend.exchanges import get_adapter
+    return get_adapter(venue)
+
+
+def _xv_binance_snapshot(base: str):
+    try:
+        ad = _get_xvenue_adapter("binance")
+        t = ad.fetch_ticker(base) or {}
+        ls = ad.fetch_top_trader_ratio(base)
+        return {"venue": "binance", "name": base, "last": t.get("last"), "ls": ls}
+    except Exception:
+        return None
+
+
+def _xv_gate_snapshot(base: str):
+    try:
+        t = _get_xvenue_adapter("gate").fetch_ticker(base) or {}
+        return {"venue": "gate", "name": base, "last": t.get("last"),
+                "funding_rate": t.get("funding_rate")}
+    except Exception:
+        return None
+
+
+def fetch_cross_venue_matrix(packages: List[Dict[str, Any]]) -> None:
+    """给每个 pkg 就地挂 xvenue：币安现价/大户多空比 + Gate 现价/费率。fail-soft。"""
+    if not _xvenue_enabled():
+        return
+    try:
+        by_name = {p["name"]: p for p in packages if p.get("name")}
+        with ThreadPoolExecutor(max_workers=6) as ex:
+            futures = []
+            for name in by_name:
+                futures.append(ex.submit(_xv_binance_snapshot, name))
+                futures.append(ex.submit(_xv_gate_snapshot, name))
+            for fut in futures:
+                try:
+                    val = fut.result(timeout=6)
+                except Exception:
+                    val = None
+                if not isinstance(val, dict):
+                    continue
+                pkg = by_name.get(val.get("name"))
+                if pkg is None:
+                    continue
+                xv = pkg.setdefault("xvenue", {})
+                if val.get("last") is not None:
+                    xv["bin_last" if val["venue"] == "binance" else "gate_last"] = val["last"]
+                if val.get("ls") is not None:
+                    xv["bin_ls"] = val["ls"]
+                if val.get("funding_rate") is not None:
+                    try:
+                        xv["gate_funding_pct"] = round(float(val["funding_rate"]) * 100, 4)
+                    except (TypeError, ValueError):
+                        pass
+    except Exception:
+        pass
+
+
+def _xvenue_prompt_line(p: Dict[str, Any]) -> str:
+    """归一跨所证据行；数据不足返回空串（Prompt 不出现残行）。"""
+    xv = p.get("xvenue") or {}
+    okx_px = safe_float(p.get("price", 0))
+    bin_px = safe_float(xv.get("bin_last", 0))
+    gate_px = safe_float(xv.get("gate_last", 0))
+    if okx_px <= 0 or (bin_px <= 0 and gate_px <= 0):
+        return ""
+    seg = [f"OKX:{okx_px:g}"]
+    for label, px in (("币安", bin_px), ("Gate", gate_px)):
+        if px > 0:
+            basis = (px - okx_px) / okx_px * 100
+            seg.append(f"{label}:{px:g}(基差{basis:+.3f}%)")
+    if xv.get("bin_ls") is not None:
+        seg.append(f"币安大户多空比:{xv['bin_ls']}")
+    if xv.get("gate_funding_pct") is not None:
+        seg.append(f"Gate费率:{xv['gate_funding_pct']}%")
+    return "- 🌐 跨所比对 (基差=对OKX偏离，>0.05% 警惕插针/流动性分层): " + " | ".join(seg)
+
+
 # System 宪法保持静态：全部动态风控阈值由每轮 construct_full_market_prompt 注入的
 # 【本周期风险预算】小节实时携带（该小节直接从 risk_constants 推导，永不进快照）。
 # 这样即使策略快照布局缓存了本节文本，风控改参也不会造成「提示词口径过期」。
@@ -587,6 +677,8 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
             f"{tf}:v={v.get('velocity', '--')},a={v.get('acceleration', '--')},I={v.get('impulse', '--')},态={v.get('regime', '--')}"
             for tf, v in calc_tfs.items() if isinstance(v, dict)
         )
+        _xv_line = _xvenue_prompt_line(p)
+        xv_suffix = ("\n" + _xv_line) if _xv_line else ""
         info = f"""---------------------------------------------------------
 【{p['name']} ({p['instId']})】| 数据质量: {quality} | 现价: {p['price']} | 24H涨跌: {p['chg24h']}% | 盘口买/卖: {p['bidPx']}/{p['askPx']}
 - 🏛️ 三重滤网宏观结构: 4H宏观大势={p.get('macro_4h', '4H_MACRO_RANGE')} | 1H波段结构={p.get('structure_1h', '1H_SWING_CHOP')}
@@ -598,7 +690,7 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
 - ∫ 定积分能量学: {integral_line}
 - ⚅ 概率论与统计风险: {prob_line}
 - ∂ 分周期速度/加速度/冲量: {calc_tf_line or 'UNKNOWN'}
-- 衍生品博弈: 资金费率: {p['fundingRate']}% | OI未平仓: {p['oiUsd']} | 多空比: {p['lsRatio']} | 5M主动吃单净差: {p['takerNetUsd']}
+- 衍生品博弈: 资金费率: {p['fundingRate']}% | OI未平仓: {p['oiUsd']} | 多空比: {p['lsRatio']} | 5M主动吃单净差: {p['takerNetUsd']}{xv_suffix}
 - 15M K线(倒序12根 [O,H,L,C,V]): {k15}
 - 1H K线(倒序12根 [O,H,L,C,V]): {k1h}
 - 4H K线(倒序8根 [O,H,L,C,V]): {k4h}"""
@@ -1023,6 +1115,9 @@ def execute_batch_ai_brain_cycle(
     print(f"[AI Brain Batch] 并行获取 {len(TARGET_INSTRUMENTS)} 币种原生行情、技术指标与顶级聪明钱数据...")
     with ThreadPoolExecutor(max_workers=8) as executor:
         packages = list(executor.map(fetch_single_instrument_package, TARGET_INSTRUMENTS))
+
+    # 跨所比对（币安/Gate 只读备源，纯证据增益，失败静默跳过不阻塞决策）
+    fetch_cross_venue_matrix(packages)
 
     # Fetch OKX Smart Money Signals
     try:

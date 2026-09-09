@@ -14,7 +14,9 @@ from .base import (
 )
 from .binance import BinanceAdapter
 from .gate import GateAdapter
+from .okx import OKXPublicAdapter
 from .registry import (
+    ADAPTER_EXECUTION_ENABLED,
     get_adapter,
     is_registered,
     registered_venues,
@@ -25,6 +27,7 @@ from .registry import (
 __all__ = [
     "BaseExchangeAdapter", "ExchangeCapabilities", "ExchangeCapabilityError",
     "InstrumentSpec", "canonical_base", "BinanceAdapter", "GateAdapter",
+    "OKXPublicAdapter", "ADAPTER_EXECUTION_ENABLED",
     "get_adapter", "is_registered", "registered_venues", "require_execution",
     "resolve_symbol",
 ]

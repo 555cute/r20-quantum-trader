@@ -52,13 +52,20 @@ class GateAdapter(BaseExchangeAdapter):
         if not t:
             return None
         last = float(t.get("last") or 0)
+        chg = float(t.get("change_percentage") or 0)
+        open_24h = round(last / (1 + chg / 100.0), 8) if last and chg > -100 else None
         return {
             "venue": "gate", "inst_id": inst,
             "last": last or None,
             "bid": float(t.get("highest_bid") or 0) or None,
             "ask": float(t.get("lowest_ask") or 0) or None,
             "mark_price": float(t.get("mark_price") or 0) or None,
-            "change_24h_pct": float(t.get("change_percentage") or 0),
+            "open_24h": open_24h,
+            "high_24h": float(t.get("high_24h") or 0) or None,
+            "low_24h": float(t.get("low_24h") or 0) or None,
+            "chg_24h_pct": chg,
+            "vol_24h_base": float(t.get("volume_24h_base") or 0),
+            "quote_vol_24h": float(t.get("volume_24h_quote") or 0),
             "funding_rate": float(t.get("funding_rate") or 0) or None,
             "ts_ms": int(time.time() * 1000),
         }

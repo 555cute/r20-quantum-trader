@@ -112,8 +112,10 @@ class TestFailClosedPrivateFacets(unittest.TestCase):
         with self.assertRaises(ExchangeCapabilityError):
             registry.require_execution("gate")
         with self.assertRaises(ExchangeCapabilityError):
+            registry.require_execution("okx")   # OKX 执行在遗留链路，适配器路由未开闸
+        with self.assertRaises(ExchangeCapabilityError):
             registry.get_adapter("hyperliquid")
-        self.assertEqual(registry.registered_venues(), ["binance", "gate"])
+        self.assertEqual(registry.registered_venues(), ["binance", "gate", "okx"])
 
     def test_instance_singleton(self):
         self.assertIs(get_adapter("binance"), get_adapter("Binance"))
@@ -142,7 +144,11 @@ class _FakeSession:
 class TestReadOnlyMarketData(unittest.TestCase):
     def test_binance_ticker_normalized(self):
         bn = BinanceAdapter(session=_FakeSession({
-            "ticker/price": {"symbol": "BTCUSDT", "price": "79650.10", "time": 1788000000000},
+            "ticker/24hr": {"symbol": "BTCUSDT", "lastPrice": "79650.10",
+                            "openPrice": "78700", "highPrice": "80000",
+                            "lowPrice": "78500", "volume": "25000",
+                            "quoteVolume": "2e9", "priceChangePercent": "1.21",
+                            "closeTime": 1788000000000},
             "bookTicker": {"bidPrice": "79650.0", "askPrice": "79650.2"},
         }))
         t = bn.fetch_ticker("BTC")
@@ -150,18 +156,31 @@ class TestReadOnlyMarketData(unittest.TestCase):
         self.assertEqual(t["last"], 79650.10)
         self.assertEqual(t["bid"], 79650.0)
         self.assertEqual(t["ts_ms"], 1788000000000)
+        self.assertEqual(t["chg_24h_pct"], 1.21)
+
+    def test_binance_ticker_bbo_depth_fallback(self):
+        # bookTicker 被 WAF 拦（无路由命中→404）时回退 depth 档一
+        bn = BinanceAdapter(session=_FakeSession({
+            "ticker/24hr": {"lastPrice": "100", "closeTime": 1},
+            "depth": {"bids": [["99.9", "5"]], "asks": [["100.1", "3"]]},
+        }))
+        t = bn.fetch_ticker("BTC")
+        self.assertEqual(t["bid"], 99.9)
+        self.assertEqual(t["ask"], 100.1)
 
     def test_gate_ticker_normalized(self):
         gt = GateAdapter(session=_FakeSession({
             "tickers": [{"contract": "BTC_USDT", "last": "78977.4",
                          "highest_bid": "78983.6", "lowest_ask": "78983.7",
                          "mark_price": "78989.78", "change_percentage": "1.17",
+                         "volume_24h_base": "48460", "volume_24h_quote": "3.8e9",
                          "funding_rate": "0.000032"}],
         }))
         t = gt.fetch_ticker("BTC")
         self.assertEqual(t["bid"], 78983.6)
         self.assertEqual(t["ask"], 78983.7)
-        self.assertEqual(t["change_24h_pct"], 1.17)
+        self.assertEqual(t["chg_24h_pct"], 1.17)
+        self.assertAlmostEqual(t["open_24h"], 78977.4 / 1.0117, places=4)
 
     def test_binance_candles_shape_ascending(self):
         payload = [

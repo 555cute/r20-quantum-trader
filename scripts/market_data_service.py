@@ -127,6 +127,91 @@ def _public_post(path: str, payload: Dict[str, Any], timeout: float = 4.0) -> Op
 
 
 # ---------------------------------------------------------------------------
+# 0b. 多场所只读备源（Phase 2 · 2026-09-09）
+#     仅当 OKX 三级容灾（www→aws→CLI）全断时兜底，保「价格连续性」优先。
+#     量/张数单位随场所原生语义（币安=币量、Gate=张数），与 OKX 口径不同，
+#     消费方仅得相对量级用于放量检测；大陆受限 IP 上自然失败落空，无副作用。
+# ---------------------------------------------------------------------------
+
+ALT_VENUES = ("binance", "gate")
+
+
+def _alt_venue_allowed() -> bool:
+    """离线/测试熔断开关：R20_ALT_VENUE_FALLBACK=0 时备源路径完全不发网络请求。"""
+    import os
+    return str(os.environ.get("R20_ALT_VENUE_FALLBACK", "1")).strip().lower() not in ("0", "off", "false")
+
+
+def _get_venue_adapter(venue: str):
+    """懒导入 r20_backend.exchanges（scripts 入口的 sys.path 引导）。"""
+    import sys
+    from pathlib import Path
+    root = str(Path(__file__).resolve().parents[1])
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from r20_backend.exchanges import get_adapter
+    return get_adapter(venue)
+
+
+def _alt_venue_ticker(inst_id: str) -> Optional[Dict[str, Any]]:
+    if not _alt_venue_allowed():
+        return None
+    for venue in ALT_VENUES:
+        try:
+            ad = _get_venue_adapter(venue)
+            t = ad.fetch_ticker(ad.canonical(inst_id))
+        except Exception:
+            t = None
+        if t and t.get("last"):
+            logger.warning("Multi-venue fallback: ticker %s served by %s", inst_id, venue)
+            return {
+                "instId": inst_id, "venue": venue,
+                "last": str(t["last"]),
+                "bidPx": str(t.get("bid") or ""),
+                "askPx": str(t.get("ask") or ""),
+                "open24h": str(t.get("open_24h") or ""),
+                "high24h": str(t.get("high_24h") or ""),
+                "low24h": str(t.get("low_24h") or ""),
+                "vol24h": str(t.get("vol_24h_base") or ""),
+                "volCcy24h": str(t.get("vol_24h_base") or ""),
+                "ts": str(t.get("ts_ms") or ""),
+            }
+    return None
+
+
+def _alt_venue_candles(inst_id: str, bar: str, limit: int) -> List[List[str]]:
+    if not _alt_venue_allowed():
+        return []
+    for venue in ALT_VENUES:
+        try:
+            ad = _get_venue_adapter(venue)
+            kl = ad.fetch_candles(ad.canonical(inst_id), bar, limit)
+        except Exception:
+            kl = None
+        if kl:
+            kl = kl[-limit:]
+            kl.reverse()  # 适配器升序 → OKX 契约「最新在前」
+            logger.warning("Multi-venue fallback: candles %s %s served by %s (%d rows)",
+                           inst_id, bar, venue, len(kl))
+            return kl
+    return []
+
+
+def _alt_funding_rate(inst_id: str) -> Optional[float]:
+    if not _alt_venue_allowed():
+        return None
+    for venue in ALT_VENUES:
+        try:
+            ad = _get_venue_adapter(venue)
+            r = ad.fetch_funding_rate(ad.canonical(inst_id))
+        except Exception:
+            r = None
+        if r is not None:
+            return round(float(r) * 100, 4)  # 对齐 OKX 路径的百分数口径
+    return None
+
+
+# ---------------------------------------------------------------------------
 # 1. Ticker & Bulk Tickers
 # ---------------------------------------------------------------------------
 
@@ -150,7 +235,7 @@ def fetch_ticker(inst_id: str, timeout: float = 3.5) -> Optional[Dict[str, Any]]
             return out[0] if isinstance(out, list) and out else (out if isinstance(out, dict) else None)
     except Exception:
         pass
-    return None
+    return _alt_venue_ticker(inst_id)
 
 
 def fetch_tickers_bulk(inst_type: str = "SWAP", timeout: float = 4.0) -> Dict[str, Dict[str, Any]]:
@@ -413,7 +498,7 @@ def fetch_candles(
                 return parsed
     except Exception:
         pass
-    return []
+    return _alt_venue_candles(inst_id, bar, limit)
 
 
 # ---------------------------------------------------------------------------
@@ -428,7 +513,7 @@ def fetch_funding_rate(inst_id: str, timeout: float = 3.5) -> Optional[float]:
             return round(float(data["data"][0].get("fundingRate", 0.0)) * 100, 4)
         except (ValueError, TypeError):
             pass
-    return None
+    return _alt_funding_rate(inst_id)
 
 
 def fetch_open_interest(inst_id: str, timeout: float = 3.5) -> Optional[Dict[str, Any]]:

@@ -46,8 +46,8 @@ class BinanceAdapter(BaseExchangeAdapter):
 
     def fetch_ticker(self, symbol: str) -> Optional[Dict[str, Any]]:
         inst = self.native_symbol(symbol)
-        price = self._public_get("/fapi/v1/ticker/price", {"symbol": inst})
-        if not isinstance(price, dict) or not price.get("price"):
+        stats = self._public_get("/fapi/v1/ticker/24hr", {"symbol": inst})
+        if not isinstance(stats, dict) or not stats.get("lastPrice"):
             return None
         bid = ask = 0.0
         book = self._public_get("/fapi/v1/bookTicker", {"symbol": inst})
@@ -62,9 +62,15 @@ class BinanceAdapter(BaseExchangeAdapter):
                 ask = float(depth["asks"][0][0])
         return {
             "venue": "binance", "inst_id": inst,
-            "last": float(price["price"]),
+            "last": float(stats["lastPrice"]),
             "bid": bid or None, "ask": ask or None,
-            "ts_ms": int(price.get("time") or time.time() * 1000),
+            "open_24h": float(stats.get("openPrice") or 0) or None,
+            "high_24h": float(stats.get("highPrice") or 0) or None,
+            "low_24h": float(stats.get("lowPrice") or 0) or None,
+            "chg_24h_pct": float(stats.get("priceChangePercent") or 0),
+            "vol_24h_base": float(stats.get("volume") or 0),
+            "quote_vol_24h": float(stats.get("quoteVolume") or 0),
+            "ts_ms": int(stats.get("closeTime") or time.time() * 1000),
         }
 
     def fetch_candles(self, symbol: str, bar: str = "15m",
