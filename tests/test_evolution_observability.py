@@ -183,6 +183,17 @@ class EvolutionFallbackModelTests(unittest.TestCase):
         with patch("r20_backend.llm_manager.init_llm_config", return_value=cfg):
             self.assertEqual(sie.evolution_fallback_model(), "gemini-3.8-flash-high")
 
+    def test_prefers_same_gateway_as_active(self):
+        # 死域 cpa 上的 gemini 排第一，但激活 qwen 在 tokenrhythm——
+        # 必须回退到同健康网关的 deepseek，而不是顺序更靠前的死域模型
+        cfg = {"active_model_id": "qwen3.8-flash", "models": [
+            {"id": "gemini-3.8-flash-high", "base_url": "https://cpa.r20.cn/v1"},
+            {"id": "deepseek-v4-flash-0731", "base_url": "https://tokenrhythm.studio/v1"},
+            {"id": "qwen3.8-flash", "base_url": "https://tokenrhythm.studio/v1"},
+        ]}
+        with patch("r20_backend.llm_manager.init_llm_config", return_value=cfg):
+            self.assertEqual(sie.evolution_fallback_model(), "deepseek-v4-flash-0731")
+
     def test_none_when_only_active_model_configured(self):
         cfg = self._cfg("qwen3.8-flash", ["qwen3.8-flash"])
         with patch("r20_backend.llm_manager.init_llm_config", return_value=cfg):

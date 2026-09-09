@@ -189,21 +189,33 @@ def render_observability_brief(audit) -> str:
 
 
 def evolution_fallback_model() -> Optional[str]:
-    """复盘专属回退模型：主模型网关故障（如 qwen3.8-flash 持续 504）时，
-    按后台模型池配置顺序返回第一个非激活位候选。
+    """复盘专属回退模型：主模型网关故障时，按后台模型池顺序选下一个候选。
+
+    同网关优先（2026-09-10）：模型池可能横跨多域名（tokenrhythm/cpa 混布），
+    死域上的席位（如 cpa 的 gemini）回退过去也是 400/504，故先选与激活模型
+    同 base_url 的健康池成员，其次才考虑异域名候选。
 
     刻意只作用于自进化复盘调用——交易主脑的选模与回退链是风险行为，
     调整需用户批准（fallback_model_ids 属全局配置，本函数绝不改写）。
-    复盘内容不进入下单路径，换模型只影响归因文风，风险面隔离。
     """
     try:
         from r20_backend.llm_manager import init_llm_config
         cfg = init_llm_config() or {}
-        active = str(cfg.get("active_model_id") or "")
-        for m in cfg.get("models") or []:
-            mid = str((m or {}).get("id") or "").strip()
-            if mid and mid != active:
-                return mid
+        active = str(cfg.get("active_model_id") or "").strip()
+        models = [m for m in (cfg.get("models") or []) if isinstance(m, dict)]
+        active_base = ""
+        for m in models:
+            if str(m.get("id") or "").strip() == active:
+                active_base = str(m.get("base_url") or "").strip()
+                break
+        same_gw, other_gw = [], []
+        for m in models:
+            mid = str(m.get("id") or "").strip()
+            if not mid or mid == active:
+                continue
+            (same_gw if str(m.get("base_url") or "").strip() == active_base else other_gw).append(mid)
+        for mid in same_gw + other_gw:
+            return mid
     except Exception as exc:
         log_msg(f"复盘回退模型解析失败: {exc}")
     return None
