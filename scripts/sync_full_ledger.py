@@ -295,7 +295,7 @@ def build_lifecycle_ledger():
             "lever": f"{lever}x",
             "strategy": strat_tag,
             "margin": margin_usdt,
-            "sz": 0,
+            "sz": round(close_pos_sz, 4),
             "open_time": open_time,
             "open_px": round(open_px, 4),
             "close_time": close_time,

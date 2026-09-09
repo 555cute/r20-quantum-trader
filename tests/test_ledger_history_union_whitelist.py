@@ -68,5 +68,49 @@ class RetiredCoinContractSpecTests(unittest.TestCase):
         sfl._CTVAL_CACHE.clear()
 
 
+class ClosedTradeSizeTests(unittest.TestCase):
+    """生命周期抽屉数量恒为 0 的回归钉扎：closed 行必须写入真实张数。"""
+
+    def setUp(self):
+        self._pool = sfl.TARGET_INSTRUMENTS
+        sfl.TARGET_INSTRUMENTS = [{"instId": "BTC-USDT-SWAP", "name": "BTC", "ctVal": 0.01}]
+
+    def tearDown(self):
+        sfl.TARGET_INSTRUMENTS = self._pool
+
+    def test_closed_row_sz_from_close_total_pos(self):
+        import subprocess as _sp
+        from unittest.mock import MagicMock
+        hist = [{
+            "instId": "BTC-USDT-SWAP", "direction": "long", "type": "2",
+            "openAvgPx": "50000", "closeAvgPx": "51000", "pnl": "10", "fee": "-1",
+            "lever": "3", "closeTotalPos": "2", "openMaxPos": "2", "pnlRatio": "3.0",
+            "cTime": "1700000000000", "uTime": "1700003600000",
+        }]
+
+        def fake_run(cmd, **kw):
+            cp = _sp.CompletedProcess(args=cmd, returncode=0, stdout="[]", stderr="")
+            if "positions-history" in cmd:
+                cp.stdout = json.dumps(hist)
+            return cp
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger_path = os.path.join(tmp, "trading_ledger.json")
+            with patch.object(sfl.subprocess, "run", side_effect=fake_run), \
+                 patch.object(sfl, "DATA_DIR", tmp), \
+                 patch.object(sfl, "LEDGER_JSON_FILE", ledger_path), \
+                 patch.object(sfl, "POSITION_TRACKER_FILE", os.path.join(tmp, "trackers.json")), \
+                 patch.object(sfl, "INITIAL_STATE_FILE", os.path.join(tmp, "no_such_state.json")), \
+                 patch.dict("sys.modules", {"qq_notifier": MagicMock()}):
+                trades = sfl.build_lifecycle_ledger()
+            written = json.load(open(ledger_path, encoding="utf-8"))
+
+        closed = [t for t in trades if t.get("status") == "closed"]
+        self.assertEqual(len(closed), 1)
+        self.assertEqual(closed[0]["sz"], 2.0)                       # 不再恒为 0
+        self.assertEqual(written[0]["sz"], 2.0)                      # 落盘同样真实
+        self.assertEqual(closed[0]["margin"], 333.33)                # 2 * 0.01 * 50000 / 3
+
+
 if __name__ == "__main__":
     unittest.main()
