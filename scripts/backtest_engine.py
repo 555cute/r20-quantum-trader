@@ -76,32 +76,34 @@ class BacktestSummary:
 
 
 def fetch_okx_candles(inst_id: str, bar: str = "1H", limit: int = 100) -> List[Dict[str, Any]]:
-    """Fetch live historical K-line candles directly from OKX public market endpoint."""
-    url = f"https://www.okx.com/api/v5/market/candles?instId={inst_id}&bar={bar}&limit={limit}"
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+    """Fetch live historical K-line candles via the zero-process 3-level
+    failover service (www.okx.com → aws.okx.com → okx CLI) instead of a
+    single hardcoded host."""
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            if data.get("code") == "0" and data.get("data"):
-                raw = list(reversed(data["data"]))
-                candles = []
-                for c in raw:
-                    ts_ms = int(c[0])
-                    dt_str = datetime.datetime.fromtimestamp(ts_ms / 1000.0, tz=datetime.timezone(datetime.timedelta(hours=8))).strftime("%m-%d %H:%M")
-                    candles.append({
-                        "symbol": inst_id,
-                        "timestamp": dt_str,
-                        "ts_ms": ts_ms,
-                        "open": float(c[1]),
-                        "high": float(c[2]),
-                        "low": float(c[3]),
-                        "close": float(c[4]),
-                        "volume": float(c[5]) if len(c) > 5 else 0.0,
-                    })
-                return candles
-    except Exception as exc:
-        print(f"Failed to fetch OKX public candles for {inst_id}: {exc}")
-    return []
+        from market_data_service import fetch_candles
+    except ImportError:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from market_data_service import fetch_candles
+    raw = fetch_candles(inst_id, bar=bar, limit=limit, timeout=10.0)
+    candles: List[Dict[str, Any]] = []
+    try:
+        for c in reversed(raw or []):
+            ts_ms = int(c[0])
+            dt_str = datetime.datetime.fromtimestamp(ts_ms / 1000.0, tz=datetime.timezone(datetime.timedelta(hours=8))).strftime("%m-%d %H:%M")
+            candles.append({
+                "symbol": inst_id,
+                "timestamp": dt_str,
+                "ts_ms": ts_ms,
+                "open": float(c[1]),
+                "high": float(c[2]),
+                "low": float(c[3]),
+                "close": float(c[4]),
+                "volume": float(c[5]) if len(c) > 5 else 0.0,
+            })
+    except (ValueError, IndexError) as exc:
+        print(f"Failed to parse OKX public candles for {inst_id}: {exc}")
+        return []
+    return candles
 
 
 class BacktestEngine:

@@ -60,7 +60,7 @@ def _get_system_version_tag() -> str:
 
 WORKSPACE_DIR = PROJECT_ROOT
 DATA_DIR = os.path.join(WORKSPACE_DIR, "data")
-from market_data_service import fetch_single_indicator, fetch_ticker
+from market_data_service import fetch_single_indicator, fetch_ticker, fetch_candles
 AI_DECISION_CACHE_FILE = os.path.join(DATA_DIR, "ai_brain_decisions.json")
 AI_DECISION_HISTORY_FILE = os.path.join(DATA_DIR, "ai_brain_history.json")
 AI_POSITION_MANAGEMENT_FILE = os.path.join(DATA_DIR, "ai_position_management.json")
@@ -222,127 +222,127 @@ def fetch_single_instrument_package(item: Dict[str, Any]) -> Dict[str, Any]:
 
     # 2. 15M Candles (recent 24, about 6 hours) & Technical Indicators Calculation
     try:
-        req = urllib.request.Request(f"https://www.okx.com/api/v5/market/candles?instId={inst_id}&bar=15m&limit=24", headers=headers)
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            d = json.loads(resp.read().decode("utf-8"))
-            if d.get("code") == "0" and d.get("data"):
-                raw_candles = d["data"]
-                pkg["recent_15m"] = [[float(c[1]), float(c[2]), float(c[3]), float(c[4]), round(float(c[5]), 1)] for c in raw_candles[:12]]
+        d = {"data": fetch_candles(inst_id, bar="15m", limit=24)}
+        if d["data"]:
+            raw_candles = d["data"]
+            pkg["recent_15m"] = [[float(c[1]), float(c[2]), float(c[3]), float(c[4]), round(float(c[5]), 1)] for c in raw_candles[:12]]
 
-                # Calculate 15M indicators
-                if len(raw_candles) >= 15:
-                    closes = [float(c[4]) for c in reversed(raw_candles)]
-                    highs = [float(c[2]) for c in reversed(raw_candles)]
-                    lows = [float(c[3]) for c in reversed(raw_candles)]
-                    vols = [float(c[5]) for c in reversed(raw_candles)]
+            # Calculate 15M indicators
+            if len(raw_candles) >= 15:
+                closes = [float(c[4]) for c in reversed(raw_candles)]
+                highs = [float(c[2]) for c in reversed(raw_candles)]
+                lows = [float(c[3]) for c in reversed(raw_candles)]
+                vols = [float(c[5]) for c in reversed(raw_candles)]
 
-                    # ATR 15M
-                    tr_list = []
-                    for i in range(1, len(closes)):
-                        tr = max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1]))
-                        tr_list.append(tr)
-                    if len(tr_list) >= 14:
-                        pkg["atr_15m"] = round(sum(tr_list[-14:]) / 14, 4)
-                        pkg["atr"] = pkg["atr_15m"]
+                # ATR 15M
+                tr_list = []
+                for i in range(1, len(closes)):
+                    tr = max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1]))
+                    tr_list.append(tr)
+                if len(tr_list) >= 14:
+                    pkg["atr_15m"] = round(sum(tr_list[-14:]) / 14, 4)
+                    pkg["atr"] = pkg["atr_15m"]
 
-                    # RSI 15M
-                    diffs = [closes[i] - closes[i-1] for i in range(1, len(closes))]
-                    gains = [d if d > 0 else 0 for d in diffs]
-                    losses = [-d if d < 0 else 0 for d in diffs]
-                    if len(gains) >= 14:
-                        avg_g = sum(gains[-14:]) / 14
-                        avg_l = sum(losses[-14:]) / 14
-                        rs = (avg_g / avg_l) if avg_l > 0 else 100.0
-                        pkg["rsi"] = round(100.0 - (100.0 / (1.0 + rs)), 1)
-                        pkg["rsi_15m"] = pkg["rsi"]
+                # RSI 15M
+                diffs = [closes[i] - closes[i-1] for i in range(1, len(closes))]
+                gains = [d if d > 0 else 0 for d in diffs]
+                losses = [-d if d < 0 else 0 for d in diffs]
+                if len(gains) >= 14:
+                    avg_g = sum(gains[-14:]) / 14
+                    avg_l = sum(losses[-14:]) / 14
+                    rs = (avg_g / avg_l) if avg_l > 0 else 100.0
+                    pkg["rsi"] = round(100.0 - (100.0 / (1.0 + rs)), 1)
+                    pkg["rsi_15m"] = pkg["rsi"]
 
-                    # VWAP Bias
-                    pv_sum = sum(closes[i] * vols[i] for i in range(len(closes)))
-                    v_sum = sum(vols)
-                    if v_sum > 0:
-                        vwap = pv_sum / v_sum
-                        pkg["vwap_bias"] = round((pkg["price"] - vwap) / vwap * 100, 2)
+                # VWAP Bias
+                pv_sum = sum(closes[i] * vols[i] for i in range(len(closes)))
+                v_sum = sum(vols)
+                if v_sum > 0:
+                    vwap = pv_sum / v_sum
+                    pkg["vwap_bias"] = round((pkg["price"] - vwap) / vwap * 100, 2)
 
-                    # Volume Ratio (Last vs MA5)
-                    if len(vols) >= 6:
-                        avg_v5 = sum(vols[-6:-1]) / 5
-                        if avg_v5 > 0:
-                            pkg["vol_ratio"] = round(vols[-1] / avg_v5, 2)
+                # Volume Ratio (Last vs MA5)
+                if len(vols) >= 6:
+                    avg_v5 = sum(vols[-6:-1]) / 5
+                    if avg_v5 > 0:
+                        pkg["vol_ratio"] = round(vols[-1] / avg_v5, 2)
 
-                    # OBV Flow
-                    obv = 0
-                    for i in range(1, len(closes)):
-                        if closes[i] > closes[i-1]:
-                            obv += vols[i]
-                        elif closes[i] < closes[i-1]:
-                            obv -= vols[i]
-                    pkg["obv_flow"] = "BULL_FLOW" if obv > 0 else ("BEAR_FLOW" if obv < 0 else "NEUTRAL")
-    except Exception:
-        pass
+                # OBV Flow
+                obv = 0
+                for i in range(1, len(closes)):
+                    if closes[i] > closes[i-1]:
+                        obv += vols[i]
+                    elif closes[i] < closes[i-1]:
+                        obv -= vols[i]
+                pkg["obv_flow"] = "BULL_FLOW" if obv > 0 else ("BEAR_FLOW" if obv < 0 else "NEUTRAL")
+        else:
+            print(f"[AI Brain] ⚠️ {inst_id} 15m K线获取失败（www/aws/CLI 三级容灾均未取回），本包 15M 微观指标降级缺省")
+    except Exception as exc:
+        print(f"[AI Brain] ⚠️ {inst_id} 15m K线处理异常: {exc}")
 
     # 3. 1H Candles (recent 24, about 24 hours) & 1H ATR / 1H RSI
     try:
-        req = urllib.request.Request(f"https://www.okx.com/api/v5/market/candles?instId={inst_id}&bar=1H&limit=24", headers=headers)
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            d = json.loads(resp.read().decode("utf-8"))
-            if d.get("code") == "0" and d.get("data"):
-                raw_1h = d["data"]
-                pkg["recent_1h"] = [[float(c[1]), float(c[2]), float(c[3]), float(c[4]), round(float(c[5]), 1)] for c in raw_1h[:12]]
-                if len(raw_1h) >= 15:
-                    closes_1h = [float(c[4]) for c in reversed(raw_1h)]
-                    highs_1h = [float(c[2]) for c in reversed(raw_1h)]
-                    lows_1h = [float(c[3]) for c in reversed(raw_1h)]
+        d = {"data": fetch_candles(inst_id, bar="1H", limit=24)}
+        if d["data"]:
+            raw_1h = d["data"]
+            pkg["recent_1h"] = [[float(c[1]), float(c[2]), float(c[3]), float(c[4]), round(float(c[5]), 1)] for c in raw_1h[:12]]
+            if len(raw_1h) >= 15:
+                closes_1h = [float(c[4]) for c in reversed(raw_1h)]
+                highs_1h = [float(c[2]) for c in reversed(raw_1h)]
+                lows_1h = [float(c[3]) for c in reversed(raw_1h)]
 
-                    tr_list_1h = []
-                    for i in range(1, len(closes_1h)):
-                        tr = max(highs_1h[i] - lows_1h[i], abs(highs_1h[i] - closes_1h[i-1]), abs(lows_1h[i] - closes_1h[i-1]))
-                        tr_list_1h.append(tr)
-                    if len(tr_list_1h) >= 14:
-                        pkg["atr_1h"] = round(sum(tr_list_1h[-14:]) / 14, 4)
-                        pkg["atr"] = pkg["atr_1h"]  # Elevate primary ATR to 1H
+                tr_list_1h = []
+                for i in range(1, len(closes_1h)):
+                    tr = max(highs_1h[i] - lows_1h[i], abs(highs_1h[i] - closes_1h[i-1]), abs(lows_1h[i] - closes_1h[i-1]))
+                    tr_list_1h.append(tr)
+                if len(tr_list_1h) >= 14:
+                    pkg["atr_1h"] = round(sum(tr_list_1h[-14:]) / 14, 4)
+                    pkg["atr"] = pkg["atr_1h"]  # Elevate primary ATR to 1H
 
-                    diffs_1h = [closes_1h[i] - closes_1h[i-1] for i in range(1, len(closes_1h))]
-                    gains_1h = [d if d > 0 else 0 for d in diffs_1h]
-                    losses_1h = [-d if d < 0 else 0 for d in diffs_1h]
-                    if len(gains_1h) >= 14:
-                        avg_g_1h = sum(gains_1h[-14:]) / 14
-                        avg_l_1h = sum(losses_1h[-14:]) / 14
-                        rs_1h = (avg_g_1h / avg_l_1h) if avg_l_1h > 0 else 100.0
-                        pkg["rsi_1h"] = round(100.0 - (100.0 / (1.0 + rs_1h)), 1)
+                diffs_1h = [closes_1h[i] - closes_1h[i-1] for i in range(1, len(closes_1h))]
+                gains_1h = [d if d > 0 else 0 for d in diffs_1h]
+                losses_1h = [-d if d < 0 else 0 for d in diffs_1h]
+                if len(gains_1h) >= 14:
+                    avg_g_1h = sum(gains_1h[-14:]) / 14
+                    avg_l_1h = sum(losses_1h[-14:]) / 14
+                    rs_1h = (avg_g_1h / avg_l_1h) if avg_l_1h > 0 else 100.0
+                    pkg["rsi_1h"] = round(100.0 - (100.0 / (1.0 + rs_1h)), 1)
 
-                    # 1H Swing Structure
-                    if len(closes_1h) >= 10:
-                        ma7_1h = sum(closes_1h[-7:]) / 7
-                        ma20_1h = sum(closes_1h[-20:]) / min(len(closes_1h), 20)
-                        if closes_1h[-1] > ma7_1h > ma20_1h:
-                            pkg["structure_1h"] = "1H_SWING_BULL"
-                        elif closes_1h[-1] < ma7_1h < ma20_1h:
-                            pkg["structure_1h"] = "1H_SWING_BEAR"
-                        else:
-                            pkg["structure_1h"] = "1H_SWING_CHOP"
-    except Exception:
-        pass
+                # 1H Swing Structure
+                if len(closes_1h) >= 10:
+                    ma7_1h = sum(closes_1h[-7:]) / 7
+                    ma20_1h = sum(closes_1h[-20:]) / min(len(closes_1h), 20)
+                    if closes_1h[-1] > ma7_1h > ma20_1h:
+                        pkg["structure_1h"] = "1H_SWING_BULL"
+                    elif closes_1h[-1] < ma7_1h < ma20_1h:
+                        pkg["structure_1h"] = "1H_SWING_BEAR"
+                    else:
+                        pkg["structure_1h"] = "1H_SWING_CHOP"
+        else:
+            print(f"[AI Brain] ⚠️ {inst_id} 1H K线获取失败（www/aws/CLI 三级容灾均未取回），1H ATR/RSI/结构字段降级缺省")
+    except Exception as exc:
+        print(f"[AI Brain] ⚠️ {inst_id} 1H K线处理异常: {exc}")
 
     # 4. 4H Candles (recent 16, about 64 hours) & 4H Macro Structure
     try:
-        req = urllib.request.Request(f"https://www.okx.com/api/v5/market/candles?instId={inst_id}&bar=4H&limit=16", headers=headers)
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            d = json.loads(resp.read().decode("utf-8"))
-            if d.get("code") == "0" and d.get("data"):
-                raw_4h = d["data"]
-                pkg["recent_4h"] = [[float(c[1]), float(c[2]), float(c[3]), float(c[4]), round(float(c[5]), 1)] for c in raw_4h[:8]]
-                if len(raw_4h) >= 8:
-                    closes_4h = [float(c[4]) for c in reversed(raw_4h)]
-                    ma5_4h = sum(closes_4h[-5:]) / 5
-                    ma12_4h = sum(closes_4h[-12:]) / min(len(closes_4h), 12)
-                    if closes_4h[-1] > ma5_4h > ma12_4h:
-                        pkg["macro_4h"] = "4H_MACRO_BULL (大级别多头通道)"
-                    elif closes_4h[-1] < ma5_4h < ma12_4h:
-                        pkg["macro_4h"] = "4H_MACRO_BEAR (大级别空头承压)"
-                    else:
-                        pkg["macro_4h"] = "4H_MACRO_RANGE (大级别区间震荡)"
-    except Exception:
-        pass
+        d = {"data": fetch_candles(inst_id, bar="4H", limit=16)}
+        if d["data"]:
+            raw_4h = d["data"]
+            pkg["recent_4h"] = [[float(c[1]), float(c[2]), float(c[3]), float(c[4]), round(float(c[5]), 1)] for c in raw_4h[:8]]
+            if len(raw_4h) >= 8:
+                closes_4h = [float(c[4]) for c in reversed(raw_4h)]
+                ma5_4h = sum(closes_4h[-5:]) / 5
+                ma12_4h = sum(closes_4h[-12:]) / min(len(closes_4h), 12)
+                if closes_4h[-1] > ma5_4h > ma12_4h:
+                    pkg["macro_4h"] = "4H_MACRO_BULL (大级别多头通道)"
+                elif closes_4h[-1] < ma5_4h < ma12_4h:
+                    pkg["macro_4h"] = "4H_MACRO_BEAR (大级别空头承压)"
+                else:
+                    pkg["macro_4h"] = "4H_MACRO_RANGE (大级别区间震荡)"
+        else:
+            print(f"[AI Brain] ⚠️ {inst_id} 4H K线获取失败（www/aws/CLI 三级容灾均未取回），4H 宏观结构字段降级缺省")
+    except Exception as exc:
+        print(f"[AI Brain] ⚠️ {inst_id} 4H K线处理异常: {exc}")
 
     # 5. Funding Rate & OI
     if item["type"] == "crypto":

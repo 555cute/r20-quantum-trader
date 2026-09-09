@@ -33,6 +33,37 @@ DEFAULT_HEADERS = {
 _SESSION: Optional[requests.Session] = None
 _SESSION_LOCK = threading.Lock()
 
+# OKX bar 合法字面量（大小写敏感：分钟小写 m，小时/天/周/月大写）
+_OKX_VALID_BARS = {
+    "1m", "3m", "5m", "15m", "30m",
+    "1H", "2H", "4H", "6H", "12H",
+    "1D", "3D", "1W", "1M", "3M",
+    "1Hutc", "4Hutc", "1Dutc", "1Wutc", "1Mutc", "1Dutc8", "1Wutc8", "1Mutc8",
+}
+
+
+def normalize_bar(bar: str) -> str:
+    """Normalize K线周期到 OKX 合法字面量（大小写容错：1h→1H、4h→4H、15M→15m）。
+
+    OKX /market/candles 与 indicators 接口对 bar/timeframe 参数严格区分大小写：
+    小写 1h/4h 一律报 Parameter bar error，导致「1H/4H 数据拿不到」——
+    所有入口统一先过这里。已是合法值（含 1M 月份大写特例）原样返回。
+    """
+    raw = str(bar or "").strip()
+    if not raw:
+        return "15m"
+    if raw in _OKX_VALID_BARS:
+        return raw
+    low = raw.lower()
+    for unit, canon in (("h", "H"), ("d", "D"), ("w", "W")):
+        if low.endswith(unit) and low[: -1].isdigit():
+            return low[: -1] + canon
+    if low.endswith("m") and low[: -1].isdigit():
+        n = int(low[: -1])
+        if n in (1, 3, 5, 15, 30):
+            return f"{n}m"
+    return raw  # 未知/非法字面量交给 OKX 报错，不在本地臆造
+
 
 def get_market_session() -> requests.Session:
     """Thread-safe persistent connection-pooled requests session."""
@@ -162,6 +193,85 @@ def fetch_orderbook_depth(inst_id: str, sz: int = 5, timeout: float = 3.5) -> Op
 # 3. Technical Indicators (ADX, KDJ, BBWIDTH, CMF, RSI, etc.)
 # ---------------------------------------------------------------------------
 
+def _local_math_indicators(
+    inst_id: str,
+    indicators: List[str],
+    bar: str = "1H",
+) -> Dict[str, Dict[str, str]]:
+    """三级兜底：当 OKX MCP 指标接口与 CLI 均不可用时（部署环境常见），
+    用本地蜡烛（自带 www→aws→CLI 双源容灾）纯 Python 计算 ADX/KDJ/BBWIDTH/CMF。
+    输出与 OKX 官方口径对齐的字符串数值；样本不足时返回空 dict 让上层维持缺省。"""
+    rows = fetch_candles(inst_id, bar=bar, limit=120)
+    if not rows:
+        return {}
+    try:
+        chron = list(reversed(rows))
+        highs = [float(r[2]) for r in chron]
+        lows = [float(r[3]) for r in chron]
+        closes = [float(r[4]) for r in chron]
+        vols = [float(r[5]) for r in chron]
+    except (ValueError, IndexError):
+        return {}
+
+    result: Dict[str, Dict[str, str]] = {}
+    for ind in indicators:
+        key = ind.upper().replace("-", "").replace("_", "")
+        try:
+            if key == "ADX" and len(closes) >= 30:
+                trs, pdms, ndms = [], [], []
+                for i in range(1, len(closes)):
+                    tr = max(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1]))
+                    up, dn = highs[i] - highs[i - 1], lows[i - 1] - lows[i]
+                    trs.append(tr)
+                    pdms.append(up if (up > dn and up > 0) else 0.0)
+                    ndms.append(dn if (dn > up and dn > 0) else 0.0)
+                p = 14
+                atr = sum(trs[:p])
+                pdm = sum(pdms[:p])
+                ndm = sum(ndms[:p])
+                dxs = []
+                for i in range(p, len(trs)):
+                    atr = atr - atr / p + trs[i]
+                    pdm = pdm - pdm / p + pdms[i]
+                    ndm = ndm - ndm / p + ndms[i]
+                    pdi = 100.0 * pdm / atr if atr > 0 else 0.0
+                    ndi = 100.0 * ndm / atr if atr > 0 else 0.0
+                    denom = pdi + ndi
+                    dxs.append(100.0 * abs(pdi - ndi) / denom if denom > 0 else 0.0)
+                if len(dxs) >= p:
+                    adx = sum(dxs[:p]) / p
+                    for dx in dxs[p:]:
+                        adx = (adx * (p - 1) + dx) / p
+                    result["ADX"] = {"adx": f"{adx:.2f}"}
+            elif key == "KDJ" and len(closes) >= 9:
+                k = d = 50.0
+                for i in range(8, len(closes)):
+                    hh = max(highs[i - 8: i + 1])
+                    ll = min(lows[i - 8: i + 1])
+                    rsv = (closes[i] - ll) / (hh - ll) * 100.0 if hh > ll else 50.0
+                    k = (2.0 * k + rsv) / 3.0
+                    d = (2.0 * d + k) / 3.0
+                j = 3.0 * k - 2.0 * d
+                result["KDJ"] = {"k": f"{k:.2f}", "d": f"{d:.2f}", "j": f"{j:.2f}"}
+            elif key in ("BBWIDTH", "BBANDWIDTH") and len(closes) >= 20:
+                window = closes[-20:]
+                mid = sum(window) / 20.0
+                sd = (sum((x - mid) ** 2 for x in window) / 20.0) ** 0.5
+                if mid > 0:
+                    result["BBWIDTH"] = {"bbWidth": f"{(4.0 * sd / mid * 100.0):.2f}"}
+            elif key == "CMF" and len(closes) >= 21:
+                num = den = 0.0
+                for i in range(-20, 0):
+                    rng = highs[i] - lows[i]
+                    mf = ((closes[i] - lows[i]) - (highs[i] - closes[i])) / rng if rng > 0 else 0.0
+                    num += mf * vols[i]
+                    den += vols[i]
+                result["CMF"] = {"cmf": f"{(num / den):.4f}" if den > 0 else "0.0000"}
+        except Exception as exc:
+            logger.debug("Local indicator %s failed for %s: %s", key, inst_id, exc)
+    return result
+
+
 def fetch_indicators_batch(
     inst_id: str,
     indicators: List[str],
@@ -173,6 +283,7 @@ def fetch_indicators_batch(
     Replaces 4x-6x Node CLI process invocations per instrument with 1 fast call.
     Returns: {"ADX": {"adx": "20.1", ...}, "KDJ": {"k": "...", "d": "...", "j": "..."}, ...}
     """
+    bar = normalize_bar(bar)
     ind_configs = {ind.upper(): {} for ind in indicators}
     payload = {
         "instId": inst_id,
@@ -204,6 +315,12 @@ def fetch_indicators_batch(
             if val:
                 result[key] = val
     
+    # 三级兜底：MCP/CLI 全灭（部署环境未装 okx CLI 时最常见）→ 本地蜡烛纯 Python 计算
+    missing = [ind for ind in indicators if ind.upper().replace("-", "") not in result]
+    if missing:
+        for k, v in _local_math_indicators(inst_id, missing, bar).items():
+            result.setdefault(k, v)
+    
     return result
 
 
@@ -214,7 +331,8 @@ def fetch_single_indicator(
     timeout: float = 3.5,
 ) -> Dict[str, Any]:
     """Fetch or compute a single indicator without launching Node CLI."""
-    key = indicator.upper().replace("-", "")
+    key = indicator.upper().replace("-", "").replace("_", "")
+    bar = normalize_bar(bar)
     payload = {
         "instId": inst_id,
         "timeframes": [bar],
@@ -249,7 +367,8 @@ def fetch_single_indicator(
     except Exception:
         pass
     
-    return {}
+    # 三级兜底：本地蜡烛 + 纯 Python 数学（部署环境无 CLI / MCP 端点不可达时的最后防线）
+    return _local_math_indicators(inst_id, [key], bar).get(key, {})
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +382,12 @@ def fetch_candles(
     timeout: float = 4.0,
 ) -> List[List[str]]:
     """Fetch candles directly from OKX Official Market REST API with Keep-Alive."""
+    bar = normalize_bar(bar)
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = 45
+    limit = max(1, min(limit, 300))  # OKX 单次上限 300，超限直接报错返回空
     data = _public_get(
         "/api/v5/market/candles",
         params={"instId": inst_id, "bar": bar, "limit": limit},

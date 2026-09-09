@@ -383,6 +383,25 @@ class AdminApiTests(unittest.TestCase):
         for k in ("ts", "open", "high", "low", "close", "vol"):
             self.assertIn(k, c0)
 
+    def test_market_candles_lowercase_bar_via_failover_service(self):
+        """1h/4h 小写周期必须被归一为 OKX 合法值并经三级容灾服务取数。"""
+        import scripts.market_data_service as mds
+        from unittest.mock import patch
+        rows = [
+            ["1700003600000", "3", "4", "2", "3.5", "10"],
+            ["1700000000000", "2", "3", "1.8", "2.9", "11"],
+        ]
+        with patch.object(mds, "fetch_candles", return_value=rows) as mock_fc:
+            resp = self.client.get("/api/v1/market/TEST-USDT-SWAP/candles?bar=4h&limit=20")
+        self.assertEqual(resp.status_code, 200)
+        payload = mock_fc.call_args
+        self.assertEqual(payload.kwargs.get("bar") or payload.args[1], "4H")
+        data = resp.json()
+        self.assertEqual(data["bar"], "4H")
+        self.assertEqual(data["source"], "OKX REST")
+        ts_list = [c["ts"] for c in data["candles"]]
+        self.assertEqual(ts_list, sorted(ts_list))  # 输出时间升序
+
 
 if __name__ == "__main__":
     unittest.main()

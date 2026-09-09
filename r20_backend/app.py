@@ -3281,7 +3281,13 @@ def market_candles(inst_id: str, bar: str = "1H", limit: int = 150, response: Re
         response.headers["Expires"] = "0"
     if not inst_id.endswith("-SWAP"):
         raise HTTPException(status_code=400, detail="only SWAP instrument ids are accepted")
-    valid_bars = {"1m", "5m", "15m", "1H", "4H", "1D"}
+    # bar 大小写容错归一（1h→1H、4h→4H），归一后仍非法才回落 1H
+    try:
+        from scripts.market_data_service import normalize_bar as _nb
+        bar = _nb(bar)
+    except Exception:
+        pass
+    valid_bars = {"1m", "3m", "5m", "15m", "30m", "1H", "2H", "4H", "6H", "12H", "1D"}
     if bar not in valid_bars:
         bar = "1H"
     limit = max(10, min(limit, 300))
@@ -3291,30 +3297,27 @@ def market_candles(inst_id: str, bar: str = "1H", limit: int = 150, response: Re
     if cached and (now_ts - cached[0] < 1.0):
         return {"instId": inst_id, "bar": bar, "candles": cached[1], "source": "cache"}
     try:
-        url = f"https://www.okx.com/api/v5/market/candles?instId={inst_id}&bar={bar}&limit={limit}"
-        req = urllib.request.Request(
-            url,
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        )
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            raw = data.get("data") or []
-            candles = []
-            for item in reversed(raw):
-                try:
-                    candles.append({
-                        "ts": int(item[0]),
-                        "open": float(item[1]),
-                        "high": float(item[2]),
-                        "low": float(item[3]),
-                        "close": float(item[4]),
-                        "vol": float(item[5]),
-                    })
-                except (ValueError, IndexError):
-                    continue
-            if candles:
-                _CANDLES_CACHE[cache_key] = (now_ts, candles)
-                return {"instId": inst_id, "bar": bar, "candles": candles, "source": "OKX REST"}
+        # 三级容灾直连（www.okx.com → aws.okx.com → okx CLI），修复部署环境
+        # 单点 www 不可达 / 区域限频时 1H/4H K 线时有时无的问题
+        from scripts.market_data_service import fetch_candles as _fetch_candles
+        raw = _fetch_candles(inst_id, bar=bar, limit=limit, timeout=5.0)
+        candles = []
+        for item in reversed(raw or []):
+            try:
+                candles.append({
+                    "ts": int(item[0]),
+                    "open": float(item[1]),
+                    "high": float(item[2]),
+                    "low": float(item[3]),
+                    "close": float(item[4]),
+                    "vol": float(item[5]),
+                })
+            except (ValueError, IndexError):
+                continue
+        if candles:
+            _CANDLES_CACHE[cache_key] = (now_ts, candles)
+            return {"instId": inst_id, "bar": bar, "candles": candles, "source": "OKX REST"}
+        raise RuntimeError("upstream returned no candles (all fallback levels exhausted)")
     except Exception as exc:
         if cached:
             return {"instId": inst_id, "bar": bar, "candles": cached[1], "source": "stale_cache", "warn": str(exc)}
