@@ -91,6 +91,13 @@ def unfreeze_environment() -> None:
     _FROZEN_ENVIRONMENT = None
 
 
+def current_environment(values: Mapping[str, str] | None = None) -> OKXEnvironment:
+    """The environment the process must use right now: a frozen cycle env wins,
+    otherwise the live LIVE/DEMO selection. Signed REST callers must use this
+    instead of calling selected_environment() directly."""
+    return _FROZEN_ENVIRONMENT or selected_environment(values)
+
+
 def replace_cli_prefix(command: str, values: Mapping[str, str] | None = None) -> str:
     """Bind the process to the frozen/current credential group and replace a legacy CLI prefix."""
     selected = _FROZEN_ENVIRONMENT or selected_environment(values)
