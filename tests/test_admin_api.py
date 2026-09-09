@@ -467,10 +467,11 @@ class AdminApiTests(unittest.TestCase):
             "minNotional": "5", "quantity_unit": "base",
         }] if inst_id == "SOL-USDT-SWAP" else [])
         saved = []
+
         with patch.object(app_module, "selected_environment", return_value=env), \
              patch.object(app_module, "get_exchange", return_value=adapter), \
              patch.object(app_module, "load_instruments", return_value=[{"instId": "BTC-USDT-SWAP", "name": "BTC"}]), \
-             patch.object(app_module, "save_instruments", side_effect=lambda rows: saved.extend(rows)), \
+             patch.object(app_module, "save_instruments", side_effect=lambda rows: saved.append(list(rows))), \
              patch.object(app_module, "audit_record"):
             ticker = self.client.post("/api/v1/admin/instruments", headers=headers, json={"inst_id": "SOLUSDT"})
             self.assertEqual(ticker.status_code, 422, ticker.text)
@@ -481,7 +482,10 @@ class AdminApiTests(unittest.TestCase):
         body = response.json()
         self.assertEqual(body["added"]["instId"], "SOL-USDT-SWAP")
         self.assertEqual(body["added"]["venue_symbol"], "SOLUSDT")
-        self.assertEqual(saved[-1]["instId"], "SOL-USDT-SWAP")
+        persisted = saved[-1][-1]
+        self.assertEqual(persisted["instId"], "SOL-USDT-SWAP")
+        self.assertNotIn("venue_symbol", persisted)
+
 
 
 

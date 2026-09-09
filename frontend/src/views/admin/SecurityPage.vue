@@ -19,20 +19,20 @@ watch(bannerMsg, () => { bannerSeq.value++ })
 
 const draftExchange = computed(() => String(config.value?.editable?.exchange || ''))
 const savedExchange = computed(() => String(exchangeRt.value?.exchange || ''))
-const isBinanceDraft = computed(() => draftExchange.value === 'binance')
+const isBinance = computed(() => draftExchange.value === 'binance')
 const isBinanceSaved = computed(() => savedExchange.value === 'binance')
 const exchangeDraftDirty = computed(() => !!draftExchange.value && !!savedExchange.value && draftExchange.value !== savedExchange.value)
-const venueDraftName = computed(() => isBinanceDraft.value ? 'Binance USD-M' : 'OKX')
+const venueName = computed(() => isBinance.value ? 'Binance USD-M' : 'OKX')
 const venueSavedName = computed(() => isBinanceSaved.value ? 'Binance USD-M' : 'OKX')
 const currentMode = computed({
   get() {
     const ed = config.value?.editable
     if (!ed) return 'demo'
-    return isBinanceDraft.value ? (ed.binance_environment || 'demo') : (ed.okx_environment || 'demo')
+    return isBinance.value ? (ed.binance_environment || 'demo') : (ed.okx_environment || 'demo')
   },
   set(value: string) {
     if (!config.value?.editable) return
-    if (isBinanceDraft.value) config.value.editable.binance_environment = value
+    if (isBinance.value) config.value.editable.binance_environment = value
     else config.value.editable.okx_environment = value
   },
 })
@@ -275,8 +275,7 @@ async function saveEnvironment() {
     }
     await api('/api/v1/admin/config', { method: 'PUT', body: JSON.stringify(body) })
     keys.value = { live_key: '', live_secret: '', live_pass: '', demo_key: '', demo_secret: '', demo_pass: '' }
-    bannerMsg.value = { text: `${venueDraftName.value} ${environment.toUpperCase()} 环境与凭证已安全保存`, type: 'ok' }
-
+    bannerMsg.value = { text: `${venueName.value} ${environment.toUpperCase()} 环境与凭证已安全保存`, type: 'ok' }
     await loadAll()
   } catch (e: any) {
     bannerMsg.value = { text: `保存失败：${e.message}`, type: 'err' }
@@ -396,8 +395,10 @@ async function confirmClose() {
 
 onMounted(loadAll)
 </script>
+
 <template>
   <div class="space-y-4 font-mono text-xs">
+    <!-- Header & Action Bar -->
     <div class="panel-banner-compact">
       <div class="flex items-center space-x-2.5">
         <div class="panel-banner-icon">
@@ -407,28 +408,39 @@ onMounted(loadAll)
           <h1 class="text-xs sm:text-[13px] font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
             {{ t('admin.nSecurity') }}
           </h1>
-          <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);"> {{ venueDraftName }} 账户连接与交易标的池 —— 交易所切换、实盘/模拟盘、HMAC 凭证与 USDT 永续标的管理 </p>
+          <p class="text-[11px] font-mono mt-0.5" style="color: var(--text-muted);"> {{ venueName }} 账户连接与交易标的池 —— 交易所切换、实盘/模拟盘、HMAC 凭证与 USDT 永续标的管理 </p>
+
         </div>
       </div>
-      <span class="badge-lever">交易核心底座 · 2/4</span>
+      <span class="badge-lever">
+        交易核心底座 · 2/4
+      </span>
     </div>
 
-    <SaveBar :type="bannerMsg?.type || 'ok'" :text="bannerMsg?.text || ''" :nonce="bannerSeq" @dismiss="bannerMsg = null" />
+    <SaveBar
+          :type="bannerMsg?.type || 'ok'"
+          :text="bannerMsg?.text || ''"
+          :nonce="bannerSeq"
+          @dismiss="bannerMsg = null"
+        />
     <div v-if="loading" class="py-12 text-center text-xs font-mono" style="color: var(--text-muted);">正在加载...</div>
 
     <template v-else-if="config">
+      <!-- 1. Exchange account & environment -->
       <div class="rounded-xl border p-4 sm:p-5 space-y-4 shadow-xs transition-colors" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
         <div class="flex items-center justify-between pb-3 border-b" style="border-color: var(--border-subtle);">
           <div class="flex items-center space-x-2">
             <ShieldAlert class="w-4 h-4" style="color: var(--color-brand);" />
-            <h2 class="text-sm font-bold font-mono" style="color: var(--text-main);">1. {{ venueDraftName }} 账号连接与交易环境</h2>
+            <h2 class="text-sm font-bold font-mono" style="color: var(--text-main);">1. {{ venueName }} 账号连接与交易环境</h2>
           </div>
           <span class="text-[11px] font-mono px-2 py-0.5 rounded border font-bold" :class="accountReady ? 'text-emerald-500 border-emerald-500/30 bg-emerald-500/10' : 'text-amber-500 border-amber-500/30 bg-amber-500/10'">
             {{ accountReady ? 'READY · 凭证已配置' : 'NOT READY · 未配置凭证' }}
           </span>
         </div>
 
-        <div v-if="!isBinanceDraft && runtime" class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-4">
+        <div v-if="!isBinance && runtime" class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-4">
+
+          <!-- runtime detail -->
           <div>
             <div class="text-xs font-mono leading-relaxed space-y-1" style="color: var(--text-muted);">
               <div>当前环境：<strong style="color: var(--text-main);">{{ (runtime.selected_mode || 'demo').toUpperCase() }}</strong></div>
@@ -439,6 +451,13 @@ onMounted(loadAll)
               <div class="text-[11px]" style="color: var(--text-faint);">权限：{{ (runtime.oauth?.scopes || []).join(', ') || '--' }}</div>
               <div>只读探针：<span :class="runtime.read_probe?.ok ? 'text-emerald-500' : runtime.degraded ? 'text-amber-500' : 'text-rose-500'">{{ runtime.read_probe?.detail || '--' }}</span></div>
               <div v-if="runtime.live_control_probe" class="text-[11px]">LIVE 对照探针：<span :class="runtime.live_control_probe.ok ? 'text-emerald-500' : 'text-rose-500'">{{ runtime.live_control_probe.detail }}</span></div>
+              <div v-if="runtime.issues?.length" class="mt-2 text-[11px]" :class="runtime.degraded ? 'text-amber-500' : 'text-rose-500'">
+                <div v-for="(issue, i) in runtime.issues" :key="i">• {{ issue }}</div>
+              </div>
+              <div v-if="runtime.steps?.length" class="mt-2 text-[11px]" style="color: var(--text-faint);">
+                <div class="font-bold mb-0.5" style="color: var(--text-muted);">操作指引</div>
+                <div v-for="(s, i) in runtime.steps" :key="i">• {{ s }}</div>
+              </div>
             </div>
             <div class="flex gap-2 mt-3">
               <button @click="rediagnose" class="flex items-center space-x-1 px-3 py-1.5 rounded-lg border text-xs font-mono cursor-pointer transition-all shadow-xs" style="background-color: var(--bg-card-subtle); border-color: var(--border-medium); color: var(--text-main);"><RefreshCw class="w-3.5 h-3.5" /><span>重新诊断</span></button>
@@ -450,6 +469,8 @@ onMounted(loadAll)
               <div>OKX CLI：{{ cliCheck.okx_installed ? `✓ ${cliCheck.okx_version} (${cliCheck.okx_path})` : '✗ 未安装' }}</div>
             </div>
           </div>
+
+          <!-- OAuth panel -->
           <div class="rounded-lg p-3.5 border shadow-xs" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
             <div class="text-[11px] font-bold font-mono mb-2" style="color: var(--text-main);">官方 OAuth 授权（推荐）</div>
             <div class="text-[11px] font-mono mb-2 leading-relaxed" style="color: var(--text-muted);">授权码登录，无需向 R20 提供 OKX 密码、API Key 或 2FA。</div>
@@ -461,41 +482,76 @@ onMounted(loadAll)
               <option value="tr">TR · tr.okx.com</option>
             </select>
             <div class="flex flex-wrap gap-2">
+              <!-- When logged in: provide Unbind and Switch buttons -->
               <template v-if="runtime?.oauth?.status === 'logged_in'">
-                <button v-if="auth.isSuperadmin" @click="switchOauthAccount" :disabled="switchingAccount || loggingOutOauth" class="flex-1 btn-admin-primary disabled:opacity-50 inline-flex items-center justify-center space-x-1">
+                <button
+                  v-if="auth.isSuperadmin"
+                  @click="switchOauthAccount"
+                  :disabled="switchingAccount || loggingOutOauth"
+                  class="flex-1 btn-admin-primary disabled:opacity-50 inline-flex items-center justify-center space-x-1"
+                  title="解除当前授权并重新在浏览器中连接新 OKX 账号"
+                >
                   <RefreshCw class="w-3.5 h-3.5" :class="switchingAccount ? 'animate-spin' : ''" />
                   <span>{{ switchingAccount ? '切换中…' : '更换 OKX 账号' }}</span>
                 </button>
-                <button v-if="auth.isSuperadmin" @click="logoutOauth" :disabled="loggingOutOauth || switchingAccount" class="px-3 py-1.5 rounded-lg border text-xs font-mono cursor-pointer transition-all shadow-xs disabled:opacity-50 inline-flex items-center space-x-1 text-rose-400 hover:bg-rose-950/30" style="background-color: var(--bg-card-subtle); border-color: var(--color-down-border);">
+                <button
+                  v-if="auth.isSuperadmin"
+                  @click="logoutOauth"
+                  :disabled="loggingOutOauth || switchingAccount"
+                  class="px-3 py-1.5 rounded-lg border text-xs font-mono cursor-pointer transition-all shadow-xs disabled:opacity-50 inline-flex items-center space-x-1 text-rose-400 hover:bg-rose-950/30"
+                  style="background-color: var(--bg-card-subtle); border-color: var(--color-down-border);"
+                  title="解绑当前 OKX 账号并清除本地授权凭证"
+                >
                   <Unlink class="w-3.5 h-3.5" />
                   <span>{{ loggingOutOauth ? '解绑中…' : '解绑账号' }}</span>
                 </button>
               </template>
+              <!-- When not logged in: standard connect button -->
               <template v-else>
-                <button v-if="auth.isSuperadmin" @click="startOauth" :disabled="startingOauth" class="flex-1 btn-admin-primary disabled:opacity-50">
+                <button
+                  v-if="auth.isSuperadmin"
+                  @click="startOauth"
+                  :disabled="startingOauth"
+                  class="flex-1 btn-admin-primary disabled:opacity-50"
+                >
                   <KeyRound class="w-3.5 h-3.5" />
                   <span>{{ startingOauth ? '申请授权码中…' : '使用授权码连接 OKX' }}</span>
                 </button>
               </template>
-              <button v-if="auth.isSuperadmin" @click="installCli" :disabled="installingCli" class="btn-admin-secondary disabled:opacity-50">{{ installingCli ? '安装中…' : '安装/升级 CLI' }}</button>
+              <button
+                v-if="auth.isSuperadmin"
+                @click="installCli"
+                :disabled="installingCli"
+                class="btn-admin-secondary disabled:opacity-50"
+              >
+                {{ installingCli ? '安装中…' : '安装/升级 CLI' }}
+              </button>
             </div>
+
             <div v-if="oauthState" class="mt-2 text-[11px] font-mono text-amber-500">{{ oauthState }}</div>
+
             <div v-if="oauthResult?.kind === 'device'" class="mt-2 p-2.5 rounded-lg border space-y-1.5" style="background-color: var(--color-brand-bg); border-color: var(--color-brand-border);">
               <div class="text-[11px] font-bold font-mono" style="color: var(--text-main);">请在浏览器完成 OKX 官方授权</div>
               <div class="text-[11px] font-mono break-all"><a :href="oauthResult.verification_uri" target="_blank" rel="noopener" class="underline" style="color: var(--color-brand);">{{ oauthResult.verification_uri }}</a></div>
               <div class="text-center py-1.5 rounded border" style="background-color: var(--bg-card); border-color: var(--border-subtle);"><span class="text-lg font-black font-mono tracking-widest" style="color: var(--text-main);">{{ oauthResult.user_code }}</span></div>
+              <div class="text-[11px] font-mono" style="color: var(--text-muted);">有效期约 {{ Math.ceil(Number(oauthResult.expires_in || 600) / 60) }} 分钟</div>
               <button @click="checkOauth" class="w-full px-2 py-1.5 rounded-lg border text-[11px] font-mono cursor-pointer transition-all shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-medium); color: var(--text-main);">我已授权，检查状态</button>
             </div>
-            <div v-else-if="oauthResult?.kind === 'logged_in'" class="mt-2 p-2.5 rounded-lg border text-[11px] font-mono text-emerald-500" style="background-color: var(--color-up-bg); border-color: var(--color-up-border);">✅ 当前已经登录 · 站点 {{ oauthResult.site }}</div>
+            <div v-else-if="oauthResult?.kind === 'logged_in'" class="mt-2 p-2.5 rounded-lg border text-[11px] font-mono text-emerald-500" style="background-color: var(--color-up-bg); border-color: var(--color-up-border);">
+              <div class="flex items-center justify-between">
+                <span>✅ 当前已经登录 · 站点 {{ oauthResult.site }}</span>
+                <span class="text-[11px] text-emerald-400">已就绪</span>
+              </div>
+              <div class="text-[11px] break-all mt-1" style="color: var(--text-muted);">{{ (oauthResult.scopes || []).join(', ') }}</div>
+            </div>
             <div v-else-if="oauthResult?.kind === 'error'" class="mt-2 p-2.5 rounded-lg border text-[11px] font-mono text-rose-500" style="background-color: var(--color-down-bg); border-color: var(--color-down-border);">{{ oauthResult.message }}</div>
           </div>
         </div>
 
-        <div v-if="isBinanceDraft" class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-4">
+        <div v-if="isBinance" class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-4">
           <div class="text-xs font-mono leading-relaxed space-y-1" style="color: var(--text-muted);">
             <div>当前交易所：<strong style="color: var(--text-main);">Binance USD-M</strong></div>
-            <div>草稿环境：<strong style="color: var(--text-main);">{{ currentMode.toUpperCase() }}</strong></div>
-            <div>已保存账户：<strong style="color: var(--text-main);">{{ savedExchange.toUpperCase() || '--' }} {{ (exchangeRt?.environment || '').toUpperCase() }}</strong></div>
+            <div>当前环境：<strong style="color: var(--text-main);">{{ (exchangeRt?.environment || currentMode || 'demo').toUpperCase() }}</strong></div>
             <div>认证方式：<span style="color: var(--color-brand);">HMAC API Key / Secret</span></div>
             <div>DEMO 主机：<span style="color: var(--text-main);">demo-fapi.binance.com</span> · LIVE：<span style="color: var(--text-main);">fapi.binance.com</span></div>
             <div class="text-[11px]" style="color: var(--text-faint);">无需 Passphrase、OAuth 或 OKX CLI。Key 需开通 USD-M 期货，建议限制 IP。</div>
@@ -521,6 +577,8 @@ onMounted(loadAll)
           </div>
         </div>
 
+
+        <!-- environment + backup keys -->
         <div class="pt-3 border-t" style="border-color: var(--border-subtle);">
           <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
             <div>
@@ -548,7 +606,10 @@ onMounted(loadAll)
               <button @click="saveManualClose" class="btn-admin-secondary">保存平仓开关</button>
             </div>
           </div>
-          <details v-if="!isBinanceDraft" class="mt-3">
+
+
+          <details v-if="!isBinance" class="mt-3">
+
             <summary class="cursor-pointer text-[11px] font-mono select-none" style="color: var(--color-brand);">备用方式：分别配置 LIVE / DEMO API Key（无人值守部署）</summary>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3 p-3 rounded-lg border shadow-xs" style="background-color: var(--bg-card-subtle); border-color: var(--border-subtle);">
               <div class="space-y-2">
@@ -569,6 +630,7 @@ onMounted(loadAll)
         </div>
       </div>
 
+      <!-- 2. initial capital -->
       <div class="rounded-xl border p-4 sm:p-5 shadow-xs transition-colors" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
         <div class="flex items-center space-x-2 mb-4 pb-3 border-b" style="border-color: var(--border-subtle);">
           <Wallet class="w-4 h-4 text-emerald-500" />
@@ -595,15 +657,19 @@ onMounted(loadAll)
         </div>
       </div>
 
+      <!-- 3. instruments -->
       <div class="rounded-xl border overflow-hidden shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
         <div class="px-4 py-3 border-b flex items-center justify-between" style="border-color: var(--border-subtle); background-color: var(--bg-card-subtle);">
           <div class="flex items-center space-x-2">
             <Layers class="w-4 h-4" style="color: var(--color-brand);" />
-            <h2 class="text-xs font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">3. 交易标的池 ({{ instruments.length }}/{{ instLimits.maximum }})</h2>
+            <h2 class="text-xs font-black font-mono uppercase tracking-wide" style="color: var(--text-main);">
+              3. 交易标的池 ({{ instruments.length }}/{{ instLimits.maximum }})
+            </h2>
           </div>
           <div class="flex gap-2">
             <input v-model="newInstId" :disabled="exchangeDraftDirty" :placeholder="isBinanceSaved ? '例如: BTCUSDT' : '例如: BTC-USDT-SWAP'" class="w-44 rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none border transition-colors disabled:opacity-40" style="background-color: var(--bg-input); border-color: var(--border-subtle); color: var(--text-main);" @keyup.enter="addInstrument" />
             <button @click="addInstrument" :disabled="exchangeDraftDirty" class="btn-admin-primary disabled:opacity-40">添加标的</button>
+
           </div>
         </div>
         <div class="overflow-x-auto">
@@ -624,6 +690,7 @@ onMounted(loadAll)
                 <td class="py-2.5 px-3" style="color: var(--text-muted);">{{ item.venue_symbol || item.instId }}</td>
                 <td class="py-2.5 px-3" style="color: var(--text-muted);">{{ item.name }}</td>
                 <td class="py-2.5 px-3 num-tabular" style="color: var(--text-faint);">BASE</td>
+
                 <td class="py-2.5 px-3">
                   <span v-if="item.protected" class="px-1.5 py-0.5 rounded-[3px] text-[11px] font-mono font-bold border" style="background-color: var(--color-warn-bg); border-color: var(--color-warn-border); color: var(--color-warn);">🔒 保底必选</span>
                   <span v-else-if="item.has_tracker" class="px-1.5 py-0.5 rounded-[3px] text-[11px] font-mono font-bold border" style="background-color: var(--color-brand-bg); border-color: var(--color-brand-border); color: var(--color-brand);">持仓中</span>
@@ -631,6 +698,7 @@ onMounted(loadAll)
                 </td>
                 <td class="py-2.5 px-4 text-right">
                   <button @click="removeInstrument(item)" :disabled="exchangeDraftDirty || item.protected || item.has_tracker" class="p-1 rounded hover:opacity-80 text-rose-400 disabled:opacity-20 cursor-pointer transition-opacity" title="从标的池移除">
+
                     <Trash2 class="w-3.5 h-3.5" />
                   </button>
                 </td>
@@ -638,12 +706,12 @@ onMounted(loadAll)
             </tbody>
           </table>
         </div>
-        <p class="px-4 py-2 border-t text-[11px] font-mono" style="border-color: var(--border-subtle); color: var(--text-faint);">
-          标的校验按已保存交易所 {{ (savedExchange || '--').toUpperCase() }}。可输入 {{ isBinanceSaved ? 'BTCUSDT 或 BTC-USDT-SWAP' : 'BTC-USDT-SWAP' }}，提交前归一化为内部代码。BTC 保底不可删；有追踪器禁止移除；最多 {{ instLimits.maximum }} 个。数量一律 BASE。
-          <span v-if="exchangeDraftDirty" class="text-amber-500"> 交易所下拉未保存，已禁用增删/刷新。</span>
-        </p>
+        <p class="px-4 py-2 border-t text-[11px] font-mono" style="border-color: var(--border-subtle); color: var(--text-faint);">标的校验按已保存交易所 {{ (savedExchange || '--').toUpperCase() }}。可输入 {{ isBinanceSaved ? 'BTCUSDT 或 BTC-USDT-SWAP' : 'BTC-USDT-SWAP' }}，提交前归一化为内部代码。BTC 保底不可删；有追踪器禁止移除；最多 {{ instLimits.maximum }} 个。数量一律 BASE。<span v-if="exchangeDraftDirty" class="text-amber-500"> 交易所下拉未保存，已禁用增删/刷新。</span></p>
+
+
       </div>
 
+      <!-- 4. positions & emergency close -->
       <div class="rounded-xl border overflow-hidden shadow-xs" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
         <div class="px-4 py-3 border-b flex items-center justify-between" style="border-color: var(--border-subtle); background-color: var(--bg-card-subtle);">
           <div class="flex items-center space-x-2">
@@ -658,6 +726,7 @@ onMounted(loadAll)
         <div v-if="snapshotState" class="px-4 pt-2 text-[11px] font-mono text-amber-500">{{ snapshotState }}</div>
         <div v-if="snapshot" class="px-4 pt-2 text-[11px] font-mono" style="color: var(--text-muted);">
           交易所：<strong style="color: var(--text-main);">{{ (snapshot.exchange || venueSavedName).toUpperCase() }}</strong>
+
           · 环境：<strong :class="snapshot.environment === 'live' ? 'text-rose-500' : 'text-emerald-500'">{{ (snapshot.environment || '').toUpperCase() }}</strong>
           · 持仓 {{ snapshot.positions?.length ?? 0 }} · 当前挂单 {{ snapshot.orders?.length ?? 0 }} · {{ new Date(snapshot.captured_at_ms).toLocaleString() }}
         </div>
@@ -667,6 +736,7 @@ onMounted(loadAll)
               <tr class="border-b text-[11px] uppercase tracking-wider font-bold" style="border-color: var(--border-subtle); background-color: var(--bg-card-subtle); color: var(--text-muted);">
                 <th class="py-2.5 px-4">仓位标的</th>
                 <th class="py-2.5 px-3">数量(BASE)</th>
+
                 <th class="py-2.5 px-3">模式</th>
                 <th class="py-2.5 px-3">未实现盈亏</th>
                 <th class="py-2.5 px-4 text-right">操作</th>
@@ -676,7 +746,9 @@ onMounted(loadAll)
               <tr v-for="p in snapshot.positions" :key="p.instId + p.posSide" class="border-b last:border-b-0 hover:bg-[var(--bg-card-hover)] transition-colors" style="border-color: var(--border-subtle);">
                 <td class="py-2.5 px-4">
                   <strong style="color: var(--text-main);">{{ p.instId }}</strong>
-                  <span class="ml-1.5 px-1.5 py-0.2 rounded text-[11px] font-bold border" :style="p.posSide === 'long' ? { backgroundColor: 'var(--color-up-bg)', borderColor: 'var(--color-up-border)', color: 'var(--color-up)' } : { backgroundColor: 'var(--color-down-bg)', borderColor: 'var(--color-down-border)', color: 'var(--color-down)' }">{{ (p.posSide || 'net').toUpperCase() }}</span>
+                  <span class="ml-1.5 px-1.5 py-0.2 rounded text-[11px] font-bold border" :style="p.posSide === 'long' ? { backgroundColor: 'var(--color-up-bg)', borderColor: 'var(--color-up-border)', color: 'var(--color-up)' } : { backgroundColor: 'var(--color-down-bg)', borderColor: 'var(--color-down-border)', color: 'var(--color-down)' }">
+                    {{ (p.posSide || 'net').toUpperCase() }}
+                  </span>
                 </td>
                 <td class="py-2.5 px-3 num-tabular" style="color: var(--text-muted);">{{ p.pos || '0' }}</td>
                 <td class="py-2.5 px-3 text-[11px]" style="color: var(--text-faint);">{{ p.mgnMode || '--' }}</td>
@@ -689,11 +761,14 @@ onMounted(loadAll)
           </table>
           <div v-else-if="snapshot" class="py-6 text-center text-xs font-mono text-emerald-500">✓ 当前环境 0 活跃持仓</div>
           <div v-else class="py-6 text-center text-xs font-mono" style="color: var(--text-faint);">点击「刷新持仓与挂单」从 {{ venueSavedName }} 读取最新实时状态</div>
+
         </div>
         <p class="px-4 py-2 border-t text-[11px] font-mono" style="border-color: var(--border-subtle); color: var(--text-faint);">平仓流程：复核交易所与仓位 → 撤销同标的冲突委托 → 市价平仓 → 轮询确认仓位归零。需先启用上方手动平仓开关。</p>
+
       </div>
     </template>
 
+    <!-- Close confirm modal -->
     <div v-if="closeModal?.show" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4" @click.self="closeModal = null">
       <div class="rounded-xl border p-5 sm:p-6 w-full max-w-[460px] max-h-[88dvh] overflow-y-auto shadow-2xl transition-colors" style="background-color: var(--bg-card); border-color: var(--border-subtle);">
         <h3 class="text-sm font-bold text-rose-500 mb-2 font-mono">快速安全平仓</h3>
@@ -714,4 +789,3 @@ onMounted(loadAll)
     </div>
   </div>
 </template>
-

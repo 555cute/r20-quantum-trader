@@ -2181,10 +2181,11 @@ def add_admin_instrument(payload: InstrumentAddRequest, x_r20_admin_token: str |
     item = from_okx_instrument(raw)
     item["quantity_unit"] = "base"
     item["ctVal"] = float(raw.get("ctVal") or item.get("ctVal") or 1.0)
-    item["venue_symbol"] = venue_symbol(inst_id, selected_environment().exchange)
     save_instruments([*current, item])
+    added = {**item, "venue_symbol": venue_symbol(inst_id, selected_environment().exchange)}
     audit_record("instrument.add", "success", {"instId": inst_id, "exchange": selected_environment().exchange})
-    return {"added": item, "count": len(current) + 1, "effective": "immediate", "message": f"{item['name']} 已成功加入交易池并实时同步全网大屏与因果雷达"}
+    return {"added": added, "count": len(current) + 1, "effective": "immediate", "message": f"{item['name']} 已成功加入交易池并实时同步全网大屏与因果雷达"}
+
 
 
 
