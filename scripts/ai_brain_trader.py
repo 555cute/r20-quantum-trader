@@ -592,11 +592,37 @@ def _xv_flush_health(packages: List[Dict[str, Any]]) -> None:
                 "avg_ms": round(sum(v["latency"].values()) / len(v["latency"])) if v["latency"] else 0,
                 "testnet": str(os.environ.get(f"R20_{venue.upper()}_TESTNET", "0")) == "1",
             }
+        symbols: Dict[str, Any] = {}
+        try:  # 逐币跨所快照（US-007 前端消费源）——纯附加，异常不影响健康度落盘
+            for p in packages:
+                xv = p.get("xvenue") or {}
+                okx_px = safe_float(p.get("price", 0))
+                name = str(p.get("name") or "")
+                if okx_px <= 0 or not xv or not name:
+                    continue
+
+                def _basis(v, _ref=okx_px):
+                    try:
+                        v = float(v)
+                        return round((v - _ref) / _ref * 100, 3) if v > 0 else None
+                    except (TypeError, ValueError):
+                        return None
+                symbols[name] = {
+                    "okx": okx_px,
+                    "bin_last": xv.get("bin_last"), "bin_basis_pct": _basis(xv.get("bin_last")),
+                    "gate_last": xv.get("gate_last"), "gate_basis_pct": _basis(xv.get("gate_last")),
+                    "bin_ls": xv.get("bin_ls"), "gate_ls": xv.get("gate_ls"),
+                    "bin_funding_pct": xv.get("bin_funding_pct"),
+                    "gate_funding_pct": xv.get("gate_funding_pct"),
+                }
+        except Exception:
+            pass
         out = {
             "updated_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
             "writer_pid": os.getpid(),
             "package_count": len(packages),
             "venues": venues,
+            "symbols": symbols,
         }
         with open(VENUE_HEALTH_FILE, "w", encoding="utf-8") as f:
             json.dump(out, f, ensure_ascii=False, indent=1)
@@ -1189,7 +1215,10 @@ def assemble_decision_cache(
             "raw_funding_rate": f"{p['fundingRate']}%" if p.get('fundingRate') else "--",
             "raw_oi": p.get('oiUsd') or "--",
             "raw_taker_vol": p.get('takerNetUsd') or "--",
-            "raw_ls_ratio": str(p.get('lsRatio')) if p.get('lsRatio') is not None else "--"
+            "raw_ls_ratio": str(p.get('lsRatio')) if p.get('lsRatio') is not None else "--",
+            # US-007 数据通路：把跨所比对矩阵随决策缓存持久化，供 /api/all 透传前台；
+            # 纯附加键，既有消费方忽略未知键，缺数据时为空 dict
+            "xvenue": p.get("xvenue") or {}
         }
 
     return standard_cache

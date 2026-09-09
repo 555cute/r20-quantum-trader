@@ -132,6 +132,25 @@ class TestXVenueMatrix(unittest.TestCase):
             self.assertIn("writer_pid", doc)
             self.assertIsInstance(doc["venues"]["okx"]["failed"], dict)
 
+    def test_flush_symbols_cross_venue_snapshot(self):
+        import json as _json
+        pkg = {"name": "BTC", "price": 100.0, "xvenue": {
+            "bin_last": 100.05, "gate_last": 99.9, "bin_ls": 2.1, "gate_ls": 1.4,
+            "bin_funding_pct": 0.0032, "gate_funding_pct": 0.0098}}
+        stale = {"name": "ETH", "price": 0, "xvenue": {"bin_last": 1}}
+        with tempfile.TemporaryDirectory() as td:
+            f = os.path.join(td, "vh.json")
+            with patch.object(abt, "VENUE_HEALTH_FILE", f):
+                abt._xv_flush_health([pkg, stale])
+            doc = _json.load(open(f))
+        s = doc["symbols"]["BTC"]
+        self.assertEqual(s["okx"], 100.0)
+        self.assertEqual(s["bin_basis_pct"], 0.05)
+        self.assertEqual(s["gate_basis_pct"], -0.1)
+        self.assertEqual(s["bin_ls"], 2.1)
+        self.assertEqual(s["gate_funding_pct"], 0.0098)
+        self.assertNotIn("ETH", doc["symbols"])   # price<=0 不进快照
+
 
 class TestDivergenceNotes(unittest.TestCase):
     """US-003 分歧标注正反例（阈值 50% / 3x，依据价值研究实测基线）。"""
