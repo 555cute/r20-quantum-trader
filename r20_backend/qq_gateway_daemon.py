@@ -23,6 +23,9 @@ from typing import Any, Optional
 
 import websockets
 
+from r20_backend.file_lock import acquire, release
+from r20_backend.qq_bind import DAEMON_LOCK_FILE
+
 ROOT = Path(__file__).resolve().parents[1]
 LOG_FILE = ROOT / "logs" / "qq_gateway.log"
 QQ_TOKEN_URL = "https://bots.qq.com/app/getAppAccessToken"
@@ -236,12 +239,22 @@ async def _run_session():
             backoff = min(backoff * 2, 60)
 
 
-def main():
-    signal.signal(signal.SIGTERM, stop_handler)
-    signal.signal(signal.SIGINT, stop_handler)
-    log("QQ Gateway Daemon 启动中...")
-    asyncio.run(_run_session())
-    log("QQ Gateway Daemon 已安全停止。")
+def main() -> None:
+    DAEMON_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with DAEMON_LOCK_FILE.open("a+", encoding="utf-8") as handle:
+        try:
+            acquire(handle, blocking=False)
+        except BlockingIOError:
+            print("[qq_gateway_daemon] 已有实例在运行，本进程退出。", flush=True)
+            return
+        try:
+            signal.signal(signal.SIGTERM, stop_handler)
+            signal.signal(signal.SIGINT, stop_handler)
+            log("QQ Gateway Daemon 启动中...")
+            asyncio.run(_run_session())
+            log("QQ Gateway Daemon 已安全停止。")
+        finally:
+            release(handle)
 
 
 if __name__ == "__main__":

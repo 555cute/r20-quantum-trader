@@ -13,13 +13,18 @@ import binascii
 import datetime
 import json
 import secrets
+import subprocess
+import sys
 import threading
 import time
 import urllib.parse
 import urllib.request
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+from r20_backend.file_lock import acquire, release
 
 QQ_HOST = "q.qq.com"
 QQ_TOKEN_URL = "https://bots.qq.com/app/getAppAccessToken"
@@ -27,6 +32,13 @@ QQ_API_BASE = "https://api.sgroup.qq.com"
 BIND_STATUS = {"NONE": 0, "PENDING": 1, "COMPLETED": 2, "EXPIRED": 3}
 TASK_TTL_SECONDS = 300
 MAX_ACTIVE_TASKS = 3
+
+ROOT = Path(__file__).resolve().parents[1]
+DAEMON_LOCK_FILE = ROOT / "data" / ".qq_gateway_daemon.lock"
+DAEMON_LOG_FILE = ROOT / "logs" / "qq_gateway.log"
+
+_DAEMON_SPAWN_LOCK = threading.Lock()
+_OWNED_DAEMON: subprocess.Popen[bytes] | None = None
 
 
 class _BindTask:
@@ -144,25 +156,54 @@ def _gc_tasks() -> None:
         _CAPTURE_SESSIONS.pop(cid, None)
 
 
-def ensure_qq_gateway_daemon_running() -> None:
-    """Ensure the persistent QQ Gateway daemon is active in background."""
-    import subprocess, sys
-    from pathlib import Path
-    root = Path(__file__).resolve().parents[1]
-    log_file = root / "logs" / "qq_gateway.log"
-    log_file.parent.mkdir(parents=True, exist_ok=True)
+def _daemon_lock_held() -> bool:
+    """True when another process owns the daemon lock, or the probe cannot run.
+
+    Probe failures fail closed so ensure cannot blindly respawn.
+    """
     try:
-        output = subprocess.check_output(["ps", "-ef"], text=True)
-        if "r20_backend.qq_gateway_daemon" in output:
-            return
-        with open(log_file, "a", encoding="utf-8") as f:
-            subprocess.Popen(
-                [sys.executable, "-m", "r20_backend.qq_gateway_daemon"],
-                cwd=root,
-                stdin=subprocess.DEVNULL,
-                stdout=f,
-                stderr=subprocess.STDOUT,
-            )
+        DAEMON_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with DAEMON_LOCK_FILE.open("a+", encoding="utf-8") as handle:
+            try:
+                acquire(handle, blocking=False)
+            except BlockingIOError:
+                return True
+            try:
+                release(handle)
+            except OSError:
+                pass
+            return False
+    except OSError:
+        return True
+
+
+def ensure_qq_gateway_daemon_running() -> None:
+    """Ensure the persistent QQ Gateway daemon is active in background.
+
+    Same-process callers are serialized and reuse the in-flight Popen handle so
+    a child still taking the lifetime lock cannot start a herd. Cross-process
+    races may launch a loser; only the child that owns
+    ``data/.qq_gateway_daemon.lock`` proceeds.
+    """
+    global _OWNED_DAEMON
+    try:
+        DAEMON_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with _DAEMON_SPAWN_LOCK:
+            if _OWNED_DAEMON is not None:
+                if _OWNED_DAEMON.poll() is None:
+                    return
+                _OWNED_DAEMON = None
+            if _daemon_lock_held():
+                return
+            with DAEMON_LOG_FILE.open("a", encoding="utf-8") as log:
+                _OWNED_DAEMON = subprocess.Popen(
+                    [sys.executable, "-m", "r20_backend.qq_gateway_daemon"],
+                    cwd=ROOT,
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                )
     except Exception:
         pass
 
