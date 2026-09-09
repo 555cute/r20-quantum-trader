@@ -678,7 +678,9 @@ def execute_council_debate(
             )
 
         # Stage 1: Round 1 Independent Proposals
-        round1_budget = max(2.0, min(rem * 0.35, rem - (MIN_SAFE_REASONING_TIME * 2.0)))
+        # 首轮提案预算：思考型模型出一次带推理链的提案实测需 60~180s，纯比例切分
+        # 在中低总预算下会把它压到 53s 级必死（2026-09-10 05:15 实测），故加 90s 地板。
+        round1_budget = max(2.0, min(max(rem * 0.55, 90.0), rem - (MIN_SAFE_REASONING_TIME * 2.0)))
         with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(trader_keys))) as pool:
             futures = {
                 pool.submit(
@@ -763,7 +765,7 @@ def execute_council_debate(
                 f"Council timeout: remaining time {rem:.2f}s insufficient for standard deliberation (requires >= {MIN_SAFE_REASONING_TIME + 2.0}s)"
             )
 
-        member_timeout = max(2.0, min(rem * 0.50, rem - MIN_SAFE_REASONING_TIME))
+        member_timeout = max(2.0, min(max(rem * 0.55, 90.0), rem - MIN_SAFE_REASONING_TIME))
         with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(trader_keys))) as pool:
             futures = {
                 pool.submit(

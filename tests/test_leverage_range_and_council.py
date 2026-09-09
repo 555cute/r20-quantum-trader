@@ -147,6 +147,15 @@ class CouncilBudgetTests(unittest.TestCase):
         self.assertNotIn("int(min(3, _R20_MAX_LEVERAGE))", src)
         self.assertIn("_R20_MIN_LEVERAGE", src)
 
+    def test_debate_stage_budgets_have_90s_floor(self):
+        """思考型模型单席提案实测需 60~180s：0.35/0.50 纯比例切分在中低预算下
+        会压出 53s 级必死窗口（09-10 05:15 实测），两段预算都必须有 90s 地板。"""
+        import r20_backend.council_manager as cm
+        src = Path(cm.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("rem * 0.35", src)
+        self.assertNotIn("min(rem * 0.50,", src)
+        self.assertGreaterEqual(src.count("max(rem * 0.55, 90.0)"), 2)
+
 
 class BrainCouncilTransparencyTests(unittest.TestCase):
     def test_cache_and_history_contract(self):
