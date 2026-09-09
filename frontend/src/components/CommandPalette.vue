@@ -10,7 +10,7 @@ import {
   Search, Sun, Moon, Globe, Eye, CornerDownLeft, ArrowUp, ArrowDown,
   LayoutDashboard, Radio, Scroll, FileText, Users, Sparkles, Layers,
   ShieldAlert, ShieldCheck, Wallet, RefreshCw, Cpu, Package, FileCode,
-  Info, UserCog, LayoutGrid, ArrowUpRight,
+  Info, UserCog, LayoutGrid, ArrowUpRight, Newspaper,
 } from 'lucide-vue-next'
 
 const router = useRouter()
@@ -42,6 +42,7 @@ const commands = computed<Cmd[]>(() => {
         nav('council', 'admin.nCouncil', Users),
         nav('evolution', 'admin.nEvolution', Sparkles),
         nav('policy', 'admin.nPolicy', Layers),
+        nav('news', 'admin.newsSources', Newspaper),
         nav('risk', 'admin.nRisk', ShieldAlert),
         nav('interceptors', 'admin.nInterceptors', ShieldCheck),
         nav('security', 'admin.nSecurity', Wallet),
