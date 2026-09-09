@@ -33,5 +33,8 @@ export const enEvolution = {
     title: 'Anti-pollution guard',
     on: 'Active',
     desc: 'Small samples, emotional wording and overfitted rules are rejected from the library',
+    snapshot: 'Math snapshot observability',
+    snapshotCounts: 'dynamics {observed}/{total} · price-only {priceOnly} · none {none}',
+    baselineProtected: '{n} baseline rules re-added',
   },
 };

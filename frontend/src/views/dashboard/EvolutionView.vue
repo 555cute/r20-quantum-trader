@@ -58,6 +58,8 @@ function insBody(it: any): string {
   return String(it ?? '');
 }
 const actions = computed<any[]>(() => review.value.actions_taken || []);
+/** 宿主确定性数理快照可观测性审计（2026-09-10 起进报告；旧报告无此字段则隐藏行） */
+const snapAudit = computed<any>(() => review.value.snapshot_audit || null);
 
 /** 行动项兼容：字符串直出；对象优先 action/text，未知键拼接 */
 function actText(a: any): string {
@@ -216,6 +218,11 @@ const md = computed(() => (store.data as any)?.ai_trading_memory_md || '');
                 <span class="badge badge-up ms-1">{{ t('dash.evolution.guard.on') }}</span>
               </p>
               <p class="t-faint text-xs">{{ t('dash.evolution.guard.desc') }}</p>
+              <p v-if="snapAudit" class="mt-1 text-xs" style="color: var(--ink-2)">
+                {{ t('dash.evolution.guard.snapshot') }}：
+                {{ t('dash.evolution.guard.snapshotCounts', { observed: snapAudit.math_observable ?? 0, total: snapAudit.total ?? 0, priceOnly: snapAudit.PRICE_ONLY ?? 0, none: snapAudit.NONE ?? 0 }) }}
+                <span v-if="(review.baseline_memory_protected ?? 0) > 0" class="badge badge-warn ms-1">{{ t('dash.evolution.guard.baselineProtected', { n: review.baseline_memory_protected }) }}</span>
+              </p>
             </div>
           </div>
         </div>
