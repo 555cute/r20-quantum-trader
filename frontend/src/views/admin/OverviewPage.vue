@@ -219,7 +219,7 @@ const quickNav = [
           @click="router.push('/admin/security')"
         >
           <div class="flex items-center justify-between mb-2">
-            <span class="text-[11px] 2xl:text-xs font-mono" style="color: var(--text-muted);">OKX 连接环境</span>
+            <span class="text-[11px] 2xl:text-xs font-mono" style="color: var(--text-muted);">{{ (runtime.credentials?.exchange || 'exchange').toUpperCase() }} 连接环境</span>
             <div
               class="w-6 h-6 2xl:w-7 2xl:h-7 rounded-md flex items-center justify-center border"
               style="background-color: var(--bg-badge); border-color: var(--border-subtle); color: var(--text-main);"
@@ -228,12 +228,13 @@ const quickNav = [
             </div>
           </div>
           <div class="text-xl sm:text-2xl 2xl:text-3xl font-black font-mono tracking-tight" style="color: var(--color-brand);">
-            {{ runtime.credentials?.simulated_trading ? 'DEMO' : 'LIVE' }}
+            {{ (runtime.credentials?.environment || (runtime.credentials?.simulated_trading ? 'demo' : 'live') || 'demo').toUpperCase() }}
           </div>
           <div class="text-[11px] 2xl:text-[11px] font-mono mt-1 flex items-center space-x-1" style="color: var(--text-faint);">
-            <span :class="runtime.credentials?.okx_configured ? 'text-emerald-400' : 'text-amber-400'">
-              ● {{ runtime.credentials?.okx_configured ? 'API 凭证就绪' : '模拟环境就绪' }}
+            <span :class="runtime.credentials?.configured ? 'text-emerald-400' : 'text-amber-400'">
+              ● {{ runtime.credentials?.configured ? 'API 凭证就绪' : '未配置凭证' }}
             </span>
+
             <span>·</span>
             <span class="text-indigo-400 group-hover:underline">账户管理 →</span>
           </div>

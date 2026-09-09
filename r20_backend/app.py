@@ -58,7 +58,8 @@ from r20_gateway.scheduler import scheduler_snapshot
 from r20_gateway.secrets import delete_secrets, save_secrets, status as secret_store_status
 from r20_gateway.store import GatewayStore
 from r20_gateway.supervisor import start_supervisor as start_gateway_supervisor, stop_supervisor as stop_gateway_supervisor
-from scripts.instrument_pool import from_okx_instrument, load_instruments, save_instruments
+from scripts.instrument_pool import canonical_inst_id, from_okx_instrument, load_instruments, save_instruments, venue_symbol
+
 from r20_backend.llm_manager import (
     load_llm_config,
     get_active_llm_runtime,
@@ -317,7 +318,16 @@ class GatewayReplayRequest(BaseModel):
 
 
 class InstrumentAddRequest(BaseModel):
-    inst_id: str = Field(pattern=r"^[A-Z0-9]{2,15}-USDT-SWAP$")
+    inst_id: str = Field(min_length=3, max_length=32)
+
+    @field_validator("inst_id")
+    @classmethod
+    def validate_inst_id(cls, value: str) -> str:
+        try:
+            return canonical_inst_id(value)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+
 
 
 class InstrumentDeleteRequest(BaseModel):
@@ -757,7 +767,7 @@ def runtime_overview() -> dict[str, Any]:
             "okx_configured": bool(settings.okx_live_configured or settings.okx_demo_configured or (settings.okx_api_key and settings.okx_secret_key and settings.okx_passphrase)),
             "binance_configured": bool(settings.binance_live_configured or settings.binance_demo_configured),
             "llm": bool(settings.llm_api_key),
-            "simulated_trading": settings.okx_simulated,
+            "simulated_trading": selected_environment().simulated,
         },
         "configuration": get_admin_configuration(),
         "data_health": health_payload,
@@ -2140,19 +2150,28 @@ def manual_close_position(payload: ManualCloseRequest) -> dict[str, Any]:
 def admin_instruments(x_r20_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
     refresh_settings()
     require_admin_header(x_r20_admin_token)
+    env = selected_environment()
     trackers = read_json("position_trackers.json", {})
     active = set(trackers.keys()) if isinstance(trackers, dict) else set()
     return {
-        "instruments": [{**item, "protected": item["instId"] == "BTC-USDT-SWAP", "has_tracker": item["instId"] in active or item["name"] in active} for item in load_instruments()],
+        "exchange": env.exchange,
+        "environment": env.mode,
+        "instruments": [{
+            **item,
+            "protected": item["instId"] == "BTC-USDT-SWAP",
+            "has_tracker": item["instId"] in active or item["name"] in active,
+            "venue_symbol": venue_symbol(item["instId"], env.exchange),
+        } for item in load_instruments()],
         "limits": {"minimum": MIN_POOL_SIZE, "maximum": MAX_POOL_SIZE, "btc_required": True},
     }
+
 
 
 @app.post("/api/v1/admin/instruments")
 def add_admin_instrument(payload: InstrumentAddRequest, x_r20_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
     refresh_settings()
     require_admin_header(x_r20_admin_token)
-    inst_id = payload.inst_id.upper()
+    inst_id = payload.inst_id
     current = load_instruments()
     if any(item["instId"] == inst_id for item in current):
         raise HTTPException(status_code=409, detail="该币种已在交易池中")
@@ -2168,20 +2187,28 @@ def add_admin_instrument(payload: InstrumentAddRequest, x_r20_admin_token: str |
     item = from_okx_instrument(raw)
     item["quantity_unit"] = "base"
     item["ctVal"] = float(raw.get("ctVal") or item.get("ctVal") or 1.0)
+    item["venue_symbol"] = venue_symbol(inst_id, selected_environment().exchange)
     save_instruments([*current, item])
-    audit_record("instrument.add", "success", {"instId": inst_id})
+    audit_record("instrument.add", "success", {"instId": inst_id, "exchange": selected_environment().exchange})
     return {"added": item, "count": len(current) + 1, "effective": "immediate", "message": f"{item['name']} 已成功加入交易池并实时同步全网大屏与因果雷达"}
+
 
 
 @app.delete("/api/v1/admin/instruments/{inst_id}")
 def delete_admin_instrument(inst_id: str, payload: InstrumentDeleteRequest, x_r20_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
     refresh_settings()
     require_admin_header(x_r20_admin_token)
-    inst_id = inst_id.upper()
-    if payload.confirmation.strip().upper() != f"REMOVE {inst_id}":
+    try:
+        inst_id = canonical_inst_id(inst_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    confirmation = payload.confirmation.strip().upper()
+    allowed = {f"REMOVE {inst_id}", f"REMOVE {venue_symbol(inst_id, settings.exchange)}"}
+    if confirmation not in allowed:
         raise HTTPException(status_code=400, detail=f"确认短语必须精确为：REMOVE {inst_id}")
     if inst_id == "BTC-USDT-SWAP":
         raise HTTPException(status_code=403, detail="BTC 是全局黑天鹅哨兵基准，不允许从交易池删除")
+
     current = load_instruments()
     if len(current) <= MIN_POOL_SIZE:
         raise HTTPException(status_code=409, detail=f"交易池至少保留 {MIN_POOL_SIZE} 个币种")
@@ -3470,7 +3497,8 @@ def health() -> dict[str, Any]:
             "okx_configured": bool(settings.okx_api_key and settings.okx_secret_key and settings.okx_passphrase),
             "binance_configured": bool(settings.binance_live_configured or settings.binance_demo_configured),
             "llm_configured": bool(settings.llm_api_key),
-            "simulated_trading": settings.okx_simulated,
+            "simulated_trading": selected_environment().simulated,
+
         },
         "data_flow": {
             "llm_endpoint_host": _host or "NOT_CONFIGURED",

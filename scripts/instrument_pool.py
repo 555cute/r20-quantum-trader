@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import tempfile
 from decimal import Decimal, InvalidOperation
@@ -29,6 +30,33 @@ TIER_PROFILES = {
         "min_vol_24h_usd": 20_000_000,
     }
 }
+
+_CANONICAL_INST = re.compile(r"^([A-Z0-9]{2,15})-USDT-SWAP$")
+_HYPHEN_USDT = re.compile(r"^([A-Z0-9]{2,15})-USDT$")
+_BINANCE_USDT = re.compile(r"^([A-Z0-9]{2,15})USDT$")
+
+
+def canonical_inst_id(raw: str) -> str:
+    """Map BTCUSDT / BTC-USDT / BTC-USDT-SWAP onto the shared pool id."""
+    text = str(raw or "").strip().upper().replace("/", "-")
+    match = _CANONICAL_INST.fullmatch(text)
+    if match:
+        return text
+    match = _HYPHEN_USDT.fullmatch(text)
+    if match:
+        return f"{match.group(1)}-USDT-SWAP"
+    match = _BINANCE_USDT.fullmatch(text)
+    if match:
+        return f"{match.group(1)}-USDT-SWAP"
+    raise ValueError("仅支持 USDT 永续：BTCUSDT 或 BTC-USDT-SWAP")
+
+
+def venue_symbol(inst_id: str, exchange: str = "okx") -> str:
+    canonical = canonical_inst_id(inst_id)
+    if str(exchange or "").strip().lower() == "binance":
+        return f"{canonical.split('-', 1)[0]}USDT"
+    return canonical
+
 
 # 默认 10 标的池：按 24H 名义成交额降序；规格取自 OKX /public/instruments 实时数据。
 # 扩容说明：MAX_CONCURRENT_POSITIONS = len(池) 自动跟随，同向持仓上限仍固定 3 笔(防 Beta 踩踏)。

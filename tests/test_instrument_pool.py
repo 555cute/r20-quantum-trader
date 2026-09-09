@@ -7,14 +7,26 @@ from unittest.mock import patch
 
 from scripts.instrument_pool import (
     DEFAULT_INSTRUMENTS,
+    canonical_inst_id,
     from_okx_instrument,
     load_instruments,
     normalize_pool_item,
     resolve_instrument_rules,
+    venue_symbol,
 )
 
 
+
 class TestInstrumentPoolBaseUnits(unittest.TestCase):
+    def test_canonical_inst_id_accepts_binance_symbol(self):
+        self.assertEqual(canonical_inst_id("btcusdt"), "BTC-USDT-SWAP")
+        self.assertEqual(canonical_inst_id("BTC-USDT"), "BTC-USDT-SWAP")
+        self.assertEqual(canonical_inst_id("BTC-USDT-SWAP"), "BTC-USDT-SWAP")
+        self.assertEqual(venue_symbol("BTC-USDT-SWAP", "binance"), "BTCUSDT")
+        self.assertEqual(venue_symbol("SOLUSDT", "okx"), "SOL-USDT-SWAP")
+        with self.assertRaises(ValueError):
+            canonical_inst_id("BTC-USD-SWAP")
+
     def test_legacy_okx_contracts_migrate_once_to_base_qty(self):
         item = normalize_pool_item({
             "instId": "BTC-USDT-SWAP",

@@ -441,6 +441,47 @@ class AdminApiTests(unittest.TestCase):
         self.assertNotIn("binance_demo_secret_key", editable)
         self.assertNotIn("okx_api_key", editable)
 
+    def test_instruments_list_exposes_binance_venue_symbol(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        headers = self.login("admin", "InitialAdmin123456")
+        env = SimpleNamespace(exchange="binance", mode="demo", configured=False, simulated=True)
+        pool = [{"instId": "BTC-USDT-SWAP", "name": "BTC"}]
+        with patch.object(app_module, "selected_environment", return_value=env), \
+             patch.object(app_module, "load_instruments", return_value=pool), \
+             patch.object(app_module, "read_json", return_value={}):
+            response = self.client.get("/api/v1/admin/instruments", headers=headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["exchange"], "binance")
+        self.assertEqual(body["instruments"][0]["venue_symbol"], "BTCUSDT")
+
+    def test_add_instrument_accepts_binance_symbol(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        headers = self.login("admin", "InitialAdmin123456")
+        env = SimpleNamespace(exchange="binance", mode="demo", configured=True, simulated=True)
+        adapter = SimpleNamespace(instruments=lambda inst_id: [{
+            "instId": "SOL-USDT-SWAP", "baseCcy": "SOL", "settleCcy": "USDT", "state": "live",
+            "ctVal": "1", "nativeCtVal": "1", "lotSz": "0.01", "minSz": "0.01", "tickSz": "0.01",
+            "minNotional": "5", "quantity_unit": "base",
+        }] if inst_id == "SOL-USDT-SWAP" else [])
+        saved = []
+        with patch.object(app_module, "selected_environment", return_value=env), \
+             patch.object(app_module, "get_exchange", return_value=adapter), \
+             patch.object(app_module, "load_instruments", return_value=[{"instId": "BTC-USDT-SWAP", "name": "BTC"}]), \
+             patch.object(app_module, "save_instruments", side_effect=lambda rows: saved.extend(rows)), \
+             patch.object(app_module, "audit_record"):
+            invalid = self.client.post("/api/v1/admin/instruments", headers=headers, json={"inst_id": "BTC-USD-SWAP"})
+            self.assertEqual(invalid.status_code, 422, invalid.text)
+            response = self.client.post("/api/v1/admin/instruments", headers=headers, json={"inst_id": "SOLUSDT"})
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["added"]["instId"], "SOL-USDT-SWAP")
+        self.assertEqual(body["added"]["venue_symbol"], "SOLUSDT")
+        self.assertEqual(saved[-1]["instId"], "SOL-USDT-SWAP")
+
+
     def test_put_binance_demo_requires_switch_phrase_and_skips_blank_secrets(self):
         from unittest.mock import patch
         headers = self.login("admin", "InitialAdmin123456")
