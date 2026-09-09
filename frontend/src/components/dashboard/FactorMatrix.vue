@@ -12,6 +12,8 @@ import CryptoLogo from './CryptoLogo.vue';
 const emit = defineEmits<{ (e: 'pick-symbol', instId: string): void }>();
 
 const store = useDashboardStore();
+/** US-007 跨所协调快照（/api/all cross_venue），透传给因子抽屉 */
+const crossVenue = computed(() => (store.data as any)?.cross_venue || null);
 const { t } = useI18n();
 
 const rows = computed(() => store.factors || []);
@@ -122,6 +124,6 @@ function openDetail(f: any) {
     </div>
     </template>
 
-    <FactorDrawer :factor="detail" @close="detail = null" @pick-symbol="(id: string) => { detail = null; emit('pick-symbol', id) }" />
+    <FactorDrawer :factor="detail" :cross-venue="crossVenue" @close="detail = null" @pick-symbol="(id: string) => { detail = null; emit('pick-symbol', id) }" />
   </div>
 </template>

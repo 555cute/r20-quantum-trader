@@ -325,6 +325,9 @@ def _inject_local_data_into_stale(stale, positions, timestamp_full):
     # smart_money_derivatives, probability_theory, microstructure, etc.
     stale["factor_library"] = _load_local_factor_library()
 
+    # US-007：跨所快照同为本地文件（venue_health + decisions xvenue），STALE 下保持新鲜
+    stale["cross_venue"] = _load_cross_venue_data()
+
     # Factors list — rebuilt from local trading_state + ai_brain_decisions
     factors_list, state_data = _build_factors_from_local_files(positions, timestamp_full)
     if factors_list:
@@ -461,6 +464,89 @@ def get_cache_lock():
     if CACHE_LOCK is None:
         CACHE_LOCK = asyncio.Lock()
     return CACHE_LOCK
+
+def _load_cross_venue_data() -> dict:
+    """US-007：多所协调快照透传装配（只读，零网络）。
+
+    数据源两路，各自独立兜底，任一缺失/损坏只降级该部分，绝不影响主缓存：
+      1) data/venue_health.json —— 三所健康徽标(venues/updated_utc/package_count)
+         + brain 逐币快照 symbols（含预计算基差，热文件已上线此键）；
+      2) data/ai_brain_decisions.json —— 各币 xvenue（由 US-009 收尾者持久化，
+         现在可能整键缺失，逐键位容错）。
+    by_asset = 两路合并（symbols 优先，xvenue 补缺，缺价时现算基差），
+    键位恒为 {okx_last,bin_last,gate_last,bin_basis_pct,gate_basis_pct,
+    bin_ls,gate_ls,bin_funding_pct,gate_funding_pct}，缺值置 ""（前端渲染 "--"）。
+    """
+    out = {"updated_utc": "", "package_count": 0, "venues": {}, "symbols": {}, "by_asset": {}}
+
+    def _pos(v):
+        # 基差参照只用正价格；脏值/空值一律 None（fail-soft，不抛）
+        try:
+            x = float(v)
+            return x if x > 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    sym_rows = {}
+    try:
+        with open(os.path.join(DATA_DIR, "venue_health.json"), "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        if isinstance(raw, dict):
+            out["updated_utc"] = str(raw.get("updated_utc") or "")
+            out["package_count"] = int(raw.get("package_count") or 0)
+            venues = raw.get("venues")
+            out["venues"] = venues if isinstance(venues, dict) else {}
+            symbols = raw.get("symbols")
+            if isinstance(symbols, dict):
+                sym_rows = {str(k).upper(): v for k, v in symbols.items() if isinstance(v, dict)}
+    except Exception:
+        pass
+    out["symbols"] = sym_rows
+
+    # 决策缓存侧素材：asset -> (xvenue, okx_last)
+    src = {}
+    try:
+        with open(AI_DECISIONS_FILE, "r", encoding="utf-8") as f:
+            cache = json.load(f)
+        if isinstance(cache, dict):
+            for inst_id, entry in cache.items():
+                if not isinstance(entry, dict):
+                    continue
+                asset = str(entry.get("name") or str(inst_id).split("-")[0]).upper().strip()
+                if not asset:
+                    continue
+                xv = entry.get("xvenue")
+                rt = entry.get("raw_ticker")
+                src[asset] = {
+                    "xv": xv if isinstance(xv, dict) else {},
+                    "okx_last": (rt.get("last") if isinstance(rt, dict) else None) or "",
+                }
+    except Exception:
+        pass
+
+    XV_KEYS = ("bin_last", "gate_last", "bin_ls", "gate_ls",
+               "bin_funding_pct", "gate_funding_pct")
+    for asset in src.keys() | sym_rows.keys():
+        xv = src.get(asset, {}).get("xv") or {}
+        sym = sym_rows.get(asset) or {}
+        row = {}
+        for k in XV_KEYS:
+            v = sym.get(k)
+            if v in (None, ""):
+                v = xv.get(k)
+            row[k] = "" if v is None else v
+        okx = sym.get("okx") or src.get(asset, {}).get("okx_last") or ""
+        row["okx_last"] = okx
+        for tag in ("bin", "gate"):
+            b = sym.get(tag + "_basis_pct")
+            if b in (None, ""):
+                p, ref = _pos(row[tag + "_last"]), _pos(okx)
+                if p is not None and ref is not None:
+                    b = round((p - ref) / ref * 100, 3)
+            row[tag + "_basis_pct"] = "" if b is None else b
+        out["by_asset"][asset] = row
+    return out
+
 
 def update_cache_cycle():
     global CACHE_DATA, LAST_CACHE_TIME
@@ -1233,7 +1319,8 @@ def update_cache_cycle():
         "trades": trades_table,
         "news_intelligence": news_data,
         "ai_brain_history": ai_history_list,
-        "factor_library": factor_lib_snapshot
+        "factor_library": factor_lib_snapshot,
+        "cross_venue": _load_cross_venue_data()
     }
     try:
         from r20_backend.llm_manager import get_active_llm_runtime

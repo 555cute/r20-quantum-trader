@@ -11,7 +11,7 @@ import DirTag from '../base/DirTag.vue';
 import { useI18n } from '../../composables/useI18n';
 import { fmtNum, fmtPct, fmtPrice, arrow, dirClass } from '../../utils/format';
 
-const props = defineProps<{ factor: any | null }>();
+const props = defineProps<{ factor: any | null; crossVenue?: any | null }>();
 const emit = defineEmits<{ (e: 'close'): void; (e: 'pick-symbol', instId: string): void }>();
 
 const { t } = useI18n();
@@ -58,6 +58,50 @@ const smart = computed(() => [
   row('Funding', asIs(f.value.fundingRate)),
   row('OI', asIs(f.value.oiUsd)),
 ]);
+
+/** US-007 跨所块：本币 OKX/币安/Gate 价与基差 + 双所大户比/费率 + 三所取数健康。
+ * 消费面统一走后端合并好的 by_asset（symbols 仅作旧快照兼容回退）；缺值 "--"。 */
+const cvSymbol = computed(() => {
+  const name = String(f.value.name || '').toUpperCase();
+  const cv = props.crossVenue || {};
+  return (cv.by_asset || {})[name] || (cv.symbols || {})[name] || null;
+});
+function _missing(v: unknown): boolean {
+  return v === null || v === undefined || v === '' || !Number.isFinite(Number(v));
+}
+function _num(v: unknown, digits = 2): string {
+  return _missing(v) ? '--' : fmtNum(Number(v), digits);
+}
+function _px(v: unknown): string {
+  return _missing(v) ? '--' : fmtPrice(Number(v));
+}
+function _basis(v: unknown): string {
+  return _missing(v) ? '' : ` (${fmtPct(Number(v), 2, false)})`;
+}
+const cvRows = computed(() => {
+  const s = cvSymbol.value;
+  return [
+    row('OKX', fmtPrice(f.value.price), ''),
+    row('Binance', s ? _px(s.bin_last) + _basis(s.bin_basis_pct) : '--', dirClass(s?.bin_basis_pct)),
+    row('Gate', s ? _px(s.gate_last) + _basis(s.gate_basis_pct) : '--', dirClass(s?.gate_basis_pct)),
+    row('L/S 币安/Gate', s ? `${_num(s.bin_ls)} / ${_num(s.gate_ls)}` : '--', ''),
+    row('Fund% 币安/Gate', s ? `${_num(s.bin_funding_pct, 4)} / ${_num(s.gate_funding_pct, 4)}` : '--', ''),
+  ];
+});
+const cvHealth = computed(() => {
+  const v = props.crossVenue?.venues || {};
+  return ['okx', 'binance', 'gate'].map((k) => {
+    const x = v[k] || {};
+    const okN = Array.isArray(x.ok) ? x.ok.length : 0;
+    const failN = x.failed ? Object.keys(x.failed).length : 0;
+    return {
+      key: k, ok: okN, fail: failN,
+      avg: x.avg_ms || 0, testnet: !!x.testnet,
+      fresh: okN + failN > 0,
+    };
+  });
+});
+const cvUpdated = computed(() => String(props.crossVenue?.updated_utc || ''));
 </script>
 
 <template>
@@ -127,6 +171,28 @@ const smart = computed(() => [
             <dd class="num text-sm font-semibold" :class="r.cls">{{ r.value }}</dd>
           </div>
         </dl>
+      </div>
+
+      <!-- 跨所协调（US-007：/api/all cross_venue 消费端） -->
+      <div class="card-flat p-3">
+        <div class="mb-2 flex items-baseline justify-between gap-2">
+          <p class="t-label">跨所 · Binance / Gate</p>
+          <span v-if="cvUpdated" class="num text-[10px]" style="color: var(--ink-3)">{{ cvUpdated }} UTC</span>
+        </div>
+        <div class="mb-2 flex flex-wrap gap-1.5">
+          <span v-for="h in cvHealth" :key="h.key"
+                class="badge num text-[10px]"
+                :style="h.testnet ? 'color:#56B4E9;border-color:currentColor' : (h.fail > 0 ? 'color:var(--warn, #F0B90B);border-color:currentColor' : (h.fresh ? 'color:var(--up);border-color:currentColor' : 'color:var(--ink-3);border-color:currentColor'))">
+            {{ h.key.toUpperCase() }} {{ h.fresh ? `${h.ok}/${h.ok + h.fail}` : '--' }}<template v-if="h.avg"> · {{ h.avg }}ms</template><template v-if="h.testnet"> · TN</template>
+          </span>
+        </div>
+        <dl class="space-y-1.5">
+          <div v-for="r in cvRows" :key="r.label" class="flex items-baseline justify-between gap-3 text-xs">
+            <dt style="color: var(--ink-3)">{{ r.label }}</dt>
+            <dd class="num font-semibold" :class="r.cls" style="color: var(--ink-1)">{{ r.value }}</dd>
+          </div>
+        </dl>
+        <p v-if="!cvSymbol" class="t-muted mt-2 text-[11px]">该币暂无跨所快照——等待下一个 15 分钟决策周期生成。</p>
       </div>
 
       <!-- 推演过程 -->
