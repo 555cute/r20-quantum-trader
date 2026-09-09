@@ -21,6 +21,18 @@ ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data"
 LLM_CONFIG_FILE = DATA_DIR / "llm_models.json"
 LEGACY_PROVIDERS_FILE = DATA_DIR / "llm_providers.json"
+FAILOVER_EVENTS_FILE = DATA_DIR / "llm_failover_events.json"
+
+# ── LLM 韧性（重试 / 回退）默认值 ──
+# request_attempts：单次调用中每个模型的最大请求次数（含首次），后台可调 1~10。
+# fallback_model_ids：主模型重试耗尽或非瞬时失败后按序回退的模型链，最多 5 个。
+DEFAULT_REQUEST_ATTEMPTS = 3
+MIN_REQUEST_ATTEMPTS = 1
+MAX_REQUEST_ATTEMPTS = 10
+MAX_FALLBACK_MODELS = 5
+# 整条模型链的总等待软预算（只在新一次尝试发起前检查，不切断进行中的请求）；
+# 必须低于网关 trader 任务 840s 超时，避免整轮推演被调度器硬杀。
+FAILOVER_MAX_TOTAL_WAIT = float(os.getenv("LLM_FAILOVER_MAX_WAIT_SECONDS", "600"))
 
 SUPPORTED_API_FORMATS = [
     {"id": "openai_chat", "name": "OpenAI Chat (/chat/completions)", "desc": "标准 ChatML 对话格式，兼容 OpenAI/Gemini/DeepSeek/主流中继"},
@@ -315,12 +327,38 @@ def init_llm_config() -> Dict[str, Any]:
     if not any(m["id"] == active_m_id for m in flat_models) and flat_models:
         active_m_id = flat_models[0]["id"]
 
+    # ── 韧性配置解析：请求次数 + 回退模型链（脏数据自愈）──
+    raw_attempts = data.get("request_attempts")
+    try:
+        env_attempts = int(os.getenv("LLM_REQUEST_ATTEMPTS", "") or 0)
+    except ValueError:
+        env_attempts = 0
+    try:
+        request_attempts = int(raw_attempts) if raw_attempts is not None else (env_attempts or DEFAULT_REQUEST_ATTEMPTS)
+    except (TypeError, ValueError):
+        request_attempts = DEFAULT_REQUEST_ATTEMPTS
+    request_attempts = max(MIN_REQUEST_ATTEMPTS, min(MAX_REQUEST_ATTEMPTS, request_attempts))
+
+    known_model_ids = {m["id"] for m in flat_models}
+    raw_fallbacks = data.get("fallback_model_ids")
+    fallback_model_ids: List[str] = []
+    if isinstance(raw_fallbacks, list):
+        for fid in raw_fallbacks:
+            fid = str(fid or "").strip()
+            if not fid or fid == active_m_id or fid not in known_model_ids:
+                continue
+            if fid not in fallback_model_ids:
+                fallback_model_ids.append(fid)
+    fallback_model_ids = fallback_model_ids[:MAX_FALLBACK_MODELS]
+
     config = {
-        "version": "3.1",
+        "version": "3.2",
         "defaults_seeded": True,
         "active_model_id": active_m_id,
         "active_reasoning_effort": active_effort,
         "thinking_timeout": thinking_timeout,
+        "request_attempts": request_attempts,
+        "fallback_model_ids": fallback_model_ids,
         "providers": merged_providers,
         "models": flat_models,
     }
@@ -346,10 +384,14 @@ def load_llm_config(mask_keys: bool = True) -> Dict[str, Any]:
     active_effort = config.get("active_reasoning_effort", "high")
 
     res: Dict[str, Any] = {
-        "version": config.get("version", "3.1"),
+        "version": config.get("version", "3.2"),
         "active_model_id": active_mid,
         "active_reasoning_effort": active_effort,
         "thinking_timeout": config.get("thinking_timeout", 120.0),
+        "request_attempts": config.get("request_attempts", DEFAULT_REQUEST_ATTEMPTS),
+        "fallback_model_ids": config.get("fallback_model_ids", []),
+        "max_request_attempts": MAX_REQUEST_ATTEMPTS,
+        "max_fallback_models": MAX_FALLBACK_MODELS,
         "standard_reasoning_efforts": STANDARD_REASONING_EFFORTS,
         "supported_api_formats": SUPPORTED_API_FORMATS,
         "providers": [],
@@ -493,7 +535,80 @@ def get_active_llm_runtime() -> Dict[str, Any]:
         "reasoning_effort": active_effort,
         "reasoning_type": reasoning_type,
         "thinking_timeout": thinking_timeout,
+        "request_attempts": config.get("request_attempts", DEFAULT_REQUEST_ATTEMPTS),
+        "fallback_model_ids": config.get("fallback_model_ids", []),
     }
+
+
+def resolve_model_runtime(model_id: str) -> Optional[Dict[str, Any]]:
+    """Resolve a configured model (e.g. a fallback) into a callable runtime spec.
+    Returns None when the model is unknown or has no usable endpoint."""
+    config = init_llm_config()
+    target = next((m for m in config.get("models", []) if m.get("id") == model_id), None)
+    if not target:
+        return None
+    base_url = (target.get("base_url") or "").rstrip("/")
+    api_key = target.get("api_key") or ""
+    if not api_key or not base_url:
+        prov = next((p for p in config.get("providers", []) if p.get("id") == target.get("provider_id")), None)
+        if prov:
+            base_url = base_url or (prov.get("base_url") or "").rstrip("/")
+            api_key = api_key or prov.get("api_key", "")
+    if not base_url:
+        return None
+    mid = target.get("id", model_id)
+    api_format = target.get("api_format") or _detect_api_format(base_url, mid)
+    reasoning_type = target.get("reasoning_type") or _detect_reasoning_type(mid)
+    effort = target.get("reasoning_effort") or target.get("default_effort") or "high"
+    try:
+        thinking_timeout = float(target.get("thinking_timeout") or config.get("thinking_timeout") or 120.0)
+    except (TypeError, ValueError):
+        thinking_timeout = float(config.get("thinking_timeout") or 120.0)
+    return {
+        "model": mid,
+        "name": target.get("name", mid),
+        "provider_id": target.get("provider_id", ""),
+        "provider_name": target.get("provider_name", "自定义"),
+        "base_url": base_url,
+        "api_key": api_key,
+        "api_format": api_format,
+        "reasoning_effort": effort if effort in STANDARD_REASONING_EFFORTS else "high",
+        "reasoning_type": reasoning_type,
+        "thinking_timeout": thinking_timeout,
+    }
+
+
+def record_failover_event(entry: Dict[str, Any]) -> None:
+    """Append a resilience event (retry exhausted / fallback hit / chain failure) for admin visibility."""
+    try:
+        events: List[Dict[str, Any]] = []
+        if FAILOVER_EVENTS_FILE.exists():
+            try:
+                with open(FAILOVER_EVENTS_FILE, "r", encoding="utf-8") as f:
+                    loaded = json.load(f)
+                if isinstance(loaded, list):
+                    events = loaded
+            except Exception:
+                events = []
+        entry["ts"] = int(time.time())
+        entry["time_str"] = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
+        events.insert(0, entry)
+        _atomic_write_json(FAILOVER_EVENTS_FILE, events[:200])
+    except Exception:
+        # Resilience telemetry must never break the trading path.
+        pass
+
+
+def recent_failover_events(limit: int = 30) -> List[Dict[str, Any]]:
+    if FAILOVER_EVENTS_FILE.exists():
+        try:
+            with open(FAILOVER_EVENTS_FILE, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, list):
+                return loaded[: max(1, min(int(limit), 200))]
+        except Exception:
+            pass
+    return []
 
 
 def activate_provider_model(provider_id: str, model_id: str, reasoning_effort: Optional[str] = None, thinking_timeout: Optional[float] = None) -> Dict[str, Any]:
@@ -600,8 +715,10 @@ def update_llm_settings(
     active_model_id: Optional[str] = None,
     reasoning_effort: Optional[str] = None,
     thinking_timeout: Optional[float] = None,
+    request_attempts: Optional[int] = None,
+    fallback_model_ids: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    """Update global LLM settings including model, reasoning effort, and thinking timeout limit."""
+    """Update global LLM settings: model, reasoning effort, thinking timeout, retry attempts and fallback chain."""
     from .settings_store import update_env
     from .config import refresh_settings
 
@@ -621,6 +738,33 @@ def update_llm_settings(
         config["thinking_timeout"] = val
         env_values["LLM_THINKING_TIMEOUT"] = str(int(val) if val.is_integer() else val)
 
+    if request_attempts is not None:
+        try:
+            att = int(request_attempts)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("请求次数必须是整数") from exc
+        if not (MIN_REQUEST_ATTEMPTS <= att <= MAX_REQUEST_ATTEMPTS):
+            raise ValueError(f"请求次数需在 {MIN_REQUEST_ATTEMPTS}~{MAX_REQUEST_ATTEMPTS} 之间")
+        config["request_attempts"] = att
+
+    if fallback_model_ids is not None:
+        known_ids = {m.get("id") for m in config.get("models", [])}
+        new_active = config.get("active_model_id", "")
+        cleaned: List[str] = []
+        for fid in fallback_model_ids:
+            fid = str(fid or "").strip()
+            if not fid:
+                continue
+            if fid == new_active:
+                continue  # 主脑模型不能同时是自己的回退
+            if fid not in known_ids:
+                raise ValueError(f"回退模型不存在：{fid}（请先在模型列表中添加）")
+            if fid not in cleaned:
+                cleaned.append(fid)
+        if len(cleaned) > MAX_FALLBACK_MODELS:
+            raise ValueError(f"回退模型最多 {MAX_FALLBACK_MODELS} 个，避免整轮推演超时")
+        config["fallback_model_ids"] = cleaned
+
     _atomic_write_json(LLM_CONFIG_FILE, config)
     if env_values:
         update_env(env_values)
@@ -631,6 +775,8 @@ def update_llm_settings(
         "active_model_id": config.get("active_model_id"),
         "active_reasoning_effort": config.get("active_reasoning_effort"),
         "thinking_timeout": config.get("thinking_timeout", 120.0),
+        "request_attempts": config.get("request_attempts", DEFAULT_REQUEST_ATTEMPTS),
+        "fallback_model_ids": config.get("fallback_model_ids", []),
     }
 
 
@@ -1216,139 +1362,42 @@ def build_chat_payload(
     return payload
 
 
-def execute_llm_request(
-    messages: List[Dict[str, str]],
-    model: Optional[str] = None,
-    base_url: Optional[str] = None,
-    api_key: Optional[str] = None,
-    api_format: Optional[str] = None,
-    reasoning_effort: Optional[str] = None,
-    temperature: Optional[float] = 0.2,
-    response_format: Optional[Dict[str, Any]] = None,
-    timeout: Optional[float] = None,
-) -> Tuple[str, str, Dict[str, Any], int]:
-    """Unified executor for LLM calls across all 3 protocols.
-    Returns: (content, reasoning_content, usage_dict, latency_ms)
-    """
-    runtime = get_active_llm_runtime()
-    target_model = model or runtime.get("model") or os.getenv("LLM_MODEL") or ""
-    if not target_model:
-        raise RuntimeError(
-            "LLM 模型未配置：请在后台「LLM Providers」选择模型，或在 .env 设置 LLM_MODEL。"
-            "系统不再内置任何默认模型名，避免界面谎报当前实际使用的模型。"
-        )
-    target_url = base_url or runtime.get("base_url") or os.getenv("LLM_BASE_URL") or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
-    target_key = api_key if api_key is not None else runtime.get("api_key", "")
-    target_format = api_format or runtime.get("api_format") or _detect_api_format(target_url, target_model)
-    target_effort = reasoning_effort or runtime.get("reasoning_effort") or "high"
-    target_rtype = runtime.get("reasoning_type", "auto")
-    effective_timeout = float(timeout) if (timeout is not None and float(timeout) > 0) else float(runtime.get("thinking_timeout") or 120.0)
+# ── LLM 韧性调用链：模型内重试 + 跨模型回退 ──
 
-    endpoint, headers, payload = build_request_spec(
-        model=target_model,
-        messages=messages,
-        base_url=target_url,
-        api_key=target_key,
-        api_format=target_format,
-        reasoning_effort=target_effort,
-        temperature=temperature,
-        response_format=response_format,
-        reasoning_type=target_rtype,
-    )
+# Transient upstream faults (gateway route flaps, bot/rate shields, 5xx) must not
+# silently degrade a trading or self-evolution cycle into NO_CHANGE. Retry with backoff.
+TRANSIENT_MARKERS = (
+    "unknown provider", "model_not_found", "no provider", "upstream",
+    "temporarily unavailable", "overloaded", "rate limit", "too many requests",
+    "capacity", "busy", "bad gateway", "gateway timeout",
+)
 
-    t0 = time.perf_counter()
-    req = urllib.request.Request(
-        endpoint,
-        data=json.dumps(payload).encode("utf-8"),
-        headers=headers,
-    )
 
-    # Transient upstream faults (gateway route flaps, bot/rate shields, 5xx) must not
-    # silently degrade a trading or self-evolution cycle into NO_CHANGE. Retry with backoff.
-    TRANSIENT_MARKERS = (
-        "unknown provider", "model_not_found", "no provider", "upstream",
-        "temporarily unavailable", "overloaded", "rate limit", "too many requests",
-        "capacity", "busy", "bad gateway", "gateway timeout",
-    )
+def _is_transient_http(code: int, body: str) -> bool:
+    low = (body or "").lower()
+    if code in (408, 409, 425, 429, 500, 502, 503, 504):
+        return True
+    if code in (400, 401, 402, 403) and any(m in low for m in TRANSIENT_MARKERS):
+        return True
+    return False
 
-    def _is_transient(code: int, body: str) -> bool:
-        low = (body or "").lower()
-        if code in (408, 409, 425, 429, 500, 502, 503, 504):
-            return True
-        if code in (400, 401, 402, 403) and any(m in low for m in TRANSIENT_MARKERS):
-            return True
-        return False
 
-    resp_handle = None
-    last_exc: Exception | None = None
-    for attempt in range(3):
-        try:
-            resp_handle = urllib.request.urlopen(req, timeout=effective_timeout)
-            break
-        except urllib.error.HTTPError as exc:
-            err_b = ""
-            try:
-                err_b = exc.read().decode("utf-8", errors="replace")
-            except Exception:
-                pass
-            last_exc = exc
+class _LLMTransientError(Exception):
+    """可重试错误：瞬时 HTTP、超时、连接层异常（拒绝/重置/DNS/TLS）、坏响应体、空正文。"""
 
-            # Adaptive fallback retry on rejected parameter
-            if exc.code == 400 and any(kw in err_b.lower() for kw in ["reasoning_effort", "temperature", "response_format", "invalid parameter"]):
-                fallback_payload = {
-                    "model": target_model,
-                    "messages": messages,
-                }
-                fb_req = urllib.request.Request(
-                    endpoint,
-                    data=json.dumps(fallback_payload).encode("utf-8"),
-                    headers=headers,
-                )
-                try:
-                    resp_handle = urllib.request.urlopen(fb_req, timeout=effective_timeout)
-                    last_exc = None
-                    break
-                except Exception as fb_exc:
-                    if not _is_transient(getattr(fb_exc, "code", 0) or 0, getattr(fb_exc, "msg", "")):
-                        raise
-                    exc = fb_exc
-                    last_exc = fb_exc
+    def __init__(self, message: str, timed_out: bool = False):
+        super().__init__(message)
+        self.timed_out = timed_out
 
-            if _is_transient(exc.code, err_b) and attempt < 2:
-                time.sleep(2.0 * (attempt + 1))
-                continue
-            raise RuntimeError(
-                f"LLM 网关返回 HTTP {exc.code}（模型 {target_model}）：{(err_b or '')[:280]}"
-            ) from exc
-        except (TimeoutError, socket.timeout) as exc:
-            last_exc = exc
-            if attempt < 2:
-                time.sleep(2.0 * (attempt + 1))
-                continue
-            raise TimeoutError(
-                f"LLM 推演超时（已达到思考上限时间 {effective_timeout:.0f}s）：模型思考链过长未在时限内完成响应，可前往后台 AI 模型设置中调大思考上限时间"
-            ) from exc
-        except urllib.error.URLError as exc:
-            last_exc = exc
-            if isinstance(getattr(exc, "reason", None), (socket.timeout, TimeoutError)):
-                if attempt < 2:
-                    time.sleep(2.0 * (attempt + 1))
-                    continue
-                raise TimeoutError(
-                    f"LLM 推演超时（已达到思考上限时间 {effective_timeout:.0f}s）：模型思考链过长未在时限内完成响应，可前往后台 AI 模型设置中调大思考上限时间"
-                ) from exc
-            raise
-    if resp_handle is None:
-        raise last_exc if last_exc is not None else RuntimeError("LLM 请求未获得响应")
 
-    with resp_handle as resp:
-        latency_ms = int((time.perf_counter() - t0) * 1000)
-        body_bytes = resp.read()
-        res_json = json.loads(body_bytes.decode("utf-8", errors="replace"))
+class _LLMHardError(Exception):
+    """不可重试错误（对该模型）：认证失败、404、参数被拒等——直接切换下一个回退模型。"""
 
+
+def _parse_llm_response(target_format: str, res_json: Dict[str, Any]) -> Tuple[str, str, Dict[str, Any]]:
     content = ""
     reasoning_content = ""
-    usage = res_json.get("usage", {})
+    usage = res_json.get("usage", {}) if isinstance(res_json, dict) else {}
 
     # Protocol 1: Claude Messages Response
     if target_format == "claude_messages":
@@ -1381,7 +1430,234 @@ def execute_llm_request(
         content = str(msg.get("content", "")).strip()
         reasoning_content = str(msg.get("reasoning_content") or "").strip()
 
-    return content, reasoning_content, usage, latency_ms
+    return content, reasoning_content, usage
+
+
+def _attempt_llm_call(
+    cand: Dict[str, Any],
+    messages: List[Dict[str, str]],
+    temperature: Optional[float],
+    response_format: Optional[Dict[str, Any]],
+    effective_timeout: float,
+) -> Tuple[str, str, Dict[str, Any], int]:
+    """单次请求一个模型；失败时抛 _LLMTransientError（可重试）或 _LLMHardError（换模型）。"""
+    endpoint, headers, payload = build_request_spec(
+        model=cand["model"],
+        messages=messages,
+        base_url=cand["base_url"],
+        api_key=cand.get("api_key", ""),
+        api_format=cand.get("api_format", "openai_chat"),
+        reasoning_effort=cand.get("reasoning_effort", "high"),
+        temperature=temperature,
+        response_format=response_format,
+        reasoning_type=cand.get("reasoning_type", "auto"),
+    )
+
+    t0 = time.perf_counter()
+    req = urllib.request.Request(endpoint, data=json.dumps(payload).encode("utf-8"), headers=headers)
+    try:
+        resp_handle = urllib.request.urlopen(req, timeout=effective_timeout)
+    except urllib.error.HTTPError as exc:
+        err_b = ""
+        try:
+            err_b = exc.read().decode("utf-8", errors="replace")
+        except Exception:
+            pass
+        # Adaptive fallback retry on rejected parameter (400: reasoning_effort/temperature/response_format)
+        if (
+            exc.code == 400
+            and cand.get("api_format", "openai_chat") == "openai_chat"
+            and any(kw in err_b.lower() for kw in ["reasoning_effort", "temperature", "response_format", "invalid parameter"])
+        ):
+            fb_payload = {"model": cand["model"], "messages": messages}
+            fb_req = urllib.request.Request(endpoint, data=json.dumps(fb_payload).encode("utf-8"), headers=headers)
+            try:
+                with urllib.request.urlopen(fb_req, timeout=effective_timeout) as fb_resp:
+                    latency_ms = int((time.perf_counter() - t0) * 1000)
+                    fb_json = json.loads(fb_resp.read().decode("utf-8", errors="replace"))
+                content, reasoning, usage = _parse_llm_response(cand.get("api_format", "openai_chat"), fb_json)
+                if not content and not reasoning:
+                    raise _LLMTransientError(f"模型 {cand['model']} 返回空正文（已自适应去参数重试）")
+                return content, reasoning, usage, latency_ms
+            except (urllib.error.URLError, TimeoutError, socket.timeout, ValueError) as fb_exc:
+                fb_code = getattr(fb_exc, "code", 0) or 0
+                if fb_code and not _is_transient_http(fb_code, str(getattr(fb_exc, "msg", "") or fb_exc)):
+                    raise _LLMHardError(f"LLM 网关返回 HTTP {fb_code}（模型 {cand['model']}）：{str(fb_exc)[:280]}") from fb_exc
+                raise _LLMTransientError(f"LLM 网关返回 HTTP {exc.code}（模型 {cand['model']}）：{(err_b or '')[:280]}") from fb_exc
+        if _is_transient_http(exc.code, err_b):
+            raise _LLMTransientError(f"LLM 网关返回 HTTP {exc.code}（模型 {cand['model']}）：{(err_b or '')[:280]}") from exc
+        raise _LLMHardError(f"LLM 网关返回 HTTP {exc.code}（模型 {cand['model']}）：{(err_b or '')[:280]}") from exc
+    except (TimeoutError, socket.timeout) as exc:
+        raise _LLMTransientError(
+            f"LLM 推演超时（已达到思考上限时间 {effective_timeout:.0f}s）：模型思考链过长未在时限内完成响应，可前往后台 AI 模型设置中调大思考上限时间",
+            timed_out=True,
+        ) from exc
+    except urllib.error.URLError as exc:
+        # 连接层异常（拒绝/重置/DNS/TLS/断线）与超时包装同样属于瞬时故障：
+        # 旧版在此处直接 raise，导致「失败一次就不再请求」——现在纳入重试与回退。
+        reason = getattr(exc, "reason", None)
+        timed_out = isinstance(reason, (socket.timeout, TimeoutError))
+        raise _LLMTransientError(
+            f"LLM 连接层异常（模型 {cand['model']}）：{type(reason).__name__ if reason is not None else type(exc).__name__}: {str(reason or exc)[:220]}",
+            timed_out=timed_out,
+        ) from exc
+    except (ValueError, OSError) as exc:
+        # 响应体非 JSON（如反代 HTML 错误页）、读取中断等：可重试
+        raise _LLMTransientError(f"LLM 响应体解析失败（模型 {cand['model']}）：{str(exc)[:200]}") from exc
+
+    with resp_handle as resp:
+        latency_ms = int((time.perf_counter() - t0) * 1000)
+        body_bytes = resp.read()
+        try:
+            res_json = json.loads(body_bytes.decode("utf-8", errors="replace"))
+        except ValueError as exc:
+            raise _LLMTransientError(f"LLM 响应体非 JSON（模型 {cand['model']}）：{str(body_bytes[:160])!r}") from exc
+
+    content, reasoning, usage = _parse_llm_response(cand.get("api_format", "openai_chat"), res_json)
+    if not content and not reasoning:
+        raise _LLMTransientError(f"模型 {cand['model']} 返回空正文（HTTP 200 但无 content/reasoning，疑似上游静默失败）")
+    return content, reasoning, usage, latency_ms
+
+
+def execute_llm_request(
+    messages: List[Dict[str, str]],
+    model: Optional[str] = None,
+    base_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    api_format: Optional[str] = None,
+    reasoning_effort: Optional[str] = None,
+    temperature: Optional[float] = 0.2,
+    response_format: Optional[Dict[str, Any]] = None,
+    timeout: Optional[float] = None,
+    allow_fallback: bool = True,
+) -> Tuple[str, str, Dict[str, Any], int]:
+    """Unified resilient executor for LLM calls across all 3 protocols.
+
+    韧性链路：每个模型按后台「请求次数」重试（指数退避），瞬时耗尽或遇
+    硬故障（401/404 等）时按后台「回退模型」顺序切换下一个模型。
+    Returns: (content, reasoning_content, usage_dict, latency_ms)
+    """
+    runtime = get_active_llm_runtime()
+    target_model = model or runtime.get("model") or os.getenv("LLM_MODEL") or ""
+    if not target_model:
+        raise RuntimeError(
+            "LLM 模型未配置：请在后台「LLM Providers」选择模型，或在 .env 设置 LLM_MODEL。"
+            "系统不再内置任何默认模型名，避免界面谎报当前实际使用的模型。"
+        )
+    target_url = base_url or runtime.get("base_url") or os.getenv("LLM_BASE_URL") or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
+    target_key = api_key if api_key is not None else runtime.get("api_key", "")
+    target_format = api_format or runtime.get("api_format") or _detect_api_format(target_url, target_model)
+    target_effort = reasoning_effort or runtime.get("reasoning_effort") or "high"
+    target_rtype = runtime.get("reasoning_type", "auto")
+    effective_timeout = float(timeout) if (timeout is not None and float(timeout) > 0) else float(runtime.get("thinking_timeout") or 120.0)
+
+    try:
+        attempts = int(runtime.get("request_attempts") or DEFAULT_REQUEST_ATTEMPTS)
+    except (TypeError, ValueError):
+        attempts = DEFAULT_REQUEST_ATTEMPTS
+    attempts = max(MIN_REQUEST_ATTEMPTS, min(MAX_REQUEST_ATTEMPTS, attempts))
+
+    primary = {
+        "model": target_model,
+        "name": runtime.get("name") or target_model,
+        "provider_name": runtime.get("provider_name", ""),
+        "base_url": target_url,
+        "api_key": target_key,
+        "api_format": target_format,
+        "reasoning_effort": target_effort,
+        "reasoning_type": target_rtype,
+    }
+    candidates: List[Dict[str, Any]] = [primary]
+    if allow_fallback:
+        for fid in runtime.get("fallback_model_ids", []) or []:
+            if fid == primary["model"]:
+                continue
+            rt = resolve_model_runtime(fid)
+            if not rt:
+                continue
+            # 调用方显式指定 timeout 时统一预算；否则用回退模型自身的思考上限
+            if timeout is not None and float(timeout) > 0:
+                rt["thinking_timeout"] = float(timeout)
+            candidates.append(rt)
+
+    call_started = time.perf_counter()
+    failures: List[str] = []
+    last_error: Optional[BaseException] = None
+    last_timed_out = False
+    deadline_hit = False
+
+    for cand_idx, cand in enumerate(candidates):
+        cand_timeout = effective_timeout if cand_idx == 0 else float(cand.get("thinking_timeout") or effective_timeout)
+        for attempt in range(attempts):
+            if attempt > 0:
+                if (time.perf_counter() - call_started) > FAILOVER_MAX_TOTAL_WAIT:
+                    deadline_hit = True
+                    break
+                time.sleep(min(2.0 * attempt, 8.0))
+            try:
+                content, reasoning, usage, latency = _attempt_llm_call(
+                    cand, messages, temperature, response_format, cand_timeout
+                )
+                if cand_idx > 0:
+                    print(
+                        f"[LLM Failover] ✅ 主模型 {primary['model']} 请求失败，已回退至模型 {cand['model']}"
+                        f"（{cand.get('provider_name') or '备用'} · 第 {cand_idx + 1}/{len(candidates)} 个候选 · 本模型第 {attempt + 1} 次尝试）"
+                    )
+                    record_failover_event({
+                        "type": "fallback_hit",
+                        "from_model": primary["model"],
+                        "to_model": cand["model"],
+                        "to_provider": cand.get("provider_name", ""),
+                        "attempt": attempt + 1,
+                        "attempts_per_model": attempts,
+                        "chain": " → ".join(c["model"] for c in candidates),
+                        "errors": [f[:220] for f in failures[-6:]],
+                        "elapsed_seconds": round(time.perf_counter() - call_started, 1),
+                        "succeeded": True,
+                    })
+                return content, reasoning, usage, latency
+            except _LLMHardError as exc:
+                failures.append(str(exc))
+                last_error = exc
+                last_timed_out = False
+                break  # 该模型硬故障：不再原地重试，切换下一个回退模型
+            except _LLMTransientError as exc:
+                failures.append(str(exc))
+                last_error = exc
+                last_timed_out = exc.timed_out
+            except Exception as exc:  # 兜底：任何未分类异常按瞬时处理，绝不让整链崩在第一次
+                failures.append(f"模型 {cand['model']} 未预期异常：{type(exc).__name__}: {str(exc)[:200]}")
+                last_error = exc
+                last_timed_out = False
+        if deadline_hit:
+            break
+
+    summary_tail = " | ".join(failures[-6:]) if failures else (str(last_error) if last_error else "无响应")
+    if len(candidates) == 1:
+        # 单模型（未配置回退）：保持旧版异常语义，前端提示文案不变
+        if isinstance(last_error, _LLMHardError):
+            raise RuntimeError(str(last_error)) from last_error
+        if isinstance(last_error, _LLMTransientError):
+            if last_error.timed_out:
+                raise TimeoutError(str(last_error)) from last_error
+            raise RuntimeError(str(last_error)) from last_error
+        raise RuntimeError(f"LLM 请求未获得响应（模型 {primary['model']}）")
+
+    record_failover_event({
+        "type": "chain_failed",
+        "from_model": primary["model"],
+        "to_model": "",
+        "chain": " → ".join(c["model"] for c in candidates),
+        "attempts_per_model": attempts,
+        "errors": [f[:220] for f in failures[-8:]],
+        "elapsed_seconds": round(time.perf_counter() - call_started, 1),
+        "deadline_hit": deadline_hit,
+        "succeeded": False,
+    })
+    chain_names = " → ".join(c["model"] for c in candidates)
+    if last_timed_out:
+        raise TimeoutError(f"LLM 模型链全部超时（{chain_names}）：{summary_tail}")
+    raise RuntimeError(f"LLM 模型链全部失败（{chain_names}）：{summary_tail}") from last_error
 
 
 def test_llm_connection(

@@ -20,7 +20,12 @@ import {Plus,
   Wrench,
   Image as Sparkles,
   Clock,
-  Save} from 'lucide-vue-next'
+  Save,
+  ShieldAlert,
+  ArrowUp,
+  ArrowDown,
+  X,
+  History} from 'lucide-vue-next'
 
 const { api } = useApi()
 
@@ -85,6 +90,50 @@ const thinkingTimeoutInput = ref<number>(120)
 const savingSettings = ref(false)
 const settingsResult = ref<any>(null)
 
+// ── LLM 韧性配置：单模型请求次数 + 回退模型链 ──
+const requestAttemptsInput = ref<number>(3)
+const fallbackIds = ref<string[]>([])
+const failoverEvents = ref<any[]>([])
+
+const fallbackOptions = computed(() =>
+  (cfg.value?.models || []).filter((m: any) => m.id !== cfg.value?.active_model_id),
+)
+
+function toggleFallback(id: string) {
+  const idx = fallbackIds.value.indexOf(id)
+  if (idx > -1) {
+    fallbackIds.value.splice(idx, 1)
+  } else {
+    if (fallbackIds.value.length >= (cfg.value?.max_fallback_models || 5)) {
+      settingsResult.value = { ok: false, error: '回退模型最多 5 个，避免整轮推演超时' }
+      setTimeout(() => { settingsResult.value = null }, 3500)
+      return
+    }
+    fallbackIds.value.push(id)
+  }
+}
+
+function moveFallback(idx: number, dir: -1 | 1) {
+  const target = idx + dir
+  if (target < 0 || target >= fallbackIds.value.length) return
+  const arr = fallbackIds.value
+  ;[arr[idx], arr[target]] = [arr[target], arr[idx]]
+}
+
+function modelNameOf(id: string) {
+  const m = (cfg.value?.models || []).find((x: any) => x.id === id)
+  return m ? `${m.name || m.id}${m.provider_name ? ` · ${m.provider_name}` : ''}` : id
+}
+
+async function loadFailoverEvents() {
+  try {
+    const res = await api('/api/v1/admin/llm/failover-events')
+    failoverEvents.value = res?.events || []
+  } catch {
+    failoverEvents.value = []
+  }
+}
+
 function setPresetTimeout(sec: number) {
   thinkingTimeoutInput.value = sec
 }
@@ -99,10 +148,16 @@ async function saveGlobalSettings() {
         thinking_timeout: Number(thinkingTimeoutInput.value) || 120,
         active_model_id: cfg.value?.active_model_id,
         reasoning_effort: cfg.value?.active_reasoning_effort,
+        request_attempts: Number(requestAttemptsInput.value) || 3,
+        fallback_model_ids: fallbackIds.value,
       }),
     })
     await loadConfig()
-    settingsResult.value = { ok: true, message: `推演参数已保存：思考上限设为 ${thinkingTimeoutInput.value} 秒` }
+    await loadFailoverEvents()
+    settingsResult.value = {
+      ok: true,
+      message: `配置已保存：思考上限 ${thinkingTimeoutInput.value}s · 每模型请求 ${requestAttemptsInput.value} 次 · 回退模型 ${fallbackIds.value.length} 个`,
+    }
     setTimeout(() => {
       settingsResult.value = null
     }, 3500)
@@ -120,6 +175,12 @@ async function loadConfig() {
     cfg.value = await api('/api/v1/admin/llm/models')
     if (cfg.value?.thinking_timeout) {
       thinkingTimeoutInput.value = Number(cfg.value.thinking_timeout)
+    }
+    if (cfg.value?.request_attempts) {
+      requestAttemptsInput.value = Number(cfg.value.request_attempts)
+    }
+    if (Array.isArray(cfg.value?.fallback_model_ids)) {
+      fallbackIds.value = [...cfg.value.fallback_model_ids]
     }
     if (selectedProvider.value) {
       const updated = cfg.value.providers?.find((p: any) => p.id === selectedProvider.value.id)
@@ -538,6 +599,7 @@ function toggleCapability(cap: string) {
 
 onMounted(() => {
   loadConfig()
+  loadFailoverEvents()
 })
 </script>
 
@@ -701,6 +763,169 @@ onMounted(() => {
           <CheckCircle2 v-if="settingsResult.ok" class="w-3.5 h-3.5 shrink-0" />
           <AlertCircle v-else class="w-3.5 h-3.5 shrink-0" />
           <span>{{ settingsResult.message || settingsResult.error }}</span>
+        </div>
+      </div>
+
+      <!-- Resilience: Request Attempts & Fallback Model Chain -->
+      <div
+        class="rounded-2xl border p-4 sm:p-5 shadow-xs transition-colors space-y-3"
+        style="background-color: var(--surface-2); border-color: var(--line-1);"
+      >
+        <div class="flex flex-wrap items-center justify-between gap-2 pb-3 border-b" style="border-color: var(--line-1);">
+          <div class="flex items-center space-x-2.5">
+            <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-amber-500/10 text-amber-400 border border-amber-500/20">
+              <ShieldAlert class="w-4 h-4" />
+            </div>
+            <div>
+              <div class="flex items-center space-x-2">
+                <h2 class="text-xs sm:text-[13px] font-bold" style="color: var(--ink-1);">
+                  请求韧性与回退模型
+                </h2>
+                <span
+                  class="px-2 py-0.5 rounded text-[11px] font-bold border"
+                  style="background-color: var(--accent-bg); border-color: var(--accent-line); color: var(--accent);"
+                >
+                  每模型 {{ cfg?.request_attempts || 3 }} 次 · 回退 {{ (cfg?.fallback_model_ids || []).length }} 个
+                </span>
+              </div>
+              <p class="text-[11px] mt-0.5" style="color: var(--ink-2);">
+                模型请求失败（超时/断连/网关抖动/空响应/额度故障）不再一次即弃：先按请求次数指数退避重试，仍失败则按顺序回退到备用模型继续推演。
+              </p>
+            </div>
+          </div>
+
+          <button
+            @click="saveGlobalSettings"
+            :disabled="savingSettings"
+            class="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs disabled:opacity-40"
+            style="background-color: var(--accent); border-color: var(--accent); color: var(--accent-ink);"
+          >
+            <RefreshCw v-if="savingSettings" class="w-3.5 h-3.5 animate-spin" />
+            <Save v-else class="w-3.5 h-3.5" />
+            <span>{{ savingSettings ? '保存中...' : '保存韧性配置' }}</span>
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+          <!-- Request attempts -->
+          <div class="p-3 rounded-xl border space-y-2" style="background-color: var(--surface-1); border-color: var(--line-1);">
+            <div class="flex items-center justify-between">
+              <label class="text-[11px] font-bold" style="color: var(--ink-2);">单模型请求次数（含首次）</label>
+              <span class="text-[11px]" style="color: var(--ink-3);">1 ~ 10 次</span>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <input
+                v-model.number="requestAttemptsInput"
+                type="number"
+                min="1"
+                max="10"
+                step="1"
+                class="w-20 rounded-lg px-3 py-1.5 text-xs outline-none border font-bold"
+                style="background-color: var(--surface-2); border-color: var(--line-2); color: var(--ink-1);"
+              />
+              <span class="text-xs font-bold" style="color: var(--ink-2);">次</span>
+              <div class="flex flex-wrap items-center gap-1.5 pl-1">
+                <button
+                  v-for="n in [1, 2, 3, 5]"
+                  :key="n"
+                  type="button"
+                  @click="requestAttemptsInput = n"
+                  class="px-2 py-1 rounded text-[11px] border cursor-pointer transition-all"
+                  :class="requestAttemptsInput === n ? 'bg-amber-500/20 text-amber-400 border-amber-500 font-bold' : 'text-gray-400 hover:text-white border-transparent'"
+                >
+                  {{ n }} 次
+                </button>
+              </div>
+            </div>
+            <p class="text-[10px] leading-relaxed" style="color: var(--ink-3);">
+              重试间指数退避；整条模型链共享 600s 总等待预算（低于任务 14 分钟硬超时），防止拖垮本轮推演。
+            </p>
+          </div>
+
+          <!-- Fallback chain -->
+          <div class="p-3 rounded-xl border space-y-2" style="background-color: var(--surface-1); border-color: var(--line-1);">
+            <div class="flex items-center justify-between">
+              <label class="text-[11px] font-bold" style="color: var(--ink-2);">回退模型链（按序生效）</label>
+              <span class="text-[11px]" style="color: var(--ink-3);">当前主脑: {{ cfg?.active_model_id || '--' }}</span>
+            </div>
+
+            <div v-if="fallbackIds.length === 0" class="text-[11px] italic px-1 py-0.5" style="color: var(--ink-3);">
+              未配置回退模型 —— 主脑失败重试耗尽后本轮直接放弃
+            </div>
+            <div v-else class="space-y-1">
+              <div
+                v-for="(fid, idx) in fallbackIds"
+                :key="fid"
+                class="flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg border text-[11px]"
+                style="background-color: var(--surface-2); border-color: var(--line-1);"
+              >
+                <div class="flex items-center space-x-2 min-w-0">
+                  <span class="w-4 h-4 shrink-0 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/25 flex items-center justify-center font-bold text-[10px]">{{ idx + 1 }}</span>
+                  <span class="font-bold truncate" style="color: var(--ink-1);">{{ modelNameOf(fid) }}</span>
+                </div>
+                <div class="flex items-center space-x-1 shrink-0">
+                  <button type="button" title="上移" @click="moveFallback(idx, -1)" class="p-1 rounded hover:bg-[var(--surface-1)] cursor-pointer text-gray-400"><ArrowUp class="w-3 h-3" /></button>
+                  <button type="button" title="下移" @click="moveFallback(idx, 1)" class="p-1 rounded hover:bg-[var(--surface-1)] cursor-pointer text-gray-400"><ArrowDown class="w-3 h-3" /></button>
+                  <button type="button" title="移除" @click="toggleFallback(fid)" class="p-1 rounded hover:bg-[var(--surface-1)] cursor-pointer text-red-400"><X class="w-3 h-3" /></button>
+                </div>
+              </div>
+            </div>
+
+            <div class="pt-1 border-t" style="border-color: var(--line-1);">
+              <div class="text-[10px] mb-1.5" style="color: var(--ink-3);">点击加入 / 移出回退链：</div>
+              <div class="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                <button
+                  v-for="m in fallbackOptions"
+                  :key="m.id"
+                  type="button"
+                  @click="toggleFallback(m.id)"
+                  class="px-2 py-1 rounded-lg text-[11px] border cursor-pointer transition-all"
+                  :class="fallbackIds.includes(m.id)
+                    ? 'bg-amber-500/20 text-amber-400 border-amber-500 font-bold'
+                    : 'text-gray-400 border-transparent hover:text-white hover:bg-[var(--surface-2)]'"
+                  :title="m.description || m.id"
+                >
+                  {{ m.name || m.id }}
+                </button>
+                <span v-if="fallbackOptions.length === 0" class="text-[11px] italic" style="color: var(--ink-3);">
+                  暂无其他模型，请先在供应商下添加备用模型
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Failover audit -->
+        <div class="pt-1">
+          <div class="flex items-center justify-between pb-1.5">
+            <div class="flex items-center space-x-1.5 text-[11px] font-bold" style="color: var(--ink-2);">
+              <History class="w-3.5 h-3.5 text-amber-400" />
+              <span>最近回退 / 失败记录</span>
+            </div>
+            <button @click="loadFailoverEvents" class="text-[11px] px-2 py-0.5 rounded border cursor-pointer" style="color: var(--ink-2); border-color: var(--line-1);">刷新</button>
+          </div>
+          <div v-if="failoverEvents.length === 0" class="text-[11px] italic px-1" style="color: var(--ink-3);">
+            暂无记录 —— 出现重试耗尽或触发回退时会在此留痕
+          </div>
+          <div v-else class="rounded-xl border divide-y overflow-hidden" style="background-color: var(--surface-1); border-color: var(--line-1);">
+            <div
+              v-for="(ev, i) in failoverEvents.slice(0, 8)"
+              :key="i"
+              class="px-3 py-2 text-[11px] space-y-0.5"
+              style="border-color: var(--line-1);"
+            >
+              <div class="flex items-center justify-between gap-2">
+                <span class="font-bold" :class="ev.succeeded ? 'text-emerald-400' : 'text-red-400'">
+                  {{ ev.type === 'fallback_hit' ? '✅ 已回退生效' : '⛔ 模型链全灭' }}
+                  {{ ev.from_model }}<template v-if="ev.to_model"> → {{ ev.to_model }}</template>
+                </span>
+                <span class="shrink-0" style="color: var(--ink-3);">{{ ev.time_str }} · {{ ev.elapsed_seconds }}s</span>
+              </div>
+              <div class="truncate" style="color: var(--ink-2);" :title="(ev.errors || []).join(' | ')">
+                {{ (ev.errors || [])[0] || ev.chain || '' }}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 

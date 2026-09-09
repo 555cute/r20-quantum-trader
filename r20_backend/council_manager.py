@@ -480,6 +480,7 @@ def _call_single_trader(
             reasoning_effort=override_effort,
             temperature=temperature,
             timeout=timeout,
+            allow_fallback=False,  # 委员会成员必须以其登记模型作答，保住模型身份；只享重试
         )
         return {
             "proposal_id": proposal_id,
@@ -578,6 +579,7 @@ def _call_single_trader_critique(
             reasoning_effort=override_effort,
             temperature=temperature,
             timeout=timeout,
+            allow_fallback=False,  # 委员会成员必须以其登记模型作答，保住模型身份；只享重试
         )
         return {
             "role_id": role_id,
@@ -898,6 +900,7 @@ def execute_council_debate(
         temperature=cio_temperature,
         response_format={"type": "json_object"},
         timeout=cio_timeout,
+        allow_fallback=False,  # CIO 终审同理由登记模型作答；整链失败由上层降级单模型决策
     )
 
     clean_content = content.strip()

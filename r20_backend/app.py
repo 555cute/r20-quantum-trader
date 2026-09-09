@@ -75,6 +75,7 @@ from r20_backend.llm_manager import (
     fetch_remote_models,
     init_llm_providers,
     save_llm_config,
+    recent_failover_events,
 )
 from scripts.prompt_library import (
     PRESETS, TEMPLATE_KEYS, active_profile, activate_profile, all_profiles, apply_module_layout,
@@ -191,9 +192,11 @@ class LLMActivateRequest(BaseModel):
 
 
 class LLMSettingsUpdateRequest(BaseModel):
-    thinking_timeout: float = Field(default=120.0, ge=5.0, le=1800.0)
+    thinking_timeout: float | None = Field(default=None, ge=5.0, le=1800.0)
     active_model_id: str | None = None
     reasoning_effort: str | None = None
+    request_attempts: int | None = Field(default=None, ge=1, le=10)
+    fallback_model_ids: list[str] | None = None
 
 
 class LLMTestRequest(BaseModel):
@@ -1337,18 +1340,34 @@ def admin_update_llm_settings(
     x_r20_session: str | None = Header(default=None, alias="X-R20-Session"),
 ) -> dict[str, Any]:
     actor = require_superadmin(x_r20_session)
-    result = update_llm_settings(
-        active_model_id=payload.active_model_id,
-        reasoning_effort=payload.reasoning_effort,
-        thinking_timeout=payload.thinking_timeout,
-    )
+    try:
+        result = update_llm_settings(
+            active_model_id=payload.active_model_id,
+            reasoning_effort=payload.reasoning_effort,
+            thinking_timeout=payload.thinking_timeout,
+            request_attempts=payload.request_attempts,
+            fallback_model_ids=payload.fallback_model_ids,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     audit_record("llm.settings.update", "success", {
         "actor": actor["username"],
         "thinking_timeout": payload.thinking_timeout,
         "active_model_id": payload.active_model_id,
         "reasoning_effort": payload.reasoning_effort,
+        "request_attempts": payload.request_attempts,
+        "fallback_model_ids": payload.fallback_model_ids,
     })
     return result
+
+
+@app.get("/api/v1/admin/llm/failover-events")
+def admin_llm_failover_events(
+    limit: int = 30,
+    x_r20_session: str | None = Header(default=None, alias="X-R20-Session"),
+) -> dict[str, Any]:
+    require_admin_header(x_r20_session=x_r20_session)
+    return {"events": recent_failover_events(limit)}
 
 
 @app.post("/api/v1/admin/llm/test")
