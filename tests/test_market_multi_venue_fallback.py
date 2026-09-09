@@ -63,6 +63,23 @@ def _adapters(binance, gate):
 
 
 class TestMultiVenueFallback(unittest.TestCase):
+    def setUp(self):
+        # 钉死健康文件路径到不存在位置 + 清缓存：旧用例断言依赖静态序（binance 在前），
+        # 不得被生产 data/venue_health.json 的真实失败记录翻转。
+        self._health = patch("scripts.market_data_service.VENUE_HEALTH_FILE",
+                             "/tmp/r20-mission-nonexistent-venue-health.json")
+        self._health.start()
+        self._reset()
+
+    def tearDown(self):
+        self._health.stop()
+        self._reset()
+
+    @staticmethod
+    def _reset():
+        mds._ALT_ORDER_CACHE["order"] = None
+        mds._ALT_ORDER_CACHE["ts"] = 0.0
+
     def _fail_okx(self):
         return [
             patch("scripts.market_data_service._public_get", return_value=None),
@@ -121,6 +138,87 @@ class TestMultiVenueFallback(unittest.TestCase):
                 patch.dict(os.environ, {"R20_ALT_VENUE_FALLBACK": "0"}):
             self.assertEqual(mds.fetch_candles("BTC-USDT-SWAP"), [])
             self.assertIsNone(mds.fetch_ticker("BTC-USDT-SWAP"))
+
+
+class TestAltVenueDynamicOrder(unittest.TestCase):
+    """US-004：venue_health 感知的备源排序（全临时文件，零生产读写）。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.hf = os.path.join(self.tmp.name, "venue_health.json")
+        self._health = patch("scripts.market_data_service.VENUE_HEALTH_FILE", self.hf)
+        self._health.start()
+        self._reset()
+
+    def tearDown(self):
+        self._health.stop()
+        self._reset()
+        self.tmp.cleanup()
+
+    @staticmethod
+    def _reset():
+        mds._ALT_ORDER_CACHE["order"] = None
+        mds._ALT_ORDER_CACHE["ts"] = 0.0
+
+    def _write(self, obj_or_text):
+        with open(self.hf, "w", encoding="utf-8") as f:
+            if isinstance(obj_or_text, str):
+                f.write(obj_or_text)
+            else:
+                import json
+                json.dump(obj_or_text, f)
+        self._reset()   # 模拟 mtime 变化窗口外
+
+    def test_failed_count_demotes_venue(self):
+        self._write({"venues": {
+            "binance": {"ok": [], "failed": {"BTC": "429", "ETH": "429"}, "avg_ms": 300},
+            "gate": {"ok": ["BTC"], "failed": {}, "avg_ms": 250}}})
+        self.assertEqual(mds._alt_venue_order(), ("gate", "binance"))
+
+    def test_missing_file_static_fallback(self):
+        self.assertEqual(mds._alt_venue_order(), ("binance", "gate"))
+
+    def test_corrupt_json_never_crashes(self):
+        self._write("{not json at all [[")
+        self.assertEqual(mds._alt_venue_order(), ("binance", "gate"))
+
+    def test_weird_shapes_survive(self):
+        self._write({"venues": {"binance": "garbage", "gate": {"failed": None, "avg_ms": "x"}}})
+        self.assertEqual(mds._alt_venue_order(), ("binance", "gate"))  # 都无有效 failed → 静态原序平局
+
+    def test_tie_broken_by_latency(self):
+        self._write({"venues": {
+            "binance": {"ok": [], "failed": {}, "avg_ms": 900},
+            "gate": {"ok": [], "failed": {}, "avg_ms": 120}}})
+        self.assertEqual(mds._alt_venue_order(), ("gate", "binance"))
+
+    def test_ticker_end_to_end_prefers_healthy(self):
+        # binance 健康差 → 同一双活 fake 下 ticker 应由 gate 服务（用返回体 venue 标签断言）
+        self._write({"venues": {
+            "binance": {"ok": [], "failed": {"BTC": "418 banned"}, "avg_ms": 300},
+            "gate": {"ok": [], "failed": {}, "avg_ms": 250}}})
+
+        class GatedFake(_FakeAdapter):
+            def fetch_ticker(self, base):
+                t = dict(super().fetch_ticker(base))
+                t["venue"] = "gate"
+                return t
+
+        with patch("scripts.market_data_service._get_venue_adapter",
+                   _adapters(_FakeAdapter(), GatedFake())):
+            t = mds._alt_venue_ticker("BTC-USDT-SWAP")
+        self.assertEqual(t["venue"], "gate")
+
+    def test_cache_avoids_reparse(self):
+        self._write({"venues": {"binance": {"failed": {"B": 1, "C": 2, "D": 3}},
+                                "gate": {"failed": {}}}})
+        self.assertEqual(mds._alt_venue_order(), ("gate", "binance"))
+        # 缓存窗口内改文件为反向数据——必须仍返回缓存（证明读盘被吸收）
+        with open(self.hf, "w") as f:
+            f.write('{"venues": {"binance": {"failed": {}}, "gate": {"failed": {"a":1,"b":2,"c":3}}}}')
+        self.assertEqual(mds._alt_venue_order(), ("gate", "binance"))
+        self._reset()
+        self.assertEqual(mds._alt_venue_order(), ("binance", "gate"))  # 重置后读到新数据
 
 
 class TestOkxPublicAdapter(unittest.TestCase):

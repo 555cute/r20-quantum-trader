@@ -135,6 +135,60 @@ def _public_post(path: str, payload: Dict[str, Any], timeout: float = 4.0) -> Op
 
 ALT_VENUES = ("binance", "gate")
 
+# 健康文件与 ai_brain_trader 的 VENUE_HEALTH_FILE 同源目录（scripts/../data/）
+import pathlib as _pathlib  # noqa: E402  （0b 段局部引入，避免动头部 import 块）
+VENUE_HEALTH_FILE = str(_pathlib.Path(__file__).resolve().parents[1] / "data" / "venue_health.json")
+
+_ALT_ORDER_CACHE = {"ts": 0.0, "order": None}
+_ALT_ORDER_LOCK = threading.Lock()
+
+
+def _alt_venue_order() -> tuple:
+    """健康感知备源顺序（US-004）：按 venue_health.json 失败数升序 → avg_ms 升序 → 静态原序。
+
+    缓存理由：备源路径在 OKX 全断时会爆发几十次请求（因子轮询/brain/回测），
+    而健康文件每 15 分钟周期至多更新一次——stat + 60s TTL 避免每次读盘解析；
+    mtime 在 TTL 外变化才重新解析。任何缺失/损坏/结构异常一律回退静态 ALT_VENUES，
+    绝不抛（热文件纪律：本模块被生产 trader 子进程直接加载）。
+    """
+    try:
+        now = time.time()
+        with _ALT_ORDER_LOCK:
+            cached = _ALT_ORDER_CACHE["order"]
+            if cached is not None and now - _ALT_ORDER_CACHE["ts"] < 60.0:
+                return cached
+        order = None
+        try:
+            p = _pathlib.Path(VENUE_HEALTH_FILE)
+            if p.exists():
+                raw = json.loads(p.read_text(encoding="utf-8"))
+                venues = raw.get("venues") if isinstance(raw, dict) else None
+                if isinstance(venues, dict):
+                    base_idx = {v: i for i, v in enumerate(ALT_VENUES)}
+
+                    def _key(v):
+                        rec = venues.get(v)
+                        rec = rec if isinstance(rec, dict) else {}
+                        failed = rec.get("failed")
+                        nf = len(failed) if isinstance(failed, (dict, list)) else 0
+                        try:
+                            avg = float(rec.get("avg_ms"))
+                        except (TypeError, ValueError):
+                            avg = 1e9
+                        return (nf, avg if avg >= 0 else 1e9, base_idx.get(v, 99))
+
+                    order = tuple(sorted(ALT_VENUES, key=_key))
+        except Exception:
+            order = None
+        if order is None:
+            order = ALT_VENUES
+        with _ALT_ORDER_LOCK:
+            _ALT_ORDER_CACHE["ts"] = time.time()
+            _ALT_ORDER_CACHE["order"] = order
+        return order
+    except Exception:
+        return ALT_VENUES
+
 
 def _alt_venue_allowed() -> bool:
     """离线/测试熔断开关：R20_ALT_VENUE_FALLBACK=0 时备源路径完全不发网络请求。"""
@@ -156,7 +210,7 @@ def _get_venue_adapter(venue: str):
 def _alt_venue_ticker(inst_id: str) -> Optional[Dict[str, Any]]:
     if not _alt_venue_allowed():
         return None
-    for venue in ALT_VENUES:
+    for venue in _alt_venue_order():
         try:
             ad = _get_venue_adapter(venue)
             t = ad.fetch_ticker(ad.canonical(inst_id))
@@ -182,7 +236,7 @@ def _alt_venue_ticker(inst_id: str) -> Optional[Dict[str, Any]]:
 def _alt_venue_candles(inst_id: str, bar: str, limit: int) -> List[List[str]]:
     if not _alt_venue_allowed():
         return []
-    for venue in ALT_VENUES:
+    for venue in _alt_venue_order():
         try:
             ad = _get_venue_adapter(venue)
             kl = ad.fetch_candles(ad.canonical(inst_id), bar, limit)
@@ -200,7 +254,7 @@ def _alt_venue_candles(inst_id: str, bar: str, limit: int) -> List[List[str]]:
 def _alt_funding_rate(inst_id: str) -> Optional[float]:
     if not _alt_venue_allowed():
         return None
-    for venue in ALT_VENUES:
+    for venue in _alt_venue_order():
         try:
             ad = _get_venue_adapter(venue)
             r = ad.fetch_funding_rate(ad.canonical(inst_id))
