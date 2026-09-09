@@ -1,10 +1,20 @@
-from okx_runtime import replace_cli_prefix as okx_private_command
-import subprocess
-import json
+import sys
+import os
 import datetime
 
-res = subprocess.run(okx_private_command("okx account bills --limit 100 --json"), shell=True, capture_output=True, text=True)
-bills = json.loads(res.stdout) if res.stdout else []
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+import scripts.okx_rest as okx_rest
+import scripts.okx_runtime as okx_runtime
+
+# 2026-09-09 OKX CLI 移除：账单直读走 V5 直签 REST；未配置 Key 一律 NOT READY 拒绝。
+if not okx_runtime.current_environment().configured:
+    print("[NOT READY] OKX API Key 未配置 — 调试工具仅支持 V5 直签 REST（fail-closed，无 CLI 回退）")
+    raise SystemExit(3)
+
+bills = okx_rest.bills(limit=100)
 
 print("=== 01:11:20 REBOOT AFTERMATH BILLS (Chronological) ===")
 total_pnl = 0.0
