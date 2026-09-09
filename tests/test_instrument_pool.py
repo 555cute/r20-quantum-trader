@@ -12,6 +12,7 @@ from scripts.instrument_pool import (
     load_instruments,
     normalize_pool_item,
     resolve_instrument_rules,
+    save_instruments,
     venue_symbol,
 )
 
@@ -47,6 +48,19 @@ class TestInstrumentPoolBaseUnits(unittest.TestCase):
             self.assertEqual(loaded["risk_per_trade_usd"], 15.0)
             self.assertEqual(loaded["base_qty"], 0.0001)
             self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["instruments"], [row])
+
+    def test_save_discards_response_only_venue_symbol(self):
+        row = {
+            "instId": "DUSK-USDT-SWAP", "name": "DUSK",
+            "base_qty": 1, "venue_symbol": "DUSKUSDT",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "instrument_pool.json"
+            with patch("scripts.instrument_pool.POOL_FILE", path), \
+                    patch("scripts.instrument_pool.sync_instruments_state"):
+                save_instruments([row])
+            stored = json.loads(path.read_text(encoding="utf-8"))["instruments"][0]
+            self.assertNotIn("venue_symbol", stored)
 
     def test_coin_identity_repair_preserves_custom_display_name(self):
         item = normalize_pool_item({
