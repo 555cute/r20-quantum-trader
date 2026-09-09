@@ -88,7 +88,7 @@ function openDetail(f: any) {
             <td>
               <div class="flex items-center gap-1.5">
                 <span class="dir" :class="actionMeta(actionOf(f)).cls">{{ actionMeta(actionOf(f)).label }}</span>
-                <ConfBadge v-if="actionOf(f) !== 'WAIT'" :value="f.decision?.confidence" />
+                <ConfBadge v-if="actionOf(f) !== 'WAIT'" :value="f.decision?.confidence ?? f.confidence" />
               </div>
             </td>
           </tr>

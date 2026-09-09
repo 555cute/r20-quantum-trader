@@ -31,6 +31,22 @@ const statusMeta = computed(() => {
 });
 
 const insights = computed<any[]>(() => review.value.diagnosis_insights || review.value.insights || []);
+/** 归因切片兼容两种形态：字符串（"标题：正文"，当前后端格式）与对象 {dimension, observation} */
+function insTitle(it: any): string {
+  if (typeof it === 'string') {
+    const i = it.indexOf('：');
+    if (i > 0 && i <= 24) return it.slice(0, i);
+    return '';
+  }
+  return it?.dimension || it?.title || '';
+}
+function insBody(it: any): string {
+  if (typeof it === 'string') {
+    const i = it.indexOf('：');
+    return i > 0 && i <= 24 ? it.slice(i + 1) : it;
+  }
+  return it?.observation || it?.detail || it?.text || String(it ?? '');
+}
 const actions = computed<string[]>(() => review.value.actions_taken || []);
 
 /** 心法解析：【标题】正文 */
@@ -120,9 +136,9 @@ const md = computed(() => (store.data as any)?.ai_trading_memory_md || '');
             <BaseEmpty v-if="!insights.length" :text="t('dash.evolution.insights.empty')" />
             <div v-for="(it, i) in insights" :key="i" class="card-flat p-3">
               <p class="text-sm font-semibold" style="color: var(--ink-strong)">
-                <span class="num me-1.5 t-faint">{{ String(i + 1).padStart(2, '0') }}</span>{{ it.dimension }}
+                <span class="num me-1.5 t-faint">{{ String(i + 1).padStart(2, '0') }}</span>{{ insTitle(it) }}
               </p>
-              <p class="mt-1 text-xs leading-relaxed" style="color: var(--ink-2)">{{ it.observation }}</p>
+              <p class="mt-1 text-xs leading-relaxed" style="color: var(--ink-2)">{{ insBody(it) }}</p>
             </div>
           </div>
         </div>
