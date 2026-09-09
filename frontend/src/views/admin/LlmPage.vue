@@ -443,7 +443,11 @@ async function importRemoteModel(m: any, autoActivate = false) {
     if (autoActivate) {
       await api('/api/v1/admin/llm/activate', {
         method: 'POST',
-        body: JSON.stringify({ model_id: m.id, reasoning_effort: payload.reasoning_effort }),
+        body: JSON.stringify({
+          model_id: m.id,
+          provider_id: selectedProvider.value.id,
+          reasoning_effort: payload.reasoning_effort,
+        }),
       })
     }
     await loadConfig()
@@ -542,6 +546,7 @@ async function activateModel(m: any) {
       method: 'POST',
       body: JSON.stringify({
         model_id: m.id,
+        provider_id: selectedProvider.value?.id || m.provider_id || 'custom',
         reasoning_effort: m.reasoning_effort || 'high',
       }),
     })
@@ -551,10 +556,15 @@ async function activateModel(m: any) {
   }
 }
 
-async function deleteSingleModel(modelId: string) {
-  if (!confirm(`确定删除模型 ${modelId} 吗？`)) return
+async function deleteSingleModel(m: any) {
+  const pid = selectedProvider.value?.id
+  const pname = selectedProvider.value?.name || pid || ''
+  if (!confirm(`确定删除供应商「${pname}」名下的模型 ${m.id} 吗？`)) return
   try {
-    await api(`/api/v1/admin/llm/models/${encodeURIComponent(modelId)}`, {
+    const url = pid
+      ? `/api/v1/admin/llm/providers/${encodeURIComponent(pid)}/models/${encodeURIComponent(m.id)}`
+      : `/api/v1/admin/llm/models/${encodeURIComponent(m.id)}`
+    await api(url, {
       method: 'DELETE',
     })
     await loadConfig()
@@ -1184,10 +1194,13 @@ onMounted(() => {
             <label class="block text-xs font-bold mb-1.5" style="color: var(--ink-2);">API Base URL</label>
             <input
               v-model="providerForm.base_url"
-              placeholder="https://api.openai.com/v1 或自建中继地址"
+              placeholder="按供应商要求原样填写，如 https://open.bigmodel.cn/api/paas/v4"
               class="w-full rounded-xl px-4 py-2.5 text-xs outline-none border transition-colors"
               style="background-color: var(--surface-1); border-color: var(--line-1); color: var(--ink-1);"
             />
+            <p class="mt-1 text-[10px]" style="color: var(--ink-3);">
+              已取消自动补 /v1：带版本路径（/v1、/v4、/v1beta 等）以填写内容为准，直接拼接请求端点；仅裸域名自动兼容补 /v1。
+            </p>
           </div>
 
           <!-- API 路径 -->
@@ -1337,7 +1350,7 @@ onMounted(() => {
               </button>
 
               <button
-                @click="deleteSingleModel(m.id)"
+                @click="deleteSingleModel(m)"
                 class="p-2 rounded-xl border text-xs cursor-pointer hover:bg-red-500/10 transition-colors text-red-400"
                 style="border-color: var(--line-1);"
                 title="删除该模型"

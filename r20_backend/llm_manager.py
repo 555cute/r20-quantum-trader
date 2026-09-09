@@ -16,6 +16,7 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data"
@@ -191,6 +192,82 @@ DEFAULT_PROVIDERS = [
 ]
 
 
+# ── Base URL 拼接：以用户显式输入的路径为准，不再强插 /v1 ──
+# 历史缺陷：所有请求端点构造都在 base_url 不以 /v1 结尾时硬拼 "/v1/..."，
+# 导致智谱（https://open.bigmodel.cn/api/paas/v4）、Gemini（.../v1beta）这类
+# 带版本路径的供应商被拼成 /v4/v1/chat/completions 而 404/401。
+# 规则：base 含任何显式路径 → 直接拼接协议后缀；裸域名（无路径）→ 兼容补 /v1。
+def _url_path_of(base: str) -> str:
+    try:
+        return urlparse(base).path or ""
+    except Exception:
+        return "/unparseable"  # 解析失败按“有路径”处理，不做任何自动填充
+
+
+def _join_api_path(base: str, suffix: str) -> str:
+    """把协议后缀（/chat/completions、/messages、/responses、/models）拼到 Base URL 上。"""
+    cleaned = str(base or "").strip().rstrip("/")
+    if cleaned.endswith(suffix):
+        return cleaned
+    if _url_path_of(cleaned) in ("", "/"):
+        return f"{cleaned}/v1{suffix}"
+    return f"{cleaned}{suffix}"
+
+
+def _model_holder_pids(providers: List[Dict[str, Any]], model_id: str) -> List[str]:
+    """列出嵌套模型清单里持有该模型 id 的所有供应商 id。"""
+    return [
+        str(p.get("id", ""))
+        for p in providers
+        if any(m.get("id") == model_id for m in p.get("models", []))
+    ]
+
+
+def _resolve_active_provider_id(config: Dict[str, Any]) -> str:
+    """判定主脑模型归属的供应商。
+
+    优先级：显式 active_provider_id > 唯一持有者 > 顶层扁平缓存归属。
+    多个供应商挂同名模型且无法判定时返回空串——调用方据此保守处理（宁可拦，不可放错）。
+    """
+    mid = config.get("active_model_id", "")
+    if not mid:
+        return ""
+    providers = config.get("providers", [])
+    holders = _model_holder_pids(providers, mid)
+    if not holders:
+        # 模型不嵌套在任何供应商名下（仅顶层注册）→ 没有归属可言，
+        # 绝不能沿用陈旧的 active_provider_id，否则会被误重挂到该供应商凭据上
+        return ""
+    pid = str(config.get("active_provider_id") or "").strip()
+    if pid and pid in holders:
+        return pid
+    if len(set(holders)) == 1:
+        return holders[0]
+    flat_pid = next(
+        (str(m.get("provider_id") or "") for m in config.get("models", []) if m.get("id") == mid),
+        "",
+    )
+    if flat_pid and flat_pid in holders:
+        return flat_pid
+    return ""
+
+
+def _provider_holds_active_model(config: Dict[str, Any], provider_id: str) -> bool:
+    """该供应商是否持有当前主脑模型。
+
+    多供应商挂同名模型时按归属精确判定，不再让未启用的那份副本被误伤；
+    归属无法判定（多持有者且无记录）时保守视为持有，防止主脑悬空。
+    """
+    mid = config.get("active_model_id", "")
+    if not mid:
+        return False
+    prov = next((p for p in config.get("providers", []) if p.get("id") == provider_id), None)
+    if not prov or not any(m.get("id") == mid for m in prov.get("models", [])):
+        return False
+    active_pid = _resolve_active_provider_id(config)
+    return (not active_pid) or active_pid == provider_id
+
+
 
 def init_llm_config() -> Dict[str, Any]:
     """Load or initialize clean, user-centric model configuration with multi-provider support."""
@@ -288,6 +365,7 @@ def init_llm_config() -> Dict[str, Any]:
                 "base_url": m.get("base_url") or p_base,
                 "api_key": m.get("api_key") or p_key,
                 "api_format": m.get("api_format") or p_fmt,
+                "api_path": m.get("api_path") or p.get("api_path", ""),
                 "reasoning_type": m.get("reasoning_type", _detect_reasoning_type(mid)),
                 "reasoning_effort": m.get("reasoning_effort") or m.get("default_effort", "high"),
                 "capabilities": m.get("capabilities", _detect_capabilities(mid)),
@@ -327,6 +405,34 @@ def init_llm_config() -> Dict[str, Any]:
     if not any(m["id"] == active_m_id for m in flat_models) and flat_models:
         active_m_id = flat_models[0]["id"]
 
+    # ── 主脑供应商归属：嵌套持有者为准（显式记录 > 唯一持有 > 顶层扁平缓存归属）──
+    # models_map 按 id 去重（后出现的供应商覆盖先出现的），多供应商挂同名模型时
+    # 顶层缓存的 base_url/api_key 会静默变成另一家的——必须把主脑条目钉回其供应商。
+    raw_active_pid = str(data.get("active_provider_id") or "").strip()
+    active_pid = _resolve_active_provider_id(
+        {
+            "active_model_id": active_m_id,
+            "active_provider_id": raw_active_pid,
+            "providers": merged_providers,
+            "models": flat_models,
+        }
+    )
+    if active_pid and active_m_id:
+        ap = next((p for p in merged_providers if str(p.get("id", "")) == active_pid), None)
+        if ap:
+            for m in flat_models:
+                if m.get("id") != active_m_id:
+                    continue
+                m["provider_id"] = active_pid
+                m["provider_name"] = ap.get("name", active_pid)
+                if ap.get("base_url"):
+                    m["base_url"] = ap["base_url"]
+                if ap.get("api_key"):
+                    m["api_key"] = ap["api_key"]
+                if not m.get("api_format"):
+                    m["api_format"] = ap.get("api_format", "openai_chat")
+                break
+
     # ── 韧性配置解析：请求次数 + 回退模型链（脏数据自愈）──
     raw_attempts = data.get("request_attempts")
     try:
@@ -355,6 +461,7 @@ def init_llm_config() -> Dict[str, Any]:
         "version": "3.2",
         "defaults_seeded": True,
         "active_model_id": active_m_id,
+        "active_provider_id": active_pid,
         "active_reasoning_effort": active_effort,
         "thinking_timeout": thinking_timeout,
         "request_attempts": request_attempts,
@@ -381,6 +488,7 @@ def load_llm_config(mask_keys: bool = True) -> Dict[str, Any]:
     config = init_llm_config()
     providers_list = config.get("providers", [])
     active_mid = config.get("active_model_id", "")
+    active_pid = _resolve_active_provider_id(config)
     active_effort = config.get("active_reasoning_effort", "high")
 
     res: Dict[str, Any] = {
@@ -396,7 +504,7 @@ def load_llm_config(mask_keys: bool = True) -> Dict[str, Any]:
         "supported_api_formats": SUPPORTED_API_FORMATS,
         "providers": [],
         "models": [],
-        "active_provider_id": "openai",
+        "active_provider_id": active_pid or (config.get("active_provider_id") or ""),
     }
 
     for p in providers_list:
@@ -414,7 +522,9 @@ def load_llm_config(mask_keys: bool = True) -> Dict[str, Any]:
                 "reasoning_effort": m.get("reasoning_effort") or "high",
                 "context_length": m.get("context_length"),
                 "description": m.get("description", ""),
-                "is_active": m_id == active_mid,
+                # 同名模型挂多家供应商时，主脑徽标只打给归属供应商的那一份；
+                # 归属无法判定（active_pid 为空）时保留全打，避免误导为"没启用"
+                "is_active": bool(m_id == active_mid and (not active_pid or pid == active_pid)),
             })
 
         p_copy = {
@@ -484,6 +594,7 @@ def get_active_llm_runtime() -> Dict[str, Any]:
     api_key = target_model.get("api_key") if target_model else getattr(settings, "llm_api_key", "")
     provider_id = target_model.get("provider_id", "") if target_model else ""
     provider_name = target_model.get("provider_name", "") if target_model else "默认"
+    prov_api_path = str((target_model or {}).get("api_path", "") or "")
 
     if target_model:
         t_base = target_model.get("base_url", "").rstrip("/")
@@ -503,6 +614,8 @@ def get_active_llm_runtime() -> Dict[str, Any]:
                 provider_name = prov.get("name", provider_name)
             if not provider_id:
                 provider_id = prov.get("id", "openai")
+            if not prov_api_path:
+                prov_api_path = str(prov.get("api_path", "") or "")
 
     base_url = (base_url or os.getenv("LLM_BASE_URL", "")).rstrip("/")
     if not base_url:
@@ -532,6 +645,7 @@ def get_active_llm_runtime() -> Dict[str, Any]:
         "base_url": base_url,
         "api_key": api_key,
         "api_format": api_format,
+        "api_path": prov_api_path,
         "reasoning_effort": active_effort,
         "reasoning_type": reasoning_type,
         "thinking_timeout": thinking_timeout,
@@ -572,6 +686,7 @@ def resolve_model_runtime(model_id: str) -> Optional[Dict[str, Any]]:
         "base_url": base_url,
         "api_key": api_key,
         "api_format": api_format,
+        "api_path": str(target.get("api_path", "") or ""),
         "reasoning_effort": effort if effort in STANDARD_REASONING_EFFORTS else "high",
         "reasoning_type": reasoning_type,
         "thinking_timeout": thinking_timeout,
@@ -621,7 +736,51 @@ def activate_provider_model(provider_id: str, model_id: str, reasoning_effort: O
         save_secrets = None
 
     config = init_llm_config()
-    target_model = next((m for m in config.get("models", []) if m["id"] == model_id), None)
+    flat_model = next((m for m in config.get("models", []) if m["id"] == model_id), None)
+    target_model: Optional[Dict[str, Any]] = None
+    scoped_pid = str(provider_id or "").strip()
+    scoped_prov: Optional[Dict[str, Any]] = None
+
+    if scoped_pid and scoped_pid != "custom":
+        # 从指定供应商的「模型」页设为主脑：归属以本次调用的供应商为准，
+        # 解决多供应商挂同名模型时顶层缓存只按 model id 记录导致的混挂。
+        scoped_prov = next((p for p in config.get("providers", []) if p.get("id") == scoped_pid), None)
+        if scoped_prov is None:
+            raise ValueError(f"供应商 {scoped_pid} 未找到，无法激活")
+        nested = next((m for m in scoped_prov.get("models", []) if m.get("id") == model_id), None)
+        if nested is None and not (flat_model and str(flat_model.get("provider_id") or "") == scoped_pid):
+            raise ValueError(
+                f"供应商 {scoped_prov.get('name')} 名下没有模型 {model_id}；请先在该供应商下添加，再设为主脑。"
+            )
+        nested = nested or {}
+        target_model = {
+            "id": model_id,
+            "name": nested.get("name") or (flat_model or {}).get("name") or model_id,
+            "provider_id": scoped_prov.get("id"),
+            "provider_name": scoped_prov.get("name", scoped_pid),
+            "base_url": scoped_prov.get("base_url", "") or (flat_model or {}).get("base_url", ""),
+            "api_key": scoped_prov.get("api_key", ""),
+            "api_format": nested.get("api_format")
+            or (flat_model or {}).get("api_format")
+            or scoped_prov.get("api_format", "openai_chat"),
+            "reasoning_type": nested.get("reasoning_type")
+            or (flat_model or {}).get("reasoning_type")
+            or _detect_reasoning_type(model_id),
+            "reasoning_effort": nested.get("reasoning_effort")
+            or nested.get("default_effort")
+            or (flat_model or {}).get("reasoning_effort", "high"),
+            "capabilities": nested.get("capabilities") or (flat_model or {}).get("capabilities", []),
+            "context_length": nested.get("context_length") or (flat_model or {}).get("context_length"),
+            "description": nested.get("description") or (flat_model or {}).get("description", ""),
+        }
+        # 顶层扁平缓存钉到主脑供应商的凭据上，交易引擎与全局列表随之对齐
+        if flat_model is not None:
+            flat_model.update(target_model)
+        else:
+            config.setdefault("models", []).append(target_model)
+
+    if target_model is None:
+        target_model = flat_model
     if not target_model:
         # Check providers models
         for p in config.get("providers", []):
@@ -661,6 +820,7 @@ def activate_provider_model(provider_id: str, model_id: str, reasoning_effort: O
         effort = "auto"
 
     config["active_model_id"] = model_id
+    config["active_provider_id"] = str(target_model.get("provider_id") or "")
     config["active_reasoning_effort"] = effort
     if thinking_timeout is not None:
         timeout_val = max(5.0, min(float(thinking_timeout), 1800.0))
@@ -728,6 +888,8 @@ def update_llm_settings(
     if active_model_id:
         config["active_model_id"] = active_model_id
         env_values["LLM_MODEL"] = active_model_id
+        # 主脑换了模型 → 供应商归属立即重判，防止 active_provider_id 悬在旧模型上
+        config["active_provider_id"] = _resolve_active_provider_id(config)
 
     if reasoning_effort:
         config["active_reasoning_effort"] = reasoning_effort
@@ -783,6 +945,12 @@ def update_llm_settings(
 def upsert_model(provider_id: str, model_data: Dict[str, Any]) -> Dict[str, Any]:
     """Add or update a custom model definition."""
     mid = str(model_data.get("id", "")).strip()
+    provider_id = str(provider_id or "").strip()
+    # 旧全局路由 /llm/models 不带路径参数（provider_id 恒为 "custom"），
+    # 但前端 payload 一直携带归属供应商——尊重 payload，避免模型落错家。
+    payload_pid = str(model_data.get("provider_id", "") or "").strip()
+    if (not provider_id or provider_id == "custom") and payload_pid and payload_pid != "custom":
+        provider_id = payload_pid
     name = str(model_data.get("name", "")).strip() or mid
     base_url = str(model_data.get("base_url", "")).strip().rstrip("/")
     api_key = str(model_data.get("api_key", "")).strip()
@@ -888,19 +1056,65 @@ def upsert_model(provider_id: str, model_data: Dict[str, Any]) -> Dict[str, Any]
 
 
 def delete_model(provider_id: str, model_id: str) -> bool:
-    """Delete a custom model."""
+    """Delete a custom model.
+
+    多供应商挂同名模型时的作用域规则：
+    - 只有「主脑所属供应商」名下的那份不可删，其他供应商的同名副本可正常删除；
+    - 顶层扁平缓存只按 (id, provider_id) 摘除对应条目，别家持有者由下次加载自动重挂；
+    - 不带供应商作用域的旧路由保持全量删除语义（各供应商一并移除）。
+    """
     config = init_llm_config()
-    if config.get("active_model_id") == model_id:
-        raise ValueError("不能删除当前正在使用的模型；请先切换到其他模型后再删除。")
+    scoped = bool(provider_id) and provider_id != "custom"
+    active_mid = config.get("active_model_id", "")
+
+    if active_mid and model_id == active_mid:
+        active_pid = _resolve_active_provider_id(config)
+        if not scoped:
+            raise ValueError(
+                "不能删除当前正在使用的模型；请先切换到其他模型后再删除。"
+                "若只想删某家供应商名下的副本，请进入该供应商的模型页操作。"
+            )
+        if active_pid:
+            if active_pid == provider_id:
+                prov_name = next(
+                    (p.get("name", provider_id) for p in config.get("providers", []) if p.get("id") == provider_id),
+                    provider_id,
+                )
+                raise ValueError(
+                    f"{model_id} 是供应商「{prov_name}」名下正在使用的主脑模型；"
+                    "请先切换主脑或删除其他供应商名下的同名副本。"
+                )
+        else:
+            raise ValueError(
+                f"多个供应商名下挂有同名主脑模型 {model_id}，无法判定启用的是哪一家；"
+                "请先在该供应商的模型页点「设为主脑」明确归属，再执行删除。"
+            )
 
     models = config.get("models", [])
-    filtered = [m for m in models if m["id"] != model_id]
+    providers = config.get("providers", [])
 
-    for prov in config.get("providers", []):
-        if not provider_id or provider_id == "custom" or prov.get("id") == provider_id:
+    nested_removed = False
+    if scoped:
+        prov = next((p for p in providers if p.get("id") == provider_id), None)
+        if prov is None:
+            raise ValueError(f"供应商 {provider_id} 未找到")
+        before = len(prov.get("models", []))
+        prov["models"] = [m for m in prov.get("models", []) if m.get("id") != model_id]
+        nested_removed = len(prov["models"]) < before
+        # 顶层缓存只摘属于本供应商的条目；归属漂移挂在别家名下的条目留给 init 重建时自愈
+        filtered = [
+            m
+            for m in models
+            if not (m.get("id") == model_id and str(m.get("provider_id") or "") == provider_id)
+        ]
+    else:
+        for prov in providers:
+            before = len(prov.get("models", []))
             prov["models"] = [m for m in prov.get("models", []) if m.get("id") != model_id]
+            nested_removed = nested_removed or len(prov["models"]) < before
+        filtered = [m for m in models if m["id"] != model_id]
 
-    if len(filtered) == len(models):
+    if len(filtered) == len(models) and not nested_removed:
         return False
 
     config["models"] = filtered
@@ -1032,7 +1246,7 @@ def clear_provider_models(provider_id: str) -> bool:
     if not p:
         return False
     active_mid = config.get("active_model_id", "")
-    if any(m.get("id") == active_mid for m in p.get("models", [])):
+    if _provider_holds_active_model(config, provider_id):
         raise ValueError(
             f"供应商 {provider_id} 名下挂着当前激活模型 {active_mid}；请先切换主脑模型再清空。"
         )
@@ -1054,7 +1268,7 @@ def delete_provider(provider_id: str) -> bool:
     if not target:
         return False
     active_mid = config.get("active_model_id", "")
-    if any(m.get("id") == active_mid for m in target.get("models", [])):
+    if _provider_holds_active_model(config, provider_id):
         raise ValueError(
             f"供应商 {provider_id} 名下挂着当前激活模型 {active_mid}；请先切换主脑模型再删除。"
         )
@@ -1108,20 +1322,27 @@ def fetch_remote_models(
             api_key = prov.get("api_key", "")
 
     endpoints = []
+    bearer_hdr = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    anth_hdr = {"x-api-key": api_key, "anthropic-version": "2023-06-01"} if api_key else {}
     if "anthropic.com" in cleaned_url:
-        ep = f"{cleaned_url}/models" if not cleaned_url.endswith("/v1") else f"{cleaned_url}/models"
-        hdrs = {"x-api-key": api_key, "anthropic-version": "2023-06-01"} if api_key else {}
-        endpoints.append((ep, hdrs))
-    elif cleaned_url.endswith("/v1"):
-        endpoints.append((f"{cleaned_url}/models", {"Authorization": f"Bearer {api_key}"} if api_key else {}))
-        endpoints.append((f"{cleaned_url[:-3]}/models", {"Authorization": f"Bearer {api_key}"} if api_key else {}))
+        # 官方 base 自带 /v1；自建 Anthropic 代理以用户输入路径为准
+        endpoints.append((_join_api_path(cleaned_url, "/models"), anth_hdr))
+        alt = f"{cleaned_url}/models"
+        if alt != endpoints[0][0]:
+            endpoints.append((alt, anth_hdr))
     elif cleaned_url.endswith("/models"):
-        endpoints.append((cleaned_url, {"Authorization": f"Bearer {api_key}"} if api_key else {}))
+        endpoints.append((cleaned_url, bearer_hdr))
     else:
-        endpoints.append((f"{cleaned_url}/v1/models", {"Authorization": f"Bearer {api_key}"} if api_key else {}))
-        endpoints.append((f"{cleaned_url}/models", {"Authorization": f"Bearer {api_key}"} if api_key else {}))
+        # 主候选 = 按 base 原样拼接（/v4 → /v4/models，不再硬插 /v1）；
+        # 备候选 = 去掉版本段或裸域名直挂 /models 的网关兼容位
+        primary = _join_api_path(cleaned_url, "/models")
+        endpoints.append((primary, bearer_hdr))
+        alt = f"{cleaned_url[:-3]}/models" if cleaned_url.endswith("/v1") else f"{cleaned_url}/models"
+        if alt != primary:
+            endpoints.append((alt, bearer_hdr))
 
     last_err = ""
+    saw_auth_error = False
     for ep, hdrs in endpoints:
         hdrs["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 R20-Quantum-Trader/6.6"
         req = urllib.request.Request(ep, headers=hdrs)
@@ -1185,14 +1406,20 @@ def fetch_remote_models(
                 }
         except urllib.error.HTTPError as exc:
             last_err = f"HTTP {exc.code}"
-            if exc.code == 401:
-                return {
-                    "ok": False,
-                    "error": "供应商身份验证失败 (HTTP 401 Unauthorized)",
-                    "recommendation": "请先在此供应商填入正确的 API Key 后再拉取模型",
-                }
+            if exc.code in (401, 403):
+                # 部分网关对错误路径也回 401/403 而非 404——不能见状态码就中止，
+                # 试完全部候选端点仍失败才提示检查密钥
+                saw_auth_error = True
+                continue
         except Exception as exc:
             last_err = str(exc)
+
+    if saw_auth_error:
+        return {
+            "ok": False,
+            "error": "供应商身份验证失败 (HTTP 401 Unauthorized)",
+            "recommendation": "请先在此供应商填入正确的 API Key 后再拉取模型；若密钥无误，请检查 Base URL 的版本路径（如 /v1、/v4）是否与供应商要求一致",
+        }
 
     return {
         "ok": False,
@@ -1213,19 +1440,23 @@ def build_request_spec(
     response_format: Optional[Dict[str, Any]] = None,
     reasoning_type: str = "auto",
     max_tokens: int = 4096,
+    api_path: str = "",
 ) -> Tuple[str, Dict[str, str], Dict[str, Any]]:
     """Build endpoint URL, headers, and request payload according to the specific API protocol format."""
     cleaned_url = base_url.rstrip("/")
+    # 「API 路径」字段生效：标准路径由协议格式决定；仅非标准自定义路径覆盖之。
+    custom_path = str(api_path or "").strip()
+    if custom_path and not custom_path.startswith("/"):
+        custom_path = "/" + custom_path
+    if custom_path in ("/chat/completions", "/messages", "/responses", "/v1/chat/completions", "/v1/messages", "/v1/responses"):
+        custom_path = ""
     m_lower = model.lower()
     rtype = reasoning_type if reasoning_type != "auto" else _detect_reasoning_type(model)
     effort = (reasoning_effort or "auto").strip().lower()
 
     # Protocol 1: Anthropic Claude Messages API
     if api_format == "claude_messages":
-        if not cleaned_url.endswith("/messages"):
-            endpoint = f"{cleaned_url}/messages" if cleaned_url.endswith("/v1") else f"{cleaned_url}/v1/messages"
-        else:
-            endpoint = cleaned_url
+        endpoint = _join_api_path(cleaned_url, custom_path or "/messages")
 
         headers = {
             "Content-Type": "application/json",
@@ -1270,10 +1501,7 @@ def build_request_spec(
 
     # Protocol 2: OpenAI Responses API (/responses)
     elif api_format == "openai_responses":
-        if not cleaned_url.endswith("/responses"):
-            endpoint = f"{cleaned_url}/responses" if cleaned_url.endswith("/v1") else f"{cleaned_url}/v1/responses"
-        else:
-            endpoint = cleaned_url
+        endpoint = _join_api_path(cleaned_url, custom_path or "/responses")
 
         headers = {
             "Content-Type": "application/json",
@@ -1295,10 +1523,7 @@ def build_request_spec(
 
     # Protocol 3: OpenAI Chat Completions (/chat/completions, Default)
     else:
-        if not cleaned_url.endswith("/chat/completions"):
-            endpoint = f"{cleaned_url}/chat/completions" if cleaned_url.endswith("/v1") else f"{cleaned_url}/v1/chat/completions"
-        else:
-            endpoint = cleaned_url
+        endpoint = _join_api_path(cleaned_url, custom_path or "/chat/completions")
 
         headers = {
             "Content-Type": "application/json",
@@ -1451,6 +1676,7 @@ def _attempt_llm_call(
         temperature=temperature,
         response_format=response_format,
         reasoning_type=cand.get("reasoning_type", "auto"),
+        api_path=cand.get("api_path", ""),
     )
 
     t0 = time.perf_counter()
@@ -1564,6 +1790,7 @@ def execute_llm_request(
         "base_url": target_url,
         "api_key": target_key,
         "api_format": target_format,
+        "api_path": "" if base_url else str(runtime.get("api_path", "") or ""),
         "reasoning_effort": target_effort,
         "reasoning_type": target_rtype,
     }
@@ -1660,6 +1887,24 @@ def execute_llm_request(
     raise RuntimeError(f"LLM 模型链全部失败（{chain_names}）：{summary_tail}") from last_error
 
 
+def _lookup_api_path(base_url: str, model_id: str) -> str:
+    """按 base_url+模型 id 反查已配置的「API 路径」（连接测试端点不透传该字段，此处自解析）。"""
+    bu = str(base_url or "").strip().rstrip("/")
+    if not bu:
+        return ""
+    try:
+        cfg = init_llm_config()
+    except Exception:
+        return ""
+    for m in cfg.get("models", []):
+        if m.get("id") == model_id and str(m.get("base_url", "")).rstrip("/") == bu:
+            return str(m.get("api_path") or "")
+    for p in cfg.get("providers", []):
+        if str(p.get("base_url", "")).rstrip("/") == bu:
+            return str(p.get("api_path") or "")
+    return ""
+
+
 def test_llm_connection(
     base_url: str,
     api_key: str,
@@ -1668,6 +1913,7 @@ def test_llm_connection(
     reasoning_effort: str = "auto",
     reasoning_type: str = "auto",
     timeout: float = 15.0,
+    api_path: str = "",
 ) -> Dict[str, Any]:
     """Execute a real diagnostic ping across any of the 3 API formats."""
     cleaned_url = str(base_url or "").strip().rstrip("/")
@@ -1694,6 +1940,7 @@ def test_llm_connection(
         reasoning_effort=reasoning_effort,
         temperature=0.1,
         reasoning_type=reasoning_type,
+        api_path=api_path or _lookup_api_path(cleaned_url, model),
     )
 
     t0 = time.perf_counter()
