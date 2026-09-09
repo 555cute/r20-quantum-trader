@@ -3,6 +3,7 @@
 import { computed, ref } from 'vue';
 import { ChevronDown } from 'lucide-vue-next';
 import { useDashboardStore } from '../../stores/dashboard';
+import { symOf } from '../../utils/instId';
 import { useI18n } from '../../composables/useI18n';
 import { fmtHM } from '../../utils/format';
 import PageHead from '../../components/dashboard/PageHead.vue';
@@ -16,7 +17,8 @@ const { t } = useI18n();
 
 const history = computed<any[]>(() => {
   const h = (store.data as any)?.ai_brain_history;
-  return Array.isArray(h) ? [...h].reverse() : [];
+  // 后端原始序即最新在前（倒叙展示，用户指令 2026-09-09）
+  return Array.isArray(h) ? [...h] : [];
 });
 
 const selected = ref<any>(null);
@@ -49,7 +51,7 @@ function actionsOf(c: any): { inst: string; dir: string; conf: number }[] {
   const list: { inst: string; dir: string; conf: number }[] = [];
   for (const m of c.position_management || []) {
     const a = String(m.action || '').toUpperCase();
-    if (a && a !== 'WAIT' && a !== 'HOLD') list.push({ inst: String(m.instId || '').split('-')[0], dir: a.includes('LONG') ? 'long' : a.includes('SHORT') ? 'short' : 'flat', conf: Number(m.confidence || 0) });
+    if (a && a !== 'WAIT' && a !== 'HOLD') list.push({ inst: symOf(String(m.instId || '')), dir: a.includes('LONG') ? 'long' : a.includes('SHORT') ? 'short' : 'flat', conf: Number(m.confidence || 0) });
   }
   for (const o of c.top_opportunities || []) {
     const a = String(o.action || '').toUpperCase();
