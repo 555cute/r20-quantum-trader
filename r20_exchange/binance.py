@@ -141,6 +141,9 @@ class BinanceExchange:
         self.session = session if session is not None else requests.Session()
         self._filters: dict[str, dict[str, Any]] = {}
         self._hedge: bool | None = None
+        self._time_offset_ms = 0
+        self._time_synced_at = 0.0
+
 
     def close(self) -> None:
         closer = getattr(self.session, "close", None)
@@ -162,6 +165,28 @@ class BinanceExchange:
             return bool(configured)
         return bool(self._api_key() and self._secret())
 
+    def _sync_time_offset(self, *, force: bool = False) -> None:
+        now = time.monotonic()
+        if not force and self._time_synced_at and (now - self._time_synced_at) < 30.0:
+            return
+        local_ms = int(time.time() * 1000)
+        try:
+            row = self._public("/fapi/v1/time")
+        except Exception:
+            self._time_synced_at = now
+            return
+        try:
+            server = int((row or {}).get("serverTime"))
+        except (TypeError, ValueError, AttributeError):
+            self._time_synced_at = now
+            return
+        self._time_offset_ms = server - local_ms
+        self._time_synced_at = now
+
+    def _signed_timestamp_ms(self) -> int:
+        self._sync_time_offset()
+        return int(time.time() * 1000) + int(self._time_offset_ms)
+
     def _request(
         self,
         method: str,
@@ -172,6 +197,7 @@ class BinanceExchange:
         mutate: bool = False,
         client_id: str = "",
         retry_429: bool = True,
+        retry_time: bool = True,
     ) -> Any:
         method = method.upper()
         payload: dict[str, str] = {}
@@ -185,7 +211,7 @@ class BinanceExchange:
         if signed:
             if not self._configured():
                 raise ValueError("Binance credentials are not configured")
-            payload["timestamp"] = str(int(time.time() * 1000))
+            payload["timestamp"] = str(self._signed_timestamp_ms())
             payload["recvWindow"] = str(RECV_WINDOW_MS)
             unsigned = urlencode(payload)
             signature = hmac.new(self._secret().encode(), unsigned.encode(), hashlib.sha256).hexdigest()
@@ -237,6 +263,12 @@ class BinanceExchange:
         if isinstance(payload_json, dict) and isinstance(payload_json.get("code"), int) and payload_json["code"] < 0:
             message = _sanitize(payload_json.get("msg") or "Binance request failed", self._api_key(), self._secret())
             code = int(payload_json["code"])
+            if signed and code == -1021 and retry_time:
+                self._sync_time_offset(force=True)
+                return self._request(
+                    method, path, params, signed=True, mutate=mutate, client_id=client_id,
+                    retry_429=retry_429, retry_time=False,
+                )
             if mutate and (code in UNKNOWN_MUTATE_CODES or status >= 500):
                 raise UncertainSubmission(message, client_id)
             raise BinanceAPIError(code, message)

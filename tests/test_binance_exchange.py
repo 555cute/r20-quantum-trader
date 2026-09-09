@@ -238,6 +238,40 @@ class BinanceExchangeTests(unittest.TestCase):
         self.assertNotIn("demo-fapi", live_call["url"])
         self.assertEqual(live_call["headers"].get("X-MBX-APIKEY"), "testkey")
 
+    def test_signed_timestamp_follows_binance_server_time(self):
+        install_defaults(self.session, hedge=True)
+        frozen = 1_700_000_000.0
+        self.session.on("GET", "/fapi/v1/time", {"serverTime": int(frozen * 1000) - 2500})
+        with patch("r20_exchange.binance.time.time", return_value=frozen):
+            self._exchange().balance()
+        time_calls = _calls(self.session, "GET", "/fapi/v1/time")
+        self.assertEqual(len(time_calls), 1)
+        self.assertNotIn("signature", time_calls[0]["query"])
+        account = _calls(self.session, "GET", "/fapi/v2/account")[0]
+        self.assertEqual(account["query"].get("timestamp"), str(int(frozen * 1000) - 2500))
+
+    def test_timestamp_ahead_error_resyncs_once(self):
+        install_defaults(self.session, hedge=True)
+        frozen = 1_700_000_000.0
+        state = {"n": 0}
+
+        def account(_call):
+            state["n"] += 1
+            if state["n"] == 1:
+                return {"code": -1021, "msg": "Timestamp for this request was 1000ms ahead of the server's time."}
+            return ACCOUNT
+
+        self.session.on("GET", "/fapi/v2/account", account)
+        self.session.on("GET", "/fapi/v1/time", {"serverTime": int(frozen * 1000) - 1500})
+        with patch("r20_exchange.binance.time.time", return_value=frozen):
+            rows = self._exchange().balance()
+        self.assertEqual(state["n"], 2)
+        self.assertTrue(isinstance(rows, list) and rows)
+
+        stamps = [call["query"].get("timestamp") for call in _calls(self.session, "GET", "/fapi/v2/account")]
+        self.assertEqual(stamps[-1], str(int(frozen * 1000) - 1500))
+
+
     def test_redirects_and_secrets_are_not_leaked(self):
         self.session.on("GET", "/fapi/v2/account", lambda _c: FakeResponse({}, 302))
         with self.assertRaisesRegex(RuntimeError, "redirect"):
