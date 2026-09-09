@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from decimal import Decimal
@@ -38,6 +39,10 @@ class FakeEnv:
     def configured(self) -> bool:
         return bool(self.api_key and self.secret_key)
 
+    @property
+    def fingerprint(self) -> str:
+        material = "\0".join((self.exchange, self.mode, self.api_key, self.secret_key, self.passphrase))
+        return hashlib.sha256(material.encode()).hexdigest()[:24]
 
 class FakeResponse:
     def __init__(self, payload, status_code: int = 200) -> None:
@@ -106,6 +111,31 @@ BTC_INFO = {
         ],
     }]
 }
+
+
+def _perp_row(symbol: str, base: str, tick: str, min_price: str, step: str = "0.001", min_qty: str = "0.001") -> dict:
+    return {
+        "symbol": symbol,
+        "contractType": "PERPETUAL",
+        "quoteAsset": "USDT",
+        "baseAsset": base,
+        "status": "TRADING",
+        "filters": [
+            {"filterType": "PRICE_FILTER", "tickSize": tick, "minPrice": min_price, "maxPrice": "1000000"},
+            {"filterType": "LOT_SIZE", "stepSize": step, "minQty": min_qty, "maxQty": "1000000"},
+            {"filterType": "MIN_NOTIONAL", "notional": "5.0"},
+        ],
+    }
+
+
+MIXED_INFO = {
+    "symbols": [
+        _perp_row("BTCUSDT", "BTC", "0.10", "100"),
+        _perp_row("LINKUSDT", "LINK", "0.001", "0.001"),
+        _perp_row("UNIUSDT", "UNI", "0.001", "0.001"),
+        _perp_row("XRPUSDT", "XRP", "0.0001", "0.0001", step="0.1", min_qty="0.1"),
+    ]
+}
 LONG_POS = {
     "symbol": "BTCUSDT",
     "positionAmt": "0.001",
@@ -173,6 +203,7 @@ def install_defaults(session: FakeSession, *, hedge: bool = True, positions=None
 
     def get_algo(call):
         cid = call["query"].get("clientAlgoId") or ""
+        is_sl = cid.endswith("SL") or cid.endswith("SX")
         return {
             "algoId": 7,
             "clientAlgoId": cid,
@@ -180,7 +211,10 @@ def install_defaults(session: FakeSession, *, hedge: bool = True, positions=None
             "closePosition": True,
             "symbol": "BTCUSDT",
             "positionSide": "LONG" if hedge else "BOTH",
-            "triggerPrice": "49000" if cid.endswith("SL") or cid.endswith("SX") else "52000",
+            "side": "SELL",
+            "workingType": "MARK_PRICE",
+            "orderType": "STOP_MARKET" if is_sl else "TAKE_PROFIT_MARKET",
+            "triggerPrice": "49000" if is_sl else "52000",
         }
 
     session.on("GET", "/fapi/v1/exchangeInfo", exchange_info)
@@ -201,11 +235,16 @@ class BinanceExchangeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.session = FakeSession()
         self.env = FakeEnv()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.data_patch = patch("r20_exchange.runtime.DATA_DIR", Path(self._tmp.name))
+        self.data_patch.start()
         self.hex_patch = patch("r20_exchange.binance.secrets.token_hex", return_value=GROUP)
         self.hex_patch.start()
 
     def tearDown(self) -> None:
         self.hex_patch.stop()
+        self.data_patch.stop()
+        self._tmp.cleanup()
 
     def _exchange(self, env: FakeEnv | None = None) -> BinanceExchange:
         return BinanceExchange(env or self.env, session=self.session)
@@ -326,7 +365,10 @@ class BinanceExchangeTests(unittest.TestCase):
         self.assertEqual(Decimal(entry["quantity"]), Decimal("0.001"))
         self.assertLessEqual(Decimal(entry["quantity"]) * Decimal(entry["price"]), Decimal("95.000361"))
         self.assertEqual(order["protection_mechanism"], "paired_conditional")
+        self.assertEqual(order["protection_status"], "awaiting_fill")
         self.assertEqual(order["ordId"], "11")
+        self.assertEqual(order["clOrdId"], ENTRY_ID)
+        self.assertEqual(_calls(self.session, "POST", "/fapi/v1/algoOrder"), [])
 
     def test_filters_reject_illegal_inputs_before_submit(self):
         install_defaults(self.session, hedge=True)
@@ -350,7 +392,29 @@ class BinanceExchangeTests(unittest.TestCase):
             ex.place_protected_limit_order(INST, "buy", "long", "0.001", "50000", "51000", "49000")
         self.assertEqual(posted["order"], 0)
 
-    def test_hedge_and_oneway_protection_parameters(self):
+    def test_geometry_uses_shared_risk_floor(self):
+        install_defaults(self.session, hedge=True)
+        posted = {"order": 0}
+
+        def count_post(_call):
+            posted["order"] += 1
+            return {
+                "orderId": 11, "clientOrderId": ENTRY_ID, "symbol": "BTCUSDT", "side": "BUY",
+                "positionSide": "LONG", "origQty": "0.001", "executedQty": "0", "price": "50000",
+                "avgPrice": "0", "status": "NEW", "reduceOnly": False, "time": 1, "updateTime": 1,
+            }
+
+        self.session.on("POST", "/fapi/v1/order", count_post)
+        ex = self._exchange()
+        with patch("scripts.order_risk.MIN_RISK_REWARD_RATIO", 1.9):
+            with self.assertRaises(ValueError):
+                ex.place_protected_limit_order(INST, "buy", "long", "0.001", "50000", "51800", "49000")
+            self.assertEqual(posted["order"], 0)
+            result = ex.place_protected_limit_order(INST, "buy", "long", "0.001", "50000", "51900", "49000")
+        self.assertEqual(posted["order"], 1)
+        self.assertEqual(result["protection_status"], "awaiting_fill")
+
+    def test_new_entry_does_not_post_close_position_algos(self):
         install_defaults(self.session, hedge=True)
         self.session.on("POST", "/fapi/v1/order", {
             "orderId": 11, "clientOrderId": ENTRY_ID, "symbol": "BTCUSDT", "side": "BUY",
@@ -360,22 +424,13 @@ class BinanceExchangeTests(unittest.TestCase):
         self.session.on("POST", "/fapi/v1/algoOrder", {
             "algoId": 1, "clientAlgoId": SL_ID, "algoStatus": "NEW", "closePosition": True,
         })
-        self._exchange().place_protected_limit_order(INST, "buy", "long", "0.001", "50000", "52000", "49000")
+        result = self._exchange().place_protected_limit_order(INST, "buy", "long", "0.001", "50000", "52000", "49000")
         entry = _calls(self.session, "POST", "/fapi/v1/order")[0]["query"]
         self.assertEqual(entry.get("positionSide"), "LONG")
+        self.assertEqual(entry.get("timeInForce"), "GTC")
         self.assertNotIn("reduceOnly", entry)
-        algos = _calls(self.session, "POST", "/fapi/v1/algoOrder")
-        self.assertEqual(len(algos), 2)
-        for algo in algos:
-            query = algo["query"]
-            self.assertEqual(query.get("algoType"), "CONDITIONAL")
-            self.assertEqual(query.get("closePosition"), "true")
-            self.assertEqual(query.get("positionSide"), "LONG")
-            self.assertEqual(query.get("side"), "SELL")
-            self.assertNotIn("quantity", query)
-            self.assertNotIn("reduceOnly", query)
-        self.assertTrue(algos[0]["query"]["clientAlgoId"].endswith("SL"))
-        self.assertTrue(algos[1]["query"]["clientAlgoId"].endswith("TP"))
+        self.assertEqual(result["protection_status"], "awaiting_fill")
+        self.assertEqual(_calls(self.session, "POST", "/fapi/v1/algoOrder"), [])
 
         oneway = FakeSession()
         install_defaults(oneway, hedge=False)
@@ -384,20 +439,16 @@ class BinanceExchangeTests(unittest.TestCase):
             "positionSide": "BOTH", "origQty": "0.001", "executedQty": "0", "price": "50000",
             "avgPrice": "0", "status": "NEW", "reduceOnly": False, "time": 1, "updateTime": 1,
         })
-        oneway.on("POST", "/fapi/v1/algoOrder", {"algoId": 1, "algoStatus": "NEW", "closePosition": True})
-        BinanceExchange(self.env, session=oneway).place_protected_limit_order(INST, "buy", "long", "0.001", "50000", "52000", "49000")
+        oneway_env = FakeEnv(api_key="onewaykey", secret_key="onewaysecret")
+        result = BinanceExchange(oneway_env, session=oneway).place_protected_limit_order(INST, "buy", "long", "0.001", "50000", "52000", "49000")
         one_entry = _calls(oneway, "POST", "/fapi/v1/order")[0]["query"]
         self.assertEqual(one_entry.get("positionSide"), "BOTH")
         self.assertNotIn("reduceOnly", one_entry)
-        for algo in _calls(oneway, "POST", "/fapi/v1/algoOrder"):
-            self.assertEqual(algo["query"].get("positionSide"), "BOTH")
-            self.assertEqual(algo["query"].get("closePosition"), "true")
-            self.assertNotIn("quantity", algo["query"])
-            self.assertNotIn("reduceOnly", algo["query"])
+        self.assertEqual(result["protection_status"], "awaiting_fill")
+        self.assertEqual(_calls(oneway, "POST", "/fapi/v1/algoOrder"), [])
 
-    def test_second_leg_failure_keeps_stop_until_flat(self):
-        state = install_defaults(self.session, hedge=True, filled="0.001")
-        state["positions"] = [dict(LONG_POS)]
+    def test_second_leg_failure_keeps_confirmed_stop(self):
+        state = install_defaults(self.session, hedge=True)
 
         def post_order(call):
             query = call["query"]
@@ -411,6 +462,7 @@ class BinanceExchangeTests(unittest.TestCase):
                     "executedQty": query.get("quantity") or "0", "price": "0", "avgPrice": "50000",
                     "status": "FILLED", "reduceOnly": False, "time": 3, "updateTime": 3,
                 }
+            state["positions"] = [dict(LONG_POS)]
             return {
                 "orderId": 11, "clientOrderId": ENTRY_ID, "symbol": "BTCUSDT", "side": "BUY",
                 "positionSide": "LONG", "origQty": "0.001", "executedQty": "0.001", "price": "50000",
@@ -421,26 +473,15 @@ class BinanceExchangeTests(unittest.TestCase):
             cid = call["query"].get("clientAlgoId") or ""
             if cid.endswith("TP"):
                 return FakeResponse({"code": -2021, "msg": "Order would immediately trigger."})
-            return {"algoId": 1, "clientAlgoId": cid, "algoStatus": "NEW", "closePosition": True}
+            return {"algoId": 1, "clientAlgoId": cid, "algoStatus": "NEW", "closePosition": True, "orderType": "STOP_MARKET", "triggerPrice": "49000", "closePosition": True}
 
         self.session.on("POST", "/fapi/v1/order", post_order)
         self.session.on("POST", "/fapi/v1/algoOrder", post_algo)
-        self.session.on("DELETE", "/fapi/v1/algoOrder", {"algoId": 7, "status": "CANCELED"})
-        with self.assertRaises(RuntimeError):
-            self._exchange().place_protected_limit_order(INST, "buy", "long", "0.001", "50000", "52000", "49000")
-        close_posts = [call for call in _calls(self.session, "POST", "/fapi/v1/order") if call["query"].get("type") == "MARKET"]
-        self.assertEqual(len(close_posts), 1)
-        close = close_posts[0]["query"]
-        self.assertEqual(close.get("quantity"), "0.001")
-        self.assertEqual(close.get("side"), "SELL")
-        self.assertEqual(close.get("positionSide"), "LONG")
-        self.assertNotIn("closePosition", close)
-        self.assertNotIn("reduceOnly", close)
-        self.assertTrue(_calls(self.session, "DELETE", "/fapi/v1/order"))
-        delete_indexes = [index for index, call in enumerate(self.session.calls) if call["method"] == "DELETE" and call["path"] == "/fapi/v1/algoOrder"]
-        close_index = next(index for index, call in enumerate(self.session.calls) if call["method"] == "POST" and call["path"] == "/fapi/v1/order" and call["query"].get("type") == "MARKET")
-        self.assertTrue(delete_indexes)
-        self.assertGreater(min(delete_indexes), close_index)
+        result = self._exchange().place_protected_limit_order(INST, "buy", "long", "0.001", "50000", "52000", "49000")
+        self.assertEqual(result["protection_status"], "sl_only")
+        self.assertEqual([call for call in _calls(self.session, "POST", "/fapi/v1/order") if call["query"].get("type") == "MARKET"], [])
+        self.assertEqual(_calls(self.session, "DELETE", "/fapi/v1/algoOrder"), [])
+        self.assertTrue(self._exchange().has_pending_entries())
 
     def test_unknown_canceled_entry_does_not_attach_protection(self):
         install_defaults(self.session, hedge=True)
@@ -476,8 +517,13 @@ class BinanceExchangeTests(unittest.TestCase):
         self.assertEqual(posts["count"], 1)
         self.assertEqual(len(_calls(self.session, "POST", "/fapi/v1/order")), 1)
         self.assertEqual(result["ordId"], "11")
-        self.assertEqual(result["protection_mechanism"], "paired_conditional")
-        self.assertEqual(len(_calls(self.session, "POST", "/fapi/v1/algoOrder")), 2)
+        self.assertEqual(result["clOrdId"], ENTRY_ID)
+        self.assertEqual(result["protection_status"], "awaiting_fill")
+        self.assertEqual(_calls(self.session, "POST", "/fapi/v1/algoOrder"), [])
+        self.assertTrue(self._exchange().has_pending_entries())
+        with self.assertRaises(RuntimeError):
+            self._exchange().place_protected_limit_order(INST, "buy", "long", "0.001", "50000", "52000", "49000")
+        self.assertEqual(posts["count"], 1)
 
     def test_one_leg_orphan_does_not_cover_next_position(self):
         orphan = [{
@@ -599,153 +645,108 @@ class BinanceExchangeTests(unittest.TestCase):
         self.assertEqual(close.get("reduceOnly"), "true")
         self.assertNotIn("closePosition", close)
 
-    def _fail_second_leg(self) -> None:
+    def test_partial_fill_cancels_remainder_without_protection(self):
+        state = install_defaults(self.session, hedge=True)
+        state["filled"] = "0.0005"
+
+        def post_order(call):
+            query = call["query"]
+            if query.get("type") == "MARKET":
+                return {
+                    "orderId": 22, "clientOrderId": query.get("newClientOrderId"), "symbol": "BTCUSDT",
+                    "side": "SELL", "positionSide": "LONG", "origQty": query.get("quantity") or "0",
+                    "executedQty": query.get("quantity") or "0", "price": "0", "avgPrice": "50000",
+                    "status": "FILLED", "reduceOnly": False, "time": 3, "updateTime": 3,
+                }
+            return {
+                "orderId": 11, "clientOrderId": ENTRY_ID, "symbol": "BTCUSDT", "side": "BUY",
+                "positionSide": "LONG", "origQty": "0.001", "executedQty": "0.0005", "price": "50000",
+                "avgPrice": "50000", "status": "PARTIALLY_FILLED", "reduceOnly": False, "time": 1, "updateTime": 1,
+            }
+
+        self.session.on("POST", "/fapi/v1/order", post_order)
+        self.session.on("POST", "/fapi/v1/algoOrder", {"algoId": 1, "algoStatus": "NEW", "closePosition": True})
+        result = self._exchange().place_protected_limit_order(INST, "buy", "long", "0.001", "50000", "52000", "49000")
+        self.assertEqual(result["protection_status"], "awaiting_fill")
+        self.assertEqual(_calls(self.session, "POST", "/fapi/v1/algoOrder"), [])
+        self.assertEqual([call for call in _calls(self.session, "POST", "/fapi/v1/order") if call["query"].get("type") == "MARKET"], [])
+        self.assertTrue(_calls(self.session, "DELETE", "/fapi/v1/order"))
+
+    def test_unknown_tp_keeps_confirmed_stop(self):
+        state = install_defaults(self.session, hedge=True)
+
+        def post_order(call):
+            if call["query"].get("type") == "MARKET":
+                state["positions"] = []
+                return {
+                    "orderId": 22, "clientOrderId": call["query"].get("newClientOrderId"), "symbol": "BTCUSDT",
+                    "side": "SELL", "positionSide": "LONG", "origQty": "0.001", "executedQty": "0.001",
+                    "price": "0", "avgPrice": "50000", "status": "FILLED", "reduceOnly": False, "time": 3, "updateTime": 3,
+                }
+            state["positions"] = [dict(LONG_POS)]
+            return {
+                "orderId": 11, "clientOrderId": ENTRY_ID, "symbol": "BTCUSDT", "side": "BUY",
+                "positionSide": "LONG", "origQty": "0.001", "executedQty": "0.001", "price": "50000",
+                "avgPrice": "50000", "status": "FILLED", "reduceOnly": False, "time": 1, "updateTime": 1,
+            }
+
         def post_algo(call):
             cid = call["query"].get("clientAlgoId") or ""
             if cid.endswith("TP"):
-                return FakeResponse({"code": -2021, "msg": "Order would immediately trigger."})
-            return {"algoId": 1, "clientAlgoId": cid, "algoStatus": "NEW", "closePosition": True}
+                return FakeResponse({"code": -1007, "msg": "Timeout waiting for response from backend server."})
+            return {
+                "algoId": 1, "clientAlgoId": cid, "algoStatus": "NEW", "closePosition": True,
+                "orderType": "STOP_MARKET", "triggerPrice": "49000",
+            }
 
-        self.session.on("POST", "/fapi/v1/order", {
-            "orderId": 11, "clientOrderId": ENTRY_ID, "symbol": "BTCUSDT", "side": "BUY",
-            "positionSide": "LONG", "origQty": "0.001", "executedQty": "0", "price": "50000",
-            "avgPrice": "0", "status": "NEW", "reduceOnly": False, "time": 1, "updateTime": 1,
-        })
+        self.session.on("POST", "/fapi/v1/order", post_order)
         self.session.on("POST", "/fapi/v1/algoOrder", post_algo)
-
-    def test_unknown_cancel_does_not_drop_protection(self):
-        install_defaults(self.session, hedge=True)
-        self._fail_second_leg()
-        self.session.on("DELETE", "/fapi/v1/order", lambda _c: TimeoutError("cancel unknown"))
-        self.session.on("GET", "/fapi/v1/order", {
-            "orderId": 11, "clientOrderId": ENTRY_ID, "symbol": "BTCUSDT", "side": "BUY",
-            "positionSide": "LONG", "origQty": "0.001", "executedQty": "0", "price": "50000",
-            "avgPrice": "0", "status": "NEW", "reduceOnly": False, "time": 1, "updateTime": 1,
+        self.session.on("GET", "/fapi/v1/algoOrder", lambda call: FakeResponse({"code": -2013, "msg": "Order does not exist."}) if call["query"].get("clientAlgoId", "").endswith("TP") else {
+            "algoId": 7, "clientAlgoId": call["query"]["clientAlgoId"], "algoStatus": "NEW", "closePosition": True,
+            "symbol": "BTCUSDT", "positionSide": "LONG", "side": "SELL", "workingType": "MARK_PRICE",
+            "triggerPrice": "49000", "orderType": "STOP_MARKET",
         })
-        with self.assertRaises(RuntimeError):
-            self._exchange().place_protected_limit_order(INST, "buy", "long", "0.001", "50000", "52000", "49000")
+        result = self._exchange().place_protected_limit_order(INST, "buy", "long", "0.001", "50000", "52000", "49000")
+        self.assertEqual(result["protection_status"], "sl_only")
         self.assertEqual(_calls(self.session, "DELETE", "/fapi/v1/algoOrder"), [])
         self.assertEqual([call for call in _calls(self.session, "POST", "/fapi/v1/order") if call["query"].get("type") == "MARKET"], [])
-
-    def test_non_terminal_entry_does_not_drop_protection(self):
-        install_defaults(self.session, hedge=True, positions=[dict(LONG_POS)])
-        self._fail_second_leg()
-        self.session.on("GET", "/fapi/v1/order", {
-            "orderId": 11, "clientOrderId": ENTRY_ID, "symbol": "BTCUSDT", "side": "BUY",
-            "positionSide": "LONG", "origQty": "0.001", "executedQty": "0.001", "price": "50000",
-            "avgPrice": "50000", "status": "PARTIALLY_FILLED", "reduceOnly": False, "time": 1, "updateTime": 1,
-        })
-        with self.assertRaises(RuntimeError):
-            self._exchange().place_protected_limit_order(INST, "buy", "long", "0.001", "50000", "52000", "49000")
-        self.assertEqual(_calls(self.session, "DELETE", "/fapi/v1/algoOrder"), [])
-        self.assertEqual([call for call in _calls(self.session, "POST", "/fapi/v1/order") if call["query"].get("type") == "MARKET"], [])
-
-    def test_positions_history_refuses_unprovable_entry(self):
-        install_defaults(self.session, hedge=True)
-        self.session.on("GET", "/fapi/v1/income", [{"symbol": "BTCUSDT", "incomeType": "REALIZED_PNL", "income": "-1", "asset": "USDT", "time": 1, "tranId": 1}])
-        self.session.on("GET", "/fapi/v1/userTrades", [{
-            "symbol": "BTCUSDT", "id": 1, "orderId": 8, "side": "SELL", "positionSide": "LONG",
-            "price": "50000", "qty": "0.001", "realizedPnl": "-1", "commission": "-0.02",
-            "commissionAsset": "USDT", "time": 1,
-        }])
-        with self.assertRaises(RuntimeError) as raised:
-            self._exchange().positions_history()
-        self.assertTrue(getattr(raised.exception, "incomplete", False))
-        self.assertEqual(getattr(raised.exception, "status", ""), "unavailable")
-
-    def test_positions_history_keeps_fee_out_of_pnl(self):
-        install_defaults(self.session, hedge=True)
-        self.session.on("GET", "/fapi/v1/income", [{"symbol": "BTCUSDT", "incomeType": "REALIZED_PNL", "income": "8", "asset": "USDT", "time": 2, "tranId": 1}])
-        self.session.on("GET", "/fapi/v1/userTrades", [
-            {"symbol": "BTCUSDT", "id": 1, "orderId": 8, "side": "BUY", "positionSide": "LONG", "price": "50000", "qty": "0.001", "realizedPnl": "0", "commission": "0.02", "commissionAsset": "USDT", "time": 1},
-            {"symbol": "BTCUSDT", "id": 2, "orderId": 9, "side": "SELL", "positionSide": "LONG", "price": "58000", "qty": "0.001", "realizedPnl": "8", "commission": "0.02", "commissionAsset": "USDT", "time": 2},
-        ])
-        rows = self._exchange().positions_history()
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["pnl"], "8")
-        self.assertEqual(rows[0]["fee"], "-0.04")
-        self.assertEqual(rows[0]["direction"], "long")
-        self.assertEqual(rows[0]["instId"], INST)
-        self.assertEqual(rows[0]["entryOrderIds"], ["8"])
-
-    def test_positions_history_rejects_mid_window_add_reduce(self):
-        install_defaults(self.session, hedge=True, positions=[{**LONG_POS, "positionAmt": "1"}])
-        self.session.on("GET", "/fapi/v1/income", [{"symbol": "BTCUSDT", "incomeType": "REALIZED_PNL", "income": "50", "asset": "USDT", "time": 11, "tranId": 1}])
-        self.session.on("GET", "/fapi/v1/userTrades", [
-            {"symbol": "BTCUSDT", "id": 10, "orderId": 10, "side": "BUY", "positionSide": "LONG", "price": "60000", "qty": "0.001", "realizedPnl": "0", "commission": "0.01", "commissionAsset": "USDT", "time": 10},
-            {"symbol": "BTCUSDT", "id": 11, "orderId": 11, "side": "SELL", "positionSide": "LONG", "price": "60000", "qty": "0.001", "realizedPnl": "50", "commission": "0.01", "commissionAsset": "USDT", "time": 11},
-        ])
-        with self.assertRaises(RuntimeError) as raised:
-            self._exchange().positions_history()
-        self.assertTrue(getattr(raised.exception, "incomplete", False))
-
-    def test_positions_history_splits_oneway_zero_cross(self):
-        install_defaults(self.session, hedge=False)
-        self.session.on("GET", "/fapi/v1/income", [{"symbol": "BTCUSDT", "incomeType": "REALIZED_PNL", "income": "15", "asset": "USDT", "time": 3, "tranId": 1}])
-        self.session.on("GET", "/fapi/v1/userTrades", [
-            {"symbol": "BTCUSDT", "id": 1, "orderId": 1, "side": "BUY", "positionSide": "BOTH", "price": "100", "qty": "1", "realizedPnl": "0", "commission": "0.01", "commissionAsset": "USDT", "time": 1},
-            {"symbol": "BTCUSDT", "id": 2, "orderId": 2, "side": "SELL", "positionSide": "BOTH", "price": "110", "qty": "2", "realizedPnl": "10", "commission": "0.02", "commissionAsset": "USDT", "time": 2},
-            {"symbol": "BTCUSDT", "id": 3, "orderId": 3, "side": "BUY", "positionSide": "BOTH", "price": "105", "qty": "1", "realizedPnl": "5", "commission": "0.01", "commissionAsset": "USDT", "time": 3},
-        ])
-        rows = self._exchange().positions_history()
-        self.assertEqual(len(rows), 2)
-        self.assertEqual(rows[1]["direction"], "long")
-        self.assertEqual(rows[1]["closeTotalPos"], "1")
-        self.assertEqual(rows[0]["direction"], "short")
-        self.assertEqual(rows[0]["closeTotalPos"], "1")
-        self.assertEqual(rows[0]["openAvgPx"], "110")
-        self.assertEqual(rows[0]["closeAvgPx"], "105")
-        self.assertEqual(rows[0]["pnl"], "5")
-        self.assertIsNone(rows[0]["lever"])
-        self.assertEqual(rows[1]["entryOrderIds"], ["1"])
-        self.assertEqual(rows[0]["entryOrderIds"], ["2"])
-        self.assertEqual(sum(Decimal(row["fee"]) for row in rows), Decimal("-0.04"))
-
-    def test_positions_history_bnb_fee_is_incomplete(self):
-        install_defaults(self.session, hedge=True)
-        self.session.on("GET", "/fapi/v1/income", [{"symbol": "BTCUSDT", "incomeType": "REALIZED_PNL", "income": "8", "asset": "USDT", "time": 2, "tranId": 1}])
-        self.session.on("GET", "/fapi/v1/userTrades", [
-            {"symbol": "BTCUSDT", "id": 1, "orderId": 8, "side": "BUY", "positionSide": "LONG", "price": "50000", "qty": "0.001", "realizedPnl": "0", "commission": "0.001", "commissionAsset": "BNB", "time": 1},
-            {"symbol": "BTCUSDT", "id": 2, "orderId": 9, "side": "SELL", "positionSide": "LONG", "price": "58000", "qty": "0.001", "realizedPnl": "8", "commission": "0.001", "commissionAsset": "BNB", "time": 2},
-        ])
-        with self.assertRaises(RuntimeError) as raised:
-            self._exchange().positions_history()
-        self.assertTrue(getattr(raised.exception, "incomplete", False))
-
-    def test_positions_history_full_window_page_is_incomplete(self):
-        install_defaults(self.session, hedge=True)
-        self.session.on("GET", "/fapi/v1/income", [{"symbol": "BTCUSDT", "incomeType": "REALIZED_PNL", "income": "1", "asset": "USDT", "time": 1, "tranId": 1}])
-        page = [{"symbol": "BTCUSDT", "id": i, "orderId": i, "side": "BUY", "positionSide": "LONG", "price": "1", "qty": "0.001", "realizedPnl": "0", "commission": "0", "time": i} for i in range(1000)]
-        self.session.on("GET", "/fapi/v1/userTrades", page)
-        with self.assertRaises(RuntimeError) as raised:
-            self._exchange().positions_history()
-        self.assertTrue(getattr(raised.exception, "window_limited", False))
 
     def test_sl_timeout_is_reconciled_before_compensate(self):
-        install_defaults(self.session, hedge=True)
-        self.session.on("POST", "/fapi/v1/order", {
-            "orderId": 11, "clientOrderId": ENTRY_ID, "symbol": "BTCUSDT", "side": "BUY",
-            "positionSide": "LONG", "origQty": "0.001", "executedQty": "0", "price": "50000",
-            "avgPrice": "0", "status": "NEW", "reduceOnly": False, "time": 1, "updateTime": 1,
-        })
+        state = install_defaults(self.session, hedge=True)
+
+        def post_order(call):
+            if call["query"].get("type") == "LIMIT":
+                state["positions"] = [dict(LONG_POS)]
+                return {
+                    "orderId": 11, "clientOrderId": ENTRY_ID, "symbol": "BTCUSDT", "side": "BUY",
+                    "positionSide": "LONG", "origQty": "0.001", "executedQty": "0.001", "price": "50000",
+                    "avgPrice": "50000", "status": "FILLED", "reduceOnly": False, "time": 1, "updateTime": 1,
+                }
+            raise AssertionError("unexpected order type")
 
         def post_algo(call):
             cid = call["query"].get("clientAlgoId") or ""
             if cid.endswith("SL"):
                 return FakeResponse({"code": -1007, "msg": "Timeout waiting for response from backend server. Send status unknown; execution status unknown."})
-            return {"algoId": 2, "clientAlgoId": cid, "algoStatus": "NEW", "closePosition": True}
+            return {
+                "algoId": 2, "clientAlgoId": cid, "algoStatus": "NEW", "closePosition": True,
+                "orderType": "TAKE_PROFIT_MARKET", "triggerPrice": "52000",
+            }
 
+        self.session.on("POST", "/fapi/v1/order", post_order)
         self.session.on("POST", "/fapi/v1/algoOrder", post_algo)
         self.session.on("GET", "/fapi/v1/algoOrder", lambda call: {
             "algoId": 7 if call["query"]["clientAlgoId"] == SL_ID else 8,
             "clientAlgoId": call["query"]["clientAlgoId"], "algoStatus": "NEW", "closePosition": True,
-            "symbol": "BTCUSDT", "positionSide": "LONG",
+            "symbol": "BTCUSDT", "positionSide": "LONG", "side": "SELL", "workingType": "MARK_PRICE",
+            "orderType": "STOP_MARKET" if call["query"]["clientAlgoId"] == SL_ID else "TAKE_PROFIT_MARKET",
             "triggerPrice": "49000" if call["query"]["clientAlgoId"] == SL_ID else "52000",
         })
         result = self._exchange().place_protected_limit_order(INST, "buy", "long", "0.001", "50000", "52000", "49000")
-        self.assertEqual(result["protection_mechanism"], "paired_conditional")
+        self.assertEqual(result["protection_status"], "protected")
         stop_posts = [call for call in _calls(self.session, "POST", "/fapi/v1/algoOrder") if call["query"].get("clientAlgoId") == SL_ID]
         self.assertEqual(len(stop_posts), 1)
+        self.assertEqual([call for call in _calls(self.session, "POST", "/fapi/v1/order") if call["query"].get("type") == "MARKET"], [])
 
     def test_amend_stop_alternates_client_ids(self):
         state = install_defaults(self.session, hedge=True, positions=[dict(LONG_POS)], algos=[
@@ -898,6 +899,85 @@ class BinanceExchangeTests(unittest.TestCase):
         self.assertEqual(rows[0][4], "9")
         self.assertEqual(state["n"], 2)
         slept.assert_called_once()
+
+
+    def test_symbol_filters_use_exact_match_not_first_row(self):
+        install_defaults(self.session, hedge=True)
+        self.session.on("GET", "/fapi/v1/exchangeInfo", MIXED_INFO)
+        posted = []
+
+        def post_order(call):
+            posted.append(call["query"])
+            return {
+                "orderId": 11, "clientOrderId": ENTRY_ID, "symbol": call["query"]["symbol"], "side": "BUY",
+                "positionSide": "LONG", "origQty": call["query"]["quantity"], "executedQty": "0",
+                "price": call["query"]["price"], "avgPrice": "0", "status": "NEW", "reduceOnly": False, "time": 1, "updateTime": 1,
+            }
+
+        self.session.on("POST", "/fapi/v1/order", post_order)
+        ex = self._exchange()
+        link = ex.place_protected_limit_order("LINK-USDT-SWAP", "buy", "long", "1", "10.5", "12.5", "9.5")
+        self.assertEqual(link["protection_status"], "awaiting_fill")
+        self.assertEqual(posted[-1]["symbol"], "LINKUSDT")
+        self.assertEqual(posted[-1]["price"], "10.5")
+        uni_env = FakeEnv(api_key="unikey", secret_key="unisecret")
+        uni = BinanceExchange(uni_env, session=self.session).place_protected_limit_order("UNI-USDT-SWAP", "buy", "long", "1", "10.5", "12.5", "9.5")
+        self.assertEqual(uni["protection_status"], "awaiting_fill")
+        xrp_env = FakeEnv(api_key="xrpkey", secret_key="xrpsecret")
+        xrp = BinanceExchange(xrp_env, session=self.session).place_protected_limit_order("XRP-USDT-SWAP", "buy", "long", "10", "2.05", "2.09", "2.03")
+        self.assertEqual(xrp["protection_status"], "awaiting_fill")
+        self.assertEqual(posted[-1]["price"], "2.05")
+        self.assertNotEqual(posted[-1]["price"], posted[-1].get("unused"))
+        self.assertEqual(_calls(self.session, "POST", "/fapi/v1/algoOrder"), [])
+        with self.assertRaises(RuntimeError):
+            ex._filters.clear()
+            ex._symbol_filters("DOGE-USDT-SWAP")
+
+    def test_duplicate_and_malformed_symbol_rows_are_rejected(self):
+        install_defaults(self.session, hedge=True)
+        dup = {"symbols": [MIXED_INFO["symbols"][0], dict(MIXED_INFO["symbols"][0])]}
+        self.session.on("GET", "/fapi/v1/exchangeInfo", dup)
+        with self.assertRaises(RuntimeError):
+            self._exchange()._symbol_filters(INST)
+        bad = {"symbols": [{**MIXED_INFO["symbols"][0], "symbol": "BTCUSDT", "filters": [{"filterType": "PRICE_FILTER", "tickSize": "0", "minPrice": "0.1"}]}]}
+        self.session.on("GET", "/fapi/v1/exchangeInfo", bad)
+        ex = self._exchange()
+        ex._filters.clear()
+        with self.assertRaises(RuntimeError):
+            ex._symbol_filters(INST)
+
+    def test_filled_entry_places_hedge_protection_without_quantity(self):
+        state = install_defaults(self.session, hedge=True)
+
+        def post_order(call):
+            state["positions"] = [dict(LONG_POS)]
+            return {
+                "orderId": 11, "clientOrderId": ENTRY_ID, "symbol": "BTCUSDT", "side": "BUY",
+                "positionSide": "LONG", "origQty": "0.001", "executedQty": "0.001", "price": "50000",
+                "avgPrice": "50000", "status": "FILLED", "reduceOnly": False, "time": 1, "updateTime": 1,
+            }
+
+        self.session.on("POST", "/fapi/v1/order", post_order)
+        self.session.on("POST", "/fapi/v1/algoOrder", lambda call: {
+            "algoId": 1, "clientAlgoId": call["query"].get("clientAlgoId"), "algoStatus": "NEW",
+            "closePosition": True, "orderType": call["query"].get("type"),
+            "triggerPrice": call["query"].get("triggerPrice"),
+        })
+        result = self._exchange().place_protected_limit_order(INST, "buy", "long", "0.001", "50000", "52000", "49000")
+        self.assertEqual(result["protection_status"], "protected")
+        algos = _calls(self.session, "POST", "/fapi/v1/algoOrder")
+        self.assertEqual(len(algos), 2)
+        for algo in algos:
+            query = algo["query"]
+            self.assertEqual(query.get("algoType"), "CONDITIONAL")
+            self.assertEqual(query.get("closePosition"), "true")
+            self.assertEqual(query.get("positionSide"), "LONG")
+            self.assertEqual(query.get("side"), "SELL")
+            self.assertNotIn("quantity", query)
+            self.assertNotIn("reduceOnly", query)
+        self.assertTrue(algos[0]["query"]["clientAlgoId"].endswith("SL"))
+        self.assertTrue(algos[1]["query"]["clientAlgoId"].endswith("TP"))
+        self.assertFalse(self._exchange().has_pending_entries())
 
 
 if __name__ == "__main__":

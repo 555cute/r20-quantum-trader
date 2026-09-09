@@ -13,6 +13,14 @@ from urllib.parse import urlencode
 
 import requests
 from scripts.order_risk import validate_quote_geometry_and_rr
+from r20_exchange.binance_pending import (
+    PENDING_LOCK,
+    PendingStoreCorrupt,
+    load_pending_entries,
+    new_record,
+    pending_state_path,
+    save_pending_entries,
+)
 
 if TYPE_CHECKING:
     from r20_exchange.runtime import ExchangeEnvironment
@@ -22,6 +30,7 @@ DEMO_HOST = "https://demo-fapi.binance.com"
 RECV_WINDOW_MS = 5000
 TRADE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 TRADE_LOOKBACK_MS = 90 * 24 * 60 * 60 * 1000
+ORDER_MAX_AGE_MS = 240_000
 UNKNOWN_MUTATE_CODES = {-1000, -1006, -1007}
 CLIENT_ID_RE = re.compile(r"^[.A-Z:/a-z0-9_-]{1,36}$")
 INST_RE = re.compile(r"^([A-Z0-9]+)-USDT-SWAP$")
@@ -60,6 +69,8 @@ ORDER_STATES = {
     "REJECTED": "canceled",
 }
 TERMINAL_ORDER_STATES = {"FILLED", "CANCELED", "EXPIRED", "EXPIRED_IN_MATCH", "REJECTED"}
+ALGO_LIVE_STATES = {"NEW", "RUNNING", "TRIGGERING"}
+ALGO_DEAD_STATES = {"CANCELED", "CANCELLED", "EXPIRED", "REJECTED", "FINISHED", "TRIGGERED"}
 UNKNOWN_BODY_HINTS = (
     "unknown error, please check your request",
     "request occur unknown error",
@@ -293,6 +304,50 @@ class BinanceExchange:
             raise ValueError("Unsupported candle interval")
         return interval
 
+    def _exact_symbol_row(self, rows: list[Any], symbol: str) -> dict[str, Any]:
+        matches = [
+            row for row in rows
+            if isinstance(row, dict) and str(row.get("symbol") or "").upper() == symbol
+        ]
+        if not matches:
+            raise RuntimeError("Binance exchangeInfo did not return the requested symbol")
+        if len(matches) > 1:
+            raise RuntimeError("Binance exchangeInfo returned duplicate rows for the requested symbol")
+        return matches[0]
+
+    def _parse_symbol_filters(self, inst_id: str, symbol: str, row: dict[str, Any]) -> dict[str, Any]:
+        if row.get("contractType") != "PERPETUAL" or row.get("quoteAsset") != "USDT":
+            raise ValueError("Instrument is not a USDT perpetual contract")
+        raw_filters = row.get("filters")
+        if not isinstance(raw_filters, list):
+            raise RuntimeError("Binance symbol filters are malformed")
+        filters = {str(item.get("filterType")): item for item in raw_filters if isinstance(item, dict)}
+        lot = filters.get("LOT_SIZE") or {}
+        price = filters.get("PRICE_FILTER") or {}
+        notional = filters.get("MIN_NOTIONAL") or filters.get("NOTIONAL") or {}
+        if not isinstance(lot, dict) or not isinstance(price, dict) or not isinstance(notional, dict):
+            raise RuntimeError("Binance symbol filters are malformed")
+        tick = str(price.get("tickSize") or "0")
+        step = str(lot.get("stepSize") or "0")
+        try:
+            if _decimal(tick) <= 0 or _decimal(step) <= 0:
+                raise RuntimeError("Binance symbol filters are malformed")
+        except ValueError as exc:
+            raise RuntimeError("Binance symbol filters are malformed") from exc
+        return {
+            "instId": inst_id,
+            "symbol": symbol,
+            "baseCcy": str(row.get("baseAsset") or inst_id.split("-")[0]),
+            "settleCcy": "USDT",
+            "state": "live" if row.get("status") == "TRADING" else str(row.get("status") or ""),
+            "tickSz": tick,
+            "lotSz": step,
+            "minSz": str(lot.get("minQty") or "0"),
+            "minNotional": str(notional.get("notional") or notional.get("minNotional") or "0"),
+            "minPrice": str(price.get("minPrice") or "0"),
+            "maxPrice": str(price.get("maxPrice") or "0"),
+        }
+
     def _symbol_filters(self, inst_id: str) -> dict[str, Any]:
         if inst_id in self._filters:
             return self._filters[inst_id]
@@ -301,26 +356,7 @@ class BinanceExchange:
         rows = info.get("symbols") if isinstance(info, dict) else None
         if not isinstance(rows, list) or not rows:
             raise RuntimeError("Binance exchangeInfo is unavailable")
-        row = rows[0]
-        if row.get("contractType") != "PERPETUAL" or row.get("quoteAsset") != "USDT":
-            raise ValueError("Instrument is not a USDT perpetual contract")
-        filters = {str(item.get("filterType")): item for item in row.get("filters") or [] if isinstance(item, dict)}
-        lot = filters.get("LOT_SIZE") or {}
-        price = filters.get("PRICE_FILTER") or {}
-        notional = filters.get("MIN_NOTIONAL") or filters.get("NOTIONAL") or {}
-        parsed = {
-            "instId": inst_id,
-            "symbol": symbol,
-            "baseCcy": str(row.get("baseAsset") or inst_id.split("-")[0]),
-            "settleCcy": "USDT",
-            "state": "live" if row.get("status") == "TRADING" else str(row.get("status") or ""),
-            "tickSz": str(price.get("tickSize") or "0"),
-            "lotSz": str(lot.get("stepSize") or "0"),
-            "minSz": str(lot.get("minQty") or "0"),
-            "minNotional": str(notional.get("notional") or notional.get("minNotional") or "0"),
-            "minPrice": str(price.get("minPrice") or "0"),
-            "maxPrice": str(price.get("maxPrice") or "0"),
-        }
+        parsed = self._parse_symbol_filters(inst_id, symbol, self._exact_symbol_row(rows, symbol))
         self._filters[inst_id] = parsed
         return parsed
 
@@ -398,6 +434,7 @@ class BinanceExchange:
             "SL": f"R20G{group}SL",
             "TP": f"R20G{group}TP",
             "SX": f"R20G{group}SX",
+            "CL": f"R20G{group}CL",
         }
         for value in ids.values():
             if not CLIENT_ID_RE.fullmatch(value):
@@ -439,6 +476,10 @@ class BinanceExchange:
         except UncertainSubmission:
             try:
                 found = self._query_order(str(params["symbol"]), client_id=client_id)
+            except BinanceAPIError as exc:
+                if exc.code in {-2011, -2013}:
+                    raise UncertainSubmission("Binance order submission is unknown", client_id) from exc
+                raise RuntimeError("Binance order submission is unknown and could not be reconciled") from exc
             except Exception as exc:
                 raise RuntimeError("Binance order submission is unknown and could not be reconciled") from exc
             if str(params.get("type") or "").upper() != "MARKET" and not self._entry_live_or_filled(found):
@@ -466,6 +507,10 @@ class BinanceExchange:
         except UncertainSubmission:
             try:
                 found = self._query_algo(client_id)
+            except BinanceAPIError as exc:
+                if exc.code in {-2011, -2013}:
+                    raise UncertainSubmission("Binance algo submission is unknown", client_id) from exc
+                raise RuntimeError("Binance algo submission is unknown and could not be reconciled") from exc
             except Exception as exc:
                 raise RuntimeError("Binance algo submission is unknown and could not be reconciled") from exc
             return found
@@ -563,7 +608,23 @@ class BinanceExchange:
         for kind in ("SL", "TP", "SX"):
             self._cancel_algo(ids[kind])
 
+    def _pending_records(self) -> list[dict[str, Any]] | None:
+        with PENDING_LOCK:
+            try:
+                return load_pending_entries(self._pending_path())
+            except (PendingStoreCorrupt, OSError):
+                return None
+
+    def _pending_owned_groups(self, inst_id: str | None = None) -> set[str] | None:
+        rows = self._pending_records()
+        if rows is None:
+            return None
+        return {row["group"] for row in rows if inst_id is None or row["inst_id"] == inst_id}
+
     def _sweep_orphans(self, inst_id: str, pos_side: str | None = None) -> None:
+        owned = self._pending_owned_groups(inst_id)
+        if owned is None:
+            return
         live = {str(row.get("posSide") or "").lower(): _decimal(row.get("pos") or "0") for row in self.positions(inst_id)}
         grouped: dict[str, dict[str, dict[str, Any]]] = {}
         for row in self._open_algos(inst_id):
@@ -573,6 +634,8 @@ class BinanceExchange:
             group, kind = parsed
             grouped.setdefault(group, {})[kind] = row
         for group, legs in grouped.items():
+            if group in owned:
+                continue
             sample = next(iter(legs.values()))
             native_side = str(sample.get("positionSide") or "BOTH").upper()
             logical = {"LONG": "long", "SHORT": "short", "BOTH": "net"}.get(native_side, "net")
@@ -651,25 +714,9 @@ class BinanceExchange:
                 continue
             try:
                 mapped = _from_symbol(str(row["symbol"]))
-            except ValueError:
+                parsed = self._parse_symbol_filters(mapped, str(row["symbol"]), row)
+            except (ValueError, RuntimeError, KeyError):
                 continue
-            filters = {str(item.get("filterType")): item for item in row.get("filters") or [] if isinstance(item, dict)}
-            lot = filters.get("LOT_SIZE") or {}
-            price = filters.get("PRICE_FILTER") or {}
-            notional = filters.get("MIN_NOTIONAL") or filters.get("NOTIONAL") or {}
-            parsed = {
-                "instId": mapped,
-                "symbol": str(row["symbol"]),
-                "baseCcy": str(row.get("baseAsset") or mapped.split("-")[0]),
-                "settleCcy": "USDT",
-                "state": "live",
-                "tickSz": str(price.get("tickSize") or "0"),
-                "lotSz": str(lot.get("stepSize") or "0"),
-                "minSz": str(lot.get("minQty") or "0"),
-                "minNotional": str(notional.get("notional") or notional.get("minNotional") or "0"),
-                "minPrice": str(price.get("minPrice") or "0"),
-                "maxPrice": str(price.get("maxPrice") or "0"),
-            }
             self._filters[mapped] = parsed
             result.append({
                 "instId": mapped,
@@ -1218,13 +1265,24 @@ class BinanceExchange:
             raise RuntimeError("Binance cancellation was not acknowledged")
         return self._normalize_order(row)
 
-    def close_position(self, inst_id: str, pos_side: str, *, cancel_protection: bool = True) -> dict[str, Any]:
+    def close_position(
+        self,
+        inst_id: str,
+        pos_side: str,
+        *,
+        cancel_protection: bool = True,
+        client_id: str = "",
+        quantity: Any | None = None,
+    ) -> dict[str, Any]:
         hedge = self._hedge_mode()
         logical = str(pos_side or "").lower()
-        qty = self._live_position_qty(inst_id, logical)
+        live = self._live_position_qty(inst_id, logical)
+        qty = live if quantity is None else _decimal(quantity)
         if qty <= 0:
             raise RuntimeError("No live position to close")
-        quantity = self._align_qty(inst_id, qty)
+        if qty > live:
+            raise RuntimeError("Close quantity exceeds live position")
+        aligned = self._align_qty(inst_id, qty)
         if logical == "net":
             if hedge:
                 raise ValueError("Hedge mode requires long or short position side")
@@ -1241,12 +1299,16 @@ class BinanceExchange:
             side = self._close_side(logical)
             position_side = "BOTH"
             reduce_only = True
-        client_id = f"R20C{secrets.token_hex(8)}"[:36]
+        if client_id:
+            if not CLIENT_ID_RE.fullmatch(client_id):
+                raise ValueError("Invalid client order id")
+        else:
+            client_id = f"R20C{secrets.token_hex(8)}"[:36]
         params: dict[str, Any] = {
             "symbol": _to_symbol(inst_id),
             "side": side,
             "type": "MARKET",
-            "quantity": quantity,
+            "quantity": aligned,
             "positionSide": position_side,
             "newClientOrderId": client_id,
             "newOrderRespType": "RESULT",
@@ -1275,53 +1337,407 @@ class BinanceExchange:
         valid, reason, _rr = validate_quote_geometry_and_rr(action, _text(price), _text(tp), _text(sl))
         if not valid:
             raise ValueError(reason)
-        if pos_side == "long":
-            risk, reward = price - sl, tp - price
-        else:
-            risk, reward = sl - price, price - tp
-        if risk <= 0 or (reward / risk) < Decimal("2"):
-            raise ValueError("核心风控拦截：盈亏比不足 2.0")
 
-    def _is_terminal(self, order: dict[str, Any]) -> bool:
-        return str(order.get("status") or "").upper() in TERMINAL_ORDER_STATES
+    def _pending_path(self):
+        return pending_state_path(self.env)
 
-    def _require_entry_state(self, symbol: str, client_id: str) -> dict[str, Any]:
+    def _upsert_pending(self, record: dict[str, Any]) -> None:
+        with PENDING_LOCK:
+            path = self._pending_path()
+            try:
+                rows = load_pending_entries(path)
+            except PendingStoreCorrupt as exc:
+                raise RuntimeError("pending entry state is corrupt") from exc
+            rows = [row for row in rows if row["group"] != record["group"]]
+            rows.append(record)
+            save_pending_entries(path, rows)
+
+    def _retire_pending(self, group: str) -> None:
+        with PENDING_LOCK:
+            path = self._pending_path()
+            try:
+                rows = load_pending_entries(path)
+            except PendingStoreCorrupt as exc:
+                raise RuntimeError("pending entry state is corrupt") from exc
+            save_pending_entries(path, [row for row in rows if row["group"] != group])
+
+    def has_pending_entries(self) -> bool:
+        with PENDING_LOCK:
+            try:
+                return bool(load_pending_entries(self._pending_path()))
+            except (PendingStoreCorrupt, OSError):
+                return True
+
+    def _query_entry(self, symbol: str, client_id: str) -> dict[str, Any] | None:
         try:
-            order = self._query_order(symbol, client_id=client_id)
-        except Exception as exc:
-            raise RuntimeError("Entry order state is unknown; protection left in place") from exc
-        if not isinstance(order, dict) or not order.get("status"):
-            raise RuntimeError("Entry order state is unknown; protection left in place")
-        return order
+            row = self._query_order(symbol, client_id=client_id)
+        except BinanceAPIError as exc:
+            if exc.code in {-2011, -2013}:
+                return None
+            raise
+        if not isinstance(row, dict):
+            raise RuntimeError("Binance order query failed")
+        return row
 
-    def _compensate(self, inst_id: str, pos_side: str, entry_client: str, keep_sl: str) -> None:
-        symbol = _to_symbol(inst_id)
+    def _query_algo_optional(self, client_id: str) -> dict[str, Any] | None:
         try:
-            self._cancel_order(symbol, client_id=entry_client)
-        except UncertainSubmission as exc:
-            order = self._require_entry_state(symbol, entry_client)
-            if not self._is_terminal(order):
-                raise RuntimeError("Entry order state is unknown; protection left in place") from exc
-        except RuntimeError:
-            order = self._require_entry_state(symbol, entry_client)
-        else:
-            order = self._require_entry_state(symbol, entry_client)
-        if not self._is_terminal(order):
-            raise RuntimeError("Entry order is not terminal; protection left in place")
-        filled = _decimal(order.get("executedQty") or "0")
-        exposure = self._live_position_qty(inst_id, pos_side)
-        if filled > 0 and exposure > 0:
-            self.close_position(inst_id, pos_side, cancel_protection=False)
-            exposure = self._live_position_qty(inst_id, pos_side)
-        if exposure != 0:
-            raise RuntimeError("Position is not confirmed flat; protection left in place")
-        if not keep_sl:
+            return self._query_algo(client_id)
+        except BinanceAPIError as exc:
+            if exc.code in {-2011, -2013}:
+                return None
+            raise
+
+    def _algo_identity_ok(self, row: dict[str, Any], *, record: dict[str, Any], kind: str) -> bool:
+        client_id = record["client_ids"][kind]
+        if str(row.get("clientAlgoId") or "") != client_id:
+            return False
+        if not row.get("algoId"):
+            return False
+        if str(row.get("symbol") or "").upper() != _to_symbol(record["inst_id"]):
+            return False
+        if str(row.get("side") or "").upper() != self._close_side(record["pos_side"]):
+            return False
+        if str(row.get("positionSide") or "").upper() != self._position_side(record["pos_side"]):
+            return False
+        if str(row.get("workingType") or "").upper() != "MARK_PRICE":
+            return False
+        if not _bool_text(row.get("closePosition")):
+            return False
+        expected = "STOP_MARKET" if kind == "SL" else "TAKE_PROFIT_MARKET"
+        if str(row.get("orderType") or "").upper() != expected:
+            return False
+        if str(row.get("algoStatus") or "").upper() not in ALGO_LIVE_STATES:
+            return False
+        try:
+            trigger = record["sl" if kind == "SL" else "tp"]
+            if _decimal(row.get("triggerPrice") or "nan") != _decimal(trigger):
+                return False
+        except ValueError:
+            return False
+        return True
+
+    def _refresh_protection_leg(self, record: dict[str, Any], kind: str) -> None:
+        key = "sl_leg" if kind == "SL" else "tp_leg"
+        leg = record[key]
+        client_id = record["client_ids"][kind]
+        try:
+            found = self._query_algo_optional(client_id)
+        except Exception:
+            leg["unknown"] = True
+            leg["state"] = "unknown"
             return
-        parsed = self._parse_group(keep_sl)
-        if parsed:
-            self._cancel_group(parsed[0])
-        else:
-            self._cancel_algo(keep_sl)
+        if found is None:
+            if leg["state"] in {"idle", "rejected", "finished"}:
+                return
+            if leg["state"] == "confirmed":
+                live = self._live_position_qty(record["inst_id"], record["pos_side"])
+                if live == 0:
+                    leg["state"] = "finished"
+                    leg["unknown"] = False
+                    return
+            leg["unknown"] = True
+            leg["state"] = "unknown"
+            return
+        if self._algo_identity_ok(found, record=record, kind=kind):
+            leg["state"] = "confirmed"
+            leg["unknown"] = False
+            leg["algo_id"] = str(found.get("algoId") or "")
+            return
+        status = str(found.get("algoStatus") or "").upper()
+        if status in ALGO_DEAD_STATES:
+            leg["state"] = "finished" if status in {"TRIGGERED", "FINISHED"} else "rejected"
+            leg["unknown"] = False
+            return
+        leg["unknown"] = True
+        leg["state"] = "unknown"
+
+    def _pending_order_result(self, placed: dict[str, Any], record: dict[str, Any]) -> dict[str, Any]:
+        return {
+            **self._normalize_order(placed),
+            "ordId": str(placed.get("orderId") or record.get("order_id") or ""),
+            "clOrdId": record["client_ids"]["EN"],
+            "protection_mechanism": "paired_conditional",
+            "protection_status": record["protection_status"],
+            "algoId": record["group"],
+            "tpTriggerPx": record["tp"],
+            "slTriggerPx": record["sl"],
+            "quantity_unit": "base",
+        }
+
+    def _owned_live_matches_fill(self, record: dict[str, Any]) -> tuple[Decimal | None, str]:
+        filled = _decimal(record["entry_filled"])
+        baseline = _decimal(record["baseline_qty"])
+        try:
+            live = self._live_position_qty(record["inst_id"], record["pos_side"])
+        except Exception as exc:
+            return None, _sanitize(exc) or "position query failed"
+        if live != baseline + filled:
+            return None, "position does not match baseline plus filled quantity"
+        return live, ""
+
+    def _cancel_entry_remainder(self, record: dict[str, Any]) -> None:
+        record["cancel_requested"] = True
+        self._upsert_pending(record)
+        try:
+            self._cancel_order(_to_symbol(record["inst_id"]), client_id=record["client_ids"]["EN"])
+        except UncertainSubmission:
+            return
+        except BinanceAPIError as exc:
+            if exc.code not in {-2011, -2013}:
+                raise
+
+    def _cleanup_residual_algos(self, record: dict[str, Any]) -> list[str]:
+        errors: list[str] = []
+        for kind in ("SL", "TP"):
+            leg = record["sl_leg" if kind == "SL" else "tp_leg"]
+            if not leg["posted"] and leg["state"] == "idle":
+                continue
+            self._refresh_protection_leg(record, kind)
+            if leg["unknown"] or leg["state"] == "unknown":
+                errors.append(f"{kind} result is unknown; original client id preserved")
+                continue
+            if leg["state"] != "confirmed":
+                continue
+            try:
+                self._cancel_algo(record["client_ids"][kind])
+            except UncertainSubmission:
+                leg["unknown"] = True
+                leg["state"] = "unknown"
+                errors.append(f"{kind} cancellation is unknown; original client id preserved")
+                continue
+            self._refresh_protection_leg(record, kind)
+            if leg["unknown"] or leg["state"] in {"unknown", "confirmed"}:
+                errors.append(f"{kind} cancellation is not confirmed; original client id preserved")
+        return errors
+
+    def _submit_protection_leg(self, record: dict[str, Any], kind: str) -> None:
+        key = "sl_leg" if kind == "SL" else "tp_leg"
+        leg = record[key]
+        if leg["posted"] or leg["state"] != "idle":
+            self._refresh_protection_leg(record, kind)
+        if leg["state"] == "confirmed":
+            return
+        if leg["unknown"] or leg["state"] == "unknown":
+            return
+        if leg["posted"] or leg["state"] in {"rejected", "finished"}:
+            return
+        client_id = record["client_ids"][kind]
+        trigger = record["sl" if kind == "SL" else "tp"]
+        params = self._protection_params(record["inst_id"], record["pos_side"], trigger, kind, client_id)
+        leg["posted"] = True
+        leg["state"] = "submitting"
+        self._upsert_pending(record)
+        try:
+            self._place_algo(params, client_id)
+        except UncertainSubmission:
+            leg["unknown"] = True
+            leg["state"] = "unknown"
+            self._upsert_pending(record)
+            self._refresh_protection_leg(record, kind)
+            return
+        except BinanceAPIError:
+            leg["state"] = "rejected"
+            leg["unknown"] = False
+            return
+        except RuntimeError as exc:
+            message = str(exc).lower()
+            if "unknown" in message or "could not be reconciled" in message:
+                leg["unknown"] = True
+                leg["state"] = "unknown"
+                self._refresh_protection_leg(record, kind)
+                return
+            leg["state"] = "rejected"
+            leg["unknown"] = False
+            return
+        self._refresh_protection_leg(record, kind)
+
+    def _close_entry_fill(self, record: dict[str, Any]) -> list[str]:
+        filled = _decimal(record["entry_filled"])
+        baseline = _decimal(record["baseline_qty"])
+        close = record["close_leg"]
+        client_id = record["client_ids"]["CL"]
+        symbol = _to_symbol(record["inst_id"])
+        if not close["posted"]:
+            live, err = self._owned_live_matches_fill(record)
+            if err or live is None or filled <= 0:
+                return [err or "owned entry fill is unverified"]
+            close["posted"] = True
+            close["state"] = "submitting"
+            self._upsert_pending(record)
+            try:
+                self.close_position(
+                    record["inst_id"],
+                    record["pos_side"],
+                    cancel_protection=False,
+                    client_id=client_id,
+                    quantity=filled,
+                )
+            except RuntimeError:
+                # The intent is durable. Only query this client ID from now on.
+                close["unknown"] = True
+                close["state"] = "unknown"
+                self._upsert_pending(record)
+
+        try:
+            found = self._query_entry(symbol, client_id)
+        except Exception as exc:
+            close["unknown"] = True
+            close["state"] = "unknown"
+            return [_sanitize(exc) or "compensation close query is unknown"]
+        if found is None:
+            close["unknown"] = True
+            close["state"] = "unknown"
+            return ["compensation close is unknown; refusing to resend"]
+        try:
+            identity_ok = (
+                str(found.get("clientOrderId") or "") == client_id
+                and bool(found.get("orderId"))
+                and str(found.get("symbol") or "").upper() == symbol
+                and str(found.get("side") or "").upper() == self._close_side(record["pos_side"])
+                and str(found.get("positionSide") or "").upper() == self._position_side(record["pos_side"])
+                and str(found.get("type") or "").upper() == "MARKET"
+                and _decimal(found.get("origQty") or "nan") == filled
+                and Decimal("0") <= _decimal(found.get("executedQty") or "nan") <= filled
+            )
+        except ValueError:
+            identity_ok = False
+        if not identity_ok or str(found.get("status") or "").upper() not in TERMINAL_ORDER_STATES:
+            close["unknown"] = True
+            close["state"] = "unknown"
+            return ["compensation close identity or terminal state is unverified; refusing to resend"]
+        live = self._live_position_qty(record["inst_id"], record["pos_side"])
+        if live != baseline:
+            return ["position did not return to baseline after compensation close"]
+        close["state"] = "confirmed"
+        close["unknown"] = False
+        return self._cleanup_residual_algos(record)
+
+    def _retire_flat_after_fill(self, record: dict[str, Any]) -> tuple[dict[str, Any], list[str], bool]:
+        errors = self._cleanup_residual_algos(record)
+        if errors or any(record[key]["unknown"] or record[key]["state"] == "unknown" for key in ("sl_leg", "tp_leg", "close_leg")):
+            record["protection_status"] = "blocked"
+            return record, errors or ["protective leg result is unknown; original client id preserved"], False
+        record["protection_status"] = "flat"
+        return record, errors, True
+
+    def _protect_verified_entry(self, record: dict[str, Any]) -> tuple[dict[str, Any], list[str], bool]:
+        if record["close_leg"]["posted"]:
+            errors = self._close_entry_fill(record)
+            record["protection_status"] = "blocked" if errors else "flat"
+            return record, errors, not errors
+        live = self._live_position_qty(record["inst_id"], record["pos_side"])
+        if live == 0:
+            return self._retire_flat_after_fill(record)
+        matched, err = self._owned_live_matches_fill(record)
+        if err or matched is None:
+            record["protection_status"] = "blocked"
+            return record, [err or "owned exposure is unverified"], False
+        self._submit_protection_leg(record, "SL")
+        sl = record["sl_leg"]
+        if sl["unknown"] or sl["state"] == "unknown":
+            record["protection_status"] = "blocked"
+            return record, ["stop-loss result is unknown; original client id preserved"], False
+        if sl["state"] != "confirmed":
+            errors = self._close_entry_fill(record)
+            live_after = self._live_position_qty(record["inst_id"], record["pos_side"])
+            if sl["unknown"] or record["close_leg"]["unknown"] or errors:
+                record["protection_status"] = "blocked"
+                return record, errors or ["stop-loss failed and compensation is unresolved"], False
+            if live_after != _decimal(record["baseline_qty"]):
+                record["protection_status"] = "blocked"
+                return record, ["position did not return to baseline after stop-loss failure"], False
+            record["protection_status"] = "flat"
+            return record, [], True
+        self._submit_protection_leg(record, "TP")
+        tp = record["tp_leg"]
+        if tp["state"] == "confirmed":
+            record["protection_status"] = "protected"
+            return record, [], True
+        if tp["unknown"] or tp["state"] == "unknown":
+            record["protection_status"] = "sl_only"
+            return record, ["take-profit result is unknown; confirmed stop-loss left in place"], False
+        record["protection_status"] = "sl_only"
+        return record, [], False
+
+    def _advance_pending(self, record: dict[str, Any]) -> tuple[dict[str, Any], list[str], bool]:
+        symbol = _to_symbol(record["inst_id"])
+        client_id = record["client_ids"]["EN"]
+        try:
+            order = self._query_entry(symbol, client_id)
+        except Exception as exc:
+            record["entry_unknown"] = True
+            record["protection_status"] = "blocked"
+            return record, [_sanitize(exc) or f"entry {client_id} query is unknown"], False
+        if order is None:
+            record["entry_unknown"] = True
+            record["protection_status"] = "blocked"
+            return record, [f"entry {client_id} is not found after an unknown submission; refusing to resend"], False
+        status = str(order.get("status") or "").upper()
+        filled = _decimal(order.get("executedQty") or "0")
+        if (
+            str(order.get("clientOrderId") or "") != client_id
+            or str(order.get("symbol") or "").upper() != symbol
+            or str(order.get("side") or "").lower() != record["side"]
+            or str(order.get("positionSide") or "").upper() != self._position_side(record["pos_side"])
+            or _decimal(order.get("origQty") or "nan") != _decimal(record["qty"])
+            or not _decimal(record["entry_filled"]) <= filled <= _decimal(record["qty"])
+        ):
+            record["entry_unknown"] = True
+            record["protection_status"] = "blocked"
+            return record, ["entry identity or cumulative fill is inconsistent; original client id preserved"], False
+        record["entry_status"] = status or record["entry_status"]
+        record["entry_filled"] = _text(filled)
+        record["order_id"] = str(order.get("orderId") or record["order_id"])
+        record["entry_unknown"] = False
+        if status == "PARTIALLY_FILLED" or (filled > 0 and status not in TERMINAL_ORDER_STATES and status != "FILLED"):
+            self._cancel_entry_remainder(record)
+            record["protection_status"] = "awaiting_fill"
+            return record, [], False
+        if status == "NEW" and filled <= 0:
+            now_ms = int(time.time() * 1000)
+            if now_ms - int(record["created_ms"]) > ORDER_MAX_AGE_MS:
+                self._cancel_entry_remainder(record)
+            record["protection_status"] = "awaiting_fill"
+            return record, [], False
+        if status not in TERMINAL_ORDER_STATES:
+            record["protection_status"] = "awaiting_fill"
+            return record, [], False
+        if filled <= 0:
+            record["protection_status"] = "flat"
+            return record, [], True
+        return self._protect_verified_entry(record)
+
+    def reconcile_pending_entries(self) -> dict[str, Any]:
+        with PENDING_LOCK:
+            try:
+                records = load_pending_entries(self._pending_path())
+            except PendingStoreCorrupt:
+                return {"pending": 1, "blocked": True, "errors": ["pending entry state is corrupt"]}
+            except OSError:
+                return {"pending": 1, "blocked": True, "errors": ["pending entry state is unreadable"]}
+        errors: list[str] = []
+        remaining: list[dict[str, Any]] = []
+        for record in records:
+            try:
+                record, rec_errors, retire = self._advance_pending(record)
+            except Exception as orig:
+                remaining.append(record)
+                errors.append(_sanitize(orig) or "pending entry reconciliation failed")
+                continue
+            errors.extend(rec_errors)
+            if retire:
+                continue
+            remaining.append(record)
+        with PENDING_LOCK:
+            try:
+                save_pending_entries(self._pending_path(), remaining)
+            except PendingStoreCorrupt:
+                return {
+                    "pending": max(len(remaining), 1),
+                    "blocked": True,
+                    "errors": errors + ["pending entry state is corrupt"],
+                }
+        return {"pending": len(remaining), "blocked": bool(remaining) or bool(errors), "errors": errors}
 
     def place_protected_limit_order(
         self,
@@ -1340,8 +1756,32 @@ class BinanceExchange:
         sl = self._align_price(inst_id, sl_px)
         qty = self._align_qty(inst_id, size, px)
         self._validate_geometry(str(pos_side).lower(), _decimal(px), _decimal(tp), _decimal(sl))
+        baseline = self._live_position_qty(inst_id, str(pos_side).lower())
         group = self._new_group()
         ids = self._group_ids(group)
+        record = new_record(
+            group=group,
+            inst_id=inst_id,
+            side=str(side).lower(),
+            pos_side=str(pos_side).lower(),
+            qty=qty,
+            price=px,
+            tp=tp,
+            sl=sl,
+            baseline_qty=_text(baseline),
+            client_ids=ids,
+            created_ms=int(time.time() * 1000),
+        )
+        with PENDING_LOCK:
+            path = self._pending_path()
+            try:
+                existing = load_pending_entries(path)
+            except (PendingStoreCorrupt, OSError) as exc:
+                raise RuntimeError("A pending Binance entry is still unresolved") from exc
+            if existing:
+                raise RuntimeError("A pending Binance entry is still unresolved")
+            record["posted"] = True
+            save_pending_entries(path, [record])
         symbol = _to_symbol(inst_id)
         entry = {
             "symbol": symbol,
@@ -1355,26 +1795,63 @@ class BinanceExchange:
             "newOrderRespType": "RESULT",
         }
         entry.pop("reduceOnly", None)
-        placed = self._place_order(entry, ids["EN"])
-        sl_row = None
         try:
-            sl_row = self._place_algo(self._protection_params(inst_id, pos_side, sl, "SL", ids["SL"]), ids["SL"])
-            self._confirm_algo(ids["SL"])
-            self._place_algo(self._protection_params(inst_id, pos_side, tp, "TP", ids["TP"]), ids["TP"])
-            self._confirm_algo(ids["TP"])
-        except Exception as exc:
-            keep = ids["SL"] if sl_row is not None else ""
-            self._compensate(inst_id, pos_side, ids["EN"], keep)
-            raise RuntimeError(_sanitize(exc)) from exc
-        return {
-            **self._normalize_order(placed),
-            "ordId": str(placed.get("orderId") or ""),
-            "protection_mechanism": "paired_conditional",
-            "algoId": group,
-            "tpTriggerPx": tp,
-            "slTriggerPx": sl,
-            "quantity_unit": "base",
-        }
+            placed = self._place_order(entry, ids["EN"])
+        except UncertainSubmission as exc:
+            record["entry_unknown"] = True
+            record["protection_status"] = "blocked"
+            self._upsert_pending(record)
+            raise RuntimeError(_sanitize(exc) or "Binance entry submission is unknown") from exc
+        except BinanceAPIError:
+            self._retire_pending(group)
+            raise
+        except RuntimeError as exc:
+            message = str(exc).lower()
+            if "not accepted" in message:
+                self._retire_pending(group)
+            else:
+                record["entry_unknown"] = True
+                record["protection_status"] = "blocked"
+                self._upsert_pending(record)
+            raise
+        status = str(placed.get("status") or "").upper()
+        filled = _decimal(placed.get("executedQty") or "0")
+        record["order_id"] = str(placed.get("orderId") or "")
+        record["entry_status"] = status or "NEW"
+        record["entry_filled"] = _text(filled)
+        record["entry_unknown"] = False
+        if status == "PARTIALLY_FILLED" or (filled > 0 and status not in TERMINAL_ORDER_STATES and status != "FILLED"):
+            record["protection_status"] = "awaiting_fill"
+            self._upsert_pending(record)
+            self._cancel_entry_remainder(record)
+            return self._pending_order_result(placed, record)
+        if status in TERMINAL_ORDER_STATES:
+            if filled <= 0:
+                record["protection_status"] = "flat"
+                self._retire_pending(group)
+                raise RuntimeError("Entry order was not accepted")
+            record["protection_status"] = "awaiting_fill"
+            self._upsert_pending(record)
+            try:
+                record, errors, retire = self._protect_verified_entry(record)
+            except Exception:
+                record["protection_status"] = "blocked"
+                self._upsert_pending(record)
+                raise
+            if retire:
+                self._retire_pending(group)
+            else:
+                self._upsert_pending(record)
+            if record["protection_status"] in {"protected", "sl_only"}:
+                return self._pending_order_result(placed, record)
+            if errors:
+                raise RuntimeError(errors[0])
+            if record["protection_status"] == "flat":
+                raise RuntimeError("Stop-loss failed; the entry fill was closed back to its verified baseline")
+            raise RuntimeError("Protected entry could not be completed")
+        record["protection_status"] = "awaiting_fill"
+        self._upsert_pending(record)
+        return self._pending_order_result(placed, record)
 
     def _logical_pos_side(self, row: dict[str, Any]) -> str:
         native = str(row.get("positionSide") or "BOTH").upper()
@@ -1421,6 +1898,9 @@ class BinanceExchange:
         sl = self._align_price(inst_id, sl_px)
         qty = self._align_qty(inst_id, size, px_ref)
         self._validate_geometry(str(pos_side).lower(), _decimal(px_ref), _decimal(tp), _decimal(sl))
+        owned = self._pending_owned_groups(inst_id)
+        if owned is None or owned:
+            raise RuntimeError("A pending Binance entry still owns protection for this instrument")
         self._sweep_orphans(inst_id, str(pos_side).lower())
         group = self._new_group()
         ids = self._group_ids(group)
@@ -1451,6 +1931,9 @@ class BinanceExchange:
     def amend_stop(self, inst_id: str, algo_id: str, new_sl: Any) -> dict[str, Any]:
         sl = self._align_price(inst_id, new_sl)
         group = str(algo_id)
+        owned = self._pending_owned_groups(inst_id)
+        if owned is None or group in owned:
+            raise RuntimeError("Pending protection group cannot be amended")
         ids = self._group_ids(group)
         live = {item["algoId"]: item for item in self.protection_orders(inst_id)}
         current = live.get(group)
@@ -1480,7 +1963,9 @@ class BinanceExchange:
         }
 
     def cancel_protection(self, inst_id: str, algo_id: str) -> dict[str, Any]:
-        _ = inst_id
+        owned = self._pending_owned_groups(inst_id)
+        if owned is None or str(algo_id) in owned:
+            raise RuntimeError("Pending protection group cannot be cancelled")
         self._cancel_group(str(algo_id))
         return {"algoId": str(algo_id), "state": "canceled"}
 

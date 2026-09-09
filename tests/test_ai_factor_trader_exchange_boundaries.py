@@ -83,7 +83,7 @@ class FakeExchange:
         self.open_orders_error = None
         self.cancel_error = None
         self.place_error = None
-        self.place_payload = {"ordId": "ord-1", "protection_mechanism": "paired_conditional"}
+        self.place_payload = {"ordId": "ord-1", "protection_mechanism": "paired_conditional", "protection_status": "protected"}
         self.leverage_payload = {"lever": "10"}
         self.ticker_data = {"instId": "BTC-USDT-SWAP", "last": "100000", "bidPx": "99999", "askPx": "100001"}
 
@@ -215,6 +215,49 @@ class LeverageConfirmTests(unittest.TestCase):
             "test", "AI", available, planned, leverage, False, 0.0,
             {}, [], set(), 30.0, 1.0, 1,
         )
+
+    def test_old_btc_metadata_cannot_determine_altcoin_order_step_or_quantity(self):
+        from scripts.instrument_pool import normalize_pool_item
+        from r20_exchange.binance import BinanceExchange
+        from tests.test_binance_exchange import BTC_INFO, FakeEnv, FakeSession, _perp_row
+
+        transport = FakeSession()
+        transport.on("GET", "/fapi/v1/exchangeInfo", {
+            "symbols": [*BTC_INFO["symbols"], _perp_row(
+                "DUSKUSDT", "DUSK", "0.0001", "0.0001", step="1", min_qty="1",
+            )],
+        })
+        adapter = BinanceExchange(FakeEnv(), session=transport)
+        row = normalize_pool_item({
+            "instId": "DUSK-USDT-SWAP", "name": "BTC", "ccy": "BTC",
+            "base_qty": 0.0001, "ctVal": 1, "tickSz": "0.10",
+            "lotSz": "0.0001", "minSz": "0.0001", "minNotional": "50",
+        })
+        candles = [
+            [str(index * 900000), "0.1300", "0.1319", "0.1299", "0.1309", "1000", "130.9", "130.9", "1"]
+            for index in range(45, 0, -1)
+        ]
+        self.exchange.ticker_data = {
+            "instId": "DUSK-USDT-SWAP", "last": "0.1309", "bidPx": "0.1309", "askPx": "0.1310",
+        }
+        with patch.object(self.exchange, "instruments", adapter.instruments), \
+             patch.object(aft, "fetch_candles_direct", return_value=candles), \
+             patch.object(aft, "load_adaptive_config", return_value={}), \
+             patch.object(aft, "effective_risk_per_trade", return_value=2.0):
+            factors = aft.fetch_single_instrument_data(row, [], 100.0)
+            self.assertTrue(factors["market_data_valid"])
+            result = aft.submit_entry_with_confirmed_leverage(
+                "DUSK-USDT-SWAP", "buy", "long", factors,
+                {"entry_price": 0.1309, "take_profit_price": 0.19, "stop_loss_price": 0.11},
+                "test", "AI", 100.0, 10.0, 5, False, 0.0,
+                {}, [], set(), 0.06, 0.02, row["precision"],
+            )
+        self.assertEqual(result, "accepted")
+        order = next(call for call in self.exchange.calls if call[0] == "place_protected_limit_order")
+        self.assertEqual(order[1], "DUSK-USDT-SWAP")
+        self.assertEqual(order[4], Decimal("95"))
+        self.assertEqual(order[5:8], (0.1309, 0.19, 0.11))
+        self.assertLessEqual(order[4] * Decimal("0.0209"), Decimal("2"))
 
     def test_unconfirmed_leverage_blocks_place(self):
         self.exchange.leverage_payload = {}

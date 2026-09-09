@@ -284,6 +284,62 @@ def _call_exchange(method: str, *args, **kwargs) -> Tuple[bool, Any, str]:
         return False, None, f"{UNCERTAIN_PREFIX}{e}"
 
 
+def _protection_status_from_payload(payload: Any) -> str:
+    if isinstance(payload, dict):
+        return str(payload.get("protection_status") or "").strip().lower()
+    return ""
+
+
+def binance_pending_risk_gate() -> Tuple[bool, str]:
+    """Reconcile Binance pending entries before news/model/NEW risk.
+
+    Returns (blocked, log_line). log_line is empty when the cycle may take new risk.
+    OKX is never blocked by this gate.
+    """
+    env = selected_environment()
+    if getattr(env, "exchange", "") != "binance":
+        return False, ""
+    ok, pending, err = _call_exchange("has_pending_entries")
+    if not ok:
+        reason = err or "unable to read durable pending entries"
+        return True, f"[Trader] Abort: {reason}"
+    if not pending:
+        return False, ""
+    ok, result, err = _call_exchange("reconcile_pending_entries")
+    if not ok or not isinstance(result, dict):
+        reason = err or "pending reconciliation failed"
+        return True, f"[Trader] Abort: {reason}"
+    errors = [str(item).strip() for item in (result.get("errors") or []) if str(item).strip()]
+    try:
+        pending_count = int(result.get("pending"))
+    except (TypeError, ValueError):
+        pending_count = -1
+        errors.append("reconcile_pending_entries returned a non-integer pending count")
+    blocked = bool(result.get("blocked")) or pending_count != 0 or bool(errors)
+    if not blocked:
+        return False, ""
+    if errors:
+        return True, f"[Trader] Abort: {'; '.join(errors)}"
+    if pending_count > 0:
+        noun = "entry" if pending_count == 1 else "entries"
+        return True, (
+            f"[Trader] Pending: Binance has {pending_count} pending {noun} "
+            "awaiting fill or protection; new risk and paid analysis skipped"
+        )
+    return True, (
+        "[Trader] Pending: Binance pending entries remain unresolved; "
+        "new risk and paid analysis skipped"
+    )
+
+def _binance_submit_requires_maintenance(result: str) -> bool:
+    """Awaiting fill, incomplete protection, or Binance-uncertain POST must release the lock."""
+    if result in {"awaiting_fill", "protection_pending"}:
+        return True
+    return result == "uncertain" and getattr(selected_environment(), "exchange", "") == "binance"
+
+
+
+
 def instrument_filters(inst_id: str, item: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     meta: Dict[str, Any] = {}
     ok, rows, _err = _call_exchange("instruments", inst_id)
@@ -624,8 +680,8 @@ def prune_trackers(trackers: Dict[str, Any], real_pos_dict: Dict[str, Any]) -> i
     return removed
 
 
-def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size, price: float, tp_px: float, sl_px: float) -> Tuple[bool, str]:
-    """Submit a protected limit order; acceptance is not treated as a fill."""
+def _submit_protected_limit_order_result(inst_id: str, side: str, pos_side: str, size, price: float, tp_px: float, sl_px: float) -> Tuple[bool, str, str]:
+    """Place a protected limit. Acceptance is not a fill; NEW may be awaiting_fill."""
     effective_px = float(price)
     effective_tp = float(tp_px)
     effective_sl = float(sl_px)
@@ -635,11 +691,11 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size, p
     is_valid, reason, _ = validate_quote_geometry_and_rr(action_type, effective_px, effective_tp, effective_sl)
     if not is_valid:
         print(f"[Order Rejected] 最终有效开仓报价未通过核心安全复验: {reason} (px={effective_px}, tp={effective_tp}, sl={effective_sl})")
-        return False, f"最终订单核心安全复验拒绝: {reason}"
+        return False, f"最终订单核心安全复验拒绝: {reason}", ""
 
     size_d = _as_decimal(size)
     if size_d <= 0:
-        return False, "order size must be a positive BASE quantity"
+        return False, "order size must be a positive BASE quantity", ""
 
     ok, payload, err = _call_exchange(
         "place_protected_limit_order",
@@ -647,8 +703,8 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size, p
     )
     if not ok:
         if is_uncertain_submit(err):
-            return False, err or f"{UNCERTAIN_PREFIX}order submission failed"
-        return False, err or "order command failed"
+            return False, err or f"{UNCERTAIN_PREFIX}order submission failed", ""
+        return False, err or "order command failed", ""
     order_id = None
     if isinstance(payload, dict):
         order_id = payload.get("ordId") or payload.get("orderId")
@@ -660,8 +716,24 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size, p
     elif isinstance(payload, list) and payload and isinstance(payload[0], dict):
         order_id = payload[0].get("ordId")
     if not order_id:
-        return False, f"{UNCERTAIN_PREFIX}exchange accepted response without a verifiable order id"
-    return True, str(order_id)
+        return False, f"{UNCERTAIN_PREFIX}exchange accepted response without a verifiable order id", ""
+    status = _protection_status_from_payload(payload)
+    known = {"awaiting_fill", "protected", "sl_only"}
+    if getattr(selected_environment(), "exchange", "") == "binance":
+        if status not in known:
+            status = status or "unknown"
+    elif status not in known:
+        status = ""
+    return True, str(order_id), status
+
+
+
+
+def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size, price: float, tp_px: float, sl_px: float) -> Tuple[bool, str]:
+    """Submit a protected limit order; acceptance is not treated as a fill."""
+    ok, ref, _status = _submit_protected_limit_order_result(inst_id, side, pos_side, size, price, tp_px, sl_px)
+    return ok, ref
+
 
 
 def _float_or_zero(value: Any) -> float:
@@ -2124,7 +2196,9 @@ def submit_entry_with_confirmed_leverage(
 
 
     submitted_at = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
-    accepted, order_ref = submit_protected_limit_order(inst_id, side, pos_side, actual_sz, limit_px, tp_px, sl_px)
+    accepted, order_ref, protection_status = _submit_protected_limit_order_result(
+        inst_id, side, pos_side, actual_sz, limit_px, tp_px, sl_px,
+    )
     qty_text = format(actual_sz.normalize(), "f")
     if accepted:
         record_signal_snapshot({
@@ -2141,15 +2215,31 @@ def submit_entry_with_confirmed_leverage(
                 **build_signal_snapshot(f),
                 "entry_price": limit_px, "take_profit_price": tp_px, "stop_loss_price": sl_px,
                 "quantity": qty_text, "leverage": float(confirmed_lev),
+                "protection_status": protection_status or "submitted",
             },
         })
+        if protection_status == "sl_only":
+            fill_phrase = "已成交且仅确认止损，止盈未确认"
+            protection_note = ", protection=sl_only"
+        elif protection_status == "awaiting_fill":
+            fill_phrase = "已提交待成交"
+            protection_note = ", protection=awaiting_fill"
+        elif protection_status == "unknown":
+            fill_phrase = "已受理但保护状态未知"
+            protection_note = ", protection=unknown"
+        elif protection_status == "protected":
+            fill_phrase = "已提交"
+            protection_note = ", protection=protected"
+        else:
+            fill_phrase = "已提交待成交"
+            protection_note = ""
         if is_scale_in:
             tracker = trackers.get(f"{inst_id}_{pos_side}", {})
             tracker["scale_count"] = tracker.get("scale_count", 0) + 1
             trackers[f"{inst_id}_{pos_side}"] = tracker
             save_trackers(trackers)
             tag = "🚀 顺势金字塔加多" if pos_side == "long" else "🌪️ 顺势金字塔加空"
-            executed_actions.append(f"[{f['name']}] {tag}挂单已提交 {qty_text}@{limit_px} (order={order_ref}, TP={tp_px}, SL={sl_px})")
+            executed_actions.append(f"[{f['name']}] {tag}{fill_phrase} {qty_text}@{limit_px} (order={order_ref}{protection_note}, TP={tp_px}, SL={sl_px})")
             if notify_trade_open:
                 notify_trade_open(
                     inst=f["name"],
@@ -2164,7 +2254,7 @@ def submit_entry_with_confirmed_leverage(
                 )
         else:
             executed_actions.append(
-                f"[{f['name']}] AI限价{'多' if pos_side == 'long' else '空'}单已提交待成交 {qty_text}@{limit_px} (order={order_ref}, TP={tp_px}, SL={sl_px})"
+                f"[{f['name']}] AI限价{'多' if pos_side == 'long' else '空'}单{fill_phrase} {qty_text}@{limit_px} (order={order_ref}{protection_note}, TP={tp_px}, SL={sl_px})"
             )
             if notify_trade_open:
                 notify_trade_open(
@@ -2178,7 +2268,25 @@ def submit_entry_with_confirmed_leverage(
                     sl_px=sl_px,
                     leverage=float(confirmed_lev),
                 )
+        if protection_status == "awaiting_fill":
+            executed_actions.append(
+                f"[{f['name']}] NEW entry awaiting fill; not filled and not yet protected — releasing cycle lock for safety maintenance"
+            )
+            return "awaiting_fill"
+        if protection_status == "sl_only":
+            executed_actions.append(
+                f"[{f['name']}] FILLED with SL-only coverage; take-profit is not confirmed — releasing cycle lock for safety maintenance"
+            )
+            return "protection_pending"
+        if protection_status and protection_status != "protected":
+            executed_actions.append(
+                f"[{f['name']}] Binance protection_status={protection_status} is not treated as protected — releasing cycle lock for safety maintenance"
+            )
+            return "protection_pending"
         return "accepted"
+
+
+
     if is_uncertain_submit(order_ref):
         executed_actions.append(f"[{f['name']}] AI限价单提交结果未知，本轮禁止重复下单: {order_ref}")
         return "uncertain"
@@ -2192,17 +2300,23 @@ def execute_portfolio():
     now_dt = datetime.datetime.now(tz_bj)
     timestamp_full = now_dt.strftime("%Y-%m-%d %H:%M:%S")
 
-    # 0. Clean Stale Open Orders & Harvest Real-time News Sentiment
-    orders_ok, orders_error = clean_stale_open_orders()
-    if not orders_ok:
-        print(f"[Trader] Abort: unable to verify/cancel stale open orders: {orders_error}")
-        return None
-    try:
-        harvester_script = os.path.join(WORKSPACE_DIR, "scripts", "news_sentiment_harvester.py")
-        if os.path.exists(harvester_script):
-            subprocess.run(f"python3 {harvester_script}", shell=True, capture_output=True, text=True, timeout=25)
-    except Exception as e:
-        print(f"News Harvester sync warning: {e}")
+    # 0. Reconcile Binance pending entries before news/model/NEW risk.
+    block_new_risk, pending_log = binance_pending_risk_gate()
+    if pending_log:
+        print(pending_log)
+
+    if not block_new_risk:
+        orders_ok, orders_error = clean_stale_open_orders()
+        if not orders_ok:
+            print(f"[Trader] Abort: unable to verify/cancel stale open orders: {orders_error}")
+            return None
+        try:
+            harvester_script = os.path.join(WORKSPACE_DIR, "scripts", "news_sentiment_harvester.py")
+            if os.path.exists(harvester_script):
+                subprocess.run(f"python3 {harvester_script}", shell=True, capture_output=True, text=True, timeout=25)
+        except Exception as e:
+            print(f"News Harvester sync warning: {e}")
+
 
     # 1. Fetch Real Positions. A failed account query aborts the complete cycle.
     positions_ok, all_positions, positions_error = query_positions()
@@ -2235,10 +2349,12 @@ def execute_portfolio():
     long_count = real_long_count
     short_count = real_short_count
 
-    orphans_ok, orphans_error = clean_orphan_protections(real_pos_dict)
-    if not orphans_ok:
-        print(f"[Trader] Abort: unable to clean orphan protections: {orphans_error}")
-        return None
+    if not (block_new_risk and getattr(selected_environment(), "exchange", "") == "binance"):
+        orphans_ok, orphans_error = clean_orphan_protections(real_pos_dict)
+        if not orphans_ok:
+            print(f"[Trader] Abort: unable to clean orphan protections: {orphans_error}")
+            return None
+
 
     pending_ok, pending_orders, pending_err = _call_exchange("open_orders")
     if not pending_ok or not isinstance(pending_orders, list):
@@ -2286,10 +2402,11 @@ def execute_portfolio():
     stale_tracker_count = prune_trackers(trackers, real_pos_dict)
     if stale_tracker_count:
         executed_actions.append(f"清理 {stale_tracker_count} 条已失效持仓追踪记录")
-    for f in all_factors:
-        curr_pos = f["position"]
-        if curr_pos:
-            manage_position_tp_and_trailing(f, curr_pos, trackers, timestamp_full, executed_actions)
+    if not (block_new_risk and getattr(selected_environment(), "exchange", "") == "binance"):
+        for f in all_factors:
+            curr_pos = f["position"]
+            if curr_pos:
+                manage_position_tp_and_trailing(f, curr_pos, trackers, timestamp_full, executed_actions)
     save_trackers(trackers)
 
     # 4. Check Circuit Breaker & Batch AI Brain Scan (Including Active Positions Detail)
@@ -2299,7 +2416,7 @@ def execute_portfolio():
 
     brain_cache = {}
     # One LLM call covers the full six-instrument universe and all active positions.
-    if not cb_active and execute_batch_ai_brain_cycle:
+    if not cb_active and not block_new_risk and execute_batch_ai_brain_cycle:
         try:
             pos_desc = f"当前系统总持仓 {active_pos_count}/{MAX_CONCURRENT_POSITIONS} (多{long_count}/空{short_count})"
             active_pos_list = []
@@ -2333,7 +2450,7 @@ def execute_portfolio():
         except Exception as e:
             print(f"[AI Brain Batch Scan Warning] {e}")
 
-    if not cb_active:
+    if not cb_active and not block_new_risk:
         for f in all_factors:
             asset_type = f.get("type", "crypto")
             if not is_tradfi_market_liquid(asset_type):
@@ -2370,6 +2487,7 @@ def execute_portfolio():
             f["policy_version"] = ai_info.get("policy_version", "")
             f["policy_hash"] = ai_info.get("policy_hash", "")
 
+
             if ai_act in ["BUY_LONG", "SELL_SHORT"]:
                 action = ai_act
                 strat_tag = f"🧠 AI大脑({ai_act})"
@@ -2396,7 +2514,7 @@ def execute_portfolio():
 
             def _record_submit_result(result: str, pos_side: str) -> None:
                 nonlocal reserved_slot_count, reserved_long_count, reserved_short_count
-                if result in {"accepted", "uncertain"}:
+                if result in {"accepted", "uncertain", "awaiting_fill", "protection_pending"}:
                     pending_inst_ids.add(inst_id)
                     pending_sides.setdefault(inst_id, set()).add(pos_side)
                     reserved_slot_count += 1
@@ -2431,6 +2549,7 @@ def execute_portfolio():
                     within_margin_cap = within_asset_margin_cap(curr_margin, planned_margin, usdt_available)
 
 
+
                     if is_profit_or_breakeven and scale_count < MAX_SCALE_IN_COUNT and within_margin_cap and ai_conf >= MIN_SCALE_IN_CONFIDENCE and calculus_accel_ok:
                         allow_entry = True
                         is_scale_in = True
@@ -2453,8 +2572,13 @@ def execute_portfolio():
                     )
                     if not is_scale_in:
                         _record_submit_result(result, "long")
-                    elif result == "uncertain":
+                    elif result in {"uncertain", "awaiting_fill", "protection_pending"}:
                         pending_inst_ids.add(inst_id)
+                    if _binance_submit_requires_maintenance(result):
+                        block_new_risk = True
+                        kind = "awaiting fill" if result == "awaiting_fill" else ("incomplete protection" if result == "protection_pending" else "uncertain")
+                        print(f"[Trader] Pending: Binance entry is {kind}; releasing cycle lock for safety maintenance")
+                        break
 
             elif action == "SELL_SHORT":
                 is_scale_in = False
@@ -2504,8 +2628,16 @@ def execute_portfolio():
                     )
                     if not is_scale_in:
                         _record_submit_result(result, "short")
-                    elif result == "uncertain":
+                    elif result in {"uncertain", "awaiting_fill", "protection_pending"}:
                         pending_inst_ids.add(inst_id)
+                    if _binance_submit_requires_maintenance(result):
+                        block_new_risk = True
+                        kind = "awaiting fill" if result == "awaiting_fill" else ("incomplete protection" if result == "protection_pending" else "uncertain")
+                        print(f"[Trader] Pending: Binance entry is {kind}; releasing cycle lock for safety maintenance")
+                        break
+
+    if pending_log:
+        executed_actions.append(pending_log)
 
     # 5. Persist Latest State for Web Monitoring Dashboard
     state_payload = {
@@ -2518,6 +2650,7 @@ def execute_portfolio():
         "executed_actions": executed_actions,
         "instruments": []
     }
+
 
     for f in all_factors:
         score, action, reasons, strat_tag, strat_desc = evaluate_asset_signal(f)
@@ -2549,16 +2682,18 @@ def execute_portfolio():
     with open(TRADING_STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(state_payload, f, ensure_ascii=False, indent=2)
 
-    # 6. Always Sync Full Lifecycle Ledger and SQLite DB in Realtime
-    try:
-        sync_script = os.path.join(WORKSPACE_DIR, "scripts", "sync_full_ledger.py")
-        if os.path.exists(sync_script):
-            subprocess.run(f"python3 {sync_script}", shell=True, capture_output=True, text=True, timeout=15)
-        db_script = os.path.join(WORKSPACE_DIR, "scripts", "db_manager.py")
-        if os.path.exists(db_script):
-            subprocess.run(f"python3 {db_script}", shell=True, capture_output=True, text=True, timeout=15)
-    except Exception as e:
-        print(f"[Ledger Sync Warning] {e}")
+    # 6. Ledger sync is skipped while pending maintenance must take the cycle lock.
+    if not block_new_risk:
+        try:
+            sync_script = os.path.join(WORKSPACE_DIR, "scripts", "sync_full_ledger.py")
+            if os.path.exists(sync_script):
+                subprocess.run(f"python3 {sync_script}", shell=True, capture_output=True, text=True, timeout=15)
+            db_script = os.path.join(WORKSPACE_DIR, "scripts", "db_manager.py")
+            if os.path.exists(db_script):
+                subprocess.run(f"python3 {db_script}", shell=True, capture_output=True, text=True, timeout=15)
+        except Exception as e:
+            print(f"[Ledger Sync Warning] {e}")
+
 
     log_entry = f"[{timestamp_full}] ⚡ R20 Quantum Trader v{__version__} 巡检完成 | 持仓 {active_pos_count}/{MAX_CONCURRENT_POSITIONS} (多{long_count}/空{short_count}) | 动作: {', '.join(executed_actions) if executed_actions else '无开平仓操作'}\n"
     with open(LOG_FILE, "a", encoding="utf-8") as f:

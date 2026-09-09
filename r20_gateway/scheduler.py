@@ -1,11 +1,13 @@
 """Gateway-owned scheduler running existing jobs in isolated subprocesses."""
 from __future__ import annotations
+from contextlib import nullcontext
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import subprocess
 import sys
+import threading
 from typing import Any
 
 from r20_backend.schedule_store import load_schedule
@@ -15,6 +17,10 @@ from r20_gateway.store import GatewayStore
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
 BJ_TZ = timezone(timedelta(hours=8))
+MAINTENANCE_INTERVAL_SECONDS = 5
+MAINTENANCE_JOB_NAME = "order_maintenance"
+MAINTENANCE_ERROR_REPEAT_SECONDS = 60
+
 
 
 @dataclass(frozen=True)
@@ -80,7 +86,17 @@ class GatewayScheduler:
     def __init__(self, store: GatewayStore, max_workers: int = 3):
         self.store = store
         self.executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="r20-job")
+        self.maintenance_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="r20-maint")
+        # Let an already-running maintenance operation hand off to the trader
+        # before its subprocess takes the cross-process, nonblocking cycle lock.
+        self._trade_handoff = threading.Lock()
         self.running: dict[str, Future[None]] = {}
+        self._maintenance_future: Future[dict[str, Any]] | None = None
+        self._last_maintenance_at: datetime | None = None
+        self._last_maintenance_error_detail = ""
+        self._last_maintenance_error_at: datetime | None = None
+
+
 
     def _last_at(self, name: str) -> datetime | None:
         raw = self.store.get_state(f"job.last.{name}")
@@ -129,24 +145,89 @@ class GatewayScheduler:
         return not last or last.date() != now.date() or last.strftime("%H:%M") != minute
 
     def _execute(self, spec: JobSpec) -> None:
-        run_id = self.store.begin_job(spec.name)
+        with self._trade_handoff if spec.name == "trader" else nullcontext():
+            run_id = self.store.begin_job(spec.name)
+            try:
+                command = [sys.executable, str(SCRIPTS / spec.script)]
+                if spec.schedule_key.startswith("backup_job:"):
+                    command.extend(["--job-id", spec.schedule_key.split(":", 1)[1]])
+                result = subprocess.run(
+                    command,
+                    cwd=ROOT,
+                    text=True,
+                    capture_output=True,
+                    timeout=spec.timeout_seconds,
+                )
+                detail = (result.stderr if result.returncode else result.stdout)[-2000:]
+                self.store.finish_job(run_id, result.returncode, detail)
+            except subprocess.TimeoutExpired as exc:
+                self.store.finish_job(run_id, 124, f"timeout after {spec.timeout_seconds}s: {exc}")
+            except Exception as exc:
+                self.store.finish_job(run_id, 1, f"{type(exc).__name__}: {exc}")
+
+    def _record_maintenance_failure(self, detail: str, now: datetime) -> None:
+        text = str(detail or "pending entry maintenance failed").strip()[-2000:]
+        if (
+            text
+            and text == self._last_maintenance_error_detail
+            and self._last_maintenance_error_at is not None
+            and (now - self._last_maintenance_error_at).total_seconds() < MAINTENANCE_ERROR_REPEAT_SECONDS
+        ):
+            return
+        self._last_maintenance_error_detail = text
+        self._last_maintenance_error_at = now
+        run_id = self.store.begin_job(MAINTENANCE_JOB_NAME)
+        self.store.finish_job(run_id, 1, text)
+
+    def _maintenance_busy(self) -> bool:
+        return self._maintenance_future is not None and not self._maintenance_future.done()
+
+    def _run_pending_entry_maintenance(self, now: datetime) -> dict[str, Any]:
+        if not self._trade_handoff.acquire(blocking=False):
+            return {"status": "busy", "reason": "scheduled trader running", "pending": 0, "blocked": False, "errors": []}
+        if str(ROOT) not in sys.path:
+            sys.path.insert(0, str(ROOT))
         try:
-            command = [sys.executable, str(SCRIPTS / spec.script)]
-            if spec.schedule_key.startswith("backup_job:"):
-                command.extend(["--job-id", spec.schedule_key.split(":", 1)[1]])
-            result = subprocess.run(
-                command,
-                cwd=ROOT,
-                text=True,
-                capture_output=True,
-                timeout=spec.timeout_seconds,
-            )
-            detail = (result.stderr if result.returncode else result.stdout)[-2000:]
-            self.store.finish_job(run_id, result.returncode, detail)
-        except subprocess.TimeoutExpired as exc:
-            self.store.finish_job(run_id, 124, f"timeout after {spec.timeout_seconds}s: {exc}")
+            from scripts.binance_order_maintenance import run_pending_entry_maintenance
+            result = run_pending_entry_maintenance()
         except Exception as exc:
-            self.store.finish_job(run_id, 1, f"{type(exc).__name__}: {exc}")
+            result = {
+                "status": "error",
+                "reason": f"{type(exc).__name__}: {exc}",
+                "pending": 0,
+                "blocked": True,
+                "errors": [f"{type(exc).__name__}: {exc}"],
+            }
+        finally:
+            self._trade_handoff.release()
+        if not isinstance(result, dict):
+            result = {
+                "status": "error",
+                "reason": "maintenance returned a non-dict result",
+                "pending": 0,
+                "blocked": True,
+                "errors": ["maintenance returned a non-dict result"],
+            }
+        if result.get("status") == "error" or result.get("errors"):
+            self._record_maintenance_failure(str(result.get("reason") or result.get("errors")), now)
+        return result
+
+    def maintain_pending_entries(self, now: datetime | None = None) -> bool:
+        """Submit at most one maintenance run on the 1-slot pool. Never waits."""
+        now = now or datetime.now(BJ_TZ)
+        if self._maintenance_busy():
+            return False
+        if (
+            self._last_maintenance_at is not None
+            and (now - self._last_maintenance_at).total_seconds() < MAINTENANCE_INTERVAL_SECONDS
+        ):
+            return False
+        self._last_maintenance_at = now
+        try:
+            self._maintenance_future = self.maintenance_executor.submit(self._run_pending_entry_maintenance, now)
+        except RuntimeError:
+            return False
+        return True
 
     def tick(self, now: datetime | None = None) -> list[str]:
         now = now or datetime.now(BJ_TZ)
@@ -159,7 +240,10 @@ class GatewayScheduler:
             self.store.set_state(f"job.last.{spec.name}", now.isoformat())
             self.running[spec.name] = self.executor.submit(self._execute, spec)
             launched.append(spec.name)
+        if "trader" not in launched:
+            self.maintain_pending_entries(now)
         return launched
+
 
     def status(self) -> dict[str, Any]:
         schedule = load_schedule()
@@ -182,3 +266,5 @@ class GatewayScheduler:
 
     def shutdown(self) -> None:
         self.executor.shutdown(wait=False, cancel_futures=False)
+        self.maintenance_executor.shutdown(wait=False, cancel_futures=False)
+
