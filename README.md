@@ -18,7 +18,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688.svg?style=flat-square)](https://fastapi.tiangolo.com/)
 [![Vue 3](https://img.shields.io/badge/Vue-3.5%2B-4FC08D.svg?style=flat-square)](https://vuejs.org/)
 [![Chart](https://img.shields.io/badge/Chart-KLineChart%20v10%20Native-blue.svg?style=flat-square)](https://klinecharts.com/)
-[![Tests](https://img.shields.io/badge/tests-390%20passed-brightgreen.svg?style=flat-square)](tests/)
+[![Tests](https://img.shields.io/badge/tests-unittest-blue.svg?style=flat-square)](tests/)
 
 **新一代机构级加密货币波段量化决策与执行系统 · AI 投委会大模型驱动**  
 🔥 **核心亮点：全栈策略全要素 100% 深度可自定义 · 17 项执行层硬风控后台可视化 · 三套优质风控预设一键应用 · 0.5s 策略快照原子回滚**  
@@ -238,21 +238,21 @@ v7.6.0 起，全部执行层硬风控参数从 py 源码中彻底剥离，收敛
 
 ## 🚀 极速部署指南
 
-### 源码直接部署 (Python 3.10+ / Node.js 18+)
+### 源码直接部署（Python 3.10+；前端源码构建另需 Node.js/npm）
 
 #### 1. 克隆代码与配置环境变量
 ```bash
 git clone https://github.com/555cute/r20-quantum-trader.git
 cd r20-quantum-trader
 
-cp env.example .env
-vim .env  # 填写您的 OKX API 与大模型凭据 (例如 OpenAI / Gemini / DeepSeek)
+sh deploy/install.sh  # 建立 .venv、安装 Python 依赖；仅在 .env 不存在时复制模板
+vim .env  # 配置大模型凭据与随机 R20_SETUP_TOKEN；保留 R20_OKX_ENV=demo
 ```
 
 #### 2. 安装依赖并启动
 ```bash
-# 1. 安装后端 Python 依赖
-pip install -r requirements.txt
+# 1. 激活安装脚本创建的 Python 环境
+. .venv/bin/activate
 
 # 2. 编译打包现代化 Vue 3 前端操盘终端 (基于原生高性能 KLineChart v10)
 cd frontend
@@ -260,7 +260,7 @@ npm install
 npm run build
 cd ..
 
-# 3. 一键启动后端控制面与交易主脑
+# 3. 启动后端控制面（调度器另开终端启动，见 STANDALONE.md）
 python -m uvicorn r20_backend.app:app --host 0.0.0.0 --port 8080
 # 或者直接运行一键启动脚本: ./start.sh
 ```
@@ -275,6 +275,22 @@ python -m uvicorn r20_backend.app:app --host 0.0.0.0 --port 8080
 
 ---
 
+## OKX 连接：V5 API Key 是唯一方式
+
+1. 在 OKX 分别创建 **DEMO / LIVE** API Key，每档填齐 **API Key、Secret Key、Passphrase** 三件套。仅授予必要的读取与交易权限，禁止提款权限，条件允许时绑定服务器 IP。
+2. 打开 `/admin` →「账户接入」，先配置 DEMO，再根据需要配置 LIVE。后台保存到本地 **Fernet 加密存储**；输入框**留空不改**，不是删除已保存密钥。不要将密钥写进截图、日志或 Git。
+3. `R20_OKX_ENV=demo|live` 选择当前档位；两套凭证不要混用。选中档位未配齐时显示 **NOT READY**，OKX 交易入口、账户私有读取与应急平仓均 fail-closed，不会改用其他授权方式。公共行情是免凭证 REST 读取，不受此门禁阻断。
+4. 服务器重启不再依赖短期登录授权；只要加密密钥与密文持久化、服务账户有读取权限，配置即可重新加载。密钥被撤销、IP 白名单变化或网络故障仍需单独排查。
+
+后端安装不需要 Node.js/npm；上方 npm 命令仅用于编译 Vue 前端。也可用 `env.example` 的 `OKX_DEMO_*` / `OKX_LIVE_*` 引导配置，但直接写 `.env` 属明文，应优先使用后台并保护文件权限。
+
+**只读状态核对**：登录后的 `GET /api/v1/admin/okx/runtime` 返回
+`environment`、`mode_configured`、`live_configured`、`demo_configured`、`fingerprint`、`base_url`、
+`connection: "static-v5-key"`、`status: "READY" | "NOT_READY"`；未配置时还包含 `not_ready_reason`。
+该接口需要管理会话（`X-R20-Session`），仅诊断本地配置，**READY 不等于交易所已验证密钥有效、可下单或已获风控许可**。后续通过账户快照核对连通性；勿为自检发送订单。
+
+---
+
 ## 🧪 全栈自动化测试保障
 
 系统配备了涵盖物理风控几何拦截、策略版本快照、多模型仲裁、OKX 鉴权与前后端 API 契约的完整自动化测试套件：
@@ -286,7 +302,7 @@ python3 -m unittest discover -s tests -t . -p "test_*.py"
 > `-t .` 使 `tests` 作为包导入，触发 `tests/__init__.py` 的环境隔离——
 > 即使生产 `.env` 已应用自定义风控套件，测试仍以代码默认基线断言。
 
-*当前自动化单测覆盖：390 项用例 100% 全部通过（含风控管理页 API 契约、套件校验与提示词-常量-布局三重零漂移守卫）。*
+*用例数量与通过状态以当前检出的上述命令输出为准；覆盖风控管理页 API 契约、套件校验与提示词-常量-布局守卫。迁移期间不以历史固定数字充当当前测试证据。*
 
 ---
 
