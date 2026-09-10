@@ -23,7 +23,6 @@ if str(_THIS_DIR) not in sys.path:
 import json
 import time
 from datetime import datetime, timedelta, timezone
-import subprocess
 import urllib.request
 from typing import Dict, Any, List, Optional
 from concurrent.futures import ThreadPoolExecutor

@@ -39,7 +39,6 @@ import json
 import time
 import datetime
 import urllib.request
-import subprocess
 import tempfile
 import fcntl
 from typing import Dict, Any, List, Optional, Tuple
