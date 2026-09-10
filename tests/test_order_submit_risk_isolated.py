@@ -18,6 +18,23 @@ import scripts.ai_factor_trader as aft
 
 
 class SubmitProtectedLimitOrderTests(unittest.TestCase):
+    def setUp(self):
+        # US-007 接线后 submit 会先走 listing gate（真实 urlopen）并落意图文件——
+        # 本文件只测风控逻辑，统一封死两条新缝（律①/③）：
+        import tempfile
+        from r20_backend.exchanges import listing as _listing
+        patcher = patch.object(
+            _listing, "ensure_contract_listed",
+            lambda venue, environment, contract: _listing.ListingCheck(
+                ok=True, reason=None, checked_at="", source="cache"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
+        tmp.close()
+        ip = patch.object(aft, "OPEN_INTENT_FILE", tmp.name)
+        ip.start()
+        self.addCleanup(ip.stop)
+
     @patch("scripts.ai_factor_trader.okx_rest")
     @patch("scripts.ai_factor_trader.selected_environment")
     def test_submit_protected_limit_order_core_rejection(self, mock_env, mock_rest):
