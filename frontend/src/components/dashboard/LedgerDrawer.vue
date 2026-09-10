@@ -23,7 +23,7 @@ const councilNote = computed(() => {
   if (!cc || !holding.value) return '';
   if (!cc.ran) return t('dash.ledger.council.degraded');
   const seat = SEAT_LABELS[String(cc.adopted_role || '')] || String(cc.adopted_role || '');
-  return seat ? t('dash.ledger.council.adopted', { seat }) : t('dash.ledger.council.ran');
+  return seat ? t('dash.ledger.council.adopted', undefined, { seat }) : t('dash.ledger.council.ran');
 });
 
 const cells = computed(() => [

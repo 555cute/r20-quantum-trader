@@ -220,8 +220,8 @@ const md = computed(() => (store.data as any)?.ai_trading_memory_md || '');
               <p class="t-faint text-xs">{{ t('dash.evolution.guard.desc') }}</p>
               <p v-if="snapAudit" class="mt-1 text-xs" style="color: var(--ink-2)">
                 {{ t('dash.evolution.guard.snapshot') }}：
-                {{ t('dash.evolution.guard.snapshotCounts', { observed: snapAudit.math_observable ?? 0, total: snapAudit.total ?? 0, priceOnly: snapAudit.PRICE_ONLY ?? 0, none: snapAudit.NONE ?? 0 }) }}
-                <span v-if="(review.baseline_memory_protected ?? 0) > 0" class="badge badge-warn ms-1">{{ t('dash.evolution.guard.baselineProtected', { n: review.baseline_memory_protected }) }}</span>
+                {{ t('dash.evolution.guard.snapshotCounts', undefined, { observed: snapAudit.math_observable ?? 0, total: snapAudit.total ?? 0, priceOnly: snapAudit.PRICE_ONLY ?? 0, none: snapAudit.NONE ?? 0 }) }}
+                <span v-if="(review.baseline_memory_protected ?? 0) > 0" class="badge badge-warn ms-1">{{ t('dash.evolution.guard.baselineProtected', undefined, { n: review.baseline_memory_protected }) }}</span>
               </p>
             </div>
           </div>
