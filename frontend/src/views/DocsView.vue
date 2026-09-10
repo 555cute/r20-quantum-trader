@@ -215,7 +215,7 @@ onUnmounted(() => {
           </div>
 
           <p class="text-xs sm:text-sm leading-relaxed font-sans" style="color: var(--ink-2);">
-            <strong>R20量子交易系统 (R20 Quantum Trading System)</strong> 是一套专为高波动加密货币（Crypto）打造的<strong>机构级全自动波段量化决策与执行系统</strong>。系统依托 OKX 交易所官方 REST/WebSocket V5 生产 API 与 @okx_ai 官方交易底座，运行在严格的北京时间（UTC+8）自然日财务基准之上，聚焦 1H~4H 大级别顺势波段，以<strong>“胜率第一、宁缺毋滥、三位一体 Fail-Closed 物理硬防线”</strong>为最高风控宗旨。在 v7.5.0 全面集成本地化 TradingView 官方轻量引擎与视觉 LLM 友好型量价形态工作站；v7.6.0 里程碑将全部执行层硬风控阈值从源码剥离，升级为后台可视化「风控管理中心」与三套优质预设套件。
+            <strong>R20量子交易系统 (R20 Quantum Trading System)</strong> 是一套专为高波动加密货币（Crypto）打造的<strong>机构级全自动波段量化决策与执行系统</strong>。系统通过 OKX V5 REST API 直签执行私有账户与交易请求，API Key 为唯一连接方式：在后台分别配置 LIVE/DEMO 三件套，凭证采用 Fernet 本地加密存储，留空不改；未配置时显示 NOT READY 并禁止交易，公共行情无需凭证。系统运行在严格的北京时间（UTC+8）自然日财务基准之上，聚焦 1H~4H 大级别顺势波段，以<strong>“胜率第一、宁缺毋滥、三位一体 Fail-Closed 物理硬防线”</strong>为最高风控宗旨。在 v7.5.0 全面集成本地化 TradingView 官方轻量引擎与视觉 LLM 友好型量价形态工作站；v7.6.0 里程碑将全部执行层硬风控阈值从源码剥离，升级为后台可视化「风控管理中心」与三套优质预设套件。
           </p>
 
           <!-- 4 Core Pillars Grid -->
