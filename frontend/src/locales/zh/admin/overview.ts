@@ -1,6 +1,18 @@
 /** 运行总览页文案 */
 export const zhAdminOverview = {
-  keyConnection: {"title": "API Key 连接状态", "description": "唯一接入方式：OKX V5 API Key 直签 REST。READY 仅表示凭证配置完整，不代表交易权限或上游可用性已验证。", "method": "后台加密 API Key · V5 REST", "refresh": "刷新配置状态", "fingerprint": "凭证指纹", "unavailable": "无法确认当前 API Key 配置，请刷新重试", "blocked": "系统禁止交易", "configured": "已配置", "missing": "未配置", "credentials": "交易环境与 API Key", "storage": "LIVE / DEMO 双档独立保存，Fernet 加密落盘；所有密钥字段留空均保持现有值。"},
+  keyConnection: {
+    title: "API Key 连接状态",
+    description: "唯一接入方式：OKX V5 API Key 直签 REST。READY 仅表示凭证配置完整，不代表交易权限或上游可用性已验证。",
+    method: "后台加密 API Key · V5 REST",
+    refresh: "刷新配置状态",
+    fingerprint: "凭证指纹",
+    unavailable: "无法确认当前 API Key 配置，请刷新重试",
+    blocked: "系统禁止交易",
+    configured: "已配置",
+    missing: "未配置",
+    credentials: "交易环境与 API Key",
+    storage: "LIVE / DEMO 双档独立保存，Fernet 加密落盘；所有密钥字段留空均保持现有值。",
+  },
   desc: '交易引擎、决策主脑、数据管道与物理拦截门禁的全景健康度',
   backend: '后台服务',
   uptime: '持续运行',
