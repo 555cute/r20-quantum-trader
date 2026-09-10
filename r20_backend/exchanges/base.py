@@ -71,6 +71,11 @@ class ExchangeCapabilities:
     # ---- 私有面能力（本阶段三家除 OKX 现状外均为 False）----
     supports_account: bool = False
     supports_orders: bool = False
+    # ---- G9 统一开闸判定（US-009 后收口）：适配器执行的 env 旗标单源声明 ----
+    #: 空 = 经本适配器的执行面未实装/未启用（恒关闸，结构性，非风险开关）；
+    #: 非空 = live 档开闸旗标名（sandbox 档自动映射 `<前缀>DEMO_EXECUTION` 变体），
+    #: 判定单一入口 registry.execution_open（能力表 AND 环境双轴旗标）。
+    adapter_execution_flag: str = ""
     # ---- 网络与合规现实（文档化，供选所/可用性矩阵使用）----
     mainland_ip_restricted: bool = False
     rate_limit_note: str = ""

@@ -95,6 +95,9 @@ class GateAdapter(BaseExchangeAdapter):
         symbol_template="{base}_USDT",
         quantity_unit="contracts",
         signed_size=True,
+        # G9 单源声明：适配器执行开闸旗标（live 档原样读，sandbox 档自动映射
+        # R20_GATE_DEMO_EXECUTION——判定统一入口 registry.execution_open）
+        adapter_execution_flag="R20_GATE_EXECUTION",
         supports_attached_tp_sl=False,   # 独立 /price_orders 资源族，非附属
         trigger_price_default="last",    # price_type 0=最新/1=标记/2=指数，必须显式传参
         max_candle_limit=2000,

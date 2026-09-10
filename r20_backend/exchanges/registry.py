@@ -32,13 +32,11 @@ _ADAPTERS: Dict[str, type] = {
     "gate": GateAdapter,
 }
 
-# 经「适配器」下单的场所开闸表——Phase 3 实现真实 place_order 后逐所置 True。
-# 注意 okx 的实盘能力并没有消失：下单/撤单/云端 OCO 在 scripts/ai_factor_trader
-# 的 V5 REST 直签链路中稳定运行（CLI 已于 v7.9.0 全删）；本表只管「是否通过
-# exchanges 适配器执行」。
-ADAPTER_EXECUTION_ENABLED: Dict[str, bool] = {
-    "okx": False, "binance": False, "gate": False,
-}
+# 经「适配器」下单的场所开闸——G9 统一后不再手工维护双源：单一事实 =
+# 各所能力表 ``adapter_execution_flag`` 声明（gate 已声明；okx 实盘执行走
+# ai_factor_trader 直签链路、binance orders 未实装 → 均未声明，恒关）。
+# 本映射仅为向后兼容再导出保留，由能力表推导，勿再手改。
+ADAPTER_EXECUTION_ENABLED: Dict[str, bool] = {}
 
 
 _TRUE_VALUES = ("1", "true", "yes", "on")
@@ -51,19 +49,31 @@ def _env_on(name: str) -> bool:
 def execution_open(venue: str, environment: str = "live") -> bool:
     """场所执行开闸的统一判定（运行时读 env，支持热切换无需改码）。
 
-    US-002 双轴门禁——本地执行许可按「交易所资金环境」再分档：
-    - gate live 档：默认关闸，需显式 ``R20_GATE_EXECUTION=1``（语义不变）；
-    - gate 沙盒档（sandbox/demo/testnet）：独立开关 ``R20_GATE_DEMO_EXECUTION``
-      （默认 0）——打开只放行**模拟盘真实发送**，绝不标示/充当 LIVE 实盘；
-    - 其余场所：静态表（binance 等未实装，恒关）。
+    G9 单源判定 = 能力表 ``adapter_execution_flag`` 声明 AND 环境双轴旗标：
+    - 能力表未声明旗标（okx 实盘走 ai_factor_trader 直签链路、binance orders
+      未实装）→ 结构性恒关，与 env 无关；
+    - 已声明（gate）：live 档读声明旗标原样，沙盒档（sandbox/demo/testnet）
+      读 ``<前缀>DEMO_EXECUTION`` 变体（R20_GATE_EXECUTION→R20_GATE_DEMO_
+      EXECUTION）——打开只放行**模拟盘真实发送**，绝不标示/充当 LIVE 实盘。
     单参调用 ``execution_open(venue)`` = live 档语义，逐字节兼容旧判定。
     """
     key = str(venue or "").strip().lower()
-    if key == "gate":
-        flag = ("R20_GATE_DEMO_EXECUTION" if is_sandbox_environment(environment)
-                else "R20_GATE_EXECUTION")
-        return _env_on(flag)
-    return ADAPTER_EXECUTION_ENABLED.get(key, False)
+    cls = _ADAPTERS.get(key)
+    base_flag = getattr(getattr(cls, "capabilities", None), "adapter_execution_flag", "")
+    if not base_flag:
+        return False
+    if is_sandbox_environment(environment):
+        return _env_on(base_flag.replace("EXECUTION", "DEMO_EXECUTION"))
+    return _env_on(base_flag)
+
+
+def _derive_adapter_execution_enabled() -> Dict[str, bool]:
+    """由能力表推导兼容映射：仅反映「该所是否声明了 env 开闸路径」。"""
+    return {v: bool(getattr(getattr(cls, "capabilities", None),
+                            "adapter_execution_flag", "")) for v, cls in _ADAPTERS.items()}
+
+
+ADAPTER_EXECUTION_ENABLED.update(_derive_adapter_execution_enabled())
 
 #: US-002：缓存键 = AccountKey (venue, environment, credential_fingerprint)
 _INSTANCES: Dict[AccountKey, BaseExchangeAdapter] = {}
