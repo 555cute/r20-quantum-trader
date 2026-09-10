@@ -17,6 +17,7 @@ if scripts_dir not in sys.path:
     sys.path.insert(0, scripts_dir)
 
 import scripts.ai_factor_trader as aft
+from tests.okx_algo_http_fixture import install_http
 
 
 class ThreeTierRatchetAndCloudSyncTests(unittest.TestCase):
@@ -25,53 +26,54 @@ class ThreeTierRatchetAndCloudSyncTests(unittest.TestCase):
     # 本套测试直接调用 sync_cloud_algo_stop，任何对已删除全局的复活引用都会在此炸出 NameError。
 
     def setUp(self):
-        # 封闭性隔离(09-08 事故)：manage_position_tp_and_trailing 每周期真实调用
-        # ensure_cloud_position_protection → okx CLI，曾把 sz=2 的 ETH 垃圾 OCO 打进
-        # demo 账户，且测试通过与否取决于该残留单的死活(11:38 绿、12:00 红)。
-        # 一律 mock，测试永不触碰真实交易所。
-        patcher = patch(
-            "scripts.ai_factor_trader.ensure_cloud_position_protection",
-            return_value=(True, "mocked: cloud OCO coverage verified"),
-        )
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        self.http = install_http(self, aft)
 
     def test_sync_cloud_algo_stop_success_and_idempotence(self):
-        # US-007：CLI 包装函数已随迁移删除；改在 okx_rest 函数边界 mock。
-        with patch.object(aft.okx_rest, "pending_algo_orders") as pend, \
-             patch.object(aft.okx_rest, "amend_algo_sl") as amend:
-            # 1. When existing algo already matches new_sl, do not issue redundant amend
-            pend.return_value = [
-                {"state": "live", "posSide": "long", "algoId": "algo_101", "slTriggerPx": "2500.0"}
-            ]
-            res = aft.sync_cloud_algo_stop("ETH-USDT-SWAP", "long", 2500.0)
-            self.assertTrue(res)
-            pend.assert_called_once_with("ETH-USDT-SWAP")
-            amend.assert_not_called()
+        row = self.http.rows[0]
+        row['slTriggerPx'] = '2500'
+        self.assertTrue(aft.sync_cloud_algo_stop('ETH-USDT-SWAP', 'long', 2500))
+        self.assertEqual(self.http.calls('/api/v5/trade/amend-algos'), [])
+        row['slTriggerPx'] = '2400'
+        self.assertTrue(aft.sync_cloud_algo_stop('ETH-USDT-SWAP', 'long', 2500))
+        self.assertEqual(self.http.calls('/api/v5/trade/amend-algos'), [
+            ('POST', [{'algoId': 'algo_long', 'newSlTriggerPx': '2500', 'newSlOrdPx': '-1'}])])
+        self.http.rows = []
+        self.assertFalse(aft.sync_cloud_algo_stop('ETH-USDT-SWAP', 'long', 2600))
+        self.http.failures['/api/v5/trade/orders-algo-pending'] = {'code':'50011','msg':'signature error'}
+        self.assertFalse(aft.sync_cloud_algo_stop('ETH-USDT-SWAP', 'long', 2600))
+        self.http.failures.clear()
+        self.http.rows = [row]
+        self.http.failures['/api/v5/trade/amend-algos'] = {'code':'0','data':[{'sCode':'51088','sMsg':'algo not found'}]}
+        self.assertFalse(aft.sync_cloud_algo_stop('ETH-USDT-SWAP', 'long', 2600))
 
-            # 2. When existing algo has different slTriggerPx, issue amend (market SL px)
-            pend.return_value = [
-                {"state": "live", "posSide": "long", "algoId": "algo_101", "slTriggerPx": "2400.0"}
-            ]
-            amend.return_value = [{"algoId": "algo_101", "sCode": "0"}]
-            res = aft.sync_cloud_algo_stop("ETH-USDT-SWAP", "long", 2500.0)
-            self.assertTrue(res)
-            amend.assert_called_once_with("algo_101", 2500.0, new_sl_ord_px="-1")
+    def test_full_coverage_never_places_and_partial_gap_rechecks_four_times(self):
+        self.assertTrue(aft.ensure_cloud_position_protection('ETH-USDT-SWAP', 'long', 2, 2600, 2400)[0])
+        self.assertEqual(self.http.calls('/api/v5/trade/order-algo'), [])
+        self.http.requests.clear()
+        partial = self.http.row(size='0.5')
+        full = self.http.row(size='2')
+        self.http.pending = [[partial], [partial], [partial], [partial], [full]]
+        ok, detail = aft.ensure_cloud_position_protection('ETH-USDT-SWAP', 'long', 2, 2600, 2400)
+        self.assertTrue(ok, detail)
+        self.assertEqual(self.http.calls('/api/v5/trade/order-algo')[0][1]['sz'], '1.5')
+        self.assertEqual(len(self.http.calls('/api/v5/trade/orders-algo-pending')), 5)
+        self.assertEqual(aft.time.sleep.call_args_list, [unittest.mock.call(0.5)] * 4)
 
-            # 3. No live algo → False without touching amend
-            pend.return_value = []
-            self.assertFalse(aft.sync_cloud_algo_stop("ETH-USDT-SWAP", "long", 2600.0))
-            amend.assert_called_once()  # unchanged from case 2
-
-            # 4. Query/amend failures must fail closed (False), never raise past the cycle
-            pend.side_effect = RuntimeError("OKX 50011: signature error")
-            self.assertFalse(aft.sync_cloud_algo_stop("ETH-USDT-SWAP", "long", 2600.0))
-            pend.side_effect = None
-            pend.return_value = [
-                {"state": "live", "posSide": "long", "algoId": "algo_101", "slTriggerPx": "2400.0"}
-            ]
-            amend.side_effect = RuntimeError("OKX 51088: algo not found")
-            self.assertFalse(aft.sync_cloud_algo_stop("ETH-USDT-SWAP", "long", 2500.0))
+    def test_failed_place_or_unverifiable_recheck_fails_closed(self):
+        self.http.rows = []
+        self.http.failures['/api/v5/trade/order-algo'] = {
+            'code': '0', 'data': [{'sCode': '51000', 'sMsg': 'rejected'}]}
+        ok, detail = aft.ensure_cloud_position_protection('ETH-USDT-SWAP', 'long', 2, 2600, 2400)
+        self.assertFalse(ok)
+        self.assertIn('51000', detail)
+        self.assertEqual(len(self.http.calls('/api/v5/trade/orders-algo-pending')), 1)
+        self.http.failures.clear()
+        self.http.requests.clear()
+        self.http.pending = [[]] * 5
+        ok, detail = aft.ensure_cloud_position_protection('ETH-USDT-SWAP', 'long', 2, 2600, 2400)
+        self.assertFalse(ok)
+        self.assertIn('could not be verified', detail)
+        self.assertEqual(len(self.http.calls('/api/v5/trade/orders-algo-pending')), 5)
 
     def test_long_three_tier_ratchet_progression(self):
         f = {
@@ -97,25 +99,24 @@ class ThreeTierRatchetAndCloudSyncTests(unittest.TestCase):
         # 2. Price rises to 2535 (profit = +35.0 >= 1.5 * ATR = 30.0) -> Triggers Tier 1 Breakeven (+0.20% cushion)
         f["price"] = 2535.0
         curr_pos["upl"] = 7.0
-        with patch("scripts.ai_factor_trader.sync_cloud_algo_stop") as mock_sync:
-            mock_sync.return_value = True
-            closed, reason = aft.manage_position_tp_and_trailing(f, curr_pos, trackers, "2026-09-07 10:15:00", executed_actions)
-            self.assertFalse(closed)
-            self.assertIn("已推保本无风险", t["stage_desc"])
-            # 2500 * 1.002 = 2505.0
-            self.assertGreaterEqual(t["trailingStopPx"], 2505.0)
-            mock_sync.assert_called_once()
+        before = len(self.http.calls("/api/v5/trade/amend-algos"))
+        closed, reason = aft.manage_position_tp_and_trailing(f, curr_pos, trackers, "2026-09-07 10:15:00", executed_actions)
+        self.assertFalse(closed)
+        self.assertIn("已推保本无风险", t["stage_desc"])
+        # 2500 * 1.002 = 2505.0
+        self.assertGreaterEqual(t["trailingStopPx"], 2505.0)
+        self.assertEqual(len(self.http.calls("/api/v5/trade/amend-algos")), before + 1)
 
         # 3. Price rises to 2550 (profit = +50.0 >= 2.2 * ATR = 44.0) -> Triggers Tier 2 Wave Profit Lock (+1.0 ATR)
         f["price"] = 2550.0
         curr_pos["upl"] = 10.0
-        with patch("scripts.ai_factor_trader.sync_cloud_algo_stop") as mock_sync:
-            mock_sync.return_value = True
-            closed, reason = aft.manage_position_tp_and_trailing(f, curr_pos, trackers, "2026-09-07 10:30:00", executed_actions)
-            self.assertFalse(closed)
-            self.assertIn("锁定大波段利润", t["stage_desc"])
-            # 2500 + 1.0 * 20 = 2520.0
-            self.assertGreaterEqual(t["trailingStopPx"], 2520.0)
+        before = len(self.http.calls("/api/v5/trade/amend-algos"))
+        closed, reason = aft.manage_position_tp_and_trailing(f, curr_pos, trackers, "2026-09-07 10:30:00", executed_actions)
+        self.assertFalse(closed)
+        self.assertIn("锁定大波段利润", t["stage_desc"])
+        # 2500 + 1.0 * 20 = 2520.0
+        self.assertGreaterEqual(t["trailingStopPx"], 2520.0)
+        self.assertEqual(len(self.http.calls("/api/v5/trade/amend-algos")), before + 1)
 
         # 4. Price surges to 2560 (profit 60.0 >= 2.0*ATR=40), then pulls back to 2540 (pullback 20.0 >= 0.75*ATR=15.0)
         # Should trigger Tier 3 Kinetic Momentum Pullback Exit
@@ -125,13 +126,11 @@ class ThreeTierRatchetAndCloudSyncTests(unittest.TestCase):
 
         f["price"] = 2540.0
         curr_pos["upl"] = 8.0
-        with patch("scripts.ai_factor_trader.close_position_confirmed") as mock_close, \
-             patch("scripts.ai_factor_trader.record_trade"):
-            mock_close.return_value = (True, "mock closed")
+        with patch("scripts.ai_factor_trader.record_trade"):
             closed, reason = aft.manage_position_tp_and_trailing(f, curr_pos, trackers, "2026-09-07 11:00:00", executed_actions)
             self.assertTrue(closed)
             self.assertEqual(reason, "已移动止盈")
-            mock_close.assert_called_once_with("ETH-USDT-SWAP", "long", 2.0)
+            self.assertEqual(self.http.calls("/api/v5/trade/close-position")[-1][1]["posSide"], "long")
 
     def test_short_three_tier_ratchet_progression(self):
         f = {
@@ -157,25 +156,24 @@ class ThreeTierRatchetAndCloudSyncTests(unittest.TestCase):
         # 2. Price plunges to 2465 (profit = 35.0 >= 1.5 * ATR = 30.0) -> Triggers Tier 1 Breakeven (-0.20% cushion)
         f["price"] = 2465.0
         curr_pos["upl"] = 7.0
-        with patch("scripts.ai_factor_trader.sync_cloud_algo_stop") as mock_sync:
-            mock_sync.return_value = True
-            closed, reason = aft.manage_position_tp_and_trailing(f, curr_pos, trackers, "2026-09-07 10:15:00", executed_actions)
-            self.assertFalse(closed)
-            self.assertIn("已推保本无风险", t["stage_desc"])
-            # 2500 * (1 - 0.002) = 2495.0
-            self.assertLessEqual(t["trailingStopPx"], 2495.0)
-            mock_sync.assert_called_once()
+        before = len(self.http.calls("/api/v5/trade/amend-algos"))
+        closed, reason = aft.manage_position_tp_and_trailing(f, curr_pos, trackers, "2026-09-07 10:15:00", executed_actions)
+        self.assertFalse(closed)
+        self.assertIn("已推保本无风险", t["stage_desc"])
+        # 2500 * (1 - 0.002) = 2495.0
+        self.assertLessEqual(t["trailingStopPx"], 2495.0)
+        self.assertEqual(len(self.http.calls("/api/v5/trade/amend-algos")), before + 1)
 
         # 3. Price plunges to 2450 (profit = 50.0 >= 2.2 * ATR = 44.0) -> Triggers Tier 2 Wave Profit Lock (-1.0 ATR)
         f["price"] = 2450.0
         curr_pos["upl"] = 10.0
-        with patch("scripts.ai_factor_trader.sync_cloud_algo_stop") as mock_sync:
-            mock_sync.return_value = True
-            closed, reason = aft.manage_position_tp_and_trailing(f, curr_pos, trackers, "2026-09-07 10:30:00", executed_actions)
-            self.assertFalse(closed)
-            self.assertIn("锁定大波段利润", t["stage_desc"])
-            # 2500 - 1.0 * 20 = 2480.0
-            self.assertLessEqual(t["trailingStopPx"], 2480.0)
+        before = len(self.http.calls("/api/v5/trade/amend-algos"))
+        closed, reason = aft.manage_position_tp_and_trailing(f, curr_pos, trackers, "2026-09-07 10:30:00", executed_actions)
+        self.assertFalse(closed)
+        self.assertIn("锁定大波段利润", t["stage_desc"])
+        # 2500 - 1.0 * 20 = 2480.0
+        self.assertLessEqual(t["trailingStopPx"], 2480.0)
+        self.assertEqual(len(self.http.calls("/api/v5/trade/amend-algos")), before + 1)
 
         # 4. Price plunges to 2440 (profit 60.0 >= 2.0*ATR=40), then rebounds to 2460 (rebound 20.0 >= 0.75*ATR=15.0)
         # Should trigger Tier 3 Kinetic Momentum Pullback Exit for Short
@@ -185,13 +183,11 @@ class ThreeTierRatchetAndCloudSyncTests(unittest.TestCase):
 
         f["price"] = 2460.0
         curr_pos["upl"] = 8.0
-        with patch("scripts.ai_factor_trader.close_position_confirmed") as mock_close, \
-             patch("scripts.ai_factor_trader.record_trade"):
-            mock_close.return_value = (True, "mock closed")
+        with patch("scripts.ai_factor_trader.record_trade"):
             closed, reason = aft.manage_position_tp_and_trailing(f, curr_pos, trackers, "2026-09-07 11:00:00", executed_actions)
             self.assertTrue(closed)
             self.assertEqual(reason, "已移动止盈")
-            mock_close.assert_called_once_with("ETH-USDT-SWAP", "short", 2.0)
+            self.assertEqual(self.http.calls("/api/v5/trade/close-position")[-1][1]["posSide"], "short")
 
 
 class CloudOcoHttpBoundaryTests(unittest.TestCase):
@@ -201,7 +197,7 @@ class CloudOcoHttpBoundaryTests(unittest.TestCase):
     newSlTriggerPx/newSlOrdPx）。毫秒级，零联网。"""
 
     def setUp(self):
-        import json as _json  # noqa: F401
+        self.http = install_http(self, aft)
         from scripts.okx_runtime import freeze_environment, unfreeze_environment
         freeze_environment({
             "R20_OKX_ENV": "demo",

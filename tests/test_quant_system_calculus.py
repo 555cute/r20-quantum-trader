@@ -29,6 +29,7 @@ from calculus_engine import (
 )
 import factor_library
 import ai_factor_trader
+from tests.okx_algo_http_fixture import install_http
 
 
 class CalculusEngineMathTest(unittest.TestCase):
@@ -256,6 +257,10 @@ class AiFactorTraderMathProbTest(unittest.TestCase):
 
 
 class AiFactorTraderPositionProtectionTest(unittest.TestCase):
+    def setUp(self):
+        self.http = install_http(self, ai_factor_trader)
+        self.http.rows = [self.http.row(inst='SOL-USDT-SWAP', size='4', sl='101')]
+
     def _factor(self, price=99.0):
         return {
             "market_data_valid": True, "instId": "SOL-USDT-SWAP", "name": "SOL",
@@ -266,10 +271,11 @@ class AiFactorTraderPositionProtectionTest(unittest.TestCase):
         position={"pos":4.0,"side":"long","avgPx":103.55,"upl":-18.0}
         trackers={"SOL-USDT-SWAP_long":{"entryTs":1,"trailingStopPx":101.81,"highWaterMark":104.2,"lowWaterMark":99.0}}
         actions=[]
-        with patch.object(ai_factor_trader,"close_position_confirmed",return_value=(True,"exchange position closed")) as close, patch.object(ai_factor_trader,"record_trade"), patch.object(ai_factor_trader,"add_stop_cooldown"), patch.object(ai_factor_trader,"notify_trade_close") as notify_close:
+        with patch.object(ai_factor_trader,"record_trade"), patch.object(ai_factor_trader,"add_stop_cooldown"), patch.object(ai_factor_trader,"notify_trade_close") as notify_close:
             closed,reason=ai_factor_trader.manage_position_tp_and_trailing(self._factor(),position,trackers,"2026-09-02 15:00:00",actions)
         self.assertTrue(closed); self.assertEqual(reason,"已硬止损")
-        close.assert_called_once_with("SOL-USDT-SWAP","long",4.0)
+        self.assertEqual(self.http.calls('/api/v5/trade/close-position'), [
+            ('POST', {'instId': 'SOL-USDT-SWAP', 'mgnMode': 'cross', 'posSide': 'long', 'autoCxl': 'true'})])
         self.assertNotIn("SOL-USDT-SWAP_long",trackers)
         self.assertTrue(any("触发硬止损" in item for item in actions))
         if notify_close is not None:
@@ -280,27 +286,20 @@ class AiFactorTraderPositionProtectionTest(unittest.TestCase):
         now=int(ai_factor_trader.time.time())
         trackers={"SOL-USDT-SWAP_long":{"entryTs":now,"trailingStopPx":101.81,"takeProfitPx":106.45,"highWaterMark":104.2,"lowWaterMark":102.5}}
         actions=[]
-        with patch.object(ai_factor_trader,"ensure_cloud_position_protection",return_value=(True,"verified")), patch.object(ai_factor_trader,"close_position_confirmed") as close, patch.object(ai_factor_trader,"notify_trade_close"):
+        with patch.object(ai_factor_trader,"notify_trade_close"):
             closed,reason=ai_factor_trader.manage_position_tp_and_trailing(self._factor(102.5),position,trackers,"2026-09-02 15:00:00",actions)
-        self.assertFalse(closed); self.assertEqual(reason,"持仓监控中"); close.assert_not_called()
+        self.assertFalse(closed); self.assertEqual(reason,"持仓监控中"); self.assertEqual(self.http.calls('/api/v5/trade/close-position'), [])
 
     def test_cloud_oco_gap_is_repaired_and_verified(self):
-        # US-007：run_cmd_result CLI 包装已删；同语义迁到 okx_rest 函数边界——
-        # 首查零覆盖→补挂 place_algo_oco(oco/reduceOnly/cxlOnClosePos 参数化)→复查满覆盖。
-        live_rows=[{"state":"live","posSide":"long","side":"sell","reduceOnly":"true","sz":"4","tpTriggerPx":"106","slTriggerPx":"101"}]
-        with patch.object(ai_factor_trader,"okx_rest") as rest, patch.object(ai_factor_trader.time,"sleep"):
-            rest.pending_algo_orders.side_effect=[[], live_rows]
-            rest.place_algo_oco.return_value={"algoId":"88"}
-            ok,detail=ai_factor_trader.ensure_cloud_position_protection("SOL-USDT-SWAP","long",4,106,101)
-        self.assertTrue(ok); self.assertIn("repaired and verified",detail)
-        rest.pending_algo_orders.assert_called_with("SOL-USDT-SWAP")
-        args=rest.place_algo_oco.call_args.args
-        self.assertEqual(args[:2],("SOL-USDT-SWAP","sell"))  # 缺口 4→平仓侧 sell
-        kwargs=rest.place_algo_oco.call_args.kwargs
-        self.assertEqual(kwargs["pos_side"],"long"); self.assertEqual(kwargs["td_mode"],"cross")
-        self.assertEqual(kwargs["tp_trigger_px"],106); self.assertEqual(kwargs["sl_trigger_px"],101)
-        self.assertEqual(kwargs["tp_ord_px"],"-1"); self.assertEqual(kwargs["sl_ord_px"],"-1")
-        self.assertTrue(kwargs["reduce_only"]); self.assertTrue(kwargs["cxl_on_close_pos"])
+        self.http.rows = []
+        ok, detail = ai_factor_trader.ensure_cloud_position_protection("SOL-USDT-SWAP", "long", 4, 106, 101)
+        self.assertTrue(ok); self.assertIn("repaired and verified", detail)
+        method, body = self.http.calls('/api/v5/trade/order-algo')[0]
+        self.assertEqual(method, 'POST')
+        self.assertEqual(body, dict(instId='SOL-USDT-SWAP', side='sell', sz='4', posSide='long',
+            tdMode='cross', ordType='oco', tpTriggerPx='106', slTriggerPx='101', tpOrdPx='-1',
+            slOrdPx='-1', reduceOnly='true', cxlOnClosePos='true'))
+        self.assertEqual(len(self.http.calls('/api/v5/trade/orders-algo-pending')), 2)
 
     def test_stale_order_query_failure_aborts_cleanup(self):
         with patch.object(ai_factor_trader,"okx_rest") as rest:
@@ -322,10 +321,12 @@ class AiFactorTraderPositionProtectionTest(unittest.TestCase):
         now=int(ai_factor_trader.time.time())
         trackers={"SOL-USDT-SWAP_long":{"entryTs":now,"trailingStopPx":101.81,"takeProfitPx":106.45,"highWaterMark":104.2,"lowWaterMark":102.5}}
         actions=[]
-        with patch.object(ai_factor_trader,"ensure_cloud_position_protection",return_value=(False,"repair failed")), patch.object(ai_factor_trader,"close_position_confirmed",return_value=(True,"closed")) as close, patch.object(ai_factor_trader,"record_trade"), patch.object(ai_factor_trader,"add_stop_cooldown"), patch.object(ai_factor_trader,"notify_trade_close") as notify_close:
+        self.http.failures['/api/v5/trade/orders-algo-pending'] = {'code':'50011', 'msg':'repair failed'}
+        with patch.object(ai_factor_trader,"record_trade"), patch.object(ai_factor_trader,"add_stop_cooldown"), patch.object(ai_factor_trader,"notify_trade_close") as notify_close:
             closed,reason=ai_factor_trader.manage_position_tp_and_trailing(self._factor(102.5),position,trackers,"2026-09-02 15:00:00",actions)
         self.assertTrue(closed); self.assertEqual(reason,"保护失效安全退出")
-        close.assert_called_once_with("SOL-USDT-SWAP","long",4.0)
+        self.assertEqual(self.http.calls('/api/v5/trade/close-position'), [
+            ('POST', {'instId': 'SOL-USDT-SWAP', 'mgnMode': 'cross', 'posSide': 'long', 'autoCxl': 'true'})])
         self.assertNotIn("SOL-USDT-SWAP_long",trackers)
         if notify_close is not None:
             notify_close.assert_called_once_with(inst="SOL", pnl=-4.0, stage="云端保护失效退出", exit_px=102.5)
