@@ -1307,14 +1307,18 @@ def admin_okx_runtime(x_r20_session: str | None = Header(default=None, alias="X-
     require_admin_header(x_r20_session=x_r20_session)
     from scripts.okx_runtime import current_environment
     env = current_environment()
-    mode_configured = settings.okx_demo_configured if settings.okx_environment == "demo" else settings.okx_live_configured
+    # Diagnose the exact group used by signed requests (including a frozen
+    # cycle and the supported legacy fallback), not profile-only settings flags.
+    # Deliberately uncached: secret/passphrase rotation and partial edits must
+    # be visible even when the public API-key fingerprint stays unchanged.
+    mode_configured = env.configured
     payload: dict[str, Any] = {
-        "environment": settings.okx_environment,
+        "environment": env.mode,
         "mode_configured": bool(mode_configured),
         "live_configured": bool(settings.okx_live_configured),
         "demo_configured": bool(settings.okx_demo_configured),
         "fingerprint": env.fingerprint,
-        "base_url": settings.okx_base_url,
+        "base_url": env.base_url,
         "connection": "static-v5-key",
         "status": "READY" if mode_configured else "NOT_READY",
     }
@@ -1979,6 +1983,8 @@ def manual_close_position(payload: ManualCloseRequest) -> dict[str, Any]:
             result = fast_close_confirmed(payload.close_token, payload.confirmation)
             audit_record("position.close", "confirmed_closed", {"instId": result.get("instId"), "side": result.get("posSide"), "environment": result.get("environment"), "size": result.get("closed_size")})
             return result
+        except OKXNotConfigured as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         except ValueError as exc:
             audit_record("position.close", "rejected", {"error": str(exc)[:300]})
             raise HTTPException(status_code=409, detail=str(exc)) from exc
