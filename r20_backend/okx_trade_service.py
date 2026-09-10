@@ -109,3 +109,120 @@ def fast_close_confirmed(close_token: str, confirmation: str) -> dict[str, Any]:
         if remaining<=tolerance: break
     if remaining>tolerance: raise RuntimeError(f"平仓请求已受理但仓位未确认归零，剩余 {remaining}；请刷新，禁止重复点击")
     return {"status":"confirmed_closed","environment":env.mode,"instId":intent["instId"],"posSide":intent["posSide"],"closed_size":actual,"canceled_entry_orders":canceled,"close_result":close_result}
+
+
+# =====================================================================
+# US-004 · attachAlgoOrds 保护核验（审计 2026-09-10 §2 OKX / 设计 §0-3、§6）
+# attachAlgoOrds ≠ 受理时即生效的原子保护：官方 attachAlgoClOrdId 说明——普通订单
+# **完全成交后**才提交附带算法单，回执含 failCode/failReason；HTTP 200 或附带字段
+# 存在都不能宣称受保护，必须回读 pending algo 逐腿核验。
+# 2026-08-20 起 post_only/mmp_and_post_only 失败可只收到 canceled 不先 live
+# （Demo 2026-08-10 已生效）：状态机必须接受直接终态，不无限等待 live——本 helper
+# 为纯函数判定，不 sleep 不轮询，等待窗口由上层节奏控制。
+# =====================================================================
+PROTECTION_STATES = ("PROTECTION_PENDING", "PROTECTED", "UNPROTECTED")
+
+
+def _dec_eq(a: Any, b: Any) -> bool:
+    """十进制字符串等值（不做 float 比较，防精度漂移）。"""
+    from decimal import Decimal, InvalidOperation
+    if a in (None, "") or b in (None, ""):
+        return False
+    try:
+        return Decimal(str(a)) == Decimal(str(b))
+    except (InvalidOperation, ValueError):
+        return str(a) == str(b)
+
+
+def verify_attached_protection(*, inst_id: str, expected_legs: list[dict[str, Any]],
+                               attach_rows: list[dict[str, Any]] | None = None,
+                               pending_rows: list[dict[str, Any]],
+                               main_order_state: str | None = None) -> dict[str, Any]:
+    """主单附带保护腿回读核验。
+
+    expected_legs: 每腿 {"kind","side","sz","x_price"[,"attach_algo_cl_ord_id"]}
+    attach_rows:   下单回执中的 attachAlgoOrds 结果行（failCode/failReason 非空 ⇒ 未受理）
+    pending_rows:  回读 pending_algo_orders 的在途条件/OCO 行（账户与合约由
+                   pending_algo_orders 的私有签名通道与本地过滤保证归属——本函数
+                   另钉 instId 一致才允许记 PROTECTED）
+    返回 {"status": 三态之一, "legs": [逐腿判定], "detail": 人话}；HTTP 200 ≠ 受保护。
+    """
+    if str(main_order_state or "").lower() in ("canceled", "cancelled"):
+        # 直接终态（含 2026-08-20 post_only 不先 live 的 canceled 直达）：主单永不成交，
+        # 附带算法单不会被提交——不存在保护，也无需再等待。
+        return {"status": "UNPROTECTED", "legs": [{"kind": l.get("kind"), "state": "not_submitted",
+                "reason": "主单已终态 canceled，attachAlgoOrds 永不提交"} for l in expected_legs],
+                "detail": "主单直接终态（canceled），附带保护从未提交——按未保护处理，不等待 live"}
+    legs_out: list[dict[str, Any]] = []
+    any_failed = any_pending = all_ok = False
+    for leg in expected_legs:
+        kind = str(leg.get("kind") or "")
+        # ① 受理回执 failCode/failReason 非空 ⇒ 该腿明确未创建（HTTP 200 不代表受保护）
+        fail = None
+        for ar in attach_rows or []:
+            if not isinstance(ar, dict):
+                continue
+            same = (leg.get("attach_algo_cl_ord_id")
+                    and str(ar.get("attachAlgoClOrdId") or "") == str(leg["attach_algo_cl_ord_id"]))
+            if not same:
+                same = (_dec_eq(ar.get("sz"), leg.get("sz"))
+                        and _dec_eq(ar.get("tpTriggerPx") or ar.get("slTriggerPx") or ar.get("xPrice"),
+                                    leg.get("x_price"))
+                        and (ar.get("side") in (None, "", leg.get("side"))))
+            fc = str(ar.get("failCode") or "")
+            if same and fc and fc != "0":
+                fail = (fc, str(ar.get("failReason") or ""))
+                break
+        if fail:
+            legs_out.append({"kind": kind, "state": "failed", "failCode": fail[0],
+                             "failReason": fail[1]})
+            any_failed = True
+            continue
+        # ② pending 回读逐字段覆盖：合约/方向/数量/触发值
+        hit = None
+        for pr in pending_rows or []:
+            if not isinstance(pr, dict):
+                continue
+            if str(pr.get("instId") or "") != str(inst_id):
+                continue
+            if leg.get("side") and str(pr.get("side") or "") != str(leg["side"]):
+                continue
+            if leg.get("sz") not in (None, "") and not _dec_eq(pr.get("sz"), leg["sz"]):
+                continue
+            if leg.get("x_price") not in (None, ""):
+                trig = pr.get("xPrice") or pr.get("tpTriggerPx") or pr.get("slTriggerPx")
+                if not _dec_eq(trig, leg["x_price"]):
+                    continue
+            hit = pr
+            break
+        if hit is not None:
+            legs_out.append({"kind": kind, "state": "protected",
+                             "algoId": str(hit.get("algoId") or "")})
+        else:
+            legs_out.append({"kind": kind, "state": "pending_readback",
+                             "reason": "回执无 failCode 但 pending 未见——attach 于完全成交后提交，"
+                                       "可能尚未生效，须再回读；期间不得宣称受保护"})
+            any_pending = True
+    all_ok = all(l["state"] == "protected" for l in legs_out) and bool(legs_out)
+    if any_failed or (str(main_order_state or "").lower() == "filled" and not any_pending and not all_ok):
+        status = "UNPROTECTED"
+        detail = "存在未受理/缺失保护腿——按未保护处理（审计：不得凭 200 宣称保护生效）"
+    elif all_ok:
+        status = "PROTECTED"
+        detail = "全部保护腿经 pending 回读覆盖账户/合约/方向/数量/触发值核验"
+    else:
+        status = "PROTECTION_PENDING"
+        detail = "部分腿尚未回读到，暂不认定受保护，窗口内复核"
+    return {"status": status, "legs": legs_out, "detail": detail}
+
+
+def readback_attached_protection(inst_id: str, expected_legs: list[dict[str, Any]], *,
+                                 attach_rows: list[dict[str, Any]] | None = None,
+                                 main_order_state: str | None = None,
+                                 env: OKXEnvironment | None = None) -> dict[str, Any]:
+    """便利包装：私有只读回读 pending algo 后过纯函数核验（零写请求）。"""
+    env = env or current_environment()
+    rows = pending_algo_orders(inst_id, env=env)
+    return verify_attached_protection(inst_id=inst_id, expected_legs=expected_legs,
+                                      attach_rows=attach_rows, pending_rows=rows,
+                                      main_order_state=main_order_state)

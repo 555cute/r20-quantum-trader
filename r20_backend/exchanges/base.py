@@ -46,7 +46,23 @@ class ExchangeCapabilities:
     signed_size: bool = False         # Gate: 正多负空带符号张数
     # ---- 条件单/OCO 语义（Phase 3 用，先声明后实现）----
     supports_attached_tp_sl: bool = False   # OKX attachAlgoOrds / Bybit tpslMode
-    trigger_price_default: str = "last"     # ⚠️ Binance 合约触发单默认 MARK_PRICE
+    trigger_price_default: str = "last"     # 本系统内部语义标注（last/mark/index）
+    # ⚠️ US-004 纠偏（审计 2026-09-10 §2 Binance，替代旧「默认 MARK_PRICE」误断言）：
+    # Binance Algo API 的 workingType 官方默认是 CONTRACT_PRICE——实现必须显式传入
+    # 触发价格类型，不依赖任何默认值；旧调研把默认写成 MARK_PRICE 已作废。
+    # ---- US-004 真实语义字段（审计 §2 出处逐所声明，勿再挤在 supports_orders 一栏）----
+    # 订单 ID 类型（审计 §2 Gate id_string 防 JS int64 精度损失 / Binance orderId int64）：
+    #   "string"             — 原生即字符串（OKX ordId/algoId）
+    #   "int64_id_string"    — int64 且响应带 id_string，读取一律用 id_string 字符串（Gate）
+    #   "int64_precision_risk" — int64 无 id_string，跨 JSON Number 链路必须 str 归一（Binance）
+    order_id_type: str = "string"
+    native_amend: bool = False        # 原生改单端点（Gate price_orders/amend=True）
+    decimal_amount: bool = False      # 十进制张数 amount 字符串（Gate 模型支持，账户实况未验）
+    # 持仓模式族（仅声明支持域，永不自动切换用户账户；未支持档=禁新开仓并显示原因）
+    # gate: ("single","dual","dual_plus")——dual_plus 拆仓不得折叠成净仓/双向（审计 §2）
+    position_modes: tuple = ()
+    conditional_family: str = "none"  # attached | independent_resource | algo_service
+    protection_semantics: str = ""    # 保护生效条件的人读语义（见各所声明与 §0 设计纠正）
     # ---- 公共行情 ----
     max_candle_limit: int = 300
     bar_case: str = "upper"                 # OKX 混合大小写 vs binance/gate 全小写
@@ -206,6 +222,11 @@ class BaseExchangeAdapter:
         - base_asset 语义（Binance）：币数，向下截断到 step_size；
         - contracts 语义（OKX/Gate）：整数张，四舍五入后校验最小张数。
         换算失败/低于最小名义价值 → 0.0（调用方据此拒单，fail-closed）。
+
+        US-004 注：本函数是「按名义额估整数张」的便利换算，不是数量类型禁令——
+        Gate 等支持十进制 amount 的场所（capabilities.decimal_amount=True 且环境合约
+        规格许可）可在下单入口显式传 Decimal/十进制字符串 amount 绕过本整数换算，
+        不得再把「所有合约必须 int 张数」当硬编码事实（审计 §2 Gate decimal amount）。
         """
         if notional_usdt <= 0 or price <= 0:
             return 0.0

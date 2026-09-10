@@ -82,7 +82,10 @@ class TestQuantitySemantics(unittest.TestCase):
 class TestCapabilityTable(unittest.TestCase):
     def test_binance_pitfalls_declared(self):
         cap = BinanceAdapter.capabilities
-        self.assertEqual(cap.trigger_price_default, "mark")       # 默认 MARK_PRICE 坑
+        # US-004 律③修正：旧断言钉「默认 MARK_PRICE」是被时效审计推翻的假事实——
+        # Algo workingType 官方默认 CONTRACT_PRICE，本系统要求显式传参不吃任何默认。
+        self.assertEqual(cap.trigger_price_default, "explicit_only")
+        self.assertEqual(cap.conditional_family, "algo_service")   # 独立 /fapi/v1/algoOrder 族
         self.assertFalse(cap.supports_attached_tp_sl)             # 无附属 TP/SL
         self.assertTrue(cap.mainland_ip_restricted)               # 大陆 IP 明文封锁
         self.assertEqual(cap.quantity_unit, "base_asset")
