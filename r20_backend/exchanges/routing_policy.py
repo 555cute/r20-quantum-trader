@@ -109,9 +109,6 @@ def _read_raw_routing() -> Dict[str, Any]:
 #: 手动选所合法值 = 注册表已登记场所 + auto（不硬编码场所名单，新所登记即生效）
 VALID_PREFERRED_VENUES = tuple(sorted(set(registered_venues()) | {"auto"}))
 
-#: 缺字段 warn 只提示一次（下单路径每周期多次读配置，避免刷屏）
-_PREFERRED_MISSING_WARNED = False
-
 
 def load_preferred_venue(raw: Dict[str, Any] = None) -> str:
     """US-003 手动选所优先项：顶层 preferred_venue ∈ {okx,binance,gate,auto}。
@@ -120,12 +117,9 @@ def load_preferred_venue(raw: Dict[str, Any] = None) -> str:
     逐位一致）；非法值 → warn + 回退 'auto'（fail-safe：宁可回到评分路由，
     绝不因为一个写错的配置字符串把交易链断掉，也绝不猜某个所）。
     """
-    global _PREFERRED_MISSING_WARNED
     data = _read_raw_routing() if raw is None else raw
     if "preferred_venue" not in data:
-        if not _PREFERRED_MISSING_WARNED:
-            _PREFERRED_MISSING_WARNED = True
-            print("[venue_routing] warn: 配置缺 preferred_venue 字段，回退 auto（评分路由）")
+        print("[venue_routing] warn: 配置缺 preferred_venue 字段，回退 auto（评分路由）")
         return "auto"
     value = data.get("preferred_venue")
     key = str(value or "").strip().lower()

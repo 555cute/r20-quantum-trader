@@ -787,6 +787,27 @@ def persist_venue_decision(inst_id: str, venue_decision: Dict[str, Any]) -> bool
         return False
 
 
+def _rejection_focus_reason(decision, candidates: List[Dict[str, Any]],
+                            preferred: str) -> str:
+    """ALL_REJECTED 时挑「最该解释本次跳过」的那条淘汰理由。
+
+    优先级：手选场所 > 现任所（本链路直签所）> 首个候选 > 第一条记录；同一场所若
+    有多阶段淘汰，取非 executable 的第一条（listing/precision/freshness 才是真因，
+    未开闸只是结构性事实）。
+    """
+    wanted = [preferred] if preferred != "auto" else []
+    wanted += [str(c.get("venue")) for c in candidates if c.get("current_venue")]
+    wanted += [str(c.get("venue")) for c in candidates]
+    rows = list(decision.rejected or [])
+    for venue in wanted:
+        same = [r for r in rows if str(r.get("venue")) == venue]
+        if not same:
+            continue
+        substantive = [r for r in same if r.get("stage") != "executable"]
+        return str((substantive or same)[0].get("reason") or "")
+    return str((rows[0] if rows else {}).get("reason") or "无候选所")
+
+
 def route_and_reserve_signal(inst_id: str, side: str, size: float, price: float,
                              notional_usdt: float = 0.0, margin_usdt: float = 0.0,
                              intent_id: str = "") -> Dict[str, Any]:
@@ -839,9 +860,9 @@ def route_and_reserve_signal(inst_id: str, side: str, size: float, price: float,
     payload = _decision_payload(decision, preferred)
 
     if decision.venue is None or decision.reason_code in ("ALL_REJECTED", "NO_CANDIDATES"):
-        first = (decision.rejected or [{}])[0]
-        reason = first.get("reason") or "无候选所"
+        reason = _rejection_focus_reason(decision, candidates, preferred)
         payload["outcome"] = "rejected"
+        payload["skip_reason"] = f"{decision.reason_code}: {reason}"
         persist_venue_decision(inst_id, payload)
         print(f"[选所路由] 本轮不下单 {inst_id}: {decision.reason_code} → {reason}")
         return {"ok": False, "error": f"路由拒绝: {reason}",
@@ -851,9 +872,10 @@ def route_and_reserve_signal(inst_id: str, side: str, size: float, price: float,
     payload["outcome"] = "selected"
     if venue not in VENUE_SUBMITTERS:
         # 路由可选中未来所，但下单实现只在登记后存在——fail-closed 不硬打 OKX 端点
-        payload["executed_venue"] = None
-        persist_venue_decision(inst_id, payload)
         reason = f"{venue} 未登记下单实现（VENUE_SUBMITTERS 只有 {sorted(VENUE_SUBMITTERS)}）"
+        payload["executed_venue"] = None
+        payload["skip_reason"] = reason
+        persist_venue_decision(inst_id, payload)
         print(f"[选所路由] 本轮不下单 {inst_id}: {reason}")
         return {"ok": False, "error": f"路由拒绝: {reason}",
                 "venue": venue, "decision": payload, "reservation": None}
@@ -870,6 +892,8 @@ def route_and_reserve_signal(inst_id: str, side: str, size: float, price: float,
     except risk_reservation.ReservationExceeded as exc:
         payload["budget"] = {"limit_usdt": budget_total, "reserved_before_usdt": budget_used,
                              "margin_usdt": margin_est, "error": str(exc)}
+        payload["outcome"] = "budget_rejected"
+        payload["skip_reason"] = f"预算预留拒绝: {exc}"
         persist_venue_decision(inst_id, payload)
         print(f"[预算预留] 本轮不下单 {inst_id}: {exc}")
         return {"ok": False, "error": f"预算预留拒绝: {exc}",
@@ -877,6 +901,8 @@ def route_and_reserve_signal(inst_id: str, side: str, size: float, price: float,
     except Exception as exc:
         payload["budget"] = {"limit_usdt": budget_total, "margin_usdt": margin_est,
                              "error": str(exc)}
+        payload["outcome"] = "budget_error"
+        payload["skip_reason"] = f"预算预留拒绝: {exc}"
         persist_venue_decision(inst_id, payload)
         print(f"[预算预留] 本轮不下单 {inst_id}: 预留层异常 {exc}")
         return {"ok": False, "error": f"预算预留拒绝: {exc}",
@@ -908,17 +934,29 @@ def release_signal_reservation(reservation: Dict[str, Any], reason: str = "") ->
         print(f"[预算预留] warn 释放失败（交由重启 recovery 处理）: {exc}")
 
 
-def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: float, price: float, tp_px: float, sl_px: float, notional_usdt: float = 0.0, margin_usdt: float = 0.0, intent_id: str = "") -> Tuple[bool, str]:
-    """Submit a protected limit order; acceptance is not treated as a fill."""
+def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: float, price: float, tp_px: float, sl_px: float, venue_ctx: Optional[Dict[str, Any]] = None) -> Tuple[bool, str]:
+    """Submit a protected limit order; acceptance is not treated as a fill.
+
+    venue_ctx：US-003 决策面上下文（AI 信号入口单必须带）。带上下文 → 先过选所路由
+    + 预算原子预留，任一失败返回 (False, "路由拒绝/预算预留拒绝: <reason>")，本轮
+    不下单；不带上下文 = 非 AI 信号的通用提交（保留 US-007 listing gate 契约），
+    只 warn 不闸门——新增开仓路径时必须传 ctx。
+    """
     env = selected_environment()
-    # ---- US-003 决策面前置闸：选所路由 + 预算原子预留（失败即本轮不下单）----
-    _routing = route_and_reserve_signal(inst_id, side, size, price,
-                                        notional_usdt=notional_usdt,
-                                        margin_usdt=margin_usdt,
-                                        intent_id=intent_id)
-    if not _routing["ok"]:
-        return False, str(_routing.get("error") or "路由拒绝")
-    _reservation = _routing.get("reservation")
+    _reservation = None
+    if isinstance(venue_ctx, dict):
+        # ---- US-003 决策面前置闸：选所路由 + 预算原子预留（失败即本轮不下单）----
+        _routing = route_and_reserve_signal(
+            inst_id, side, size, price,
+            notional_usdt=float(venue_ctx.get("notional_usdt") or 0.0),
+            margin_usdt=float(venue_ctx.get("margin_usdt") or 0.0),
+            intent_id=str(venue_ctx.get("intent_id") or ""))
+        if not _routing["ok"]:
+            return False, str(_routing.get("error") or "路由拒绝")
+        _reservation = _routing.get("reservation")
+    else:
+        print(f"[US-003 决策面] warn {inst_id} 提交未携带 venue_ctx——"
+              f"未经选所路由/预算预留，仅限非 AI 信号通用路径")
 
     # 环境维合约存在性对账（US-007）：目录拉不到 → fail-open 放行（对账是增强不是闸门）；
     # 已下架/未上市（如 SUI 在 demo 被下架）→ fail-closed 拒单，reason 透传。
@@ -2603,15 +2641,14 @@ def execute_portfolio():
                     if tp_px <= limit_px:
                         tp_px = round(limit_px + max(tp_dist, f["price"] * 0.024), prec)
 
-                    # US-003 决策面接线：就地组装路由/预算入参——名义额（选所硬筛与
-                    # 深度需求）、保证金估算（预算预留金额）、意图号（同一条 AI 决策
-                    # 重投幂等，不重复占预算）。
+                    # US-003 决策面上下文：名义额（选所硬筛/深度需求）+ 保证金估算
+                    # （预算预留额）+ 意图号（同一条 AI 决策重投幂等，不重复占预算）
                     _notional = actual_sz * ct_val * limit_px
-                    _margin = ai_margin if ai_margin > 0 else (_notional / max(1.0, ai_lever))
-                    _intent = f"{inst_id}:BUY_LONG:{int(ai_info.get('timestamp') or time.time())}"
                     accepted, order_ref = submit_protected_limit_order(
                         inst_id, "buy", "long", actual_sz, limit_px, tp_px, sl_px,
-                        notional_usdt=_notional, margin_usdt=_margin, intent_id=_intent)
+                        venue_ctx={"notional_usdt": _notional,
+                                   "margin_usdt": ai_margin if ai_margin > 0 else (_notional / max(1.0, ai_lever)),
+                                   "intent_id": f"{inst_id}:BUY_LONG:{int(ai_info.get('timestamp') or time.time())}"})
                     if accepted:
                         if is_scale_in:
                             tracker = trackers.get(f"{inst_id}_long", {})
@@ -2712,13 +2749,13 @@ def execute_portfolio():
                     if tp_px >= limit_px:
                         tp_px = round(limit_px - max(tp_dist, f["price"] * 0.024), prec)
 
-                    # US-003 决策面接线（与多单同构：名义额/保证金估算/幂等意图号）
+                    # US-003 决策面上下文（与多单同构：名义额/保证金估算/幂等意图号）
                     _notional = actual_sz * ct_val * limit_px
-                    _margin = ai_margin if ai_margin > 0 else (_notional / max(1.0, ai_lever))
-                    _intent = f"{inst_id}:SELL_SHORT:{int(ai_info.get('timestamp') or time.time())}"
                     accepted, order_ref = submit_protected_limit_order(
                         inst_id, "sell", "short", actual_sz, limit_px, tp_px, sl_px,
-                        notional_usdt=_notional, margin_usdt=_margin, intent_id=_intent)
+                        venue_ctx={"notional_usdt": _notional,
+                                   "margin_usdt": ai_margin if ai_margin > 0 else (_notional / max(1.0, ai_lever)),
+                                   "intent_id": f"{inst_id}:SELL_SHORT:{int(ai_info.get('timestamp') or time.time())}"})
                     if accepted:
                         if is_scale_in:
                             tracker = trackers.get(f"{inst_id}_short", {})
