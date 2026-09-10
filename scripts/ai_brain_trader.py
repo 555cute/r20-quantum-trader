@@ -193,8 +193,10 @@ def fetch_single_instrument_package(item: Dict[str, Any]) -> Dict[str, Any]:
         "obv_flow": "NEUTRAL",
         "adx_1h": 0.0,
         "smart_money": {
-            "weighted_long_pct": 50.0,
-            "net_flow_usdt": "0 U",
+            "available": False,
+            "reason": "OKX CLI 已移除，smartmoney 无公开 V5 等价接口（待接新数据源）",
+            "weighted_long_pct": "--",
+            "net_flow_usdt": "--",
             "avg_long_entry": "--",
             "avg_short_entry": "--",
             "top_win_rate": "--"
@@ -831,7 +833,7 @@ def construct_full_market_prompt(packages: List[Dict[str, Any]], pos_summary: st
         info = f"""---------------------------------------------------------
 【{p['name']} ({p['instId']})】| 数据质量: {quality} | 现价: {p['price']} | 24H涨跌: {p['chg24h']}% | 盘口买/卖: {p['bidPx']}/{p['askPx']}
 - 🏛️ 三重滤网宏观结构: 4H宏观大势={p.get('macro_4h', '4H_MACRO_RANGE')} | 1H波段结构={p.get('structure_1h', '1H_SWING_CHOP')}
-- 👑 顶级聪明钱 (SmartMoney Top100): 加权做多占比={sm.get('weighted_long_pct', 50)}% | 24H净流入={sm.get('net_flow_usdt', '--')} | 多头均价={sm.get('avg_long_entry', '--')} | 空头均价={sm.get('avg_short_entry', '--')} | {sm.get('top_win_rate', '')}
+- 👑 顶级聪明钱 (SmartMoney Top100): {("加权做多占比=" + str(sm.get('weighted_long_pct')) + "% | 24H净流入=" + str(sm.get('net_flow_usdt', '--')) + " | 多头均价=" + str(sm.get('avg_long_entry', '--')) + " | 空头均价=" + str(sm.get('avg_short_entry', '--')) + " | " + str(sm.get('top_win_rate', ''))) if sm.get('available') else "数据源缺失（OKX CLI 已移除，暂无公开 V5 等价接口；本项不构成任何方向的证据，禁止臆测填充）"}
 - 📐 1H核心波段指标: 1H ATR(14)={p.get('atr_1h', p.get('atr', '--'))} (止损基准: 1.5~2.0x 1H ATR) | 1H RSI(14)={p.get('rsi_1h', '--')} | 1H ADX趋势强度={adx_val} (注:<20无趋势垃圾市, ≥22强单边)
 - ⚡ 15M微观执行参考: 15M ATR={p.get('atr_15m', '--')} | 15M RSI={p.get('rsi_15m', '--')} | VWAP乖离={p.get('vwap_bias', '--')}% | 15M量比={p.get('vol_ratio', '--')}x | OBV资金流={p.get('obv_flow', '--')}
 - 📐 1H三大数理基石硬证据: {core_math_line}
@@ -1317,37 +1319,9 @@ def execute_batch_ai_brain_cycle(
     # 跨所比对（币安/Gate 只读备源，纯证据增益，失败静默跳过不阻塞决策）
     fetch_cross_venue_matrix(packages)
 
-    # Fetch OKX Smart Money Signals
-    try:
-        instruments_ccy = ",".join([p["name"] for p in packages])
-        sm_cmd = f"okx smartmoney signal-overview-by-filter --instCcyList {instruments_ccy} --json 2>/dev/null"
-        sm_res = subprocess.run(sm_cmd, shell=True, capture_output=True, text=True, timeout=8)
-        if sm_res.stdout:
-            sm_data = json.loads(sm_res.stdout).get("data", [])
-            sm_dict = {item.get("ccy"): item for item in sm_data if item.get("ccy")}
-            for p in packages:
-                ccy = p["name"]
-                if ccy in sm_dict:
-                    item = sm_dict[ccy]
-                    ls = item.get("longShortRatio", {})
-                    notional = item.get("notional", {})
-                    win = item.get("winRate", {})
-                    w_long = round(float(ls.get("weightedLongRatio", 0.5)) * 100, 1)
-                    net_usdt = float(notional.get("netNotionalUsdt", 0) or 0)
-                    net_flow_str = f"{round(net_usdt / 1e4, 1)}万 U" if abs(net_usdt) >= 1e4 else f"{round(net_usdt, 0)} U"
-                    long_cost = notional.get("smartMoneyLongAvgEntry") or "--"
-                    short_cost = notional.get("smartMoneyShortAvgEntry") or "--"
-                    top_win = f"多胜率{round(float(win.get('avgLongWinRate', 0))*100, 1)}%" if win.get('avgLongWinRate') else "--"
-
-                    p["smart_money"] = {
-                        "weighted_long_pct": w_long,
-                        "net_flow_usdt": net_flow_str,
-                        "avg_long_entry": str(long_cost)[:10],
-                        "avg_short_entry": str(short_cost)[:10],
-                        "top_win_rate": top_win
-                    }
-    except Exception as e:
-        print(f"[AI Brain Batch] SmartMoney fetch warning: {e}")
+    # OKX Smart Money Signals：CLI 已移除且无公开 V5 等价接口——保持
+    # build 默认 smart_money 缺失标记（available=False），提示词面显式
+    # 呈现「数据源缺失」，不以中性值喂给模型。接入新数据源时在此填充。
 
     positions_context = active_positions_detail
     active_positions_detail = active_positions_detail or []
