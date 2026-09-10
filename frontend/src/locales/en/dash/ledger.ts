@@ -76,6 +76,7 @@ export const enLedger = {
     adopted: 'Council verdict · adopted {seat}',
     degraded: 'Council skipped · single-model verdict',
   },
+  venue: 'Executing venue (hidden when unlabeled legacy rows — never faked)',
   exportCsv: 'Export CSV',
   exported: 'Ledger exported',
   empty: 'No closed trades yet — the AI is waiting for its first worthy setup',

@@ -820,6 +820,9 @@ def record_signal_snapshot(snap: dict) -> None:
 
 
 def record_trade(trade_data):
+    # G10 场所标注：本链路全部为 OKX V5 直签执行，源头补 venue（gate lab 写侧
+    # 自带 venue="gate"）；setdefault 不覆盖显式值，旧调用方无感。
+    trade_data.setdefault("venue", "okx")
     if not isinstance(trade_data, dict):
         return
     if "policy_version" not in trade_data:

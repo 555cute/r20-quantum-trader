@@ -208,6 +208,7 @@ def build_lifecycle_ledger():
             "id": f"holding_{inst}_{side}",
             "inst": inst,
             "side": side,
+            "venue": "okx",   # G10 读侧贯通：本 builder 全源 OKX V5，源头标注场所
             "lever": f"{lever}x",
             "strategy": strat_tag,
             "margin": margin_usdt,
@@ -319,6 +320,7 @@ def build_lifecycle_ledger():
             "id": f"pos_hist_{u_ts}_{inst}",
             "inst": inst,
             "side": side,
+            "venue": "okx",   # G10：同上，OKX 历史行源头标注
             "lever": f"{lever}x",
             "strategy": strat_tag,
             "margin": margin_usdt,

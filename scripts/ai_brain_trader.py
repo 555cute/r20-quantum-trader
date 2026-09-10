@@ -621,6 +621,7 @@ def _xv_flush_health(packages: List[Dict[str, Any]]) -> None:
         except Exception:
             pass
         out = {
+            "v": 1,  # G12 schema 版本：结构演进时消费端可按版本分派（当前消费端已 || {} 防御）
             "updated_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
             "writer_pid": os.getpid(),
             "package_count": len(packages),

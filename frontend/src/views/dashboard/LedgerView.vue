@@ -67,7 +67,7 @@ const detail = ref<any>(null);
 
 /* —— CSV 导出 —— */
 function exportCsv() {
-  const head = ['inst', 'side', 'lever', 'open_time', 'open_px', 'close_time', 'close_px', 'margin', 'fee', 'net_pnl', 'roi_pct', 'duration', 'exit_reason', 'strategy'];
+  const head = ['inst', 'venue', 'side', 'lever', 'open_time', 'open_px', 'close_time', 'close_px', 'margin', 'fee', 'net_pnl', 'roi_pct', 'duration', 'exit_reason', 'strategy'];
   const lines = [head.join(',')];
   for (const x of filtered.value) {
     lines.push(head.map((k) => `"${String((k === 'open_time' || k === 'close_time') ? (x[k] ? fmtDateTime(x[k]) + ' +08:00' : '') : (x[k] ?? '')).replaceAll('"', '""')}"`).join(','));
@@ -83,6 +83,12 @@ function exportCsv() {
 
 function dirOf(side: string): 'long' | 'short' {
   return side === '多' ? 'long' : 'short';
+}
+
+/** G10 场所徽章：行带 venue 才渲染；旧数据缺失不冒充（显示层不留假身份）。 */
+const VENUE_LABELS: Record<string, string> = { okx: 'OKX', gate: 'Gate', binance: 'Binance' };
+function venueLabel(v: unknown): string {
+  return VENUE_LABELS[String(v || '').toLowerCase()] ?? String(v || '');
 }
 </script>
 
@@ -176,6 +182,7 @@ function dirOf(side: string): 'long' | 'short' {
                     <span class="num font-semibold" style="color: var(--ink-strong)">{{ x.inst }}</span>
                     <DirTag :dir="dirOf(x.side)" />
                     <span class="badge badge-mono hidden xl:inline-flex">{{ x.lever }}</span>
+                    <span v-if="x.venue" class="badge badge-mono hidden sm:inline-flex" :title="t('dash.ledger.venue')">{{ venueLabel(x.venue) }}</span>
                     <span v-if="x.council?.ran" class="badge badge-up" :title="x.council.adopted_role ? t('dash.ledger.council.adopted', undefined, { seat: x.council.adopted_role }) : t('dash.ledger.council.ran')">🏛️</span>
                     <span v-else-if="x.council" class="badge badge-warn" :title="t('dash.ledger.council.degraded')">⚡</span>
                   </div>
