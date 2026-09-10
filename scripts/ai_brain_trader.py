@@ -17,7 +17,7 @@ if PROJECT_ROOT not in sys.path:
 if SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, SCRIPTS_DIR)
 
-from okx_runtime import replace_cli_prefix as okx_private_command
+import scripts.okx_rest as okx_rest
 # 风控提示词与执行层共用单一事实源，防止「提示词口径 vs 代码口径」漂移
 from risk_constants import (
     DAILY_LOSS_EQUITY_RATIO,
@@ -1233,6 +1233,45 @@ def assemble_decision_cache(
 
 
 @single_brain_cycle
+def fetch_pending_orders_list() -> Optional[List[Dict[str, Any]]]:
+    """拉取交易所当前全部 SWAP 挂单（V5 直签 REST，US-003）。
+
+    行为契约（对齐历史 CLI 挂单查询）：返回列表=成功；查询失败/未配置
+    凭证（OKXNotConfigured）→ 告警并返回 None。fail-closed：绝不回退命令行子进程。
+    """
+    try:
+        fetched = okx_rest.pending_orders()
+    except Exception as e:
+        print(f"[AI Brain Batch] Pending orders fetch warning: {e}")
+        return None
+    return fetched if isinstance(fetched, list) else None
+
+
+def execute_brain_pending_cancels(pending_mgmt_list: List[Any]) -> List[Dict[str, Any]]:
+    """执行 AI 决策的 CANCEL 清单（V5 直签 REST，US-003）。
+
+    仅当撤单真实成功才打印 🛑（旧 CLI 版失败也无条件打印成功，属假告警，已修正）；
+    单笔失败打印 ⚠️ 并继续处理其余项，返回执行日志供测试与审计。
+    """
+    log: List[Dict[str, Any]] = []
+    for p_order in pending_mgmt_list or []:
+        if not isinstance(p_order, dict):
+            continue
+        p_act = str(p_order.get("action", "")).upper()
+        p_ord_id = str(p_order.get("ordId", ""))
+        p_inst_id = str(p_order.get("instId", ""))
+        p_reason = str(p_order.get("reason", "模型指示撤销该挂单"))
+        if p_act == "CANCEL" and p_ord_id and p_inst_id:
+            try:
+                okx_rest.cancel_order(p_inst_id, p_ord_id)
+                print(f"[AI Brain Batch] 🛑 AI自主撤回失效/过时限价单: {p_inst_id} (ordId={p_ord_id}, 原因={p_reason})")
+                log.append({"ok": True, "instId": p_inst_id, "ordId": p_ord_id, "reason": p_reason})
+            except Exception as exc:
+                print(f"[AI Brain Batch] ⚠️ 撤单失败（直签 REST fail-closed，不做假成功，待下一周期重试）: {p_inst_id} ordId={p_ord_id}: {exc}")
+                log.append({"ok": False, "instId": p_inst_id, "ordId": p_ord_id, "reason": p_reason, "error": str(exc)})
+    return log
+
+
 def execute_batch_ai_brain_cycle(
     pos_summary: str = "[MISSING_CONTEXT:account_positions]",
     active_positions_detail: List[Dict[str, Any]] = None,
@@ -1329,17 +1368,8 @@ def execute_batch_ai_brain_cycle(
     except Exception as e:
         print(f"[AI Brain Batch] Factor Library update warning: {e}")
 
-    # Fetch live pending limit orders from exchange
-    pending_orders_list = None
-    try:
-        ord_cmd = okx_private_command("okx swap orders --json 2>/dev/null")
-        ord_res = subprocess.run(ord_cmd, shell=True, capture_output=True, text=True, timeout=8)
-        if ord_res.returncode == 0 and ord_res.stdout:
-            pending_orders_list = json.loads(ord_res.stdout)
-            if not isinstance(pending_orders_list, list):
-                pending_orders_list = None
-    except Exception as e:
-        print(f"[AI Brain Batch] Pending orders fetch warning: {e}")
+    # Fetch live pending limit orders from exchange（V5 直签 REST，行为契约见 fetch_pending_orders_list）
+    pending_orders_list = fetch_pending_orders_list()
 
     try:
         calculus_snapshot = {
@@ -1528,17 +1558,7 @@ def execute_batch_ai_brain_cycle(
         # Execute Pending Orders Cancellation if AI Brain decides CANCEL
         pending_mgmt_list = brain_output.get("pending_orders_management", [])
         if isinstance(pending_mgmt_list, list):
-            for p_order in pending_mgmt_list:
-                if not isinstance(p_order, dict):
-                    continue
-                p_act = str(p_order.get("action", "")).upper()
-                p_ord_id = str(p_order.get("ordId", ""))
-                p_inst_id = str(p_order.get("instId", ""))
-                p_reason = str(p_order.get("reason", "模型指示撤销该挂单"))
-                if p_act == "CANCEL" and p_ord_id and p_inst_id:
-                    cxl_cmd = okx_private_command(f"okx swap cancel {p_inst_id} --ordId {p_ord_id} --json")
-                    cxl_res = subprocess.run(cxl_cmd, shell=True, capture_output=True, text=True, timeout=10)
-                    print(f"[AI Brain Batch] 🛑 AI自主撤回失效/过时限价单: {p_inst_id} (ordId={p_ord_id}, 原因={p_reason})")
+            execute_brain_pending_cancels(pending_mgmt_list)
 
         standard_cache = assemble_decision_cache(
             packages=packages,

@@ -1,8 +1,14 @@
 import os
-from okx_runtime import replace_cli_prefix as okx_private_command
+import sys
 import json
 import datetime
-import subprocess
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+import scripts.okx_rest as okx_rest
+import scripts.okx_runtime as okx_runtime
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 SNAPSHOTS_FILE = os.path.join(DATA_DIR, "snapshots.json")
@@ -23,22 +29,25 @@ def generate_live_snapshots():
         except Exception:
             pass
 
-    # Fetch live OKX balance
-    res_bal = subprocess.run(okx_private_command("okx account balance --json"), shell=True, capture_output=True, text=True)
+    env = okx_runtime.current_environment()
+    if not env.configured:
+        # fail-closed (2026-09-09 CLI removal): never flatten snapshots.json without credentials
+        raise okx_rest.OKXNotConfigured("OKX API Key 未配置 — 净值快照生成 fail-closed（保持 snapshots.json 不动）")
+
+    # Fetch live OKX balance via direct signed V5 REST
     current_eq = initial_cap
-    if res_bal.stdout:
-        try:
-            bal_data = json.loads(res_bal.stdout)[0]
-            for d in bal_data.get("details", []):
-                if d.get("ccy") == "USDT":
-                    current_eq = float(d.get("eq", initial_cap) or initial_cap)
-                    break
-        except Exception:
-            pass
+    try:
+        bal_rows = okx_rest.balances()
+        for d in (bal_rows[0].get("details", []) if bal_rows else []):
+            if d.get("ccy") == "USDT":
+                current_eq = float(d.get("eq", initial_cap) or initial_cap)
+                break
+    except Exception:
+        pass
 
     # Read OKX bills to construct intermediate equity points
-    res_bills = subprocess.run(okx_private_command("okx account bills --limit 100 --json"), shell=True, capture_output=True, text=True)
-    bills = json.loads(res_bills.stdout) if res_bills.stdout else []
+    # (a fetch failure raises before the file write below — no empty-overwrite)
+    bills = okx_rest.bills(limit=100)
 
     snapshots = [
         {
@@ -86,4 +95,8 @@ def generate_live_snapshots():
     print(f"✅ Generated {len(snapshots)} clean snapshots for Chart.js")
 
 if __name__ == "__main__":
-    generate_live_snapshots()
+    try:
+        generate_live_snapshots()
+    except okx_rest.OKXNotConfigured as exc:
+        print(f"[NOT READY] {exc}")
+        raise SystemExit(3)
