@@ -34,7 +34,6 @@ from r20_backend.config import refresh_settings, settings
 from r20_backend.version import __version__, APP_NAME, APP_VERSION
 from r20_backend.okx_client import OKXClient
 from r20_backend.okx_trade_service import account_snapshot as okx_account_snapshot, fast_close_confirmed
-from r20_backend.okx_setup import diagnose_okx_runtime, install_okx_cli, check_node_npm, start_oauth_device_login, oauth_status, oauth_logout
 from r20_backend.account_baseline import load_account_baseline, update_initial_capital
 from r20_backend.backup_secrets import credential_status as backup_credential_status, save_credentials as save_backup_credentials
 from r20_backend.prompt_views import EVOLUTION_USER_TEMPLATE, TRADING_USER_TEMPLATE, rendered_snapshots
@@ -164,15 +163,6 @@ class MultiExchangeUpdate(BaseModel):
     gate_testnet: bool | None = None
     gate_execution: bool | None = None   # R20_GATE_EXECUTION 总开关（真实验田下单）
     confirmation: str = ""               # 变更执行开关必须精确确认短语
-
-
-class OkxCliInstallRequest(BaseModel):
-    confirmation: str = Field(min_length=8, max_length=80)
-
-
-class OkxOAuthStartRequest(BaseModel):
-    site: str = Field(pattern=r"^(global|eea|us|tr)$")
-    force_relogin: bool = Field(default=False)
 
 
 class AdminConfigUpdate(BaseModel):
@@ -1237,9 +1227,6 @@ def admin_update_account_baseline(payload: InitialCapitalUpdate, x_r20_session: 
     }
 
 
-_OKX_RUNTIME_CACHE: dict[str, Any] = {"at": 0.0, "mode": "", "payload": None}
-
-
 # ── 风控管理页：执行层硬风控参数的可视化配置 ──────────────────────
 class RiskConfigUpdate(BaseModel):
     values: dict[str, Any] = Field(default_factory=dict)
@@ -1314,68 +1301,25 @@ def admin_risk_reset(payload: RiskResetRequest, x_r20_session: str | None = Head
 
 @app.get("/api/v1/admin/okx/runtime")
 def admin_okx_runtime(x_r20_session: str | None = Header(default=None, alias="X-R20-Session"), refresh: int = 0) -> dict[str, Any]:
+    """纯 API Key 诊断：静态 V5 密钥是唯一连接方式，未配置即 NOT READY（fail-closed）。"""
     refresh_settings()
     require_admin_header(x_r20_session=x_r20_session)
-    configured = settings.okx_demo_configured if settings.okx_environment == "demo" else settings.okx_live_configured
-    now = time.time()
-    # Each CLI probe spawns 4-6 subprocesses (~1.5s). Serve a 15s cache so page
-    # navigation feels instant; the UI's "重新诊断" passes refresh=1 to bypass.
-    if not refresh and _OKX_RUNTIME_CACHE["payload"] and _OKX_RUNTIME_CACHE["mode"] == settings.okx_environment and now - _OKX_RUNTIME_CACHE["at"] < 15:
-        return dict(_OKX_RUNTIME_CACHE["payload"])
-    payload = diagnose_okx_runtime(settings.okx_environment, configured)
-    _OKX_RUNTIME_CACHE.update({"at": now, "mode": settings.okx_environment, "payload": copy.deepcopy(payload)})
+    from scripts.okx_runtime import current_environment
+    env = current_environment()
+    mode_configured = settings.okx_demo_configured if settings.okx_environment == "demo" else settings.okx_live_configured
+    payload: dict[str, Any] = {
+        "environment": settings.okx_environment,
+        "mode_configured": bool(mode_configured),
+        "live_configured": bool(settings.okx_live_configured),
+        "demo_configured": bool(settings.okx_demo_configured),
+        "fingerprint": env.fingerprint,
+        "base_url": settings.okx_base_url,
+        "connection": "static-v5-key",
+        "status": "READY" if mode_configured else "NOT_READY",
+    }
+    if not mode_configured:
+        payload["not_ready_reason"] = "未配置 OKX API Key：请在后台「账户接入」填入当前档位（DEMO/LIVE）的 API Key / Secret Key / Passphrase 三件套；未配置时系统禁止一切交易。"
     return payload
-
-
-@app.post("/api/v1/admin/okx/oauth/start")
-def admin_okx_oauth_start(payload: OkxOAuthStartRequest, x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
-    actor = require_superadmin(x_r20_session)
-    try:
-        result = start_oauth_device_login(payload.site, force_relogin=payload.force_relogin)
-    except (ValueError, RuntimeError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    _OKX_RUNTIME_CACHE["at"] = 0.0
-    audit_record("okx.oauth.start", "success", {"actor": actor["username"], "site": payload.site, "force_relogin": payload.force_relogin, "status": result.get("status")})
-    return result
-
-
-@app.post("/api/v1/admin/okx/oauth/logout")
-def admin_okx_oauth_logout(x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
-    """Unbind current OKX OAuth account so user can switch or re-link an account."""
-    actor = require_superadmin(x_r20_session)
-    try:
-        result = oauth_logout()
-    except (ValueError, RuntimeError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    _OKX_RUNTIME_CACHE["at"] = 0.0
-    audit_record("okx.oauth.logout", "success", {"actor": actor["username"], "status": result.get("status")})
-    return result
-
-
-@app.get("/api/v1/admin/okx/oauth/status")
-def admin_okx_oauth_status(x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
-    require_admin_header(x_r20_session=x_r20_session)
-    return oauth_status()
-
-
-@app.get("/api/v1/admin/okx/cli-check")
-def admin_okx_cli_check(x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
-    """Check Node.js/npm/OKX CLI prerequisites without side effects."""
-    require_admin_header(x_r20_session=x_r20_session)
-    return check_node_npm()
-
-
-@app.post("/api/v1/admin/okx/install-cli")
-def admin_okx_install_cli(payload: OkxCliInstallRequest, x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
-    """One-click install or upgrade OKX CLI via npm. Requires superadmin and explicit confirmation."""
-    actor = require_superadmin(x_r20_session)
-    if payload.confirmation.strip().upper() != "INSTALL OKX CLI":
-        raise HTTPException(status_code=400, detail="确认短语必须精确为：INSTALL OKX CLI")
-    result = install_okx_cli()
-    audit_record("okx.cli.install", "success" if result.get("ok") else "failed", {"actor": actor["username"], "detail": result.get("detail", "")[:300]})
-    if not result.get("ok"):
-        raise HTTPException(status_code=502, detail=result.get("detail") or "OKX CLI 安装失败")
-    return result
 
 
 @app.put("/api/v1/admin/config")
