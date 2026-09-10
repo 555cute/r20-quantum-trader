@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import io
 import json
 import os
 import sys
@@ -13,6 +14,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from contextlib import redirect_stdout
 from unittest.mock import patch
 
 _REPO_ROOT = str(Path(__file__).resolve().parent.parent)
@@ -196,6 +198,30 @@ class LedgerRestMigrationTests(unittest.TestCase):
         self.assertEqual(seen, [])
         with open(paths["DATA_JSON_PATH"], "r", encoding="utf-8") as f:
             self.assertEqual(f.read(), '{"sentinel": 1}')
+
+    def test_web_data_entry_not_ready_exits_without_network_or_writes(self):
+        okx_runtime.freeze_environment(dict(EMPTY_VALUES))
+        paths = self._swd_paths()
+        target = Path(paths["DATA_JSON_PATH"])
+        sentinel = b'{"sentinel": "keep existing web cache"}\n'
+        target.write_bytes(sentinel)
+        os.utime(target, ns=(1_600_000_000_000_000_000,) * 2)
+        before_mtime = target.stat().st_mtime_ns
+        before_files = set(Path(self.tmp.name).iterdir())
+        stdout = io.StringIO()
+        with patch.object(okx_rest, "urlopen", side_effect=AssertionError("unexpected network")) as network, \
+             patch("urllib.request.urlopen", side_effect=AssertionError("unexpected public network")) as public_network, \
+             patch.multiple(swd, **paths), redirect_stdout(stdout):
+            with self.assertRaises(SystemExit) as raised:
+                swd.main()
+        self.assertEqual(raised.exception.code, 3)
+        self.assertIn("[NOT READY]", stdout.getvalue())
+        self.assertNotIn("successfully", stdout.getvalue())
+        self.assertEqual(network.call_count, 0)
+        self.assertEqual(public_network.call_count, 0)
+        self.assertEqual(target.read_bytes(), sentinel)
+        self.assertEqual(target.stat().st_mtime_ns, before_mtime)
+        self.assertEqual(set(Path(self.tmp.name).iterdir()), before_files)
 
     # ---------- generate_snapshots ----------
     def test_snapshots_written_via_rest_and_guarded(self):
