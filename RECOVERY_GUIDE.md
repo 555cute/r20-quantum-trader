@@ -33,30 +33,30 @@ cd /app/working/workspaces/default
 tar -zxvf r20_system_backup_*.tar.gz
 ```
 
-### 步骤 2：恢复 OKX 授权认证
-确保 OKX 认证密钥位于工作区：
-- 检查 `/app/working/workspaces/default/.okx` 是否存在。
-- 若在新机器提示未登录，在终端执行：
-  ```bash
-  okx auth login
-  ```
-  在浏览器打开提示的链接并输入设备验证码完成一键授权。
+### 步骤 2：恢复 OKX V5 API Key 配置
+先保持交易调度器停止。运行 `sh deploy/install.sh` 安装后端 Python 依赖（已有 `.env` 不会被覆盖），检查 `R20_OKX_ENV=demo`。
+
+- 推荐在步骤 3 启动控制面后，通过 `/admin` →「账户接入」重新填入 DEMO / LIVE 各自的 API Key、Secret Key、Passphrase 三件套。后台采用 **Fernet 本地加密存储，留空不改**；只授予必要读取/交易权限，禁用提款权限。
+- 若从受信任的私密备份恢复凭证，必须保留**成对匹配**的 `data/r20_secrets.enc` 与 `data/.r20_secret_key`，并让服务账户有读取权限。不要假定普通数据归档已包含密钥；缺失或无法解密时，优先在后台重新配置，禁止把密钥提交到代码仓库。
+- 选中档位未配齐时为 **NOT READY**，OKX 私有调用及交易 fail-closed；公共行情仍可免凭证读取。服务器重启不再丢失短期登录授权：持久化密文和匹配加密密钥即可重新加载，但 API Key 被撤销、IP 白名单变化仍须处理。
+- 登录后查看 `GET /api/v1/admin/okx/runtime`：`environment` 确认档位，`mode_configured` 确认三件套，`status` 为 `READY` 或 `NOT_READY`，未配置时看 `not_ready_reason`。**READY 仅表示本地配置，不代表交易所鉴权已通过**；恢复调度前再用只读账户快照核对账户与持仓。
 
 ### 步骤 3：一键启动 Web 监控大屏 (端口 8080)
 ```bash
 cd /app/working/workspaces/default
-nohup /app/venv/bin/python3 -m uvicorn dashboard.app:app --host 0.0.0.0 --port 8080 --app-dir /app/working/workspaces/default > /tmp/dashboard.log 2>&1 &
+. .venv/bin/activate
+python -m uvicorn r20_backend.app:app --host 0.0.0.0 --port 8080
 ```
 验证访问：`http://<你的服务器IP>:8080`
 
-### 步骤 4：启动后台守护与 Cron 定时任务
+### 步骤 4：恢复单一调度器
+确认 DEMO 账户与只读快照正常、复核风控与遗留仓位后，再在另一终端启动：
 ```bash
-# 1. 启动 60 秒因子计算与快讯同步守护进程 (后台常驻)
-nohup python3 /app/working/workspaces/default/scripts/daemon_web_sync.py > /tmp/daemon_sync.log 2>&1 &
-
-# 2. 检查并恢复调度任务（15m主循环、20:00每日自进化、早8晚8战报、02:00插件化灾备）
-qwenpaw cron list --agent-id default
+cd /app/working/workspaces/default
+. .venv/bin/activate
+python -m r20_gateway.worker
 ```
+生产环境使用 `STANDALONE.md` 的 systemd 配置托管。恢复前停用旧 QwenPaw 交易定时任务及重复守护进程，**不得同时运行两套交易调度器**，避免重复下单。
 
 ---
 

@@ -1,4 +1,4 @@
-"""Single source of truth for OKX live/demo selection across CLI and REST paths."""
+"""Single source of truth for OKX live/demo credentials used by signed REST."""
 from __future__ import annotations
 import hashlib
 import os
@@ -43,37 +43,26 @@ class OKXEnvironment:
     @property
     def fingerprint(self) -> str:
         seed = f"{self.mode}:{self.api_key}".encode()
-        return hashlib.sha256(seed).hexdigest()[:12] if self.api_key else f"{self.mode}-oauth"
+        return hashlib.sha256(seed).hexdigest()[:12] if self.api_key else f"{self.mode}-not-configured"
     @property
     def identity(self) -> str: return f"okx:{self.mode}:{self.fingerprint}"
 
-    def cli_env(self, base: Mapping[str, str] | None = None) -> dict[str, str]:
-        env = dict(base or os.environ)
-        if self.configured:
-            env.update({"OKX_API_KEY": self.api_key, "OKX_SECRET_KEY": self.secret_key, "OKX_PASSPHRASE": self.passphrase})
-        env["OKX_DEMO"] = "1" if self.simulated else "0"
-        env["R20_OKX_ENV"] = self.mode
-        return env
-
-    def cli_prefix(self) -> str: return f"okx --{self.mode}"
-
 
 def selected_environment(values: Mapping[str, str] | None = None) -> OKXEnvironment:
-    env = dict(values or _load_dotenv())
+    env = dict(_load_dotenv() if values is None else values)
     legacy_simulated = str(env.get("OKX_IS_SIMULATED", "1")).lower() in {"1", "true", "yes"}
     mode = str(env.get("R20_OKX_ENV") or ("demo" if legacy_simulated else "live")).lower()
     if mode not in ALLOWED_ENVIRONMENTS: mode = "demo"
     prefix = "OKX_DEMO" if mode == "demo" else "OKX_LIVE"
-    api_key = str(env.get(f"{prefix}_API_KEY") or env.get("OKX_API_KEY") or "")
-    secret_key = str(env.get(f"{prefix}_SECRET_KEY") or env.get("OKX_SECRET_KEY") or "")
-    passphrase = str(env.get(f"{prefix}_PASSPHRASE") or env.get("OKX_PASSPHRASE") or "")
+    # A profile is an atomic credential group. A partially entered profile must
+    # never borrow individual fields from a different (legacy) identity.
+    fields = ("API_KEY", "SECRET_KEY", "PASSPHRASE")
+    profile = tuple(str(env.get(f"{prefix}_{field}") or "") for field in fields)
+    legacy = tuple(str(env.get(f"OKX_{field}") or "") for field in fields)
+    api_key, secret_key, passphrase = profile if any(profile) else legacy
     base_url = str(env.get("OKX_BASE_URL") or "https://www.okx.com").rstrip("/")
     if base_url != "https://www.okx.com": raise ValueError("OKX REST Base URL 只允许 https://www.okx.com")
     return OKXEnvironment(mode, api_key, secret_key, passphrase, base_url, "separate-credentials" if env.get(f"{prefix}_API_KEY") else "legacy-or-oauth")
-
-
-def cli_command(arguments: str, values: Mapping[str, str] | None = None) -> str:
-    return f"{selected_environment(values).cli_prefix()} {arguments.strip()}"
 
 
 _FROZEN_ENVIRONMENT: OKXEnvironment | None = None
@@ -96,17 +85,3 @@ def current_environment(values: Mapping[str, str] | None = None) -> OKXEnvironme
     otherwise the live LIVE/DEMO selection. Signed REST callers must use this
     instead of calling selected_environment() directly."""
     return _FROZEN_ENVIRONMENT or selected_environment(values)
-
-
-def replace_cli_prefix(command: str, values: Mapping[str, str] | None = None) -> str:
-    """Bind the process to the frozen/current credential group and replace a legacy CLI prefix."""
-    selected = _FROZEN_ENVIRONMENT or selected_environment(values)
-    if selected.configured:
-        os.environ.update({"OKX_API_KEY": selected.api_key, "OKX_SECRET_KEY": selected.secret_key, "OKX_PASSPHRASE": selected.passphrase})
-    os.environ["OKX_DEMO"] = "1" if selected.simulated else "0"
-    os.environ["R20_OKX_ENV"] = selected.mode
-    stripped = command.strip()
-    for prefix in ("okx --demo ", "okx --live ", "okx "):
-        if stripped.startswith(prefix):
-            return f"{selected.cli_prefix()} {stripped[len(prefix):]}"
-    return f"{selected.cli_prefix()} {stripped}"

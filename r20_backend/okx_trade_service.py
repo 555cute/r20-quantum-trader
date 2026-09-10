@@ -1,11 +1,10 @@
-"""Direct signed OKX V5 control-plane client with seamless CLI OAuth fallback."""
+"""Direct signed OKX V5 control-plane client (static API Key only, fail-closed)."""
 from __future__ import annotations
 import base64
 import hashlib
 import hmac
 import json
 import secrets
-import subprocess
 import threading
 import time
 import urllib.parse
@@ -13,7 +12,8 @@ import urllib.request
 from datetime import datetime, timezone
 import logging
 from typing import Any
-from scripts.okx_runtime import OKXEnvironment, selected_environment
+from scripts.okx_runtime import OKXEnvironment, current_environment
+from scripts.okx_rest import OKXNotConfigured, cancel_algo_orders, pending_algo_orders
 
 logger = logging.getLogger(__name__)
 
@@ -26,49 +26,10 @@ def _timestamp() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-def _run_cli(command: list[str], timeout: int = 20) -> list[dict[str, Any]]:
-    try:
-        res = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
-    except Exception as exc:
-        raise RuntimeError(f"OKX CLI 执行失败：{type(exc).__name__}: {exc}") from exc
-    if res.returncode != 0:
-        err_msg = res.stderr.strip() or res.stdout.strip() or f"exit code {res.returncode}"
-        raise RuntimeError(f"OKX CLI 错误：{err_msg}")
-    try:
-        data = json.loads(res.stdout or "[]")
-        rows = data if isinstance(data, list) else [data]
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"OKX CLI JSON 解析失败：{exc} stdout={res.stdout[:200]}") from exc
-    failures = [row for row in rows if isinstance(row, dict) and str(row.get("sCode", row.get("code", "0"))) != "0"]
-    if failures:
-        code = failures[0].get("sCode", failures[0].get("code", "--"))
-        message = failures[0].get("sMsg") or failures[0].get("msg") or "业务请求失败"
-        raise RuntimeError(f"OKX CLI {code}: {message}")
-    return [row for row in rows if isinstance(row, dict)]
-
-
 def _request(method: str, path: str, params: dict[str, Any] | None = None, env: OKXEnvironment | None = None, timeout: int = 20) -> list[dict[str, Any]]:
-    selected = env or selected_environment()
+    selected = env or current_environment()
     if not selected.configured:
-        # Fallback to CLI
-        mode_flag = f"--{selected.mode}"
-        if path == "/api/v5/account/positions":
-            cmd = ["okx", mode_flag, "account", "positions", "--json"]
-            if params and params.get("instId"):
-                cmd.extend(["--instId", str(params["instId"])])
-            return _run_cli(cmd, timeout=timeout)
-        elif path == "/api/v5/trade/orders-pending":
-            cmd = ["okx", mode_flag, "swap", "orders", "--json"]
-            if params and params.get("instId"):
-                cmd.extend(["--instId", str(params["instId"])])
-            return _run_cli(cmd, timeout=timeout)
-        elif path == "/api/v5/trade/cancel-order":
-            cmd = ["okx", mode_flag, "swap", "cancel", str(params.get("instId")), "--ordId", str(params.get("ordId")), "--json"]
-            return _run_cli(cmd, timeout=timeout)
-        elif path == "/api/v5/trade/close-position":
-            cmd = ["okx", mode_flag, "swap", "close", "--instId", str(params.get("instId")), "--mgnMode", str(params.get("mgnMode", "cross")), "--posSide", str(params.get("posSide", "net")), "--autoCxl", "--json"]
-            return _run_cli(cmd, timeout=timeout)
-        raise RuntimeError(f"OKX {selected.mode.upper()} 静态 API Key 未配置，且不支持该操作的 CLI 回退：{path}")
+        raise OKXNotConfigured(f"OKX {selected.mode.upper()} 静态 API Key 未配置，请在后台「账户接入」配置 V5 API Key 后重试")
 
     params = params or {}; method = method.upper()
     query = urllib.parse.urlencode({k:v for k,v in params.items() if v not in (None, "")}) if method == "GET" else ""
@@ -110,14 +71,16 @@ def _create_intent(env: OKXEnvironment, position: dict[str, Any]) -> tuple[str, 
 
 
 def account_snapshot() -> dict[str, Any]:
-    env = selected_environment()
+    env = current_environment()
+    if not env.configured:
+        raise OKXNotConfigured(f"OKX {env.mode.upper()} 静态 API Key 未配置，请在后台「账户接入」配置 V5 API Key（系统 NOT READY，禁止交易）")
     positions = [p for p in _request("GET", "/api/v5/account/positions", {"instType":"SWAP"}, env) if abs(float(p.get("pos",0) or 0))>1e-12]
     orders = _request("GET", "/api/v5/trade/orders-pending", {"instType":"SWAP"}, env)
     public_positions=[]
     for position in positions:
         token, confirmation = _create_intent(env, position)
         public_positions.append({**position,"close_token":token,"close_confirmation":confirmation,"close_token_expires_in":INTENT_TTL_SECONDS})
-    return {"environment":env.mode,"environment_id":env.identity,"credential_source":"static-v5-key" if env.configured else "cli-oauth","positions":public_positions,"orders":orders,"captured_at_ms":int(time.time()*1000)}
+    return {"environment":env.mode,"environment_id":env.identity,"credential_source":"static-v5-key","positions":public_positions,"orders":orders,"captured_at_ms":int(time.time()*1000)}
 
 
 def _consume_intent(token: str) -> dict[str, Any]:
@@ -134,7 +97,9 @@ def _position_match(positions: list[dict[str, Any]], intent: dict[str, Any]) -> 
 
 
 def fast_close_confirmed(close_token: str, confirmation: str) -> dict[str, Any]:
-    intent=_consume_intent(close_token); env=selected_environment()
+    env=current_environment()
+    if not env.configured: raise OKXNotConfigured(f"OKX {env.mode.upper()} 静态 API Key 未配置，请在后台配置 V5 API Key 后重试（禁止应急平仓）")
+    intent=_consume_intent(close_token)
     if env.identity!=intent["environment_id"]: raise ValueError("OKX 环境或凭证已变化，请刷新当前持仓")
     if confirmation.strip().upper()!=intent["confirmation"]: raise ValueError(f"确认短语必须精确为：{intent['confirmation']}")
     target=_position_match(_request("GET","/api/v5/account/positions",{"instType":"SWAP","instId":intent["instId"]},env),intent)
@@ -157,15 +122,13 @@ def fast_close_confirmed(close_token: str, confirmation: str) -> dict[str, Any]:
 
     # Also cancel any attached/standalone algo orders (such as native cloud OCO orders) to avoid conflicts
     try:
-        mode_flag = f"--{env.mode}"
-        algo_orders = _run_cli(["okx", mode_flag, "swap", "algo", "orders", "--instId", intent["instId"], "--json"])
-        for ao in algo_orders:
+        for ao in pending_algo_orders(intent["instId"], env=env):
             ao_side = str(ao.get("posSide") or "net").lower()
             if ao_side in {target_side, "net"}:
                 algo_id = str(ao.get("algoId") or "")
                 if algo_id:
                     try:
-                        _run_cli(["okx", mode_flag, "swap", "algo", "cancel", intent["instId"], "--algoId", algo_id, "--json"])
+                        cancel_algo_orders([algo_id], inst_id=intent["instId"], env=env)
                         canceled.append(f"algo:{algo_id}")
                     except Exception as exc:
                         logger.warning("Cancel algo order %s failed during close: %s", algo_id, exc)

@@ -13,11 +13,13 @@ if str(_THIS_DIR) not in sys.path:
     sys.path.insert(0, str(_THIS_DIR))
 
 from r20_backend.time_utils import beijing_day
-from okx_runtime import replace_cli_prefix as okx_private_command
 import json
 import time
 import subprocess
 import datetime
+
+import scripts.okx_rest as okx_rest
+import scripts.okx_runtime as okx_runtime
 
 WORKSPACE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(WORKSPACE_DIR, "data")
@@ -31,15 +33,6 @@ from instrument_pool import load_instruments
 from market_data_service import fetch_tickers_bulk, fetch_ticker
 
 TARGET_INSTRUMENTS = load_instruments()
-
-def run_json_cmd(cmd: str, timeout: int = 15):
-    try:
-        res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
-        if res.stdout.strip():
-            return json.loads(res.stdout.strip())
-    except Exception:
-        pass
-    return None
 
 def get_disk_info():
     try:
@@ -55,15 +48,17 @@ def get_disk_info():
         return {"total_gb": 0, "used_gb": 0, "free_gb": 0, "percent": 0}
 
 def generate_trading_data():
+    env = okx_runtime.current_environment()
+    if not env.configured:
+        # fail-closed (2026-09-09 CLI removal): never overwrite the web cache with zeros
+        raise okx_rest.OKXNotConfigured("OKX API Key 未配置 — Web 数据同步 fail-closed（保持既有 trading_data.json 不动）")
+
     tz_bj = datetime.timezone(datetime.timedelta(hours=8))
     now_bj = datetime.datetime.now(tz_bj)
     today_str = now_bj.strftime("%Y-%m-%d")
 
-    auth_data = run_json_cmd("okx auth status --json") or {}
-    is_authenticated = auth_data.get("status") == "logged_in"
-
     # 1. Balance
-    bal_data = run_json_cmd(okx_private_command("okx account balance --json")) or []
+    bal_data = okx_rest.balances()
     usdt_bal = {}
     if bal_data and isinstance(bal_data, list) and "details" in bal_data[0]:
         for d in bal_data[0]["details"]:
@@ -76,8 +71,8 @@ def generate_trading_data():
     cash_bal = float(usdt_bal.get("cashBal", 0) or 0)
     upl_acc = float(usdt_bal.get("upl", 0) or 0)
 
-    # 2. Positions
-    pos_data = run_json_cmd(okx_private_command("okx account positions --json")) or []
+    # 2. Positions (V5 REST, replaces removed CLI)
+    pos_data = okx_rest.positions()
     positions = []
     long_count = 0
     short_count = 0
@@ -123,7 +118,7 @@ def generate_trading_data():
             pass
 
     # 3. Bills & Today PnL
-    bills_data = run_json_cmd(okx_private_command("okx account bills --limit 100 --json")) or []
+    bills_data = okx_rest.bills(limit=100)
     today_realized_gross = 0.0
     today_fees = 0.0
     today_funding = 0.0
@@ -251,11 +246,10 @@ def generate_trading_data():
         "timestamp": now_bj.strftime("%Y-%m-%d %H:%M:%S (北京时间)"),
         "date": today_str,
         "auth": {
-            "is_logged_in": is_authenticated,
-            "status": auth_data.get("status", "not_logged_in"),
-            "site": auth_data.get("site", "global"),
-            "verificationUri": auth_data.get("verificationUri", "https://www.okx.com/account/oauth?flow=device"),
-            "userCode": auth_data.get("userCode", "FSVD-HJVL")
+            "connection": "static-v5-api-key",
+            "mode": env.mode,
+            "configured": env.configured,
+            "fingerprint": env.fingerprint
         },
         "account": {
             "total_eq": round(total_eq, 2),
@@ -298,6 +292,15 @@ def generate_trading_data():
         json.dump(data, f, ensure_ascii=False, indent=2)
     os.replace(temp_path, DATA_JSON_PATH)
 
+def main():
+    """CLI entry point: missing credentials exit before any cache writes."""
+    try:
+        generate_trading_data()
+        print("✅ Web data and JSON ledger synced successfully.")
+    except okx_rest.OKXNotConfigured as exc:
+        print(f"[NOT READY] {exc}")
+        raise SystemExit(3)
+
+
 if __name__ == "__main__":
-    generate_trading_data()
-    print("✅ Web data and JSON ledger synced successfully.")
+    main()

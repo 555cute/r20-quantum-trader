@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 from pathlib import Path
 from r20_backend.time_utils import beijing_text
-from scripts.okx_runtime import replace_cli_prefix as okx_private_command
+from scripts import okx_rest
 from scripts.instrument_pool import load_instruments
 import os
 import json
@@ -106,19 +106,21 @@ app = FastAPI(title="R20 AI Quantitative Matrix", docs_url=None, redoc_url=None)
 templates = Jinja2Templates(directory=os.path.join(DASHBOARD_DIR, "templates"))
 app.mount("/static", StaticFiles(directory=os.path.join(DASHBOARD_DIR, "static")), name="static")
 
-def run_json_cmd_status(cmd):
+_NOT_READY_TEXT = "OKX API Key 未配置（NOT READY）：交易与账户查询已禁用"
+
+
+def _fetch_json(fn, *args, **kwargs):
+    """V5 直签查询包装：返回 (ok, data, error)，语义对齐旧子进程查询。
+
+    错误文本透传给页面 data_health.errors；未配置凭证时给出 NOT READY
+    人话文案而不是 traceback。异常在并发线程池里被捕获，绝不冒泡。
+    """
     try:
-        res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
-        if res.returncode == 0 and res.stdout.strip():
-            return True, json.loads(res.stdout.strip()), ""
-        return False, None, res.stderr.strip() or res.stdout.strip() or "empty response"
-    except Exception as e:
-        return False, None, str(e)
-
-
-def run_json_cmd(cmd):
-    ok, data, _ = run_json_cmd_status(cmd)
-    return data if ok else None
+        return True, fn(*args, **kwargs), ""
+    except okx_rest.OKXNotConfigured:
+        return False, None, _NOT_READY_TEXT
+    except Exception as exc:  # RuntimeError(OKX 码+msg)、网络错误等人话暴露
+        return False, None, f"{type(exc).__name__}: {exc}"
 
 def _safe_float(value, default=0.0):
     try:
@@ -594,9 +596,9 @@ def update_cache_cycle():
 
     # Parallel Phase 1: Fetch Balance, Positions, and Maker Orders concurrently
     with ThreadPoolExecutor(max_workers=3) as pool:
-        f_bal = pool.submit(run_json_cmd_status, okx_private_command("okx account balance --json"))
-        f_pos = pool.submit(run_json_cmd_status, okx_private_command("okx account positions --json"))
-        f_ord = pool.submit(run_json_cmd_status, okx_private_command("okx swap orders --json"))
+        f_bal = pool.submit(_fetch_json, okx_rest.balances)
+        f_pos = pool.submit(_fetch_json, okx_rest.positions)
+        f_ord = pool.submit(_fetch_json, okx_rest.pending_orders)
         balance_ok, bal_data, balance_error = f_bal.result()
         positions_ok, pos_data, positions_error = f_pos.result()
         orders_ok, orders_data, orders_error = f_ord.result()
@@ -610,6 +612,15 @@ def update_cache_cycle():
     if not orders_ok:
         source_errors.append(f"orders: {orders_error}")
         orders_data = []
+
+    # 三项核心私有查询同时因未配置凭证失败 → 这是「连接方式缺失」而非网络抖动，
+    # data_health 用专属 NOT_READY 状态，页面区块据此显示人话文案。
+    _private_not_ready = (
+        not balance_ok and not positions_ok and not orders_ok
+        and balance_error == _NOT_READY_TEXT
+        and positions_error == _NOT_READY_TEXT
+        and orders_error == _NOT_READY_TEXT
+    )
 
     total_eq = 0.0
     avail_eq = 0.0
@@ -781,9 +792,10 @@ def update_cache_cycle():
             stale_positions = (stale.get("positions_summary") or {}).get("items", [])
             enrich_position_risk_fields(stale_positions, trackers)
             stale["data_health"] = {
-                "status": "STALE",
+                "status": "NOT_READY" if _private_not_ready else "STALE",
                 "partial": True,
                 "errors": source_errors,
+                "message": _NOT_READY_TEXT if _private_not_ready else None,
                 "last_success_at": CACHE_DATA.get("timestamp"),
                 "attempted_at": timestamp_full,
                 "cache_age_seconds": max(0.0, round(time.time() - LAST_CACHE_TIME, 1)) if LAST_CACHE_TIME > 0 else None,
@@ -797,7 +809,12 @@ def update_cache_cycle():
             return
         CACHE_DATA = {
             "timestamp": timestamp_full,
-            "data_health": {"status": "OFFLINE", "partial": True, "errors": source_errors},
+            "data_health": {
+                "status": "NOT_READY" if _private_not_ready else "OFFLINE",
+                "partial": True,
+                "errors": source_errors,
+                "message": _NOT_READY_TEXT if _private_not_ready else None,
+            },
             "account": {}, "today_stats": {}, "performance": {},
             "positions_summary": {"total": 0, "max_positions": len(load_instruments()), "items": []},
             "factors": [], "trades": [], "logs": [], "snapshots": [],
@@ -810,8 +827,9 @@ def update_cache_cycle():
         with ThreadPoolExecutor(max_workers=min(len(positions), 6)) as pool:
             futures = {
                 pos["instId"]: pool.submit(
-                    run_json_cmd_status,
-                    okx_private_command(f"okx swap algo orders --instId {pos['instId']} --json")
+                    _fetch_json,
+                    okx_rest.pending_algo_orders,
+                    pos["instId"],
                 )
                 for pos in positions
             }
@@ -869,7 +887,7 @@ def update_cache_cycle():
             pass
 
     # 4. Load Bills and Real Order-Level Ledger
-    bills_ok, bills_data, bills_error = run_json_cmd_status(okx_private_command("okx account bills --limit 100 --json"))
+    bills_ok, bills_data, bills_error = _fetch_json(okx_rest.bills, limit=100)
     if not bills_ok:
         source_errors.append(f"bills: {bills_error}")
         bills_data = []

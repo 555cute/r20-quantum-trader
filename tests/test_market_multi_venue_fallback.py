@@ -81,14 +81,13 @@ class TestMultiVenueFallback(unittest.TestCase):
         mds._ALT_ORDER_CACHE["ts"] = 0.0
 
     def _fail_okx(self):
+        """OKX 双域 REST 直连全断（进程派生层已在 US-004 物理删除，无需再钉）。"""
         return [
             patch("scripts.market_data_service._public_get", return_value=None),
-            patch("scripts.market_data_service.subprocess.run",
-                  side_effect=FileNotFoundError("no okx cli")),
         ]
 
     def test_candles_fallback_newest_first(self):
-        with self._fail_okx()[0], self._fail_okx()[1], \
+        with self._fail_okx()[0], \
                 patch("scripts.market_data_service._get_venue_adapter",
                       _adapters(_FakeAdapter(), _FakeAdapter())):
             rows = mds.fetch_candles("BTC-USDT-SWAP", bar="1H", limit=3)
@@ -99,8 +98,6 @@ class TestMultiVenueFallback(unittest.TestCase):
 
     def test_ticker_fallback_okx_shape(self):
         with patch("scripts.market_data_service._public_get", return_value=None), \
-                patch("scripts.market_data_service.subprocess.run",
-                      side_effect=FileNotFoundError("no okx cli")), \
                 patch("scripts.market_data_service._get_venue_adapter",
                       _adapters(_FakeAdapter(), _FakeAdapter())):
             t = mds.fetch_ticker("BTC-USDT-SWAP")
@@ -120,8 +117,6 @@ class TestMultiVenueFallback(unittest.TestCase):
 
     def test_all_dead_returns_empty(self):
         with patch("scripts.market_data_service._public_get", return_value=None), \
-                patch("scripts.market_data_service.subprocess.run",
-                      side_effect=FileNotFoundError("no okx cli")), \
                 patch("scripts.market_data_service._get_venue_adapter",
                       _adapters(_DeadAdapter(), _DeadAdapter())):
             self.assertEqual(mds.fetch_candles("BTC-USDT-SWAP"), [])
@@ -132,8 +127,6 @@ class TestMultiVenueFallback(unittest.TestCase):
         def boom(venue):
             raise AssertionError("kill switch 打开时不得触碰备源")
         with patch("scripts.market_data_service._public_get", return_value=None), \
-                patch("scripts.market_data_service.subprocess.run",
-                      side_effect=FileNotFoundError("no okx cli")), \
                 patch("scripts.market_data_service._get_venue_adapter", boom), \
                 patch.dict(os.environ, {"R20_ALT_VENUE_FALLBACK": "0"}):
             self.assertEqual(mds.fetch_candles("BTC-USDT-SWAP"), [])
