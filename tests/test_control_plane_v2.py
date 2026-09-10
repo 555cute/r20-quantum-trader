@@ -1,4 +1,5 @@
 from __future__ import annotations
+import base64
 import json
 import os
 import tempfile
@@ -8,6 +9,7 @@ from unittest.mock import patch
 
 import r20_backend.notifications as notifications
 import r20_backend.okx_trade_service as okx
+import scripts.okx_rest as okx_rest
 import scripts.prompt_library as prompts
 from r20_gateway.events import GatewayEvent
 from r20_gateway.store import GatewayStore
@@ -15,34 +17,47 @@ from scripts.okx_runtime import OKXEnvironment
 
 
 class OKXV5Tests(unittest.TestCase):
-    def test_demo_request_is_signed_and_uses_v5_header(self):
-        env=OKXEnvironment("demo","AK","SK","PP")
+    # V5 私有 HTTP 传输已并入 scripts.okx_rest 统一通道（okx_trade_service._request
+    # 是委托门面）；旧测试 patch r20_backend.okx_trade_service.urllib.request 的
+    # 目标模块属性已不存在。迁移到统一通道真实 HTTP 边界：patch.object(
+    # scripts.okx_rest, "urlopen")，断言签名头/v5 路径/sCode fail-closed 原意图不变。
+    def _response(self, body):
         class Response:
-            status=200
+            status = 200
             def __enter__(self): return self
-            def __exit__(self,*_): return False
-            def read(self): return b'{"code":"0","data":[]}'
+            def __exit__(self, *_): return False
+            def read(self): return body
+        return Response()
+
+    def test_demo_request_is_signed_and_uses_v5_header(self):
+        import hashlib
+        import hmac
+        from urllib.parse import urlsplit
+        env=OKXEnvironment("demo","AK","SK","PP")
         captured={}
         def open_(request,timeout=0):
-            captured["request"]=request; return Response()
-        with patch.object(okx.urllib.request,"urlopen",side_effect=open_):
+            captured["request"]=request; return self._response(b'{"code":"0","data":[]}')
+        with patch.object(okx_rest,"urlopen",side_effect=open_):
             self.assertEqual(okx._request("GET","/api/v5/account/positions",{"instType":"SWAP"},env),[])
         req=captured["request"]
         headers={k.lower():v for k,v in req.header_items()}
-        self.assertIn("/api/v5/account/positions?instType=SWAP",req.full_url)
+        split=urlsplit(req.full_url)
+        request_path=split.path+(("?"+split.query) if split.query else "")
+        self.assertEqual(split.netloc,"www.okx.com")
+        self.assertEqual(request_path,"/api/v5/account/positions?instType=SWAP")
         self.assertEqual(headers["x-simulated-trading"],"1")
         self.assertEqual(headers["ok-access-key"],"AK")
-        self.assertTrue(headers["ok-access-sign"])
+        self.assertEqual(headers["ok-access-passphrase"],"PP")
+        message=headers["ok-access-timestamp"]+"GET"+request_path
+        expected=base64.b64encode(hmac.new(env.secret_key.encode(),message.encode(),hashlib.sha256).digest()).decode()
+        self.assertEqual(headers["ok-access-sign"],expected)
 
     def test_business_scode_fails_closed(self):
         env=OKXEnvironment("live","AK","SK","PP")
-        class Response:
-            status=200
-            def __enter__(self): return self
-            def __exit__(self,*_): return False
-            def read(self): return b'{"code":"0","data":[{"sCode":"51008","sMsg":"margin"}]}'
-        with patch.object(okx.urllib.request,"urlopen",return_value=Response()):
-            with self.assertRaises(RuntimeError): okx._request("POST","/api/v5/trade/close-position",{"instId":"BTC-USDT-SWAP"},env)
+        with patch.object(okx_rest,"urlopen",return_value=self._response(b'{"code":"0","data":[{"sCode":"51008","sMsg":"margin"}]}')):
+            with self.assertRaises(RuntimeError) as ctx:
+                okx._request("POST","/api/v5/trade/close-position",{"instId":"BTC-USDT-SWAP"},env)
+        self.assertIn("51008",str(ctx.exception))
 
 
 class ChannelBusinessCodeTests(unittest.TestCase):

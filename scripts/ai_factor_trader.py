@@ -316,31 +316,48 @@ def clean_stale_open_orders() -> Tuple[bool, str]:
     return True, "open orders verified"
 
 def check_black_swan_sentinel() -> Tuple[bool, str]:
-    """Minute-level Black Swan Sentinel: Checks for BTC 5M extreme flash-crash or catastrophic news"""
-    try:
-        # Check BTC 5M candles for extreme plunge (> 3.0% in 15 mins)
-        candles = fetch_candles_direct("BTC-USDT-SWAP", "15m", 3)
-        if candles and len(candles) >= 2:
-            latest_c = candles[0]
-            c_open = float(latest_c[1])
-            c_close = float(latest_c[4])
-            c_low = float(latest_c[3])
-            drop_pct = (c_close - c_open) / c_open * 100.0
-            if drop_pct <= -3.0 or ((c_low - c_open) / c_open * 100.0 <= -4.0):
-                return True, f"🚨 监测到 BTC 15M 级别发生断崖式暴跌插针 ({drop_pct:.2f}%)，触发全网黑天鹅紧急熔断！"
-    except Exception:
-        pass
+    """Minute-level Black Swan Sentinel, driven by the unified V5 REST public
+    market feed (market_data_service www→aws dual-domain + alt-venue fallback, 零凭证可读).
 
-    # Check news sentiment file
+    US-014 前置收尾（归因：3137c40/09fba6f 将 smartmoney/news CLI 信号面缺失化后，
+    新闻模式熔断随之休眠）：黑天鹅熔断改由此公共行情路径**复活**，并按
+    「不可判定=不放松」的 fail-closed 语义兜底——行情取不到/样本不足时触发熔断，
+    绝不带着盲区继续开新仓。新闻情绪层只消费**可判定**的极端值：旧实现以缺省
+    overall_score=50 冒充中性「一切正常」，已删除该假中性值——文件缺失/无该字段
+    一律视为不可判定，仅当数值 ≤20 才触发熔断。"""
+    # 1. BTC 15M candles extreme plunge (> 3.0% in 15 mins) via unified public REST.
+    try:
+        candles = fetch_candles_direct("BTC-USDT-SWAP", "15m", 3)
+    except Exception as exc:
+        return True, f"🚨 黑天鹅熔断：统一行情通道异常 ({type(exc).__name__})，不可判定=不放松，保守暂停新开仓"
+    if not candles or len(candles) < 2:
+        return True, "🚨 黑天鹅熔断：统一行情通道无有效数据（双域+备源皆断），不可判定=不放松，保守暂停新开仓"
+    try:
+        latest_c = candles[0]
+        c_open = float(latest_c[1])
+        c_close = float(latest_c[4])
+        c_low = float(latest_c[3])
+        drop_pct = (c_close - c_open) / c_open * 100.0
+        if drop_pct <= -3.0 or ((c_low - c_open) / c_open * 100.0 <= -4.0):
+            return True, f"🚨 监测到 BTC 15M 级别发生断崖式暴跌插针 ({drop_pct:.2f}%)，触发全网黑天鹅紧急熔断！"
+    except (ValueError, TypeError, IndexError):
+        # 行情形态不可判定同样不得放宽风控
+        return True, "🚨 黑天鹅熔断：行情数据格式异常不可判定，不可判定=不放松，保守暂停新开仓"
+
+    # 2. News sentiment file：仅认显式极端值（≤20），缺失≠中性50≠放行。
     if os.path.exists(NEWS_SENTIMENT_FILE):
         try:
             with open(NEWS_SENTIMENT_FILE, "r", encoding="utf-8") as f:
                 n_data = json.load(f)
-                score = float(n_data.get("overall_score", 50.0))
+            raw_score = n_data.get("overall_score")
+            if raw_score is not None:
+                score = float(raw_score)
                 if score <= 20.0:
                     return True, f"🚨 监测到突发黑天鹅极度恶性利空舆情 (情绪指数: {score:.1f})，触发全网黑天鹅紧急熔断！"
         except Exception:
-            pass
+            # 情绪文件损坏同样不可判定：不因读不到而放行（与下方熔断状态文件
+            # 损坏→安全暂停 的既有语义一致）
+            return True, "🚨 黑天鹅熔断：新闻情绪缓存损坏不可判定，不可判定=不放松，保守暂停新开仓"
 
     return False, ""
 

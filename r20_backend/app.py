@@ -1971,6 +1971,13 @@ def admin_okx_account_snapshot(x_r20_admin_token: str | None = Header(default=No
 def manual_close_position(payload: ManualCloseRequest) -> dict[str, Any]:
     actor = require_superadmin(REQUEST_SESSION.get())
     refresh_settings()
+    # 统一通道 fail-closed 契约（US-008/009）：整组凭证缺失/半缺时先于功能开关
+    # 判定——本地 current_environment().configured，零凭证=零 HTTP。否则未配置
+    # Key 的部署会先撞 403「功能未启用」，掩盖真正的 NOT READY 根因。
+    from scripts.okx_runtime import current_environment
+    _close_env = current_environment()
+    if not _close_env.configured:
+        raise HTTPException(status_code=503, detail=f"OKX {_close_env.mode.upper()} 静态 API Key 未配置（系统 NOT READY）：V5 直签是唯一私有通道，禁止后台手动平仓；请先在「账户接入」补齐完整三件套")
     if not settings.manual_close_enabled:
         raise HTTPException(status_code=403, detail="后台手动平仓功能未启用")
     import fcntl
