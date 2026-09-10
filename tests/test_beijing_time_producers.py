@@ -5,8 +5,10 @@ so no project data, credentials, network, or process configuration is touched.
 """
 import ast
 import datetime as dt
+import inspect
 import json
 import logging
+import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, mock_open
@@ -42,12 +44,15 @@ def isolated(path, *names, **deps):
     return SimpleNamespace(**namespace)
 
 
-@pytest.mark.parametrize("path", [
+PRODUCER_PATHS = [
     "r20_backend/llm_manager.py", "r20_backend/council_manager.py",
     "r20_backend/policy_snapshot.py", "scripts/factor_library.py",
     "scripts/gate_lab_trader.py", "r20_backend/qq_gateway_daemon.py",
     "scripts/cleanup_disk.py",
-])
+]
+
+
+@pytest.mark.parametrize("path", PRODUCER_PATHS)
 def test_all_datetime_producer_expressions(path):
     """Exercise every changed expression, including migration/fallback branches."""
     namespace = dict(datetime=FrozenDateTime, _BJ=BJ, entry={"ts": EPOCH},
@@ -192,3 +197,37 @@ def test_scheduler_record_created_and_handler_scope():
 def test_watchdog_date_explicit_timezone():
     text = (ROOT / "scripts/r20_watchdog.sh").read_text()
     assert "$(TZ=Asia/Shanghai date '+%F %T +08:00')" in text
+
+
+def load_tests(loader, standard_tests, pattern):
+    """Bridge pytest-style functions into bare unittest runs.
+
+    These are the Beijing-time contract regressions; the official suite runner
+    (``python3 -m unittest discover`` / offline_suite) must not silently execute
+    zero of them just because they are written pytest-style. Cases are built
+    inside this hook (not at module level), so pytest still collects only the
+    original functions and does not double-run them.
+    """
+    suite = unittest.TestSuite()
+    for name in sorted(n for n in globals() if n.startswith("test_")):
+        fn = globals()[name]
+        if not callable(fn):
+            continue
+        params = inspect.signature(fn).parameters
+        arg_sets = [{"path": p} for p in PRODUCER_PATHS] if "path" in params else [{}]
+        for kwargs in arg_sets:
+            def run(fn=fn, kwargs=kwargs, params=params):
+                mp = pytest.MonkeyPatch() if "monkeypatch" in params else None
+                try:
+                    if mp is not None:
+                        fn(monkeypatch=mp, **kwargs)
+                    else:
+                        fn(**kwargs)
+                finally:
+                    if mp is not None:
+                        mp.undo()
+            suffix = ("_" + kwargs["path"].replace("/", "_").replace(".py", "")) if "path" in kwargs else ""
+            cls = type("producer_" + name + suffix, (unittest.TestCase,),
+                       {"runTest": lambda self, _r=run: _r()})
+            suite.addTest(cls("runTest"))
+    return suite

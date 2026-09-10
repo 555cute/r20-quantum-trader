@@ -1,6 +1,22 @@
-"""Timezone regression checks: no trading, real network, or production data writes."""
+"""Timezone regression checks: no trading, real network, or production data writes.
+
+TZ-independent by construction: every expectation is a fixed input -> fixed output
+pair; production parsing anchors on r20_backend.time_utils.BJ_TZ (fixed +08:00),
+never on the host timezone.
+"""
+import sys
 import unittest
 from datetime import datetime, timezone
+from pathlib import Path
+
+# Same preamble as sibling scripts-importing tests (e.g. test_evolution_observability):
+# scripts modules use bare sibling imports (instrument_pool), so scripts/ must be
+# on sys.path before importing them.
+ROOT = Path(__file__).resolve().parent.parent
+for _p in (str(ROOT), str(ROOT / "scripts")):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
 from r20_backend.time_utils import parse_beijing, beijing_day, beijing_text
 
 
