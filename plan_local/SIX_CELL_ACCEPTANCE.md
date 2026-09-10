@@ -94,11 +94,11 @@
 - [ ] ③ 小额挂单——curl 直测：`POST /fapi/v1/order`（LIMIT，GTC；positionSide 按 long/short 分仓模式）
 - [ ] ④ 撤单——curl 直测：`DELETE /fapi/v1/order`
 - [ ] ⑤ 市价成交——curl 直测：`POST /fapi/v1/order`（type=MARKET，reduceOnly=false）
-- [ ] ⑥ 保护单覆盖核验——curl 直测：币安为「主单+独立条件单」两段式，条件单**全面走 Algo API**：`POST /fapi/v1/algoOrder`（type=STOP_MARKET / TAKE_PROFIT_MARKET，字段 `triggerPrice` / `clientAlgoId`；closePosition=true 仅适用指定条件市价单且与 quantity/reduceOnly 互斥）→ `current_all_algo_open_orders`（algo 专属回读端点，SDK 方法名；REST 路径以官方 algo 文档为准）双腿回读校验；开仓成功→立即挂双腿→algo 回读→失败撤主单回滚。禁止「`/fapi/v1/order` STOP_MARKET + `GET /fapi/v1/openOrders` 当保护单全集」旧写法——openOrders 回读只覆盖普通单
-- [ ] ⑦ 棘轮改止损——curl 直测：`cancel_algo_order`（按 algoId/clientAlgoId 撤旧条件单，algo 专属端点）+ 新挂 `POST /fapi/v1/algoOrder`（新 triggerPrice / 新 clientAlgoId），经 `current_all_algo_open_orders` 回读验证旧条件单不存在、新 SL 生效；不得用 `DELETE /fapi/v1/order` 撤 algo 单
-- [ ] ⑧ 平仓——curl 直测：`POST /fapi/v1/order`（MARKET + reduceOnly=true；Hedge Mode 禁传 reduceOnly，positionSide 显式映射）；平仓后清理兄弟腿：`cancel_algo_order` 撤 STOP/TP 双腿，algo 回读确认无残留
-- [ ] ⑨ 台账对账——curl 直测：`GET /fapi/v1/income`（REALIZED_PNL/FEE/COMMISSION）→ `trades(venue='binance')`；条件腿触发/成交状态另经 `query_algo_order`（algo 专属查询端点）核对，普通订单查询不替代 algo 腿对账
-- [ ] ⑩ 重启恢复——重启后回读 positionRisk + `GET /fapi/v1/openOrders`（仅普通单）+ `current_all_algo_open_orders`（STOP/TP 条件腿），验证保护单仍在、无与持仓无关的残留条件单
+- [ ] ⑥ 保护单覆盖核验——curl 直测：币安为「主单+独立条件单」两段式，条件单**全面走 Algo API**：`POST /fapi/v1/algoOrder`（type=STOP_MARKET / TAKE_PROFIT_MARKET，字段 `triggerPrice` / `clientAlgoId`；closePosition=true 仅适用指定条件市价单且与 quantity/reduceOnly 互斥）→ `GET /fapi/v1/openAlgoOrders (current_all_algo_open_orders)`（algo 专属回读端点，SDK 方法名；REST 路径以官方 algo 文档为准）双腿回读校验；开仓成功→立即挂双腿→algo 回读→失败撤主单回滚。禁止「`/fapi/v1/order` STOP_MARKET + `GET /fapi/v1/openOrders` 当保护单全集」旧写法——openOrders 回读只覆盖普通单
+- [ ] ⑦ 棘轮改止损——curl 直测：`DELETE /fapi/v1/algoOrder (cancel_algo_order)`（按 algoId/clientAlgoId 撤旧条件单，algo 专属端点）+ 新挂 `POST /fapi/v1/algoOrder`（新 triggerPrice / 新 clientAlgoId），经 `GET /fapi/v1/openAlgoOrders (current_all_algo_open_orders)` 回读验证旧条件单不存在、新 SL 生效；不得用 `DELETE /fapi/v1/order` 撤 algo 单
+- [ ] ⑧ 平仓——curl 直测：`POST /fapi/v1/order`（MARKET + reduceOnly=true；Hedge Mode 禁传 reduceOnly，positionSide 显式映射）；平仓后清理兄弟腿：`DELETE /fapi/v1/algoOrder (cancel_algo_order)` 撤 STOP/TP 双腿，algo 回读确认无残留
+- [ ] ⑨ 台账对账——curl 直测：`GET /fapi/v1/income`（REALIZED_PNL/FEE/COMMISSION）→ `trades(venue='binance')`；条件腿触发/成交状态另经 `GET /fapi/v1/algoOrder (query_algo_order)`（algo 专属查询端点）核对，普通订单查询不替代 algo 腿对账
+- [ ] ⑩ 重启恢复——重启后回读 positionRisk + `GET /fapi/v1/openOrders`（仅普通单）+ `GET /fapi/v1/openAlgoOrders (current_all_algo_open_orders)`（STOP/TP 条件腿），验证保护单仍在、无与持仓无关的残留条件单
 - [ ] 注：以上路径（含 algoOrder 专属端点）为 demo-fapi 与 fapi 同构契约；algo 端点在 demo 的实际可达性随本格 ①—⑩ 验证并回填。适配器步骤待 BinanceAdapter 私有执行面（P2）完成后回填「适配器」栏
 
 ---
@@ -116,11 +116,11 @@
 - [ ] ③ 小额挂单——人工执行：`POST /fapi/v1/order`（最小名义限价）
 - [ ] ④ 撤单——人工执行：`DELETE /fapi/v1/order`
 - [ ] ⑤ 市价成交——人工执行：最小名义 MARKET
-- [ ] ⑥ 保护单覆盖核验——人工执行：条件单走 `POST /fapi/v1/algoOrder`（STOP_MARKET + TAKE_PROFIT_MARKET 双腿，字段 triggerPrice / clientAlgoId）→ `current_all_algo_open_orders` algo 专属回读校验双腿；openOrders 回读仅覆盖普通单，禁止当保护单全集
-- [ ] ⑦ 棘轮改止损——人工执行：`cancel_algo_order` 撤旧条件单 + 新挂 `POST /fapi/v1/algoOrder`（新 triggerPrice），algo 回读验证旧单不存在、新 SL 生效
-- [ ] ⑧ 平仓——人工执行：MARKET reduceOnly（Hedge Mode 禁传 reduceOnly）；平仓后清理兄弟腿：`cancel_algo_order` 撤残留条件单，algo 回读确认清零
-- [ ] ⑨ 台账对账——curl 直测：`GET /fapi/v1/income` → `trades(venue='binance')`；条件腿经 `query_algo_order`（algo 专属查询端点）核对触发/成交
-- [ ] ⑩ 重启恢复——重启后回读 positionRisk + openOrders（仅普通单）+ `current_all_algo_open_orders`（条件腿），验证保护单与预期一致、无残留条件单
+- [ ] ⑥ 保护单覆盖核验——人工执行：条件单走 `POST /fapi/v1/algoOrder`（STOP_MARKET + TAKE_PROFIT_MARKET 双腿，字段 triggerPrice / clientAlgoId）→ `GET /fapi/v1/openAlgoOrders (current_all_algo_open_orders)` algo 专属回读校验双腿；openOrders 回读仅覆盖普通单，禁止当保护单全集
+- [ ] ⑦ 棘轮改止损——人工执行：`DELETE /fapi/v1/algoOrder (cancel_algo_order)` 撤旧条件单 + 新挂 `POST /fapi/v1/algoOrder`（新 triggerPrice），algo 回读验证旧单不存在、新 SL 生效
+- [ ] ⑧ 平仓——人工执行：MARKET reduceOnly（Hedge Mode 禁传 reduceOnly）；平仓后清理兄弟腿：`DELETE /fapi/v1/algoOrder (cancel_algo_order)` 撤残留条件单，algo 回读确认清零
+- [ ] ⑨ 台账对账——curl 直测：`GET /fapi/v1/income` → `trades(venue='binance')`；条件腿经 `GET /fapi/v1/algoOrder (query_algo_order)`（algo 专属查询端点）核对触发/成交
+- [ ] ⑩ 重启恢复——重启后回读 positionRisk + openOrders（仅普通单）+ `GET /fapi/v1/openAlgoOrders (current_all_algo_open_orders)`（条件腿），验证保护单与预期一致、无残留条件单
 
 ---
 
@@ -137,11 +137,11 @@
 - [ ] ③ 小额挂单——curl 直测：`POST /api/v4/futures/usdt/orders`（最小张数限价）
 - [ ] ④ 撤单——curl 直测：`DELETE /api/v4/futures/usdt/orders/{order_id}`
 - [ ] ⑤ 市价成交——curl 直测：`POST /api/v4/futures/usdt/orders`（tif=ioc，最小张数）
-- [ ] ⑥ 保护单覆盖核验——curl 直测：`POST /api/v4/futures/usdt/price_orders`（STOP/TP 独立条件单）→ `GET /api/v4/futures/usdt/open_price_orders` 回读校验
+- [ ] ⑥ 保护单覆盖核验——curl 直测：`POST /api/v4/futures/usdt/price_orders`（STOP/TP 独立条件单）→ `GET /api/v4/futures/usdt/price_orders?status=open` 回读校验
 - [ ] ⑦ 棘轮改止损——curl 直测：**优先直测原生改单** `PUT /api/v4/futures/usdt/price_orders/amend`（SDK update_price_triggered_order；能力未证实→撤旧挂新 `DELETE /api/v4/futures/usdt/price_orders/{id}` + 重挂新价单兜底），结果回填台账行 #3；dual_plus / decimal amount 支持情况见台账行 #3
-- [ ] ⑧ 平仓——curl 直测：`POST /api/v4/futures/usdt/orders`（reduce_only=true，tif=ioc）；平仓后清理兄弟腿：撤该仓位残留 price_orders，`open_price_orders` 回读确认清零
+- [ ] ⑧ 平仓——curl 直测：`POST /api/v4/futures/usdt/orders`（reduce_only=true，tif=ioc）；平仓后清理兄弟腿：撤该仓位残留 price_orders，`price_orders?status=open` 回读确认清零
 - [ ] ⑨ 台账对账——curl 直测：`GET /api/v4/futures/usdt/my_trades` + 平仓结算流水 → `trades(venue='gate')`
-- [ ] ⑩ 重启恢复——重启后回读 positions + open_price_orders，验证保护单与预期一致、无残留条件单
+- [ ] ⑩ 重启恢复——重启后回读 positions + price_orders?status=open，验证保护单与预期一致、无残留条件单
 - [ ] 适配器栏：`exchanges/gate.py` 域名修复后全流程沙盒回归（Gate 两段式回滚流程已实现 e0712ad）
 
 ---
@@ -159,11 +159,11 @@
 - [ ] ③ 小额挂单——人工执行：`POST /api/v4/futures/usdt/orders`（≤20U 名义限价）
 - [ ] ④ 撤单——人工执行：`DELETE /api/v4/futures/usdt/orders/{order_id}`
 - [ ] ⑤ 市价成交——人工执行：最小名义 tif=ioc
-- [ ] ⑥ 保护单覆盖核验——人工执行：price_orders 双腿 + open_price_orders 回读
+- [ ] ⑥ 保护单覆盖核验——人工执行：price_orders 双腿 + price_orders?status=open 回读
 - [ ] ⑦ 棘轮改止损——人工执行：**优先直测原生改单** `PUT /api/v4/futures/usdt/price_orders/amend`（能力未证实→撤旧挂新 price_orders 兜底），结果回填台账行 #3
-- [ ] ⑧ 平仓——人工执行：reduce_only=true tif=ioc；平仓后清理兄弟腿：撤该仓位残留 price_orders，open_price_orders 回读确认清零
+- [ ] ⑧ 平仓——人工执行：reduce_only=true tif=ioc；平仓后清理兄弟腿：撤该仓位残留 price_orders，price_orders?status=open 回读确认清零
 - [ ] ⑨ 台账对账——curl 直测：my_trades + 结算流水 → `trades(venue='gate')`
-- [ ] ⑩ 重启恢复——重启后回读 positions + open_price_orders，验证保护单与预期一致、无残留条件单
+- [ ] ⑩ 重启恢复——重启后回读 positions + price_orders?status=open，验证保护单与预期一致、无残留条件单
 
 ---
 
