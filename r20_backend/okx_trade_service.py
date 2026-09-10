@@ -134,18 +134,41 @@ def _dec_eq(a: Any, b: Any) -> bool:
         return str(a) == str(b)
 
 
+def _dec_num(v: Any):
+    """十进制解析 → Decimal；None = 不可量化（缺失/非法），供短缺判定的保守兜底。"""
+    from decimal import Decimal, InvalidOperation
+    if v in (None, ""):
+        return None
+    try:
+        return Decimal(str(v))
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _dec_text(d) -> str:
+    """Decimal → 人话数量（4.000→'4'；不做 float 往返）。"""
+    s = str(d.normalize())
+    return s if "E" not in s.upper() else str(int(d))
+
+
 def verify_attached_protection(*, inst_id: str, expected_legs: list[dict[str, Any]],
                                attach_rows: list[dict[str, Any]] | None = None,
                                pending_rows: list[dict[str, Any]],
                                main_order_state: str | None = None) -> dict[str, Any]:
     """主单附带保护腿回读核验。
 
-    expected_legs: 每腿 {"kind","side","sz","x_price"[,"attach_algo_cl_ord_id"]}
+    expected_legs: 每腿 {"kind","side","sz","x_price"[,"attach_algo_cl_ord_id"]}；
+                   sz 语义 = 主单成交量所需的应覆盖数量。
     attach_rows:   下单回执中的 attachAlgoOrds 结果行（failCode/failReason 非空 ⇒ 未受理）
     pending_rows:  回读 pending_algo_orders 的在途条件/OCO 行（账户与合约由
                    pending_algo_orders 的私有签名通道与本地过滤保证归属——本函数
                    另钉 instId 一致才允许记 PROTECTED）
     返回 {"status": 三态之一, "legs": [逐腿判定], "detail": 人话}；HTTP 200 ≠ 受保护。
+    US-004 观察项②收口：数量维度独立短路——回读行存在且 side/触发值匹配但覆盖
+    数量（含多行累加）< 期望 ⇒ **结构性短缺，显式 UNPROTECTED**（与「尚未回读到」
+    区分，供下游自动补挂/告警）；空回读、不可量化行、超量行、多行合计已达期望
+    但非单行精确等中间态一律保守留在 PROTECTION_PENDING（既不升 PROTECTED 也不
+    冤枉成短缺）；failCode 路径维持原判不动。
     """
     if str(main_order_state or "").lower() in ("canceled", "cancelled"):
         # 直接终态（含 2026-08-20 post_only 不先 live 的 canceled 直达）：主单永不成交，
@@ -155,6 +178,7 @@ def verify_attached_protection(*, inst_id: str, expected_legs: list[dict[str, An
                 "detail": "主单直接终态（canceled），附带保护从未提交——按未保护处理，不等待 live"}
     legs_out: list[dict[str, Any]] = []
     any_failed = any_pending = all_ok = False
+    any_shortfall = False
     for leg in expected_legs:
         kind = str(leg.get("kind") or "")
         # ① 受理回执 failCode/failReason 非空 ⇒ 该腿明确未创建（HTTP 200 不代表受保护）
@@ -178,8 +202,14 @@ def verify_attached_protection(*, inst_id: str, expected_legs: list[dict[str, An
                              "failReason": fail[1]})
             any_failed = True
             continue
-        # ② pending 回读逐字段覆盖：合约/方向/数量/触发值
+        # ② pending 回读逐字段覆盖：合约/方向/触发值/数量。数量维度精判
+        #    （US-004 观察项②）：精确等=protected；side/触发匹配但 sz 小于期望=
+        #    短缺候选行（后面可能仍有精确行救场）；不可量化/超量行保守忽略——
+        #    「行存在但回读未齐」的中间态按原语义留在 pending_readback，注释即此意。
         hit = None
+        shortfall_rows: list[dict[str, Any]] = []
+        loose_row = False   # 见过不可量化/超量行：信息不齐时不武断判短缺
+        exp_sz = _dec_num(leg.get("sz"))
         for pr in pending_rows or []:
             if not isinstance(pr, dict):
                 continue
@@ -187,26 +217,47 @@ def verify_attached_protection(*, inst_id: str, expected_legs: list[dict[str, An
                 continue
             if leg.get("side") and str(pr.get("side") or "") != str(leg["side"]):
                 continue
-            if leg.get("sz") not in (None, "") and not _dec_eq(pr.get("sz"), leg["sz"]):
-                continue
             if leg.get("x_price") not in (None, ""):
                 trig = pr.get("xPrice") or pr.get("tpTriggerPx") or pr.get("slTriggerPx")
                 if not _dec_eq(trig, leg["x_price"]):
                     continue
+            if exp_sz is not None:
+                got_sz = _dec_num(pr.get("sz"))
+                if got_sz is None or got_sz > exp_sz:
+                    loose_row = True           # 不判短缺也不记精确覆盖
+                    continue
+                if got_sz < exp_sz:
+                    shortfall_rows.append(pr)
+                    continue               # 暂记短缺，继续找精确行
             hit = pr
             break
         if hit is not None:
             legs_out.append({"kind": kind, "state": "protected",
                              "algoId": str(hit.get("algoId") or "")})
         else:
-            legs_out.append({"kind": kind, "state": "pending_readback",
-                             "reason": "回执无 failCode 但 pending 未见——attach 于完全成交后提交，"
-                                       "可能尚未生效，须再回读；期间不得宣称受保护"})
-            any_pending = True
+            rows_sum = None
+            if exp_sz is not None and shortfall_rows and not loose_row:
+                from decimal import Decimal
+                rows_sum = sum((_dec_num(r.get("sz")) for r in shortfall_rows),
+                               Decimal("0"))
+            if rows_sum is not None and rows_sum < exp_sz:
+                # 结构性短缺：覆盖数量 < 主单成交量——不是「还没回读到」，
+                # 等待与补挂是两回事，显式 UNPROTECTED 让下游能反应。
+                legs_out.append({"kind": kind, "state": "coverage_shortfall",
+                                 "reason": f"covered {_dec_text(rows_sum)} < filled {_dec_text(exp_sz)}",
+                                 "algo_ids": [str(r.get("algoId") or "") for r in shortfall_rows]})
+                any_shortfall = True
+            else:
+                legs_out.append({"kind": kind, "state": "pending_readback",
+                                 "reason": "回执无 failCode 但 pending 未见——attach 于完全成交后提交，"
+                                           "可能尚未生效，须再回读；期间不得宣称受保护"})
+                any_pending = True
     all_ok = all(l["state"] == "protected" for l in legs_out) and bool(legs_out)
-    if any_failed or (str(main_order_state or "").lower() == "filled" and not any_pending and not all_ok):
+    if any_failed or any_shortfall or (str(main_order_state or "").lower() == "filled"
+                                       and not any_pending and not all_ok):
         status = "UNPROTECTED"
-        detail = "存在未受理/缺失保护腿——按未保护处理（审计：不得凭 200 宣称保护生效）"
+        detail = ("存在未受理/缺失/覆盖数量结构性短缺（covered<filled，非等待可解）的保护腿"
+                  "——按未保护处理（审计：不得凭 200 宣称保护生效）")
     elif all_ok:
         status = "PROTECTED"
         detail = "全部保护腿经 pending 回读覆盖账户/合约/方向/数量/触发值核验"
