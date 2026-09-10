@@ -23,6 +23,9 @@ class BackupMethodTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
+        # Validate URL syntax/IP policy without querying public DNS.
+        dns = patch("socket.getaddrinfo", return_value=[(2, 1, 6, "", ("93.184.216.34", 443))])
+        dns.start(); self.addCleanup(dns.stop)
         self.original_admin_auth = app_module.admin_auth
         self.original_config_file = store.CONFIG_FILE
         self.original_root = runtime.ROOT

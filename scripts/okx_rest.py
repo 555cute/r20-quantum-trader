@@ -371,7 +371,7 @@ def pending_algo_orders(inst_id: str | None = None, *, inst_type: str = "SWAP", 
     """GET /api/v5/trade/orders-algo-pending. ``instId`` is sent to the API and
     additionally filtered locally — older deployments ignored the query filter."""
     rows = request("GET", "/api/v5/trade/orders-algo-pending", {
-        "instType": inst_type, "ordType": ord_type, "limit": limit,
+        "instType": inst_type, "instId": inst_id, "ordType": ord_type, "limit": limit,
     })
     if inst_id:
         rows = [row for row in rows if str(row.get("instId") or "") == inst_id]

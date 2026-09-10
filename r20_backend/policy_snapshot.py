@@ -18,7 +18,6 @@ import sys
 import tempfile
 import threading
 import time
-from datetime import datetime, timedelta, timezone
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -29,8 +28,6 @@ except ImportError:
     fcntl = None  # type: ignore
 
 from r20_backend.version import __version__
-
-_BJ = timezone(timedelta(hours=8))
 
 logger = logging.getLogger(__name__)
 
@@ -443,7 +440,7 @@ def _rebuild_index_from_archives(a_dir: Path) -> List[Dict[str, Any]]:
                 "author": str(meta.get("author") or "admin"),
                 "archived_at": str(
                     meta.get("archived_at")
-                    or datetime.fromtimestamp(f.stat().st_mtime, _BJ).isoformat(sep=" ", timespec="seconds")
+                    or time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(f.stat().st_mtime))
                 ),
                 "summary": str(package.get("summary") or ""),
                 "archive_file": f.name,
@@ -611,7 +608,7 @@ def archive_current_policy(
             "name": safe_name,
             "description": description.strip(),
             "author": author,
-            "archived_at": datetime.now(_BJ).isoformat(sep=" ", timespec="seconds"),
+            "archived_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "archive_file": archive_file.name,
         }
 
