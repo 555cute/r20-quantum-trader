@@ -37,25 +37,74 @@ class ThreeTierRatchetAndCloudSyncTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def test_sync_cloud_algo_stop_success_and_idempotence(self):
-        with patch("scripts.ai_factor_trader.run_json_cmd") as mock_cmd:
-            # 1. When existing algo already matches new_sl, do not issue redundant amend
-            mock_cmd.return_value = [
-                {"state": "live", "posSide": "long", "algoId": "algo_101", "slTriggerPx": "2500.0"}
-            ]
-            res = aft.sync_cloud_algo_stop("ETH-USDT-SWAP", "long", 2500.0)
-            self.assertTrue(res)
-            # Only 1 call to fetch orders, no amend call
-            self.assertEqual(mock_cmd.call_count, 1)
+        # US-007：sync_cloud_algo_stop 已迁移 scripts.okx_rest（V5 orders-algo-pending /
+        # amend-algos）。封闭三律：在 HTTP 边界 patch scripts.okx_rest.urlopen（import
+        # 绑定处，律②），freeze 假凭证周期注入（律①零真实网络），不再 mock 已删除的
+        # run_json_cmd CLI 契约（律③）。
+        import json as _json
+        import scripts.okx_rest as okx_rest
+        from scripts.okx_runtime import freeze_environment, unfreeze_environment
 
-            # 2. When existing algo has different slTriggerPx, issue amend
-            mock_cmd.reset_mock()
-            mock_cmd.side_effect = [
-                [{"state": "live", "posSide": "long", "algoId": "algo_101", "slTriggerPx": "2400.0"}],
-                {"code": "0", "msg": "amend success"}
-            ]
+        calls = []
+
+        def _fake_urlopen(request, timeout=None):
+            body_text = request.data.decode("utf-8") if request.data else ""
+            calls.append((request.get_method(), request.full_url, body_text))
+            if request.get_method() == "GET":
+                payload = {"code": "0", "msg": "", "data": [dict(self._ALGO_ROW)]}
+            else:
+                payload = {"code": "0", "msg": "", "data": [{"algoId": "algo_101", "sCode": "0", "sMsg": ""}]}
+            import io
+            resp = MagicMock()
+            raw = _json.dumps(payload).encode("utf-8")
+            resp.read.return_value = raw
+            resp.__enter__.return_value = resp
+            resp.__exit__.return_value = False
+            return resp
+
+        freeze_environment({
+            "R20_OKX_ENV": "demo", "OKX_DEMO_API_KEY": "AK",
+            "OKX_DEMO_SECRET_KEY": "SK", "OKX_DEMO_PASSPHRASE": "PP",
+        })
+        self.addCleanup(unfreeze_environment)
+        with patch.object(okx_rest, "urlopen", _fake_urlopen):
+            # 1. 云端 SL 已一致 → 幂等：只查询，不发 amend
+            self.algo_row_sl = "2500.0"
             res = aft.sync_cloud_algo_stop("ETH-USDT-SWAP", "long", 2500.0)
             self.assertTrue(res)
-            self.assertEqual(mock_cmd.call_count, 2)
+            self.assertEqual(len(calls), 1)
+            method, url, body = calls[0]
+            self.assertEqual(method, "GET")
+            self.assertIn("/api/v5/trade/orders-algo-pending", url)
+            self.assertIn("instType=SWAP", url)
+
+            # 2. 云端 SL 不一致 → 发 amend-algos（数组体，市价 newSlOrdPx=-1）
+            calls.clear()
+            self.algo_row_sl = "2400.0"
+            res = aft.sync_cloud_algo_stop("ETH-USDT-SWAP", "long", 2500.0)
+            self.assertTrue(res)
+            self.assertEqual(len(calls), 2)
+            method, url, body = calls[1]
+            self.assertEqual(method, "POST")
+            self.assertIn("/api/v5/trade/amend-algos", url)
+            row = _json.loads(body)[0]
+            self.assertEqual(row["algoId"], "algo_101")
+            self.assertEqual(float(row["newSlTriggerPx"]), 2500.0)
+            self.assertEqual(row["newSlOrdPx"], "-1")
+
+            # 3. fail-closed：未配置 Key → 返回 False 且零 HTTP 调用
+            unfreeze_environment()
+            freeze_environment({"R20_OKX_ENV": "demo"})
+            calls.clear()
+            self.assertFalse(aft.sync_cloud_algo_stop("ETH-USDT-SWAP", "long", 2500.0))
+            self.assertEqual(calls, [])
+
+    @property
+    def _ALGO_ROW(self):
+        sl = getattr(self, "algo_row_sl", "2500.0")
+        return {"algoId": "algo_101", "instId": "ETH-USDT-SWAP", "state": "live",
+                "posSide": "long", "ordType": "oco", "side": "sell", "sz": "2",
+                "reduceOnly": "true", "tpTriggerPx": "3000.0", "slTriggerPx": sl}
 
     def test_long_three_tier_ratchet_progression(self):
         f = {
