@@ -285,16 +285,22 @@ class AiFactorTraderPositionProtectionTest(unittest.TestCase):
         self.assertFalse(closed); self.assertEqual(reason,"持仓监控中"); close.assert_not_called()
 
     def test_cloud_oco_gap_is_repaired_and_verified(self):
-        responses=[
-            {"ok":True,"data":[],"stderr":"","stdout":"[]"},
-            {"ok":True,"data":{"algoId":"88"},"stderr":"","stdout":"{}"},
-            {"ok":True,"data":[{"state":"live","posSide":"long","side":"sell","reduceOnly":"true","sz":"4","tpTriggerPx":"106","slTriggerPx":"101"}],"stderr":"","stdout":"[]"},
-        ]
-        with patch.object(ai_factor_trader,"run_cmd_result",side_effect=responses) as run, patch.object(ai_factor_trader.time,"sleep"):
+        # US-007：run_cmd_result CLI 包装已删；同语义迁到 okx_rest 函数边界——
+        # 首查零覆盖→补挂 place_algo_oco(oco/reduceOnly/cxlOnClosePos 参数化)→复查满覆盖。
+        live_rows=[{"state":"live","posSide":"long","side":"sell","reduceOnly":"true","sz":"4","tpTriggerPx":"106","slTriggerPx":"101"}]
+        with patch.object(ai_factor_trader,"okx_rest") as rest, patch.object(ai_factor_trader.time,"sleep"):
+            rest.pending_algo_orders.side_effect=[[], live_rows]
+            rest.place_algo_oco.return_value={"algoId":"88"}
             ok,detail=ai_factor_trader.ensure_cloud_position_protection("SOL-USDT-SWAP","long",4,106,101)
         self.assertTrue(ok); self.assertIn("repaired and verified",detail)
-        self.assertIn("--ordType oco",run.call_args_list[1].args[0])
-        self.assertIn("--reduceOnly",run.call_args_list[1].args[0])
+        rest.pending_algo_orders.assert_called_with("SOL-USDT-SWAP")
+        args=rest.place_algo_oco.call_args.args
+        self.assertEqual(args[:2],("SOL-USDT-SWAP","sell"))  # 缺口 4→平仓侧 sell
+        kwargs=rest.place_algo_oco.call_args.kwargs
+        self.assertEqual(kwargs["pos_side"],"long"); self.assertEqual(kwargs["td_mode"],"cross")
+        self.assertEqual(kwargs["tp_trigger_px"],106); self.assertEqual(kwargs["sl_trigger_px"],101)
+        self.assertEqual(kwargs["tp_ord_px"],"-1"); self.assertEqual(kwargs["sl_ord_px"],"-1")
+        self.assertTrue(kwargs["reduce_only"]); self.assertTrue(kwargs["cxl_on_close_pos"])
 
     def test_stale_order_query_failure_aborts_cleanup(self):
         with patch.object(ai_factor_trader,"okx_rest") as rest:
