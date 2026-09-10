@@ -106,6 +106,14 @@ class ThreeTierRatchetAndCloudSyncTests(unittest.TestCase):
                 "posSide": "long", "ordType": "oco", "side": "sell", "sz": "2",
                 "reduceOnly": "true", "tpTriggerPx": "3000.0", "slTriggerPx": sl}
 
+    def test_ai_factor_trader_has_no_cli_surface_left(self):
+        # 律③正向守卫：algo 面迁移后（US-007），生产源码不得再出现任何
+        # okx CLI 前缀/别名/命令串——回归即红，替未来迭代守住封闭边界。
+        import inspect as _inspect
+        source = _inspect.getsource(aft)
+        for dead in ("replace_cli_prefix", "okx_private_command", "okx swap", "okx account", "okx --"):
+            self.assertNotIn(dead, source, f"CLI 残留回潮: {dead}")
+
     def test_long_three_tier_ratchet_progression(self):
         f = {
             "instId": "ETH-USDT-SWAP",
