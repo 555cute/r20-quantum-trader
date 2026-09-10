@@ -8,9 +8,11 @@ import { computed, onMounted } from 'vue';
 import { FlaskConical, RefreshCw, ShieldCheck } from 'lucide-vue-next';
 import { useI18n } from '../../composables/useI18n';
 import { useVenueAccountsStore, type VenueKey } from '../../stores/venueAccounts';
+import { useListingStatusStore } from '../../stores/listingStatus';
 import VenueAccountCard from './VenueAccountCard.vue';
 
 const store = useVenueAccountsStore();
+const listing = useListingStatusStore();
 const { t } = useI18n();
 
 const VENUES: VenueKey[] = ['okx', 'gate', 'binance'];
@@ -18,7 +20,19 @@ const isDemo = computed(() => store.environment === 'demo');
 
 onMounted(() => {
   void store.refresh();
+  void listing.refresh(store.environment);
 });
+
+/** 环境切换：账户与合约目录两条数据轴同步换挡（旧数据各自清空，防串显）。 */
+function switchEnvironment(env: 'demo' | 'live'): void {
+  store.setEnvironment(env);
+  void listing.refresh(env);
+}
+
+function refreshAll(): void {
+  void store.refresh();
+  void listing.refresh();
+}
 </script>
 
 <template>
@@ -39,14 +53,14 @@ onMounted(() => {
         >
           <button
             class="btn btn-sm" :class="isDemo ? 'btn-filled' : 'btn-ghost'"
-            :aria-pressed="isDemo" data-test="env-demo" @click="store.setEnvironment('demo')"
+            :aria-pressed="isDemo" data-test="env-demo" @click="switchEnvironment('demo')"
           >
             <FlaskConical class="h-3.5 w-3.5" />
             {{ t('dash.venueAccounts.envDemo') }}
           </button>
           <button
             class="btn btn-sm" :class="!isDemo ? 'btn-filled' : 'btn-ghost'"
-            :aria-pressed="!isDemo" data-test="env-live" @click="store.setEnvironment('live')"
+            :aria-pressed="!isDemo" data-test="env-live" @click="switchEnvironment('live')"
           >
             <ShieldCheck class="h-3.5 w-3.5" />
             {{ t('dash.venueAccounts.envLive') }}
@@ -54,7 +68,7 @@ onMounted(() => {
         </div>
         <button
           class="btn btn-ghost btn-icon btn-sm" :title="t('dash.venueAccounts.refresh')"
-          data-test="venue-refresh" :disabled="store.loading" @click="store.refresh()"
+          data-test="venue-refresh" :disabled="store.loading || listing.loading" @click="refreshAll()"
         >
           <RefreshCw :class="store.loading && 'animate-spin'" />
         </button>
@@ -72,7 +86,8 @@ onMounted(() => {
         :key="`${store.environment}-${v}`"
         :venue="v"
         :account="store.venues?.[v] ?? null"
-        :loading="store.loading"
+        :listing="listing.venues?.[v] ?? null"
+        :loading="store.loading || listing.loading"
       />
     </div>
 

@@ -30,4 +30,9 @@ export const enVenueAccounts = {
     lastSync: 'Last sync',
     unitN: '{n}',
   },
+  listing: {
+    label: 'Contracts',
+    ok: 'Checked · {n}',
+    unavailable: 'Directory unavailable · reconciliation skipped',
+  },
 };

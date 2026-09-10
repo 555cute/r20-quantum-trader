@@ -50,6 +50,16 @@ class ListingCheck:
     source: str                # 'cache' | 'fresh'
 
 
+@dataclass(frozen=True)
+class ListingSnapshot:
+    """场所级目录快照（前端「合约目录对账」徽章数据面，US-007 前端配套）。"""
+    ok: bool                   # False 仅表目录不可用（fail-open 语义：不阻塞）
+    reason: Optional[str]
+    checked_at: str            # UTC ISO8601（目录不可用时 = 本次判定时刻）
+    source: str                # 'cache' | 'fresh' | 'unavailable'
+    listed_count: Optional[int]  # 未知 = None（铁律：绝不填 0 冒充）
+
+
 def _norm(contract_native: str) -> str:
     return str(contract_native or "").strip().upper()
 
@@ -154,3 +164,31 @@ def ensure_contract_listed(venue: str, environment: str,
                                 checked_at=checked_at, source=source)
 
     return ListingCheck(ok=True, reason=None, checked_at=checked_at, source=source)
+
+
+def listing_snapshot(venue: str, environment: str) -> ListingSnapshot:
+    """场所级目录快照（只读面，前端展示用；复用 TTL 缓存，零新增出网压力）。
+
+    - 目录可用 → ok=True + listed_count（source='cache'/'fresh'）；
+    - 目录拉取失败 → **fail-open 同语义**：ok=True（表示不阻塞交易）但
+      listed_count=None + source='unavailable' + 中文 reason；
+    - venue/环境档未知 → ok=False（结构性错误，须显式暴露不能装没事）。
+    """
+    vkey = str(venue or "").strip().lower()
+    ekey = str(environment or "").strip().lower()
+    checked_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    try:
+        env_profiles.get_profile(vkey, ekey)
+    except ExchangeCapabilityError:
+        return ListingSnapshot(ok=False, reason=f"未知环境档 {vkey}/{ekey}",
+                               checked_at=checked_at, source="unavailable",
+                               listed_count=None)
+    try:
+        directory, source = _get_directory(vkey, ekey)
+    except Exception as exc:  # fail-open：对账是增强不是风控闸门
+        warnings.warn(f"[listing-gate] {vkey}/{ekey} 行情目录拉取失败，跳过对账: {exc}")
+        return ListingSnapshot(ok=True, reason="行情目录不可用，跳过对账",
+                               checked_at=checked_at, source="unavailable",
+                               listed_count=None)
+    return ListingSnapshot(ok=True, reason=None, checked_at=checked_at,
+                           source=source, listed_count=len(directory))

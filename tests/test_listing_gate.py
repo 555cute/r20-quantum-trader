@@ -15,7 +15,7 @@ from urllib.request import Request
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from r20_backend.exchanges import listing as listing_mod
-from r20_backend.exchanges.listing import ensure_contract_listed
+from r20_backend.exchanges.listing import ensure_contract_listed, listing_snapshot
 
 
 def _resp(payload) -> object:
@@ -165,6 +165,31 @@ class ListingGateTest(unittest.TestCase):
         chk = ensure_contract_listed("okx", "live", "SUI-USDT-SWAP")
         self.assertFalse(chk.ok)
         self.assertEqual(len(net.requests), 2)
+
+    def test_11_snapshot_counts_and_cache(self):
+        net = _FakeNet([OKX_LIVE])
+        listing_mod.urlopen = net
+        snap = listing_snapshot("okx", "live")
+        self.assertEqual(snap.listed_count, 2)
+        self.assertEqual(snap.source, "fresh")
+        # 同 TTL 内第二次：cache 且零新增出网
+        snap2 = listing_snapshot("okx", "live")
+        self.assertEqual(snap2.source, "cache")
+        self.assertEqual(len(net.requests), 1)
+
+    def test_12_snapshot_fail_open_unavailable(self):
+        net = _FakeNet([TimeoutError("network down")])
+        listing_mod.urlopen = net
+        snap = listing_snapshot("gate", "sandbox")
+        self.assertTrue(snap.ok)  # fail-open：不阻塞交易
+        self.assertIsNone(snap.listed_count)  # 未知≠0
+        self.assertEqual(snap.source, "unavailable")
+        self.assertEqual(snap.reason, "行情目录不可用，跳过对账")
+
+    def test_13_snapshot_unknown_env_structural_error(self):
+        snap = listing_snapshot("okx", "paper")
+        self.assertFalse(snap.ok)  # 结构性错误必须显式暴露
+        self.assertIn("未知环境档", snap.reason)
 
 
 def load_tests(loader, tests, pattern):

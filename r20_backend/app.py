@@ -3617,6 +3617,48 @@ def venue_accounts(environment: str = Query(default="demo"),
     }
 
 
+# US-007 前端配套：环境维合约目录对账快照（只读面，复用 listing TTL 缓存）。
+#: 前端 environment 轴（demo|live）→ 各所 profile 环境档（gate 沙盒档名 = sandbox）。
+_LISTING_ENV_MAP: dict[str, dict[str, str]] = {
+    "okx": {"demo": "demo", "live": "live"},
+    "binance": {"demo": "demo", "live": "live"},
+    "gate": {"demo": "sandbox", "live": "live"},
+}
+
+
+@app.get("/api/v1/listing_status")
+def listing_status(environment: str = Query(default="demo"),
+                   x_r20_admin_token: str | None = Header(default=None),
+                   x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
+    """US-007 前端配套：按资金环境逐所返回合约目录对账快照——登录态 + 纯只读。
+
+    - 复用 ``listing.listing_snapshot``（TTL 600s 进程内缓存，同一周期内零新增出网）；
+    - 目录拉取失败 fail-open（ok=True + listed_count=None + source='unavailable'），
+      对账是增强不是风控闸门，前端徽章只提示不阻塞；
+    - venue 顺序/环境映射与 /api/v1/venue_accounts 完全对齐，两环境绝不加总。
+    """
+    require_admin_header(x_r20_admin_token, x_r20_session)
+    env_key = str(environment or "").strip().lower()
+    if env_key not in ("demo", "live"):
+        raise HTTPException(status_code=400, detail="environment 只允许 demo 或 live")
+    from r20_backend.exchanges.listing import listing_snapshot
+    venues: dict[str, dict[str, Any]] = {}
+    for venue in ("okx", "gate", "binance"):
+        snap = listing_snapshot(venue, _LISTING_ENV_MAP[venue][env_key])
+        venues[venue] = {
+            "ok": snap.ok,
+            "reason": snap.reason,
+            "checked_at": snap.checked_at,
+            "source": snap.source,
+            "listed_count": snap.listed_count,
+        }
+    return {
+        "environment": env_key,
+        "venues": venues,
+        "captured_at_ms": int(time.time() * 1000),
+    }
+
+
 # Preserve the existing public dashboard and its relative-path API contract at /.
 # Admin and /api/v1 routes above are evaluated before this catch-all mount.
 from dashboard.app import app as dashboard_app

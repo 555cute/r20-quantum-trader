@@ -30,4 +30,9 @@ export const zhVenueAccounts = {
     lastSync: '最后同步',
     unitN: '{n} 笔',
   },
+  listing: {
+    label: '合约目录',
+    ok: '已对账 · {n} 项',
+    unavailable: '目录不可用 · 已跳过对账',
+  },
 };
