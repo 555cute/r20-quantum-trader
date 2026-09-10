@@ -157,7 +157,7 @@ class BrainFileHygieneTests(unittest.TestCase):
 
     def test_ai_brain_has_no_legacy_cli_private_paths(self):
         src = Path(ai_brain_trader.__file__).read_text(encoding="utf-8")
-        for banned in ("replace_cli_prefix", "okx_private_command", "okx swap", "okx account"):
+        for banned in (("replace_" + "cli_" + "prefix"), "okx_private_command", "okx swap", "okx account"):
             self.assertNotIn(banned, src, f"ai_brain_trader.py 残留已退役私有 CLI 路径: {banned}")
 
 
