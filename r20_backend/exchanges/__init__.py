@@ -17,6 +17,7 @@ from .base import (
     canonical_base,
 )
 from .binance import BinanceAdapter
+from .diagnostics import diagnose_venue_connection
 from .gate import GateAdapter
 from .identity import (
     ANON_CREDENTIAL,
@@ -36,6 +37,7 @@ from .registry import (
     require_execution,
     resolve_symbol,
     venue_credentials,
+    venue_passphrase,
     venue_testnet_enabled,
 )
 
@@ -44,8 +46,8 @@ __all__ = [
     "InstrumentSpec", "canonical_base", "BinanceAdapter", "GateAdapter",
     "OKXPublicAdapter", "ADAPTER_EXECUTION_ENABLED", "execution_open",
     "get_adapter", "is_registered", "registered_venues", "require_execution",
-    "resolve_symbol", "clear_instances", "venue_credentials",
-    "venue_testnet_enabled", "env_profiles",
+    "resolve_symbol", "clear_instances", "venue_credentials", "venue_passphrase",
+    "venue_testnet_enabled", "env_profiles", "diagnose_venue_connection",
     "AccountKey", "ANON_CREDENTIAL", "credential_fingerprint",
     "is_sandbox_environment", "gate_environment_axis",
 ]

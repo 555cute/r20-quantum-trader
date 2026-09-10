@@ -62,7 +62,7 @@ const gateExecPhrase = ref('')
 const savingMx = ref(false)
 const savingOkx = ref(false)
 const savingVenue = ref<'binance' | 'gate' | ''>('')
-const probingVenue = ref<'binance' | 'gate' | ''>('')
+const probingVenue = ref<'binance' | 'gate' | 'okx' | ''>('')
 
 async function loadAll() {
   loading.value = true
@@ -237,14 +237,53 @@ async function loadMx() {
   } catch { mx.value = null }
 }
 
-/** 单所档位/凭证检测：重读后端凭证就绪态与公共行情健康（纯只读，零写操作）。 */
-async function probeVenue(venue: 'binance' | 'gate') {
+/** 单所档位/凭证连接诊断（US-003）：支持未保存凭证的实弹预检与公共网络连通性探测。 */
+async function probeVenue(venue: 'binance' | 'gate' | 'okx') {
   probingVenue.value = venue
   try {
+    const isDemo = venue === 'okx'
+      ? (config.value?.editable?.okx_environment === 'demo')
+      : !!mxTestnet.value[venue]
+    const env = isDemo ? 'demo' : 'live'
+
+    const payload: Record<string, any> = {
+      venue,
+      environment: env,
+    }
+
+    if (venue === 'binance') {
+      const k = mxForm.value.binance_api_key.trim()
+      const s = mxForm.value.binance_secret_key.trim()
+      if (k) payload.api_key = k
+      if (s) payload.secret_key = s
+    } else if (venue === 'gate') {
+      const k = mxForm.value.gate_api_key.trim()
+      const s = mxForm.value.gate_secret_key.trim()
+      if (k) payload.api_key = k
+      if (s) payload.secret_key = s
+    } else if (venue === 'okx') {
+      if (isDemo) {
+        if (keys.value.demo_key.trim()) payload.api_key = keys.value.demo_key.trim()
+        if (keys.value.demo_secret.trim()) payload.secret_key = keys.value.demo_secret.trim()
+        if (keys.value.demo_pass.trim()) payload.passphrase = keys.value.demo_pass.trim()
+      } else {
+        if (keys.value.live_key.trim()) payload.api_key = keys.value.live_key.trim()
+        if (keys.value.live_secret.trim()) payload.secret_key = keys.value.live_secret.trim()
+        if (keys.value.live_pass.trim()) payload.passphrase = keys.value.live_pass.trim()
+      }
+    }
+
+    const res: any = await api('/api/v1/admin/multi-exchange/test-connection', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+
+    if (res?.ok) {
+      toast.ok(res.message || `${venue.toUpperCase()} 连接诊断成功`)
+    } else {
+      toast.err(res?.message || `${venue.toUpperCase()} 连接诊断失败`)
+    }
     await loadMx()
-    const v = mx.value?.venues?.[venue]
-    if (!v) { toast.err(`${venue.toUpperCase()} 状态读取失败`); return }
-    toast.ok(`${venue.toUpperCase()} 凭证${v.has_api_key ? '已就绪' : '未配置'} · 档位 ${v.testnet ? '沙盒' : '实盘'} · 执行闸 ${v.execution_open ? '开' : '关'}`)
   } catch (e: any) {
     toast.err(`检测失败：${e.message}`)
   } finally {
@@ -517,7 +556,7 @@ onMounted(() => { loadAll(); loadMx() })
                 </p>
               </template>
               <template #probe>
-                <button class="btn btn-quiet btn-sm" @click="rediagnose"><RefreshCw class="h-3 w-3" /> 检测</button>
+                <button class="btn btn-quiet btn-sm" :disabled="probingVenue === 'okx'" @click="probeVenue('okx')"><RefreshCw class="h-3 w-3" :class="probingVenue === 'okx' ? 'animate-spin' : ''" /> {{ probingVenue === 'okx' ? '检测中…' : '检测' }}</button>
               </template>
               <template #save>
                 <button class="btn btn-primary btn-sm" :disabled="savingOkx" @click="saveEnvironment"><Save class="h-3 w-3" /> {{ savingOkx ? '保存中…' : '保存 OKX' }}</button>

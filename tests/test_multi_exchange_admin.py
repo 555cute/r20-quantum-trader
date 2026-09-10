@@ -146,13 +146,238 @@ class RegistryTestnetAndCredentialsTests(unittest.TestCase):
 
     def test_secret_keys_whitelist_contains_venue_keys(self):
         from r20_gateway.secrets import SECRET_KEYS
-        for k in ("BINANCE_API_KEY", "BINANCE_SECRET_KEY", "GATE_API_KEY", "GATE_SECRET_KEY"):
+        for k in (
+            "BINANCE_API_KEY", "BINANCE_SECRET_KEY",
+            "BINANCE_LIVE_API_KEY", "BINANCE_LIVE_SECRET_KEY",
+            "BINANCE_DEMO_API_KEY", "BINANCE_DEMO_SECRET_KEY",
+            "GATE_API_KEY", "GATE_SECRET_KEY",
+            "GATE_LIVE_API_KEY", "GATE_LIVE_SECRET_KEY",
+            "GATE_DEMO_API_KEY", "GATE_DEMO_SECRET_KEY",
+            "OKX_LIVE_API_KEY", "OKX_LIVE_SECRET_KEY", "OKX_LIVE_PASSPHRASE",
+            "OKX_DEMO_API_KEY", "OKX_DEMO_SECRET_KEY", "OKX_DEMO_PASSPHRASE",
+        ):
             self.assertIn(k, SECRET_KEYS)
 
     def test_managed_env_keys_registered(self):
         from r20_backend.settings_store import MANAGED_KEYS
-        self.assertIn("R20_BINANCE_TESTNET", MANAGED_KEYS)
-        self.assertIn("R20_GATE_TESTNET", MANAGED_KEYS)
+        for k in (
+            "R20_BINANCE_TESTNET", "R20_GATE_TESTNET",
+            "BINANCE_LIVE_API_KEY", "BINANCE_DEMO_API_KEY",
+            "GATE_LIVE_API_KEY", "GATE_DEMO_API_KEY",
+        ):
+            self.assertIn(k, MANAGED_KEYS)
+
+
+class SixAccountCredentialsAndDiagnosticsTests(MultiExchangeApiTests):
+    """US-003：三所 6 账户独立凭证加密存储与诊断接口测试（封闭三律：零出网）。"""
+
+    def test_put_stores_independent_6_account_credentials(self):
+        saved: dict = {}
+        cleared = {"n": 0}
+        with patch.object(app_module, "save_secrets", lambda v: saved.update(v)), \
+                patch.object(ex, "clear_instances", lambda: cleared.__setitem__("n", cleared["n"] + 1)), \
+                patch.object(app_module, "update_env", lambda v: None), \
+                patch.object(app_module, "refresh_settings", lambda: None):
+            r = self.client.put("/api/v1/admin/multi-exchange", json={
+                "binance_live_api_key": "BN_L_K",
+                "binance_live_secret_key": "BN_L_S",
+                "binance_demo_api_key": "BN_D_K",
+                "binance_demo_secret_key": "BN_D_S",
+                "gate_live_api_key": "GT_L_K",
+                "gate_live_secret_key": "GT_L_S",
+                "gate_demo_api_key": "GT_D_K",
+                "gate_demo_secret_key": "GT_D_S",
+                "okx_live_api_key": "OKX_L_K",
+                "okx_live_secret_key": "OKX_L_S",
+                "okx_live_passphrase": "OKX_L_P",
+                "okx_demo_api_key": "OKX_D_K",
+                "okx_demo_secret_key": "OKX_D_S",
+                "okx_demo_passphrase": "OKX_D_P",
+            })
+        self.assertEqual(r.status_code, 200, r.text)
+        expected_keys = {
+            "BINANCE_LIVE_API_KEY": "BN_L_K",
+            "BINANCE_LIVE_SECRET_KEY": "BN_L_S",
+            "BINANCE_DEMO_API_KEY": "BN_D_K",
+            "BINANCE_DEMO_SECRET_KEY": "BN_D_S",
+            "GATE_LIVE_API_KEY": "GT_L_K",
+            "GATE_LIVE_SECRET_KEY": "GT_L_S",
+            "GATE_DEMO_API_KEY": "GT_D_K",
+            "GATE_DEMO_SECRET_KEY": "GT_D_S",
+            "OKX_LIVE_API_KEY": "OKX_L_K",
+            "OKX_LIVE_SECRET_KEY": "OKX_L_S",
+            "OKX_LIVE_PASSPHRASE": "OKX_L_P",
+            "OKX_DEMO_API_KEY": "OKX_D_K",
+            "OKX_DEMO_SECRET_KEY": "OKX_D_S",
+            "OKX_DEMO_PASSPHRASE": "OKX_D_P",
+        }
+        for k, v in expected_keys.items():
+            self.assertEqual(saved.get(k), v, f"Key mismatch for {k}")
+        self.assertGreaterEqual(cleared["n"], 1)
+
+    def test_venue_credentials_isolation_and_fallback(self):
+        import r20_gateway.secrets as gw_secrets
+        # 1. 独立配置时精确分流
+        store_sample = {
+            "BINANCE_LIVE_API_KEY": "bn_live_k",
+            "BINANCE_LIVE_SECRET_KEY": "bn_live_s",
+            "BINANCE_DEMO_API_KEY": "bn_demo_k",
+            "BINANCE_DEMO_SECRET_KEY": "bn_demo_s",
+            "GATE_LIVE_API_KEY": "gt_live_k",
+            "GATE_LIVE_SECRET_KEY": "gt_live_s",
+            "GATE_DEMO_API_KEY": "gt_demo_k",
+            "GATE_DEMO_SECRET_KEY": "gt_demo_s",
+            "OKX_LIVE_API_KEY": "okx_live_k",
+            "OKX_LIVE_SECRET_KEY": "okx_live_s",
+            "OKX_LIVE_PASSPHRASE": "okx_live_p",
+            "OKX_DEMO_API_KEY": "okx_demo_k",
+            "OKX_DEMO_SECRET_KEY": "okx_demo_s",
+            "OKX_DEMO_PASSPHRASE": "okx_demo_p",
+        }
+        with patch.object(gw_secrets, "load_secrets", lambda: store_sample):
+            self.assertEqual(ex.venue_credentials("binance", "live"), ("bn_live_k", "bn_live_s"))
+            self.assertEqual(ex.venue_credentials("binance", "demo"), ("bn_demo_k", "bn_demo_s"))
+            self.assertEqual(ex.venue_credentials("gate", "live"), ("gt_live_k", "gt_live_s"))
+            self.assertEqual(ex.venue_credentials("gate", "sandbox"), ("gt_demo_k", "gt_demo_s"))
+            self.assertEqual(ex.venue_credentials("okx", "live"), ("okx_live_k", "okx_live_s"))
+            self.assertEqual(ex.venue_credentials("okx", "demo"), ("okx_demo_k", "okx_demo_s"))
+            self.assertEqual(ex.venue_passphrase("okx", "live"), "okx_live_p")
+            self.assertEqual(ex.venue_passphrase("okx", "demo"), "okx_demo_p")
+
+        # 2. 未配独立凭证时优雅回退通用凭证
+        store_fallback = {
+            "BINANCE_API_KEY": "bn_legacy_k",
+            "BINANCE_SECRET_KEY": "bn_legacy_s",
+            "GATE_API_KEY": "gt_legacy_k",
+            "GATE_SECRET_KEY": "gt_legacy_s",
+            "OKX_API_KEY": "okx_legacy_k",
+            "OKX_SECRET_KEY": "okx_legacy_s",
+            "OKX_PASSPHRASE": "okx_legacy_p",
+        }
+        with patch.object(gw_secrets, "load_secrets", lambda: store_fallback):
+            self.assertEqual(ex.venue_credentials("binance", "demo"), ("bn_legacy_k", "bn_legacy_s"))
+            self.assertEqual(ex.venue_credentials("binance", "live"), ("bn_legacy_k", "bn_legacy_s"))
+            self.assertEqual(ex.venue_credentials("gate", "sandbox"), ("gt_legacy_k", "gt_legacy_s"))
+            self.assertEqual(ex.venue_credentials("okx", "demo"), ("okx_legacy_k", "okx_legacy_s"))
+            self.assertEqual(ex.venue_passphrase("okx", "demo"), "okx_legacy_p")
+
+    def test_status_endpoint_reports_6_account_readiness(self):
+        import r20_gateway.secrets as gw_secrets
+        store = {
+            "BINANCE_LIVE_API_KEY": "K",
+            "BINANCE_LIVE_SECRET_KEY": "S",
+            "GATE_DEMO_API_KEY": "K",
+            "GATE_DEMO_SECRET_KEY": "S",
+            "OKX_DEMO_API_KEY": "K",
+            "OKX_DEMO_SECRET_KEY": "S",
+            "OKX_DEMO_PASSPHRASE": "P",
+        }
+        with patch.object(gw_secrets, "load_secrets", lambda: store):
+            r = self.client.get("/api/v1/admin/multi-exchange")
+            self.assertEqual(r.status_code, 200)
+            data = r.json()
+            self.assertIn("accounts_status", data)
+            acc = data["accounts_status"]
+            self.assertTrue(acc["binance"]["live"]["has_api_key"])
+            self.assertFalse(acc["binance"]["demo"]["has_api_key"])
+            self.assertTrue(acc["gate"]["demo"]["has_api_key"])
+            self.assertFalse(acc["gate"]["live"]["has_api_key"])
+            self.assertTrue(acc["okx"]["demo"]["has_api_key"])
+            self.assertTrue(acc["okx"]["demo"]["has_passphrase"])
+            self.assertFalse(acc["okx"]["live"]["has_api_key"])
+
+    def test_diagnostics_public_ping_fallback_when_no_credentials(self):
+        from r20_backend.exchanges import diagnostics
+        mock_http = lambda url, **k: (200, {"serverTime": 1720000000000}, {})
+        with patch.object(diagnostics, "_default_http_call", mock_http):
+            res = diagnostics.diagnose_venue_connection(
+                venue="binance", environment="demo", api_key="", secret_key=""
+            )
+            self.assertTrue(res["ok"])
+            self.assertFalse(res["authenticated"])
+            self.assertEqual(res["mode"], "public_fallback")
+            self.assertIn("公共网络连通正常", res["message"])
+
+    def test_diagnostics_verify_credentials_before_saving_success(self):
+        from r20_backend.exchanges import diagnostics
+
+        # 1. OKX 鉴权成功 (code: "0")
+        okx_call = lambda url, **k: (200, {"code": "0", "data": [{"totalEq": "1000"}]}, {})
+        res = diagnostics.diagnose_venue_connection(
+            venue="okx", environment="demo", api_key="test_k", secret_key="test_s", passphrase="p",
+            http_client=okx_call
+        )
+        self.assertTrue(res["ok"])
+        self.assertTrue(res["authenticated"])
+        self.assertEqual(res["mode"], "authenticated")
+        self.assertIn("OKX DEMO 凭证鉴权成功", res["message"])
+
+        # 2. Binance 鉴权成功
+        bn_call = lambda url, **k: (200, {"totalWalletBalance": "5000", "canTrade": True}, {})
+        res_bn = diagnostics.diagnose_venue_connection(
+            venue="binance", environment="live", api_key="test_k", secret_key="test_s",
+            http_client=bn_call
+        )
+        self.assertTrue(res_bn["ok"])
+        self.assertTrue(res_bn["authenticated"])
+        self.assertIn("Binance LIVE 凭证鉴权成功", res_bn["message"])
+
+        # 3. Gate 鉴权成功
+        gt_call = lambda url, **k: (200, {"currency": "USDT", "total": "2000"}, {})
+        res_gt = diagnostics.diagnose_venue_connection(
+            venue="gate", environment="sandbox", api_key="test_k", secret_key="test_s",
+            http_client=gt_call
+        )
+        self.assertTrue(res_gt["ok"])
+        self.assertTrue(res_gt["authenticated"])
+        self.assertIn("Gate SANDBOX 凭证鉴权成功", res_gt["message"])
+
+    def test_diagnostics_verify_credentials_auth_failure_handling(self):
+        from r20_backend.exchanges import diagnostics
+
+        # OKX 业务码非0
+        okx_fail = lambda url, **k: (200, {"code": "50111", "msg": "API key doesn't exist"}, {})
+        res = diagnostics.diagnose_venue_connection(
+            venue="okx", environment="live", api_key="bad_k", secret_key="bad_s", passphrase="p",
+            http_client=okx_fail
+        )
+        self.assertFalse(res["ok"])
+        self.assertEqual(res["mode"], "auth_failed")
+        self.assertIn("50111", res["message"])
+
+        # Gate HTTP 401
+        gate_fail = lambda url, **k: (401, {"label": "INVALID_KEY", "message": "Invalid API key"}, {})
+        res_gt = diagnostics.diagnose_venue_connection(
+            venue="gate", environment="live", api_key="bad_k", secret_key="bad_s",
+            http_client=gate_fail
+        )
+        self.assertFalse(res_gt["ok"])
+        self.assertEqual(res_gt["mode"], "auth_failed")
+        self.assertIn("INVALID_KEY", res_gt["message"])
+
+    def test_diagnostics_endpoint_via_http_api(self):
+        from r20_backend.exchanges import diagnostics
+        mock_ok = lambda *a, **k: {
+            "ok": True, "venue": "binance", "environment": "live",
+            "authenticated": True, "mode": "authenticated",
+            "latency_ms": 12, "message": "Binance 鉴权成功", "details": {}
+        }
+        with patch.object(diagnostics, "diagnose_venue_connection", mock_ok):
+            r = self.client.post("/api/v1/admin/multi-exchange/test-connection", json={
+                "venue": "binance", "environment": "live",
+                "api_key": "mock_k", "secret_key": "mock_s",
+            })
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertTrue(r.json()["ok"])
+            self.assertTrue(r.json()["authenticated"])
+
+    def test_diagnostics_endpoint_requires_auth(self):
+        for p in self._patches[:1]:  # 停掉 require_admin_header 打桩
+            p.stop()
+        r = self.client.post("/api/v1/admin/multi-exchange/test-connection", json={
+            "venue": "gate", "environment": "live"
+        })
+        self.assertIn(r.status_code, (401, 403))
 
 
 if __name__ == "__main__":

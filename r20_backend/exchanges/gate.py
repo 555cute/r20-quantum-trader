@@ -242,15 +242,11 @@ class GateAdapter(BaseExchangeAdapter):
         return hmac.new(secret.encode("utf-8"), msg.encode("utf-8"), hashlib.sha512).hexdigest()
 
     def _keys(self) -> tuple:
-        try:
-            from r20_gateway.secrets import load_secrets
-            vals = load_secrets()
-        except Exception:
-            vals = {}
-        key, secret = str(vals.get("GATE_API_KEY") or ""), str(vals.get("GATE_SECRET_KEY") or "")
+        from .registry import venue_credentials
+        key, secret = venue_credentials("gate", self.environment)
         if not key or not secret:
             raise ExchangeCapabilityError(
-                "Gate 凭证未配置——请在后台「交易所与标的池 → 5. 多交易所数据源与凭证」录入 API Key/Secret")
+                f"Gate ({self.environment}档) 凭证未配置——请在后台「交易所与标的池 → 5. 多交易所数据源与凭证」录入 API Key/Secret")
         return key, secret
 
     def signed_request(self, method: str, path: str,

@@ -98,7 +98,7 @@ def gate_environment_axis() -> str:
 def _account_key(venue_key: str, environment: str) -> AccountKey:
     """组装三元身份键；凭证读取 fail-soft——密钥库异常按 anon，不抛穿上层。"""
     try:
-        api_key, _secret = venue_credentials(venue_key)
+        api_key, _secret = venue_credentials(venue_key, environment)
     except Exception:
         api_key = ""
     return AccountKey(venue=venue_key, environment=environment,
@@ -136,15 +136,73 @@ def clear_instances() -> None:
     _INSTANCES.clear()
 
 
-def venue_credentials(venue: str) -> Tuple[str, str]:
-    """从加密密钥库读该场所 (api_key, secret_key)；未配置返回 ("", "")。"""
+def venue_credentials(venue: str, environment: Optional[str] = None) -> Tuple[str, str]:
+    """从加密密钥库读该场所 (api_key, secret_key)；未配置返回 ("", "")。
+
+    支持三所 6 账户独立凭证（US-003）：
+    - environment 归属于沙盒/模拟（demo/sandbox/testnet）时：
+      优先尝试 {VENUE}_DEMO_* / {VENUE}_TESTNET_* / {VENUE}_SANDBOX_*，未配时回退通用 {VENUE}_*。
+    - environment 归属于实盘（live）时：
+      优先尝试 {VENUE}_LIVE_*，未配时回退通用 {VENUE}_*。
+    - environment 为 None 时：回退当前默认/通用凭证。
+    """
     key = str(venue or "").strip().upper()
     try:
         from r20_gateway.secrets import load_secrets
         vals = load_secrets()
     except Exception:
         vals = {}
-    return (str(vals.get(f"{key}_API_KEY") or ""), str(vals.get(f"{key}_SECRET_KEY") or ""))
+
+    env = str(environment or "").strip().lower() if environment is not None else ""
+    if env:
+        if is_sandbox_environment(env):
+            cand_keys = [f"{key}_DEMO_API_KEY", f"{key}_TESTNET_API_KEY", f"{key}_SANDBOX_API_KEY", f"{key}_API_KEY"]
+            cand_secs = [f"{key}_DEMO_SECRET_KEY", f"{key}_TESTNET_SECRET_KEY", f"{key}_SANDBOX_SECRET_KEY", f"{key}_SECRET_KEY"]
+        else:
+            cand_keys = [f"{key}_LIVE_API_KEY", f"{key}_API_KEY"]
+            cand_secs = [f"{key}_LIVE_SECRET_KEY", f"{key}_SECRET_KEY"]
+
+        api_key = ""
+        for ck in cand_keys:
+            v = str(vals.get(ck) or "").strip()
+            if v:
+                api_key = v
+                break
+
+        secret_key = ""
+        for cs in cand_secs:
+            v = str(vals.get(cs) or "").strip()
+            if v:
+                secret_key = v
+                break
+        return (api_key, secret_key)
+
+    return (str(vals.get(f"{key}_API_KEY") or "").strip(), str(vals.get(f"{key}_SECRET_KEY") or "").strip())
+
+
+def venue_passphrase(venue: str, environment: Optional[str] = None) -> str:
+    """从加密密钥库读该场所 Passphrase（OKX 专属；其他所返回空串）。"""
+    key = str(venue or "").strip().upper()
+    if key != "OKX":
+        return ""
+    try:
+        from r20_gateway.secrets import load_secrets
+        vals = load_secrets()
+    except Exception:
+        vals = {}
+
+    env = str(environment or "").strip().lower() if environment is not None else ""
+    if env:
+        if is_sandbox_environment(env):
+            cand_pass = ["OKX_DEMO_PASSPHRASE", "OKX_PASSPHRASE"]
+        else:
+            cand_pass = ["OKX_LIVE_PASSPHRASE", "OKX_PASSPHRASE"]
+        for cp in cand_pass:
+            v = str(vals.get(cp) or "").strip()
+            if v:
+                return v
+        return ""
+    return str(vals.get("OKX_PASSPHRASE") or "").strip()
 
 
 def registered_venues() -> list:

@@ -159,13 +159,36 @@ class AdminUnlockRequest(BaseModel):
 class MultiExchangeUpdate(BaseModel):
     binance_api_key: str | None = None
     binance_secret_key: str | None = None
+    binance_live_api_key: str | None = None
+    binance_live_secret_key: str | None = None
+    binance_demo_api_key: str | None = None
+    binance_demo_secret_key: str | None = None
     gate_api_key: str | None = None
     gate_secret_key: str | None = None
+    gate_live_api_key: str | None = None
+    gate_live_secret_key: str | None = None
+    gate_demo_api_key: str | None = None
+    gate_demo_secret_key: str | None = None
+    okx_live_api_key: str | None = None
+    okx_live_secret_key: str | None = None
+    okx_live_passphrase: str | None = None
+    okx_demo_api_key: str | None = None
+    okx_demo_secret_key: str | None = None
+    okx_demo_passphrase: str | None = None
     binance_testnet: bool | None = None
     gate_testnet: bool | None = None
     gate_execution: bool | None = None   # R20_GATE_EXECUTION 总开关（Gate 执行路由准入）
-    preferred_venue: str | None = None  # US-003 全局路由首选：okx|binance|gate|auto
+    preferred_venue: str | None = None  # 全局路由首选：okx|binance|gate|auto
     confirmation: str = ""               # 变更执行开关必须精确确认短语
+
+
+class VenueTestConnectionRequest(BaseModel):
+    venue: str = Field(..., pattern=r"^(okx|binance|gate)$")
+    environment: str = Field(default="live", pattern=r"^(live|demo|testnet|sandbox)$")
+    api_key: str | None = None
+    secret_key: str | None = None
+    passphrase: str | None = None
+    timeout: float = Field(default=8.0, ge=1.0, le=30.0)
 
 
 class AdminConfigUpdate(BaseModel):
@@ -1082,18 +1105,58 @@ def admin_multi_exchange_status(x_r20_admin_token: str | None = Header(default=N
     """多所凭证与档位状态（永不回显密钥值）+ 行情健康度快照。"""
     require_admin_header(x_r20_admin_token)
     from r20_backend.exchanges import (execution_open, registered_venues,
-                                        venue_credentials, venue_testnet_enabled)
+                                        venue_credentials, venue_passphrase, venue_testnet_enabled)
     venues: dict[str, Any] = {}
+    def _read_creds(v: str, env: str | None = None) -> tuple[str, str]:
+        try:
+            return venue_credentials(v, env)
+        except TypeError:
+            return venue_credentials(v)
+
     for v in registered_venues():
         if v == "okx":
             continue
-        api_key, secret = venue_credentials(v)
+        api_key, secret = _read_creds(v)
+        live_ak, live_sk = _read_creds(v, "live")
+        demo_ak, demo_sk = _read_creds(v, "demo")
         venues[v] = {
             "has_api_key": bool(api_key),
             "has_secret": bool(secret),
+            "live": {
+                "has_api_key": bool(live_ak),
+                "has_secret": bool(live_sk),
+            },
+            "demo": {
+                "has_api_key": bool(demo_ak),
+                "has_secret": bool(demo_sk),
+            },
             "testnet": venue_testnet_enabled(v),
             "execution_open": execution_open(v),
         }
+
+    # 6 账户完整就绪态快照（US-003：包含 OKX/Binance/Gate 各环境，永不回显密钥明文）
+    okx_live_ak, okx_live_sk = _read_creds("okx", "live")
+    okx_demo_ak, okx_demo_sk = _read_creds("okx", "demo")
+    try:
+        okx_live_pp = venue_passphrase("okx", "live")
+        okx_demo_pp = venue_passphrase("okx", "demo")
+    except Exception:
+        okx_live_pp, okx_demo_pp = "", ""
+    accounts_status = {
+        "okx": {
+            "live": {"has_api_key": bool(okx_live_ak), "has_secret": bool(okx_live_sk), "has_passphrase": bool(okx_live_pp)},
+            "demo": {"has_api_key": bool(okx_demo_ak), "has_secret": bool(okx_demo_sk), "has_passphrase": bool(okx_demo_pp)},
+        },
+        "binance": {
+            "live": venues.get("binance", {}).get("live", {}),
+            "demo": venues.get("binance", {}).get("demo", {}),
+        },
+        "gate": {
+            "live": venues.get("gate", {}).get("live", {}),
+            "demo": venues.get("gate", {}).get("demo", {}),
+        },
+    }
+
     health: dict[str, Any] = {}
     try:
         health_path = DATA_DIR / "venue_health.json"
@@ -1104,19 +1167,33 @@ def admin_multi_exchange_status(x_r20_admin_token: str | None = Header(default=N
 
     from r20_backend.exchanges import routing_policy
     pref = routing_policy.load_preferred_venue()
-    return {"venues": venues, "health": health, "preferred_venue": pref}
+    return {"venues": venues, "health": health, "preferred_venue": pref, "accounts_status": accounts_status}
 
 
 @app.put("/api/v1/admin/multi-exchange")
 def admin_multi_exchange_update(payload: MultiExchangeUpdate,
                                 x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
-    """保存币安/Gate 凭证与测试网档位。凭证只入加密库；档位热切换后重建适配器实例。"""
+    """保存币安/Gate/OKX 6 账户独立凭证与测试网档位。凭证只入加密库；档位热切换后重建适配器实例。"""
     actor = require_superadmin(x_r20_session)
     secret_map = {
         "BINANCE_API_KEY": payload.binance_api_key,
         "BINANCE_SECRET_KEY": payload.binance_secret_key,
+        "BINANCE_LIVE_API_KEY": payload.binance_live_api_key,
+        "BINANCE_LIVE_SECRET_KEY": payload.binance_live_secret_key,
+        "BINANCE_DEMO_API_KEY": payload.binance_demo_api_key,
+        "BINANCE_DEMO_SECRET_KEY": payload.binance_demo_secret_key,
         "GATE_API_KEY": payload.gate_api_key,
         "GATE_SECRET_KEY": payload.gate_secret_key,
+        "GATE_LIVE_API_KEY": payload.gate_live_api_key,
+        "GATE_LIVE_SECRET_KEY": payload.gate_live_secret_key,
+        "GATE_DEMO_API_KEY": payload.gate_demo_api_key,
+        "GATE_DEMO_SECRET_KEY": payload.gate_demo_secret_key,
+        "OKX_LIVE_API_KEY": payload.okx_live_api_key,
+        "OKX_LIVE_SECRET_KEY": payload.okx_live_secret_key,
+        "OKX_LIVE_PASSPHRASE": payload.okx_live_passphrase,
+        "OKX_DEMO_API_KEY": payload.okx_demo_api_key,
+        "OKX_DEMO_SECRET_KEY": payload.okx_demo_secret_key,
+        "OKX_DEMO_PASSPHRASE": payload.okx_demo_passphrase,
     }
     secret_values = {k: str(v).strip() for k, v in secret_map.items() if v and str(v).strip()}
     if secret_values:
@@ -1150,6 +1227,33 @@ def admin_multi_exchange_update(payload: MultiExchangeUpdate,
     })
     refresh_settings()
     return {"ok": True, "saved_secret_keys": sorted(secret_values.keys())}
+
+
+@app.post("/api/v1/admin/multi-exchange/test-connection")
+def admin_multi_exchange_test_connection(
+    payload: VenueTestConnectionRequest,
+    x_r20_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """测试各交易所指定环境连接与鉴权诊断（US-003：支持保存前预检）。"""
+    require_admin_header(x_r20_admin_token)
+    from r20_backend.exchanges.diagnostics import diagnose_venue_connection
+
+    result = diagnose_venue_connection(
+        venue=payload.venue,
+        environment=payload.environment,
+        api_key=payload.api_key,
+        secret_key=payload.secret_key,
+        passphrase=payload.passphrase,
+        timeout=payload.timeout,
+    )
+    audit_record("multi_exchange.test_connection", "success" if result.get("ok") else "failed", {
+        "venue": payload.venue,
+        "environment": payload.environment,
+        "authenticated": result.get("authenticated"),
+        "mode": result.get("mode"),
+        "ok": result.get("ok"),
+    })
+    return result
 
 
 @app.put("/api/v1/admin/account-baseline")
