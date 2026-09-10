@@ -73,7 +73,7 @@ export const adminGroups: { key: string; labelKey: string; items: NavItem[] }[] 
       { key: 'admin-risk', labelKey: 'nav.admin.risk', path: '/admin/risk', icon: ShieldCheck, alias: 'risk 风控' },
       { key: 'admin-interceptors', labelKey: 'nav.admin.interceptors', path: '/admin/interceptors', icon: Crosshair, alias: 'interceptor fail-closed 拦截' },
       { key: 'admin-plugins', labelKey: 'nav.admin.plugins', path: '/admin/plugins', icon: Puzzle, alias: 'plugin 插件' },
-      { key: 'admin-security', labelKey: 'nav.admin.security', path: '/admin/security', icon: KeyRound, alias: 'okx account symbols 标的池 账户' },
+      { key: 'admin-security', labelKey: 'nav.admin.security', path: '/admin/security', icon: KeyRound, alias: 'account symbols 标的池 账户 接入' },
     ],
   },
   {

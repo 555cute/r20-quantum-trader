@@ -62,7 +62,7 @@ def selected_environment(values: Mapping[str, str] | None = None) -> OKXEnvironm
     api_key, secret_key, passphrase = profile if any(profile) else legacy
     base_url = str(env.get("OKX_BASE_URL") or "https://www.okx.com").rstrip("/")
     if base_url != "https://www.okx.com": raise ValueError("OKX REST Base URL 只允许 https://www.okx.com")
-    return OKXEnvironment(mode, api_key, secret_key, passphrase, base_url, "separate-credentials" if env.get(f"{prefix}_API_KEY") else "legacy-or-oauth")
+    return OKXEnvironment(mode, api_key, secret_key, passphrase, base_url, "separate-credentials" if env.get(f"{prefix}_API_KEY") else "legacy-shared-key")
 
 
 _FROZEN_ENVIRONMENT: OKXEnvironment | None = None

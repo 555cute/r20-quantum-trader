@@ -240,7 +240,7 @@ def request(
 
 
 # ---------------------------------------------------------------------------
-# Trade — regular orders (maps: okx swap place / cancel / amend / close)
+# Trade — regular orders (historical note: replaces the removed CLI "okx swap place/cancel/amend/close")
 # ---------------------------------------------------------------------------
 
 def place_order(
@@ -347,7 +347,7 @@ def close_position(
 
 
 # ---------------------------------------------------------------------------
-# Trade — order queries (maps: okx swap orders [--history])
+# Trade — order queries (historical note: replaces the removed CLI "okx swap orders [--history]")
 # ---------------------------------------------------------------------------
 
 def pending_orders(inst_id: str | None = None, *, inst_type: str = "SWAP", ord_type: str | None = None, env: OKXEnvironment | None = None) -> list[dict[str, Any]]:
@@ -372,7 +372,7 @@ def fills(*, inst_type: str = "SWAP", inst_id: str | None = None, begin: Any = N
 
 
 # ---------------------------------------------------------------------------
-# Account (maps: okx account positions / balance / bills / positions-history)
+# Account (historical note: replaces the removed CLI "okx account positions/balance/bills/positions-history")
 # ---------------------------------------------------------------------------
 
 def positions(*, inst_type: str = "SWAP", inst_id: str | None = None, env: OKXEnvironment | None = None) -> list[dict[str, Any]]:
@@ -413,7 +413,7 @@ def positions_history(*, inst_type: str = "SWAP", inst_id: str | None = None, li
 
 
 # ---------------------------------------------------------------------------
-# Trade — algo / cloud OCO protection (maps: okx swap algo place|orders|amend|cancel)
+# Trade — algo / cloud OCO protection (historical note: replaces the removed CLI "okx swap algo place|orders|amend|cancel")
 # ---------------------------------------------------------------------------
 
 def place_algo_oco(
