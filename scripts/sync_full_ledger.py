@@ -5,12 +5,18 @@ Directly reads OKX official `account positions-history` & `account positions` AP
 Eliminates bills heuristic split-error, accurately records real position-level trades!
 """
 
-from okx_runtime import replace_cli_prefix as okx_private_command
-import subprocess
 import json
 import os
+import sys
 import datetime
 import tempfile
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+import scripts.okx_rest as okx_rest
+import scripts.okx_runtime as okx_runtime
 
 WORKSPACE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(WORKSPACE_DIR, "data")
@@ -142,16 +148,20 @@ def build_lifecycle_ledger():
 
     tz_bj = datetime.timezone(datetime.timedelta(hours=8))
 
-    # 1. Fetch OKX Official Positions History (Official position-level closed trades)
-    res_hist = subprocess.run(okx_private_command("okx account positions-history --limit 100 --json"), shell=True, capture_output=True, text=True)
-    pos_history = json.loads(res_hist.stdout) if res_hist.stdout else []
+    # 0. Fail-closed guard (2026-09-09 OKX CLI removal): without a static V5 API Key
+    #    we must NOT proceed — an aborted raise here leaves the existing ledger intact.
+    env = okx_runtime.current_environment()
+    if not env.configured:
+        raise okx_rest.OKXNotConfigured("OKX API Key 未配置 — 台账同步 fail-closed（既有 trading_ledger.json 保持不动）")
 
-    # 2. Fetch OKX Current Live Positions (Holding trades)
-    res_pos = subprocess.run(okx_private_command("okx account positions --json"), shell=True, capture_output=True, text=True)
-    pos_data = json.loads(res_pos.stdout) if res_pos.stdout else []
+    # 1. Positions-History via direct signed V5 REST (replaces the removed CLI call)
+    pos_history = okx_rest.positions_history(limit=100)
 
-    res_orders = subprocess.run(okx_private_command("okx swap orders --history --limit 100 --json"), shell=True, capture_output=True, text=True)
-    orders_history = json.loads(res_orders.stdout) if res_orders.stdout else []
+    # 2. Current live positions via V5 REST
+    pos_data = okx_rest.positions()
+
+    # 3. Filled order history via V5 REST (replaces the removed CLI swap history query)
+    orders_history = okx_rest.orders_history(limit=100)
     close_orders = [o for o in orders_history if str(o.get('reduceOnly', '')).lower() == 'true' and o.get('state') == 'filled']
 
     trades_lifecycle = []
@@ -361,4 +371,8 @@ def build_lifecycle_ledger():
     return trades_lifecycle
 
 if __name__ == "__main__":
-    build_lifecycle_ledger()
+    try:
+        build_lifecycle_ledger()
+    except okx_rest.OKXNotConfigured as exc:
+        print(f"[NOT READY] {exc}")
+        raise SystemExit(3)
