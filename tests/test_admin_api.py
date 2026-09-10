@@ -126,11 +126,19 @@ class AdminApiTests(unittest.TestCase):
 
     def test_okx_runtime_is_static_api_key_diagnosis(self):
         from unittest.mock import patch
+        # 诊断端点钉的是真实选择器 current_environment()（冻结环境优先），不是
+        # settings 标志——fixture 必须注入受控假凭据组（US-012 封闭律②：仅 patch
+        # settings 曾令该用例假绿/假红）。READY 与 NOT_READY 双向都用 freeze 显式
+        # 构造，杜绝继承环境/真实 .env 决定红绿。
         self.assertEqual(self.client.get("/api/v1/admin/okx/runtime").status_code, 401)
         headers = self.login("admin", "InitialAdmin123456")
-        with patch.object(app_module.settings, "okx_environment", "demo"), patch.object(app_module.settings, "okx_demo_configured", False):
+        from scripts.okx_runtime import freeze_environment, unfreeze_environment
+        try:
+            freeze_environment({"R20_OKX_ENV": "demo"})
             with patch.object(app_module, "refresh_settings", lambda: None):
                 response = self.client.get("/api/v1/admin/okx/runtime", headers=headers)
+        finally:
+            unfreeze_environment()
         self.assertEqual(response.status_code, 200, response.text)
         body = response.json()
         self.assertEqual(body["connection"], "static-v5-key")
@@ -145,10 +153,16 @@ class AdminApiTests(unittest.TestCase):
             set(body.keys()),
             {"environment", "mode_configured", "live_configured", "demo_configured", "fingerprint", "base_url", "connection", "status", "not_ready_reason"},
         )
-        # 配置齐备 → READY，且无 CLI/OAuth 探测残留字段
-        with patch.object(app_module.settings, "okx_environment", "demo"), patch.object(app_module.settings, "okx_demo_configured", True):
+        # 配置齐备（完整假三件套冻结注入）→ READY，且无 CLI/OAuth 探测残留字段
+        try:
+            freeze_environment({"R20_OKX_ENV": "demo",
+                                "OKX_DEMO_API_KEY": "runtime-test-key",
+                                "OKX_DEMO_SECRET_KEY": "runtime-test-secret",
+                                "OKX_DEMO_PASSPHRASE": "runtime-test-pass"})
             with patch.object(app_module, "refresh_settings", lambda: None):
                 ready = self.client.get("/api/v1/admin/okx/runtime", headers=headers)
+        finally:
+            unfreeze_environment()
         self.assertEqual(ready.status_code, 200, ready.text)
         ready_body = ready.json()
         self.assertEqual(ready_body["status"], "READY")
