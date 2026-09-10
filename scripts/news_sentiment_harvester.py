@@ -22,7 +22,6 @@ if str(_THIS_DIR) not in sys.path:
 import json
 import time
 import datetime
-import subprocess
 import re
 
 WORKSPACE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -41,61 +40,9 @@ BLACK_SWAN_PATTERNS = [
     (r"(全面取缔所有加密|宣布比特币非法|宣布数字货币交易非法|爆发核危机|宣战)", "国家级极端不可抗力/战争")
 ]
 
-_HARVEST_START = time.time()
-# The trader shells out to this script with a hard budget before a cycle starts;
-# never let upstream retries push the whole harvest past that budget.
-UPSTREAM_BUDGET_SECONDS = 9.0
-
-# The OKX CLI refuses *all* news endpoints while a demo/simulated profile is
-# selected ("News features are not available in demo/simulated trading mode").
-# News is public market data and is unrelated to order routing, so the harvest
-# always runs against the live data profile; trading env is left untouched.
-DEMO_ENV_FLAGS = ("OKX_DEMO", "OKX_SIMULATED", "R20_OKX_ENV", "OKX_ENV")
-
-
-def _news_env() -> dict:
-    env = dict(os.environ)
-    for flag in DEMO_ENV_FLAGS:
-        env.pop(flag, None)
-    return env
-
-
-def run_json_cmd(cmd: str, timeout: int = 5, retries: int = 1):
-    """Run an OKX CLI command and parse JSON. Transient upstream failures are retried
-    with backoff and logged, so a single hiccup cannot silently freeze the news feed.
-    Retries degrade to a single short attempt once the global upstream budget is spent."""
-    last_err = ""
-    for attempt in range(retries + 1):
-        elapsed = time.time() - _HARVEST_START
-        if elapsed >= UPSTREAM_BUDGET_SECONDS:
-            timeout = min(timeout, 3)
-            retries = attempt  # no further attempts
-        try:
-            res = subprocess.run(cmd, shell=True, capture_output=True, text=True,
-                                 timeout=timeout, env=_news_env())
-            out = (res.stdout or "").strip()
-            if out:
-                try:
-                    parsed = json.loads(out)
-                except Exception as je:
-                    last_err = f"non-JSON stdout: {out[:120]}"
-                else:
-                    if isinstance(parsed, dict):
-                        det = parsed.get("details")
-                        if isinstance(det, list) and not det:
-                            last_err = "empty details[]"
-                        else:
-                            return parsed
-                    else:
-                        return parsed
-            else:
-                last_err = (res.stderr or "").strip()[:200] or f"empty stdout (rc={res.returncode})"
-        except Exception as exc:
-            last_err = f"{type(exc).__name__}: {exc}"
-        if attempt < retries:
-            time.sleep(min(1.5 * (attempt + 1), max(0.5, UPSTREAM_BUDGET_SECONDS - (time.time() - _HARVEST_START))))
-    print(f"[news-harvester] WARN upstream failed after {retries + 1} attempts: {cmd[:60]} -> {last_err}", file=sys.stderr)
-    return None
+# （US-014 前置）OKX CLI 的 news 抓取通道（run_json_cmd/_news_env/subprocess）已随
+# CLI 移除整体删除；news latest/important/coin-sentiment 无公开 V5 等价接口，
+# 数据源缺失语义见 fetch_and_analyze_news_sentiment() 内注释与 source_available。
 
 def trigger_circuit_breaker(headline: str, keyword: str):
     tz_bj = datetime.timezone(datetime.timedelta(hours=8))
@@ -137,9 +84,13 @@ def fetch_and_analyze_news_sentiment():
     now_bj = datetime.datetime.now(tz_bj)
     now_str = now_bj.strftime("%Y-%m-%d %H:%M:%S")
 
-    # 1. Fetch Important & Latest News via OKX News CLI (Union of Latest + Important)
-    news_res_latest = run_json_cmd("okx news latest --lang zh-CN --limit 15 --json") or {}
-    news_res_imp = run_json_cmd("okx news important --lang zh-CN --limit 15 --json") or {}
+    # 1. News sources：OKX CLI 已移除（news latest/important/coin-sentiment 均无公开
+    #    V5 等价接口）。显式缺失化：不抓取、不以空数据冒充新鲜信号；下方既有
+    #    fail-closed 路径会继续以最后有效缓存供页面并标 stale_sections。
+    #    注意：依赖新闻流的极端黑天鹅熔断在接入新数据源前处于休眠（仅能由
+    #    其它风控层兜底）——这是数据源缺失的显式后果，不是静默降级。
+    news_res_latest: dict = {}
+    news_res_imp: dict = {}
     
     raw_news_latest = news_res_latest.get("details", []) if isinstance(news_res_latest, dict) else []
     raw_news_imp = news_res_imp.get("details", []) if isinstance(news_res_imp, dict) else []
@@ -155,10 +106,6 @@ def fetch_and_analyze_news_sentiment():
     # Sort strictly by creation timestamp descending
     raw_news.sort(key=lambda x: int(x.get("cTime", 0) or 0), reverse=True)
     raw_news = raw_news[:20]
-
-    if not raw_news:
-        news_res2 = run_json_cmd("okx news latest --lang zh-CN --limit 15 --json") or {}
-        raw_news = news_res2.get("details", []) if isinstance(news_res2, dict) else []
 
     parsed_news = []
     triggered_threat = None
@@ -203,11 +150,10 @@ def fetch_and_analyze_news_sentiment():
             except Exception:
                 pass
 
-    # 2. Fetch Multi-Coin Sentiment Snapshot
+    # 2. Multi-Coin Sentiment：CLI 已移除，无公开 V5 等价（见步骤 1 说明）。
     active_instruments = load_instruments()
     target_coins = [item["name"] for item in active_instruments]
-    coins_str = ",".join(target_coins)
-    sent_res = run_json_cmd(f"okx news coin-sentiment --coins {coins_str} --json") or []
+    sent_res: list = []
     coin_sentiments = {}
 
     # Load existing valid sentiments as fallback to prevent 0-mentions overwrite if API rate limits or drops temporarily
@@ -298,6 +244,8 @@ def fetch_and_analyze_news_sentiment():
     payload = {
         "timestamp": now_str,
         "updated_at": now_str,
+        "source_available": False,
+        "source_reason": "OKX CLI 已移除，news 无公开 V5 等价接口（黑天鹅熔断待新数据源，当前显示缺失而非中性）",
         "macro_sentiment": macro_env,
         "circuit_breaker": cb_info if cb_active else {"active": False},
         "coins_sentiment": coin_sentiments,
@@ -343,3 +291,7 @@ if __name__ == "__main__":
     res = fetch_and_analyze_news_sentiment()
     flag = " ⚠️STALE(upstream empty, serving last cache)" if res.get("stale_sections") else ""
     print(f"✅ OKX News & Sentiment Engine complete. Macro: {res['macro_sentiment']}, News Count: {len(res['latest_news'])}{flag} 最新快讯: {res.get('news_fresh_at') or '--'}")
+    # 数据源缺失（CLI 已移除、无公开 V5 等价）：按既有失败路径语义非零退出，
+    # 调度/上层据 exit code 与 source_available 显式感知缺失（缓存回退仍生效）。
+    if not res.get("source_available"):
+        raise SystemExit(3)
