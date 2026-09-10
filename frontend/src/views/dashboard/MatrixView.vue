@@ -10,6 +10,7 @@ import { useI18n } from '../../composables/useI18n';
 import { useUi } from '../../composables/useUi';
 import PageHead from '../../components/dashboard/PageHead.vue';
 import KpiRibbon from '../../components/dashboard/KpiRibbon.vue';
+import VenueAccountsPanel from '../../components/dashboard/VenueAccountsPanel.vue';
 import ChartWorkstation from '../../components/dashboard/ChartWorkstation.vue';
 import PositionsOrdersPanel from '../../components/dashboard/PositionsOrdersPanel.vue';
 import FactorMatrix from '../../components/dashboard/FactorMatrix.vue';
@@ -44,6 +45,8 @@ watch(focusSymbol, (v) => {
     <PageHead :title="t('dash.matrix.title')" :desc="t('dash.matrix.desc')" />
 
     <KpiRibbon />
+
+    <VenueAccountsPanel />
 
     <div class="grid grid-cols-1 gap-3 xl:grid-cols-12">
       <div class="xl:col-span-8">

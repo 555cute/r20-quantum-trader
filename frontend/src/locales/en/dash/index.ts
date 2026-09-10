@@ -6,6 +6,7 @@ import { enEvolution } from './evolution';
 import { enLedger } from './ledger';
 import { enAbout } from './about';
 import { enCmdk } from './cmdk';
+import { enVenueAccounts } from './venueAccounts';
 
 export const enDash = {
   shell: enShell,
@@ -16,4 +17,5 @@ export const enDash = {
   ledger: enLedger,
   about: enAbout,
   cmdk: enCmdk,
+  venueAccounts: enVenueAccounts,
 };
