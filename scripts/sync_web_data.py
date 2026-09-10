@@ -47,14 +47,14 @@ def get_disk_info():
         return {"total_gb": 0, "used_gb": 0, "free_gb": 0, "percent": 0}
 
 def generate_trading_data():
-    tz_bj = datetime.timezone(datetime.timedelta(hours=8))
-    now_bj = datetime.datetime.now(tz_bj)
-    today_str = now_bj.strftime("%Y-%m-%d")
-
     env = okx_runtime.current_environment()
     if not env.configured:
         # fail-closed (2026-09-09 CLI removal): never overwrite the web cache with zeros
         raise okx_rest.OKXNotConfigured("OKX API Key 未配置 — Web 数据同步 fail-closed（保持既有 trading_data.json 不动）")
+
+    tz_bj = datetime.timezone(datetime.timedelta(hours=8))
+    now_bj = datetime.datetime.now(tz_bj)
+    today_str = now_bj.strftime("%Y-%m-%d")
 
     # 1. Balance
     bal_data = okx_rest.balances()
@@ -291,10 +291,15 @@ def generate_trading_data():
         json.dump(data, f, ensure_ascii=False, indent=2)
     os.replace(temp_path, DATA_JSON_PATH)
 
-if __name__ == "__main__":
+def main():
+    """CLI entry point: missing credentials exit before any cache writes."""
     try:
         generate_trading_data()
         print("✅ Web data and JSON ledger synced successfully.")
     except okx_rest.OKXNotConfigured as exc:
         print(f"[NOT READY] {exc}")
         raise SystemExit(3)
+
+
+if __name__ == "__main__":
+    main()
