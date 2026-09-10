@@ -124,11 +124,36 @@ class AdminApiTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/v1/admin/okx/cli-check", headers=root).status_code, 404)
         self.assertEqual(self.client.post("/api/v1/admin/okx/install-cli", headers=root, json={"confirmation": "INSTALL OKX CLI"}).status_code, 404)
 
+    def _static_key_runtime_env(self, with_demo_trio: bool):
+        """US-012 fixture：驱动真实 readiness 门。生产诊断读 current_environment()
+        的完整凭据组（{**os.environ, ROOT/.env, secrets} 合并），不是 settings 单标志。
+        这里把真实配置面换成空 temp ROOT + 空 secrets 加载器，仅注入显式假 DEMO 值；
+        NOT_READY/READY 断言语义保持不变。"""
+        import contextlib
+        import os
+        from unittest.mock import patch
+        import scripts.okx_runtime as runtime
+        import r20_gateway.secrets as secrets
+        trio = ({"OKX_DEMO_API_KEY": "fake-demo-key",
+                 "OKX_DEMO_SECRET_KEY": "fake-demo-secret",
+                 "OKX_DEMO_PASSPHRASE": "fake-demo-pass"}
+                if with_demo_trio else {})
+
+        @contextlib.contextmanager
+        def scope():
+            with tempfile.TemporaryDirectory(prefix="r20-us012-env-") as tmp, \
+                    patch.object(runtime, "ROOT", Path(tmp)), \
+                    patch.object(runtime, "_FROZEN_ENVIRONMENT", None), \
+                    patch.object(secrets, "load_secrets", lambda: {}), \
+                    patch.dict(os.environ, {"R20_OKX_ENV": "demo", **trio}, clear=True):
+                yield
+        return scope()
+
     def test_okx_runtime_is_static_api_key_diagnosis(self):
         from unittest.mock import patch
         self.assertEqual(self.client.get("/api/v1/admin/okx/runtime").status_code, 401)
         headers = self.login("admin", "InitialAdmin123456")
-        with patch.object(app_module.settings, "okx_environment", "demo"), patch.object(app_module.settings, "okx_demo_configured", False):
+        with self._static_key_runtime_env(False), patch.object(app_module.settings, "okx_environment", "demo"), patch.object(app_module.settings, "okx_demo_configured", False):
             with patch.object(app_module, "refresh_settings", lambda: None):
                 response = self.client.get("/api/v1/admin/okx/runtime", headers=headers)
         self.assertEqual(response.status_code, 200, response.text)
@@ -146,7 +171,7 @@ class AdminApiTests(unittest.TestCase):
             {"environment", "mode_configured", "live_configured", "demo_configured", "fingerprint", "base_url", "connection", "status", "not_ready_reason"},
         )
         # 配置齐备 → READY，且无 CLI/OAuth 探测残留字段
-        with patch.object(app_module.settings, "okx_environment", "demo"), patch.object(app_module.settings, "okx_demo_configured", True):
+        with self._static_key_runtime_env(True), patch.object(app_module.settings, "okx_environment", "demo"), patch.object(app_module.settings, "okx_demo_configured", True):
             with patch.object(app_module, "refresh_settings", lambda: None):
                 ready = self.client.get("/api/v1/admin/okx/runtime", headers=headers)
         self.assertEqual(ready.status_code, 200, ready.text)
