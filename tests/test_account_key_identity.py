@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -25,6 +26,27 @@ from r20_backend.exchanges.identity import (ANON_CREDENTIAL, AccountKey,
                                             is_sandbox_environment)
 
 GATE_SANDBOX_PIN = "https://api-testnet.gateapi.io"   # 候选域之一（钉死后零探测）
+
+
+def setUpModule():
+    """封闭三律（同 fa417ee / test_gate_lab）：排除宿主 .env 注入的 ambient
+    R20_* 旗标——R20_GATE_TESTNET=1 会把「单参 = live 档」契约用例的环境解析
+    到 sandbox 档（URL/开闸文案全部错档）。环境只由用例自设旗标决定。"""
+    _backup = {k: v for k, v in os.environ.items()
+               if k.startswith(("R20_BINANCE_TESTNET", "R20_GATE_TESTNET",
+                                "R20_GATE_EXECUTION", "R20_GATE_DEMO_EXECUTION",
+                                "R20_OKX_ENV", "R20_OKX_TESTNET"))}
+    for k in _backup:
+        os.environ.pop(k, None)
+    _AMBIENT_BACKUP.append(_backup)
+
+
+_AMBIENT_BACKUP: list = []
+
+
+def tearDownModule():
+    while _AMBIENT_BACKUP:
+        os.environ.update(_AMBIENT_BACKUP.pop())
 
 
 def _fp(text: str) -> str:

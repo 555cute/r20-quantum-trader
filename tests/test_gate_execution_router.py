@@ -15,6 +15,33 @@ from r20_backend.exchanges import ExchangeCapabilityError
 from r20_backend.exchanges.gate import GateAdapter
 
 
+def setUpModule():
+    """封闭三律（同 fa417ee / test_gate_lab）：宿主 .env 注入的 ambient R20_* 旗标
+    （如 R20_GATE_TESTNET=1）会把环境解析到 sandbox 档，令用例自设的
+    R20_GATE_EXECUTION=1（live 档旗标）错配失效——执行环境只由各用例自己的
+    patch.dict 决定，ambient 旗标一律排除。"""
+    _backup = {k: v for k, v in os.environ.items()
+               if k.startswith(("R20_BINANCE_TESTNET", "R20_GATE_TESTNET",
+                                "R20_GATE_EXECUTION", "R20_GATE_DEMO_EXECUTION",
+                                "R20_OKX_ENV", "R20_OKX_TESTNET"))}
+    for k in _backup:
+        os.environ.pop(k, None)
+
+    def _restore():
+        os.environ.update(_backup)
+    # 用模块级 tearDownModule 语义恢复
+    global _RESTORE_FN
+    _RESTORE_FN = _restore
+
+
+_RESTORE_FN = None
+
+
+def tearDownModule():
+    if _RESTORE_FN:
+        _RESTORE_FN()
+
+
 class TestSigner(unittest.TestCase):
     """签名向量对照官方 SDK gen_sign 算法逐字节复算。"""
 
