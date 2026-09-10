@@ -87,8 +87,10 @@ def fetch_and_analyze_news_sentiment():
     # 1. News sources：OKX CLI 已移除（news latest/important/coin-sentiment 均无公开
     #    V5 等价接口）。显式缺失化：不抓取、不以空数据冒充新鲜信号；下方既有
     #    fail-closed 路径会继续以最后有效缓存供页面并标 stale_sections。
-    #    注意：依赖新闻流的极端黑天鹅熔断在接入新数据源前处于休眠（仅能由
-    #    其它风控层兜底）——这是数据源缺失的显式后果，不是静默降级。
+    #    注意（US-014 前置收尾归因）：新闻模式熔断层在接入新数据源前不再触发，
+    #    但黑天鹅熔断本身已由 ai_factor_trader.check_black_swan_sentinel 的统一
+    #    V5 REST 公共行情路径**复活**（不可判定=不放松），本文件不再是熔断的
+    #    唯一数据通路——这是数据源缺失的显式后果，不是静默降级。
     news_res_latest: dict = {}
     news_res_imp: dict = {}
     
@@ -245,7 +247,7 @@ def fetch_and_analyze_news_sentiment():
         "timestamp": now_str,
         "updated_at": now_str,
         "source_available": False,
-        "source_reason": "OKX CLI 已移除，news 无公开 V5 等价接口（黑天鹅熔断待新数据源，当前显示缺失而非中性）",
+        "source_reason": "OKX CLI 已移除，news 无公开 V5 等价接口（新闻模式熔断层待新数据源；黑天鹅熔断已由统一行情哨兵复活，缺失≠放宽），当前显示缺失而非中性",
         "macro_sentiment": macro_env,
         "circuit_breaker": cb_info if cb_active else {"active": False},
         "coins_sentiment": coin_sentiments,
