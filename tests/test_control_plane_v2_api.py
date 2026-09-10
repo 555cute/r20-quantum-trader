@@ -23,6 +23,14 @@ class ControlPlaneV2ApiTests(unittest.TestCase):
     def tearDown(self):
         app_module.admin_auth=self.original_auth; prompts.LIBRARY_FILE=self.original_prompt; backups.CONFIG_FILE=self.original_backup; self.temp.cleanup()
 
+    def test_snapshot_missing_key_is_503(self):
+        from scripts.okx_rest import OKXNotConfigured
+        message = "NOT READY: 请在后台配置 DEMO API Key"
+        with patch.object(app_module, 'okx_account_snapshot', side_effect=OKXNotConfigured(message)):
+            response = self.client.get('/api/v1/admin/okx/account-snapshot', headers=self.headers)
+        self.assertEqual(response.status_code, 503, response.text)
+        self.assertEqual(response.json()['detail'], message)
+
     def test_notification_diagnose_does_not_send(self):
         with patch.object(app_module,'diagnose_channel',return_value={'status':'ready','detail':'ok'}) as diagnose, patch.object(app_module,'test_channel') as send:
             response=self.client.post('/api/v1/admin/notifications/diagnose',headers=self.headers,json={'channel':'telegram'})

@@ -32,6 +32,7 @@ from contextvars import ContextVar
 from pydantic import BaseModel, Field, field_validator
 from r20_backend.config import refresh_settings, settings
 from r20_backend.version import __version__, APP_NAME, APP_VERSION
+from scripts.okx_rest import OKXNotConfigured
 from r20_backend.okx_client import OKXClient
 from r20_backend.okx_trade_service import account_snapshot as okx_account_snapshot, fast_close_confirmed
 from r20_backend.account_baseline import load_account_baseline, update_initial_capital
@@ -1957,6 +1958,7 @@ def admin_delete_policy_archive(
 def admin_okx_account_snapshot(x_r20_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
     require_admin_header(x_r20_admin_token)
     try: return okx_account_snapshot()
+    except OKXNotConfigured as exc: raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc: raise HTTPException(status_code=502, detail=f"获取 OKX 当前订单失败：{exc}") from exc
 
 
