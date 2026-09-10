@@ -97,16 +97,20 @@ def compute_instrument_factors(item: Dict[str, Any], smart_money_pool: Dict[str,
         },
         
         # Pillar 5: Smart Money & Derivatives
+        # 缺失语义：OKX CLI 已移除且 smartmoney 无公开 V5 等价接口。数据源缺失时
+        # 显式 available=False + 占位符，禁止以 50/NEUTRAL/0 中性值冒充真实信号。
         "smart_money_derivatives": {
-            "weighted_long_pct": 50.0,
-            "smart_money_flow_usd": "0 U",
+            "available": False,
+            "reason": "OKX CLI 已移除，smartmoney 无公开 V5 等价接口（待接新数据源）",
+            "weighted_long_pct": "--",
+            "smart_money_flow_usd": "--",
             "funding_rate_pct": 0.0,
             "oi_usd": "--",
             "long_short_ratio": "--",
             "avg_long_entry": "--",
             "avg_short_entry": "--",
             "top_win_rate": "--",
-            "signal": "NEUTRAL"
+            "signal": "UNAVAILABLE"
         },
 
         # Pillar 6: Calculus, Definite Integrals & Probability Theory
@@ -354,8 +358,10 @@ def compute_instrument_factors(item: Dict[str, Any], smart_money_pool: Dict[str,
         except Exception:
             pass
 
-    # SmartMoney Overlay
+    # SmartMoney Overlay（仅当真有数据源时覆盖缺失占位；无源时保留 available=False）
     if ccy in smart_money_pool:
+        factors["smart_money_derivatives"]["available"] = True
+        factors["smart_money_derivatives"].pop("reason", None)
         sm = smart_money_pool[ccy]
         ls = sm.get("longShortRatio", {})
         notional = sm.get("notional", {})
@@ -399,10 +405,12 @@ def compute_instrument_factors(item: Dict[str, Any], smart_money_pool: Dict[str,
     else:
         factors["trend_momentum"]["trend_regime"] = "CHOP_RANGE"
 
-    # 2. Smart Money Direction
-    sm_long = factors["smart_money_derivatives"]["weighted_long_pct"]
-    if sm_long >= 70.0: score += 30.0
-    elif sm_long <= 35.0: score -= 30.0
+    # 2. Smart Money Direction（信号缺失时跳过本项计分，绝不当 0/中性计入）
+    sm_block = factors["smart_money_derivatives"]
+    sm_long = sm_block.get("weighted_long_pct")
+    if sm_block.get("available") and isinstance(sm_long, (int, float)):
+        if sm_long >= 70.0: score += 30.0
+        elif sm_long <= 35.0: score -= 30.0
 
     # 3. RSI & KDJ Dynamic Momentum
     rsi = factors["trend_momentum"]["rsi_14"]
@@ -479,16 +487,10 @@ def compute_instrument_factors(item: Dict[str, Any], smart_money_pool: Dict[str,
 
 def update_factor_library() -> Dict[str, Any]:
     """Fetch and calculate multi-pillar factor library snapshot for 6 instruments."""
-    # 1. Fetch Smart Money Pool
-    smart_money_pool = {}
-    try:
-        cmd = "okx smartmoney signal-overview-by-filter --instCcyList BTC,ETH,SOL,DOGE,SUI,LINK --json 2>/dev/null"
-        res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=8)
-        if res.stdout:
-            d = json.loads(res.stdout).get("data", [])
-            smart_money_pool = {item.get("ccy"): item for item in d if item.get("ccy")}
-    except Exception as e:
-        print(f"[Factor Library] SmartMoney pool error: {e}")
+    # 1. Smart Money Pool：OKX CLI 已移除，smartmoney 无公开 V5 等价接口。
+    #    显式保持空池 → 各标的 smart_money_derivatives.available=False（缺失化，
+    #    不以中性值冒充信号；接入新数据源时仅需在此处填充 pool）。
+    smart_money_pool: Dict[str, Any] = {}
 
     # 2. Parallel Factor Computations
     with ThreadPoolExecutor(max_workers=6) as executor:
