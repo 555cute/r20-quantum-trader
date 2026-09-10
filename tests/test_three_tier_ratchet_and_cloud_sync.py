@@ -37,25 +37,41 @@ class ThreeTierRatchetAndCloudSyncTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def test_sync_cloud_algo_stop_success_and_idempotence(self):
-        with patch("scripts.ai_factor_trader.run_json_cmd") as mock_cmd:
+        # US-007：CLI 包装函数已随迁移删除；改在 okx_rest 函数边界 mock。
+        with patch.object(aft.okx_rest, "pending_algo_orders") as pend, \
+             patch.object(aft.okx_rest, "amend_algo_sl") as amend:
             # 1. When existing algo already matches new_sl, do not issue redundant amend
-            mock_cmd.return_value = [
+            pend.return_value = [
                 {"state": "live", "posSide": "long", "algoId": "algo_101", "slTriggerPx": "2500.0"}
             ]
             res = aft.sync_cloud_algo_stop("ETH-USDT-SWAP", "long", 2500.0)
             self.assertTrue(res)
-            # Only 1 call to fetch orders, no amend call
-            self.assertEqual(mock_cmd.call_count, 1)
+            pend.assert_called_once_with("ETH-USDT-SWAP")
+            amend.assert_not_called()
 
-            # 2. When existing algo has different slTriggerPx, issue amend
-            mock_cmd.reset_mock()
-            mock_cmd.side_effect = [
-                [{"state": "live", "posSide": "long", "algoId": "algo_101", "slTriggerPx": "2400.0"}],
-                {"code": "0", "msg": "amend success"}
+            # 2. When existing algo has different slTriggerPx, issue amend (market SL px)
+            pend.return_value = [
+                {"state": "live", "posSide": "long", "algoId": "algo_101", "slTriggerPx": "2400.0"}
             ]
+            amend.return_value = [{"algoId": "algo_101", "sCode": "0"}]
             res = aft.sync_cloud_algo_stop("ETH-USDT-SWAP", "long", 2500.0)
             self.assertTrue(res)
-            self.assertEqual(mock_cmd.call_count, 2)
+            amend.assert_called_once_with("algo_101", 2500.0, new_sl_ord_px="-1")
+
+            # 3. No live algo → False without touching amend
+            pend.return_value = []
+            self.assertFalse(aft.sync_cloud_algo_stop("ETH-USDT-SWAP", "long", 2600.0))
+            amend.assert_called_once()  # unchanged from case 2
+
+            # 4. Query/amend failures must fail closed (False), never raise past the cycle
+            pend.side_effect = RuntimeError("OKX 50011: signature error")
+            self.assertFalse(aft.sync_cloud_algo_stop("ETH-USDT-SWAP", "long", 2600.0))
+            pend.side_effect = None
+            pend.return_value = [
+                {"state": "live", "posSide": "long", "algoId": "algo_101", "slTriggerPx": "2400.0"}
+            ]
+            amend.side_effect = RuntimeError("OKX 51088: algo not found")
+            self.assertFalse(aft.sync_cloud_algo_stop("ETH-USDT-SWAP", "long", 2500.0))
 
     def test_long_three_tier_ratchet_progression(self):
         f = {
@@ -176,6 +192,117 @@ class ThreeTierRatchetAndCloudSyncTests(unittest.TestCase):
             self.assertTrue(closed)
             self.assertEqual(reason, "已移动止盈")
             mock_close.assert_called_once_with("ETH-USDT-SWAP", "short", 2.0)
+
+
+class CloudOcoHttpBoundaryTests(unittest.TestCase):
+    """US-007 终审边界：冻结假 DEMO 凭证，patch okx_rest 模块绑定的 urlopen，
+    让 ensure_cloud_position_protection / sync_cloud_algo_stop 全链路真实执行到
+    HTTP 边界——断言端点、签名头、x-simulated-trading 与请求体形状（ordType=oco、
+    newSlTriggerPx/newSlOrdPx）。毫秒级，零联网。"""
+
+    def setUp(self):
+        import json as _json  # noqa: F401
+        from scripts.okx_runtime import freeze_environment, unfreeze_environment
+        freeze_environment({
+            "R20_OKX_ENV": "demo",
+            "OKX_DEMO_API_KEY": "AK-demo", "OKX_DEMO_SECRET_KEY": "SK-demo",
+            "OKX_DEMO_PASSPHRASE": "PP-demo",
+        })
+        self.addCleanup(unfreeze_environment)
+        self.captured = []
+
+    def _fake(self, rows_for):
+        import json
+        def urlopen(req, timeout=None):
+            self.captured.append(req)
+            url = req.full_url
+            rows = rows_for(url, req)
+            m = MagicMock()
+            m.read.return_value = json.dumps({"code": "0", "data": rows}).encode()
+            m.__enter__.return_value = m
+            m.__exit__.return_value = False
+            return m
+        return urlopen
+
+    def _headers(self, req):
+        return {k.lower(): v for k, v in req.header_items()}
+
+    def test_coverage_gap_places_v5_algo_oco_then_verifies(self):
+        import json
+        rows_covered = [{
+            "algoId": "777", "instId": "SOL-USDT-SWAP", "state": "effective",
+            "posSide": "long", "side": "sell", "reduceOnly": "true", "sz": "4",
+            "actualSz": "4", "tpTriggerPx": "106", "slTriggerPx": "101",
+        }]
+        calls = {"n": 0}
+        def rows_for(url, req):
+            calls["n"] += 1
+            if "/api/v5/trade/order-algo" in url:
+                return [{"algoId": "777", "sCode": "0"}]
+            # first pending query: no coverage; subsequent: full coverage
+            return [] if calls["n"] == 1 else rows_covered
+        with patch.object(aft.okx_rest, "urlopen", side_effect=self._fake(rows_for)), \
+             patch.object(aft.time, "sleep"):
+            ok, detail = aft.ensure_cloud_position_protection("SOL-USDT-SWAP", "long", 4.0, 106, 101)
+        self.assertTrue(ok, detail)
+        self.assertIn("repaired and verified", detail)
+        get0, post1 = self.captured[0], self.captured[1]
+        self.assertIn("/api/v5/trade/orders-algo-pending", get0.full_url)
+        self.assertIn("instType=SWAP", get0.full_url)
+        self.assertIn("ordType=oco", get0.full_url)
+        h = self._headers(post1)
+        self.assertEqual(h["ok-access-key"], "AK-demo")
+        self.assertEqual(h["x-simulated-trading"], "1")
+        self.assertIn("ok-access-sign", h)
+        body = json.loads(post1.data.decode())
+        self.assertEqual(post1.get_method(), "POST")
+        self.assertEqual(body["ordType"], "oco")
+        self.assertEqual(body["instId"], "SOL-USDT-SWAP")
+        self.assertEqual(body["side"], "sell")
+        self.assertEqual(body["posSide"], "long")
+        self.assertEqual(body["tdMode"], "cross")
+        self.assertEqual(str(body["reduceOnly"]).lower(), "true")
+        self.assertEqual(str(body["cxlOnClosePos"]).lower(), "true")
+        self.assertEqual(str(body["sz"]), "4")
+        self.assertEqual(str(body["tpTriggerPx"]), "106")
+        self.assertEqual(str(body["slOrdPx"]), "-1")
+        self.assertIn("instId=SOL-USDT-SWAP", get0.full_url)
+
+    def test_ratchet_amend_hits_v5_amend_algos_with_market_sl_px(self):
+        import json
+        rows_live = [{
+            "algoId": "algo_500", "instId": "ETH-USDT-SWAP", "state": "live",
+            "posSide": "long", "slTriggerPx": "2400.0", "tpTriggerPx": "2600",
+        }]
+        def rows_for(url, req):
+            if "/api/v5/trade/amend-algos" in url:
+                return [{"algoId": "algo_500", "sCode": "0"}]
+            return rows_live
+        with patch.object(aft.okx_rest, "urlopen", side_effect=self._fake(rows_for)):
+            res = aft.sync_cloud_algo_stop("ETH-USDT-SWAP", "long", 2500.0)
+        self.assertTrue(res)
+        get0, post1 = self.captured
+        self.assertIn("/api/v5/trade/orders-algo-pending", get0.full_url)
+        self.assertEqual(post1.get_method(), "POST")
+        self.assertIn("/api/v5/trade/amend-algos", post1.full_url)
+        body = json.loads(post1.data.decode())
+        self.assertIsInstance(body, list)
+        self.assertEqual(body[0]["algoId"], "algo_500")
+        self.assertEqual(str(body[0]["newSlTriggerPx"]), "2500")
+        self.assertEqual(body[0]["newSlOrdPx"], "-1")
+        self.assertEqual(self._headers(post1)["x-simulated-trading"], "1")
+
+    def test_missing_credentials_fail_closed_zero_http(self):
+        from scripts.okx_runtime import unfreeze_environment, freeze_environment
+        unfreeze_environment()
+        freeze_environment({"R20_OKX_ENV": "demo"})  # no keys at all
+        self.captured.clear()
+        with patch.object(aft.okx_rest, "urlopen", side_effect=AssertionError("network!")):
+            ok1, detail1 = aft.ensure_cloud_position_protection("SOL-USDT-SWAP", "long", 4.0, 106, 101)
+            ok2 = aft.sync_cloud_algo_stop("SOL-USDT-SWAP", "long", 100.0)
+        self.assertFalse(ok1)
+        self.assertIn("unable to verify", detail1)
+        self.assertFalse(ok2)
 
 
 if __name__ == "__main__":
