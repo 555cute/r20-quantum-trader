@@ -23,7 +23,7 @@ if str(_THIS_DIR) not in sys.path:
 import json
 import time
 from datetime import datetime, timedelta, timezone
-import subprocess
+
 import urllib.request
 from typing import Dict, Any, List, Optional
 from concurrent.futures import ThreadPoolExecutor
@@ -96,17 +96,19 @@ def compute_instrument_factors(item: Dict[str, Any], smart_money_pool: Dict[str,
             "depth_bias": "NEUTRAL"
         },
         
-        # Pillar 5: Smart Money & Derivatives
+        # Pillar 5: Smart Money & Derivatives — SmartMoney 源缺失时逐币覆盖
+        # funding/OI/LS（V5 公开 REST）；weighted 50.0 仅为中性计分基准，
+        # signal/flow 显式标注缺失，不冒充实测值。
         "smart_money_derivatives": {
             "weighted_long_pct": 50.0,
-            "smart_money_flow_usd": "0 U",
+            "smart_money_flow_usd": "--",
             "funding_rate_pct": 0.0,
             "oi_usd": "--",
             "long_short_ratio": "--",
             "avg_long_entry": "--",
             "avg_short_entry": "--",
             "top_win_rate": "--",
-            "signal": "NEUTRAL"
+            "signal": "DATA_MISSING"
         },
 
         # Pillar 6: Calculus, Definite Integrals & Probability Theory
@@ -479,16 +481,12 @@ def compute_instrument_factors(item: Dict[str, Any], smart_money_pool: Dict[str,
 
 def update_factor_library() -> Dict[str, Any]:
     """Fetch and calculate multi-pillar factor library snapshot for 6 instruments."""
-    # 1. Fetch Smart Money Pool
-    smart_money_pool = {}
-    try:
-        cmd = "okx smartmoney signal-overview-by-filter --instCcyList BTC,ETH,SOL,DOGE,SUI,LINK --json 2>/dev/null"
-        res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=8)
-        if res.stdout:
-            d = json.loads(res.stdout).get("data", [])
-            smart_money_pool = {item.get("ccy"): item for item in d if item.get("ccy")}
-    except Exception as e:
-        print(f"[Factor Library] SmartMoney pool error: {e}")
+    # 1. Smart Money Pool — OKX CLI 已彻底移除（服务器重启丢 OAuth 授权根因）。
+    # 官方核查未找到 smartmoney 的公开 CEX V5 等价端点：该信号源显式缺失化，
+    # 下游按"数据缺失"处理（加权多头保持中性 50 → 复合分不加不减，
+    # 绝不伪造实测流入值，也不因此放宽任何开仓/风控门槛）。
+    smart_money_pool: Dict[str, Any] = {}
+    print("[Factor Library] SmartMoney 数据源缺失：OKX CLI 已移除，无公开 V5 等价源，因子按缺失中性处理")
 
     # 2. Parallel Factor Computations
     with ThreadPoolExecutor(max_workers=6) as executor:
@@ -497,6 +495,7 @@ def update_factor_library() -> Dict[str, Any]:
     snapshot = {
         "timestamp": int(time.time()),
         "time_str": datetime.now(_BJ).isoformat(sep=" ", timespec="seconds"),
+        "smart_money_source": {"available": False, "reason": "OKX CLI 已移除；smartmoney 无公开 V5 等价接口，待接新数据源"},
         "instruments": results
     }
 
