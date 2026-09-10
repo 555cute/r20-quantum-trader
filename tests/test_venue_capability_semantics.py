@@ -42,6 +42,35 @@ class _Resp:
 # ----------------------------------------------------------------------
 # 1) 能力表声明（审计 §2 逐所）
 # ----------------------------------------------------------------------
+_ENV_GUARD = None
+_PROFILE_GUARD = None
+
+
+def setUpModule():
+    """封闭三律：清掉宿主 .env 注入的 R20_* 旗标，探测持久化文件钉 tmp。"""
+    global _ENV_GUARD, _PROFILE_GUARD
+    import os as _os
+    import tempfile as _tempfile
+    ambient = {k: "0" for k in _os.environ
+               if k.startswith(("R20_BINANCE_TESTNET", "R20_GATE_TESTNET",
+                                "R20_OKX_ENV", "R20_OKX_TESTNET"))}
+    _ENV_GUARD = patch.dict(_os.environ, ambient, clear=False)
+    _ENV_GUARD.start()
+    from r20_backend.exchanges import env_profiles as _ep
+    tmp = _tempfile.NamedTemporaryFile(suffix=".json", delete=False)
+    tmp.close()
+    _PROFILE_GUARD = patch.object(_ep, "PROFILE_FILE", Path(tmp.name))
+    _PROFILE_GUARD.start()
+
+
+def tearDownModule():
+    global _ENV_GUARD, _PROFILE_GUARD
+    if _PROFILE_GUARD is not None:
+        _PROFILE_GUARD.stop()
+    if _ENV_GUARD is not None:
+        _ENV_GUARD.stop()
+
+
 class TestCapabilityDeclarations(unittest.TestCase):
     def test_gate_semantic_fields(self):
         cap = GateAdapter.capabilities

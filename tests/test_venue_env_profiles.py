@@ -21,6 +21,34 @@ from r20_backend.exchanges.okx import OKXPublicAdapter
 from r20_backend.exchanges import registry as reg
 
 
+_ENV_GUARD = None
+_PROFILE_GUARD = None
+
+
+def setUpModule():
+    """封闭三律：清掉宿主 .env 注入的 R20_* 旗标（config.load_dotenv 在 import 时
+    写入 os.environ），并把探测持久化文件钉到 tmp——本模块测试不得读写真实 data/。"""
+    global _ENV_GUARD, _PROFILE_GUARD
+    import os as _os
+    ambient = {k: "0" for k in _os.environ
+               if k.startswith(("R20_BINANCE_TESTNET", "R20_GATE_TESTNET",
+                                "R20_OKX_ENV", "R20_OKX_TESTNET"))}
+    _ENV_GUARD = patch.dict(_os.environ, ambient, clear=False)
+    _ENV_GUARD.start()
+    tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
+    tmp.close()
+    _PROFILE_GUARD = patch.object(ep, "PROFILE_FILE", Path(tmp.name))
+    _PROFILE_GUARD.start()
+
+
+def tearDownModule():
+    global _ENV_GUARD, _PROFILE_GUARD
+    if _PROFILE_GUARD is not None:
+        _PROFILE_GUARD.stop()
+    if _ENV_GUARD is not None:
+        _ENV_GUARD.stop()
+
+
 class ProfileTableTest(unittest.TestCase):
     """审计 §2 事实钉：三域并存、Gate 双候选、OKX 同域头开关。"""
 

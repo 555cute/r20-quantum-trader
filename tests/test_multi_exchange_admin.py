@@ -169,6 +169,16 @@ class LabStatusEndpointTests(MultiExchangeApiTests):
 
 
 class RegistryTestnetAndCredentialsTests(unittest.TestCase):
+    def setUp(self):
+        # 封闭三律：宿主 .env 的 R20_GATE_TESTNET=1 会在 import 期进 os.environ，
+        # 「未声明开关时保持实盘」的断言必须排除 ambient 旗标（各用例自设旗标用 patch.dict 不受影响）。
+        self._flag_guard = patch.dict(os.environ, {
+            k: "0" for k in list(os.environ)
+            if k.startswith(("R20_BINANCE_TESTNET", "R20_GATE_TESTNET",
+                             "R20_OKX_ENV", "R20_OKX_TESTNET"))}, clear=False)
+        self._flag_guard.start()
+        self.addCleanup(self._flag_guard.stop)
+
     def tearDown(self):
         ex.clear_instances()
 

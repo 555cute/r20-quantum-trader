@@ -67,7 +67,16 @@ GATE_DELISTING = [{"name": "BTC_USDT", "in_delisting": False},
 
 class ListingGateTest(unittest.TestCase):
     def setUp(self):
+        super().setUp()
         _reset()
+        # 封闭三律：本类曾用直接赋值替换模块属性（urlopen / env_profiles.resolve_base_url），
+        # 泄漏进同进程后续测试（曾把 (okx,demo) 解析钉到 Gate 测试域）。统一在 setUp 记录
+        # 原值、tearDown 恢复，测试体内的赋值只对当前用例生效。
+        self._orig_urlopen = listing_mod.urlopen
+        self._orig_resolve = listing_mod.env_profiles.resolve_base_url
+        self.addCleanup(setattr, listing_mod, "urlopen", self._orig_urlopen)
+        self.addCleanup(setattr, listing_mod.env_profiles,
+                        "resolve_base_url", self._orig_resolve)
 
     def test_01_okx_live_pass(self):
         net = _FakeNet([OKX_LIVE])
