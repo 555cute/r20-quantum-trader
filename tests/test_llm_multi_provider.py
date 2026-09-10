@@ -39,6 +39,10 @@ class LLMMultiProviderTests(unittest.TestCase):
         self.mock_update_env = self.patcher_env.start()
         self.mock_save_secrets = self.patcher_sec.start()
 
+        git_probe = patch.object(app_module, "git", side_effect=lambda args: (
+            "0 0" if args[0] == "rev-list" else "test" if args[0] == "branch" else
+            "" if args[0] in ("fetch", "status") else "abc1234"))
+        git_probe.start(); self.addCleanup(git_probe.stop)
         self.client = TestClient(app_module.app)
 
     def tearDown(self):

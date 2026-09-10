@@ -12,6 +12,8 @@ from r20_backend.version import __version__
 
 class AdminApiTests(unittest.TestCase):
     def setUp(self):
+        from tests.config_sandbox import isolate_config
+        isolate_config(self)
         self.temp = tempfile.TemporaryDirectory()
         self.original = app_module.admin_auth
         app_module.admin_auth = AdminAuthStore(Path(self.temp.name) / "admin.db")
@@ -354,10 +356,19 @@ class AdminApiTests(unittest.TestCase):
         self.assertEqual(bad.status_code, 400)
 
         # Valid instrument request
-        resp = self.client.get("/api/v1/market/BTC-USDT-SWAP/candles?bar=1H&limit=10")
+        from unittest.mock import patch
+        rows = [["1700000000000", "100", "102", "99", "101", "20"]]
+        import json
+        from requests import Response
+        fixture = Response()
+        fixture.status_code = 200
+        fixture._content = json.dumps({"code": "0", "data": rows}).encode()
+        with patch("requests.Session.get", return_value=fixture) as http:
+            resp = self.client.get("/api/v1/market/BTC-USDT-SWAP/candles?bar=1H&limit=10")
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data["instId"], "BTC-USDT-SWAP")
+        self.assertTrue(http.call_args.args[0].endswith("/api/v5/market/candles"))
         self.assertEqual(data["bar"], "1H")
         self.assertIn("candles", data)
         self.assertGreater(len(data["candles"]), 0)
@@ -366,18 +377,21 @@ class AdminApiTests(unittest.TestCase):
             self.assertIn(k, c0)
 
     def test_market_candles_lowercase_bar_via_failover_service(self):
-        """1h/4h 小写周期必须被归一为 OKX 合法值并经三级容灾服务取数。"""
-        import scripts.market_data_service as mds
+        """1h/4h 小写周期必须被归一为 OKX 合法值并经真实行情解析服务取数。"""
+        import json
+        from requests import Response
         from unittest.mock import patch
         rows = [
             ["1700003600000", "3", "4", "2", "3.5", "10"],
             ["1700000000000", "2", "3", "1.8", "2.9", "11"],
         ]
-        with patch.object(mds, "fetch_candles", return_value=rows) as mock_fc:
+        fixture = Response()
+        fixture.status_code = 200
+        fixture._content = json.dumps({"code": "0", "data": rows}).encode()
+        with patch("requests.Session.get", return_value=fixture) as http:
             resp = self.client.get("/api/v1/market/TEST-USDT-SWAP/candles?bar=4h&limit=20")
         self.assertEqual(resp.status_code, 200)
-        payload = mock_fc.call_args
-        self.assertEqual(payload.kwargs.get("bar") or payload.args[1], "4H")
+        self.assertEqual(http.call_args.kwargs["params"]["bar"], "4H")
         data = resp.json()
         self.assertEqual(data["bar"], "4H")
         self.assertEqual(data["source"], "OKX REST")

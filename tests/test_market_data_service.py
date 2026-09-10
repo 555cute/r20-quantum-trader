@@ -1,4 +1,6 @@
+import json
 import unittest
+from requests import Response
 from unittest.mock import patch
 from scripts.market_data_service import (
     fetch_ticker,
@@ -134,12 +136,38 @@ class TestZeroProcessGuarantee(unittest.TestCase):
             self.assertEqual(mds.fetch_candles("FAKE-USDT-SWAP"), [])
 
 
-class TestMarketDataServiceLive(unittest.TestCase):
+class TestMarketDataServiceHttpBoundary(unittest.TestCase):
+    """Exercise real decoding/local math with deterministic HTTP responses, never OKX."""
+    def setUp(self):
+        def response(url, **kwargs):
+            if url.endswith('/tickers'):
+                data = [{'instId': i, 'last': '100'} for i in ('BTC-USDT-SWAP', 'ETH-USDT-SWAP')]
+            elif url.endswith('/ticker'):
+                data = [{'instId': 'BTC-USDT-SWAP', 'last': '100'}]
+            elif url.endswith('/books'):
+                data = [{'bids': [['99', '2']], 'asks': [['101', '2']]}]
+            elif url.endswith('/candles'):
+                data = _synth_candles_1h()
+            elif url.endswith('/funding-rate'):
+                data = [{'fundingRate': '0.0001'}]
+            elif url.endswith('/aigc/mcp/indicators'):
+                data = []  # Indicator API absence exercises local candle math.
+            else:
+                self.fail('Unexpected HTTP fixture URL: ' + url)
+            fixture = Response()
+            fixture.status_code = 200
+            fixture._content = json.dumps({'code': '0', 'data': data}).encode()
+            return fixture
+        self.http = patch('requests.Session.get', side_effect=response)
+        self.http_post = patch('requests.Session.post', side_effect=response)
+        self.http.start(); self.addCleanup(self.http.stop)
+        self.http_post.start(); self.addCleanup(self.http_post.stop)
+
     def test_fetch_ticker(self):
         ticker = fetch_ticker("BTC-USDT-SWAP")
         self.assertIsNotNone(ticker)
         self.assertIn("last", ticker)
-        self.assertGreater(float(ticker["last"]), 0)
+        self.assertEqual(float(ticker["last"]), 100.0)
 
     def test_fetch_tickers_bulk(self):
         tickers = fetch_tickers_bulk("SWAP")
@@ -169,6 +197,7 @@ class TestMarketDataServiceLive(unittest.TestCase):
         fr = fetch_funding_rate("BTC-USDT-SWAP")
         self.assertIsNotNone(fr)
         self.assertIsInstance(fr, float)
+        self.assertEqual(fr, 0.01)  # Public service exposes percent, not fraction.
 
 
 if __name__ == "__main__":
