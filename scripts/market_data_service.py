@@ -1,15 +1,15 @@
 """High-Performance Zero-Process Direct Public Market Data Service (market_data_service.py).
 
-Eliminates repetitive Node CLI / OKX CLI process fork overhead during public market
-data harvesting (tickers, orderbooks, indicators, candles).
-Uses persistent connection-pooled HTTP Keep-Alive sessions with pure-Python fallbacks.
+Public market data harvesting (tickers, orderbooks, indicators, candles) runs on
+persistent connection-pooled HTTP Keep-Alive sessions with pure-Python fallbacks.
+Failover chain: www.okx.com -> aws.okx.com -> alt-venue adapters -> local math.
+Zero process-spawning layers; public endpoints need no credentials.
 """
 from __future__ import annotations
 
 import json
 import logging
 import math
-import subprocess
 import threading
 import time
 from typing import Any, Dict, List, Optional
@@ -128,7 +128,7 @@ def _public_post(path: str, payload: Dict[str, Any], timeout: float = 4.0) -> Op
 
 # ---------------------------------------------------------------------------
 # 0b. 多场所只读备源（Phase 2 · 2026-09-09）
-#     仅当 OKX 三级容灾（www→aws→CLI）全断时兜底，保「价格连续性」优先。
+#     仅当 OKX 双域直连（www→aws）全断时兜底，保「价格连续性」优先。
 #     量/张数单位随场所原生语义（币安=币量、Gate=张数），与 OKX 口径不同，
 #     消费方仅得相对量级用于放量检测；大陆受限 IP 上自然失败落空，无副作用。
 # ---------------------------------------------------------------------------
@@ -284,25 +284,10 @@ def _alt_funding_rate(inst_id: str) -> Optional[float]:
 # ---------------------------------------------------------------------------
 
 def fetch_ticker(inst_id: str, timeout: float = 3.5) -> Optional[Dict[str, Any]]:
-    """Fetch single instrument ticker via direct REST. Fallback to CLI on failure."""
+    """Fetch one instrument ticker: www→aws 双域 REST 直连，失败落异所备源。"""
     data = _public_get("/api/v5/market/ticker", params={"instId": inst_id}, timeout=timeout)
     if data and data.get("data"):
         return data["data"][0]
-    
-    # Emergency CLI fallback
-    try:
-        res = subprocess.run(
-            f"okx market ticker {inst_id} --json 2>/dev/null",
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if res.returncode == 0 and res.stdout.strip():
-            out = json.loads(res.stdout.strip())
-            return out[0] if isinstance(out, list) and out else (out if isinstance(out, dict) else None)
-    except Exception:
-        pass
     return _alt_venue_ticker(inst_id)
 
 
@@ -319,28 +304,12 @@ def fetch_tickers_bulk(inst_type: str = "SWAP", timeout: float = 4.0) -> Dict[st
 # ---------------------------------------------------------------------------
 
 def fetch_orderbook_depth(inst_id: str, sz: int = 5, timeout: float = 3.5) -> Optional[Dict[str, Any]]:
-    """Fetch orderbook depth directly via REST. Returns {'bids': [...], 'asks': [...]}.
-    Replaces repetitive `okx market orderbook ...` CLI process launches.
+    """Fetch orderbook depth directly via REST. Returns {'bids': [...], 'asks': [...]} —
+    双域直连零进程，无备源（深度语义场所间不可比）。
     """
     data = _public_get("/api/v5/market/books", params={"instId": inst_id, "sz": sz}, timeout=timeout)
     if data and data.get("data"):
         return data["data"][0]
-    
-    # Emergency CLI fallback
-    try:
-        res = subprocess.run(
-            f"okx market orderbook {inst_id} --sz {sz} --json 2>/dev/null",
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=4,
-        )
-        if res.returncode == 0 and res.stdout.strip():
-            out = json.loads(res.stdout.strip())
-            if isinstance(out, list) and out:
-                return out[0]
-    except Exception:
-        pass
     return None
 
 
@@ -353,8 +322,8 @@ def _local_math_indicators(
     indicators: List[str],
     bar: str = "1H",
 ) -> Dict[str, Dict[str, str]]:
-    """三级兜底：当 OKX MCP 指标接口与 CLI 均不可用时（部署环境常见），
-    用本地蜡烛（自带 www→aws→CLI 双源容灾）纯 Python 计算 ADX/KDJ/BBWIDTH/CMF。
+    """末级兜底：当 OKX MCP 指标接口与 REST 均不可用时（部署环境常见），
+    用本地蜡烛（自带 www→aws→异所多级容灾）纯 Python 计算 ADX/KDJ/BBWIDTH/CMF。
     输出与 OKX 官方口径对齐的字符串数值；样本不足时返回空 dict 让上层维持缺省。"""
     rows = fetch_candles(inst_id, bar=bar, limit=120)
     if not rows:
@@ -435,7 +404,7 @@ def fetch_indicators_batch(
 ) -> Dict[str, Dict[str, Any]]:
     """Fetch multiple technical indicators in ONE SINGLE HTTP POST request.
     
-    Replaces 4x-6x Node CLI process invocations per instrument with 1 fast call.
+    Batches 4-6 per-instrument indicator queries into 1 fast call.
     Returns: {"ADX": {"adx": "20.1", ...}, "KDJ": {"k": "...", "d": "...", "j": "..."}, ...}
     """
     bar = normalize_bar(bar)
@@ -470,7 +439,7 @@ def fetch_indicators_batch(
             if val:
                 result[key] = val
     
-    # 三级兜底：MCP/CLI 全灭（部署环境未装 okx CLI 时最常见）→ 本地蜡烛纯 Python 计算
+    # 末级兜底：MCP 批量接口与逐指标 REST 全灭 → 本地蜡烛纯 Python 计算
     missing = [ind for ind in indicators if ind.upper().replace("-", "") not in result]
     if missing:
         for k, v in _local_math_indicators(inst_id, missing, bar).items():
@@ -485,7 +454,7 @@ def fetch_single_indicator(
     bar: str = "1H",
     timeout: float = 3.5,
 ) -> Dict[str, Any]:
-    """Fetch or compute a single indicator without launching Node CLI."""
+    """Fetch or compute a single indicator: MCP REST，失败落纯 Python 本地数学。"""
     key = indicator.upper().replace("-", "").replace("_", "")
     bar = normalize_bar(bar)
     payload = {
@@ -502,27 +471,7 @@ def fetch_single_indicator(
                 return items[0].get("values", {})
         except Exception:
             pass
-    
-    # Emergency CLI fallback
-    try:
-        res = subprocess.run(
-            f"okx market indicator {indicator.lower()} {inst_id} --bar {bar} --json 2>/dev/null",
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=4,
-        )
-        if res.returncode == 0 and res.stdout.strip():
-            ind_res = json.loads(res.stdout.strip())
-            if isinstance(ind_res, list) and ind_res:
-                tfs = ind_res[0].get("data", [{}])[0].get("timeframes", {}).get(bar, {}).get("indicators", {})
-                items = tfs.get(key, [])
-                if items and isinstance(items[0], dict):
-                    return items[0].get("values", {})
-    except Exception:
-        pass
-    
-    # 三级兜底：本地蜡烛 + 纯 Python 数学（部署环境无 CLI / MCP 端点不可达时的最后防线）
+    # 末级兜底：本地蜡烛 + 纯 Python 数学（MCP 端点不可达时的最后防线）
     return _local_math_indicators(inst_id, [key], bar).get(key, {})
 
 
@@ -550,22 +499,6 @@ def fetch_candles(
     )
     if data and data.get("data"):
         return data["data"]
-    
-    # Emergency CLI fallback
-    try:
-        res = subprocess.run(
-            f"okx market candles {inst_id} --bar {bar} --limit {limit} --json 2>/dev/null",
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if res.returncode == 0 and res.stdout.strip():
-            parsed = json.loads(res.stdout.strip())
-            if isinstance(parsed, list):
-                return parsed
-    except Exception:
-        pass
     return _alt_venue_candles(inst_id, bar, limit)
 
 

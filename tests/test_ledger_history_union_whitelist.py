@@ -19,6 +19,8 @@ scripts_dir = str(Path(__file__).resolve().parent.parent / "scripts")
 if scripts_dir not in sys.path:
     sys.path.insert(0, scripts_dir)
 
+import scripts.okx_rest as okx_rest
+import scripts.okx_runtime as okx_runtime
 import scripts.sync_full_ledger as sfl
 
 
@@ -94,7 +96,6 @@ class ClosedTradeSizeTests(unittest.TestCase):
         sfl.TARGET_INSTRUMENTS = self._pool
 
     def test_closed_row_sz_from_close_total_pos(self):
-        import subprocess as _sp
         from unittest.mock import MagicMock
         hist = [{
             "instId": "BTC-USDT-SWAP", "direction": "long", "type": "2",
@@ -103,22 +104,36 @@ class ClosedTradeSizeTests(unittest.TestCase):
             "cTime": "1700000000000", "uTime": "1700003600000",
         }]
 
-        def fake_run(cmd, **kw):
-            cp = _sp.CompletedProcess(args=cmd, returncode=0, stdout="[]", stderr="")
-            if "positions-history" in cmd:
-                cp.stdout = json.dumps(hist)
-            return cp
+        # US-005 迁移后：CLI subprocess 边界已删，钉扎改打 HTTP 边界（律①/②），
+        # 数据与旧版 fake_run 逐字同构——positions / orders-history 返回空列表。
+        class _Resp:
+            def __init__(self, payload: bytes) -> None: self._p = payload
+            def read(self) -> bytes: return self._p
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
 
+        def fake_open(req, timeout=None):
+            url = req.full_url
+            body = {"code": "0", "data": hist if "positions-history" in url else []}
+            return _Resp(json.dumps(body).encode())
+
+        okx_runtime.freeze_environment({
+            "R20_OKX_ENV": "demo",
+            "OKX_DEMO_API_KEY": "AKD", "OKX_DEMO_SECRET_KEY": "SKD",
+            "OKX_DEMO_PASSPHRASE": "PPD",
+        })
+        self.addCleanup(okx_runtime.unfreeze_environment)
         with tempfile.TemporaryDirectory() as tmp:
             ledger_path = os.path.join(tmp, "trading_ledger.json")
-            with patch.object(sfl.subprocess, "run", side_effect=fake_run), \
+            with patch.object(okx_rest, "urlopen", fake_open), \
                  patch.object(sfl, "DATA_DIR", tmp), \
                  patch.object(sfl, "LEDGER_JSON_FILE", ledger_path), \
                  patch.object(sfl, "POSITION_TRACKER_FILE", os.path.join(tmp, "trackers.json")), \
                  patch.object(sfl, "INITIAL_STATE_FILE", os.path.join(tmp, "no_such_state.json")), \
                  patch.dict("sys.modules", {"qq_notifier": MagicMock()}):
                 trades = sfl.build_lifecycle_ledger()
-            written = json.load(open(ledger_path, encoding="utf-8"))
+            with open(ledger_path, encoding="utf-8") as f:
+                written = json.load(f)
 
         closed = [t for t in trades if t.get("status") == "closed"]
         self.assertEqual(len(closed), 1)

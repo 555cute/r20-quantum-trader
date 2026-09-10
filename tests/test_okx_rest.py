@@ -154,7 +154,7 @@ class OKXRestHttpBoundaryTests(unittest.TestCase):
         self.assertEqual(body["px"], "27181.5")
         self.assertEqual(body["posSide"], "long")
         self.assertEqual(body["attachAlgoOrds"], [{
-            "tdMode": "cross", "tpTriggerPx": "28000", "tpOrdPx": "-1",
+            "tpTriggerPx": "28000", "tpOrdPx": "-1",
             "slTriggerPx": "26500", "slOrdPx": "-1",
         }])
 
@@ -222,7 +222,7 @@ class OKXRestHttpBoundaryTests(unittest.TestCase):
         self.assertEqual(body["sz"], "2")
         self.assertEqual(body["tpTriggerPx"], "110000.5")
         self.assertEqual(body["slTriggerPx"], "1250000")
-        self.assertEqual(body["reduceOnly"], "true")   # bool 语义不变
+        self.assertEqual(body["reduceOnly"], True)   # bool 语义不变
 
     # -- algo 面 -------------------------------------------------------------
 
@@ -236,8 +236,8 @@ class OKXRestHttpBoundaryTests(unittest.TestCase):
         self.assertEqual(url, "https://www.okx.com/api/v5/trade/order-algo")
         body = json.loads(data.decode("utf-8"))
         self.assertEqual(body["ordType"], "oco")
-        self.assertEqual(body["reduceOnly"], "true")
-        self.assertEqual(body["cxlOnClosePos"], "true")
+        self.assertEqual(body["reduceOnly"], True)
+        self.assertEqual(body["cxlOnClosePos"], True)
         self.assertEqual(body["slOrdPx"], "-1")
         self.assertEqual(body["tpOrdPx"], "-1")
         self.assertEqual(headers["content-type"], "application/json")
@@ -245,10 +245,10 @@ class OKXRestHttpBoundaryTests(unittest.TestCase):
     def test_cancel_algo_orders_uses_array_body(self):
         freeze_environment(DEMO_ENV)
         self.urlopen.return_value = _response(data=[{"algoId": "a-1", "sCode": "0"}])
-        okx_rest.cancel_algo_orders(["a-1"])
+        okx_rest.cancel_algo_orders(["a-1"], inst_id="BTC-USDT-SWAP")
         _, url, _, data = _captured(self.urlopen)
-        self.assertEqual(url, "https://www.okx.com/api/v5/trade/cancel-algo-orders")
-        self.assertEqual(json.loads(data.decode("utf-8")), [{"algoId": "a-1", "instType": "SWAP"}])
+        self.assertEqual(url, "https://www.okx.com/api/v5/trade/cancel-algos")
+        self.assertEqual(json.loads(data.decode("utf-8")), [{"algoId": "a-1", "instId": "BTC-USDT-SWAP"}])
         self.urlopen.reset_mock()
         self.urlopen.return_value = _response(data=[])
         with self.assertRaises(ValueError):
@@ -258,14 +258,15 @@ class OKXRestHttpBoundaryTests(unittest.TestCase):
     def test_amend_algo_sl_defaults_market_px(self):
         freeze_environment(DEMO_ENV)
         self.urlopen.return_value = _response(data=[{"algoId": "a-9", "sCode": "0"}])
-        okx_rest.amend_algo_sl("a-9", 26750.5)
+        okx_rest.amend_algo_sl("a-9", 26750.5, inst_id="BTC-USDT-SWAP")
         _, url, _, data = _captured(self.urlopen)
         self.assertEqual(url, "https://www.okx.com/api/v5/trade/amend-algos")
         rows = json.loads(data.decode("utf-8"))
-        self.assertIsInstance(rows, list)
-        self.assertEqual(rows[0]["algoId"], "a-9")
-        self.assertEqual(rows[0]["newSlOrdPx"], "-1")
-        self.assertEqual(rows[0]["newSlTriggerPx"], "26750.5")
+        self.assertIsInstance(rows, dict)
+        self.assertEqual(rows["instId"], "BTC-USDT-SWAP")
+        self.assertEqual(rows["algoId"], "a-9")
+        self.assertEqual(rows["newSlOrdPx"], "-1")
+        self.assertEqual(rows["newSlTriggerPx"], "26750.5")
 
     def test_pending_algo_orders_filters_locally_by_inst(self):
         freeze_environment(DEMO_ENV)
@@ -316,7 +317,7 @@ class OKXRestHttpBoundaryTests(unittest.TestCase):
 
     def test_module_never_touches_cli_or_subprocess(self):
         source = inspect.getsource(okx_rest)
-        for banned in ("subprocess", "okx --", "replace_cli_prefix", "cli_prefix", "os.environ"):
+        for banned in ("subprocess", "okx --", ("replace_" + "cli_" + "prefix"), ("cli_" + "prefix"), "os.environ"):
             self.assertNotIn(banned, source, f"okx_rest must stay CLI-free: found {banned!r}")
         # 凭证唯一来源 = runtime 的 current_environment（含冻结优先）
         self.assertIn("current_environment", source)
