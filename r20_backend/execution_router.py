@@ -72,6 +72,19 @@ def open_protected_position(decision: Dict[str, Any], *,
     # 执行开闸（默认关；env 显式打开且凭证就绪前一切免谈）
     require_execution("gate")
 
+    # 环境维合约存在性对账（US-007 扩展至 gate 链）：下单前核对**本环境**合约
+    # 目录——已下架/未上市在发送前拦截（fail-closed 拒开）；目录拉不到 →
+    # fail-open 放行（对账是增强不是风控闸门，绝不阻塞交易）。
+    try:
+        from .exchanges.listing import ensure_contract_listed
+        _check = ensure_contract_listed(
+            "gate", str(getattr(ad, "environment", "live") or "live"),
+            ad.native_symbol(asset))
+        if not _check.ok:
+            return _fail("listing", f"合约对账拒绝: {_check.reason}")
+    except Exception:  # 对账自身异常一律 fail-open（含目录缓存污染等未知面）
+        pass
+
     spec = ad.fetch_instrument_spec(asset)
     if spec is None:
         return _fail("specs", f"Gate 无法获取 {asset} 合约规格（下架或网络故障）")

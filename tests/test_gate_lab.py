@@ -16,6 +16,7 @@ for p in (str(ROOT), str(ROOT / "scripts")):
         sys.path.insert(0, p)
 
 import gate_lab_trader as lab  # noqa: E402
+import io  # noqa: E402  listing gate 离线目录响应构造
 from r20_backend.exchanges import routing_policy  # noqa: E402
 from r20_backend.exchanges.gate import GateAdapter  # noqa: E402
 
@@ -87,6 +88,29 @@ class LabCase(unittest.TestCase):
     """基类：所有数据写口（lab 三文件、OKX 敞口只读源、主台账 DB）全部钉到临时目录。"""
 
     def setUp(self):
+        # 封闭三律（同 fa417ee）：宿主 .env 注入的 ambient R20_* 旗标（如
+        # R20_GATE_TESTNET=1）会把环境解析到 sandbox 档，令用例自设的
+        # R20_GATE_EXECUTION=1（live 档旗标）错配失效——执行环境只由用例
+        # 自己的 patch.dict 决定，ambient 旗标一律排除。
+        self._ambient_backup = {k: v for k, v in os.environ.items()
+                                if k.startswith(("R20_BINANCE_TESTNET", "R20_GATE_TESTNET",
+                                                 "R20_GATE_EXECUTION", "R20_GATE_DEMO_EXECUTION",
+                                                 "R20_OKX_ENV", "R20_OKX_TESTNET"))}
+        for k in self._ambient_backup:
+            os.environ.pop(k, None)
+        self.addCleanup(lambda: os.environ.update(self._ambient_backup))
+
+        # listing gate（US-007 扩展接入了 execution_router）：测试零出网——把
+        # 目录拉取钉成离线失败，走 fail-open（不阻塞执行路径断言）；需要验证
+        # 对账拒绝的用例再自行 patch 成离线目录响应。
+        import r20_backend.exchanges.listing as _listing
+        _lp = patch.object(_listing, "urlopen",
+                           lambda *a, **k: (_ for _ in ()).throw(AssertionError("listing 零出网违例")))
+        _lp.start()
+        self.addCleanup(_lp.stop)
+        _listing._CACHE.clear()
+        self.addCleanup(_listing._CACHE.clear)
+
         self.tmp = tempfile.TemporaryDirectory()
         self.df = os.path.join(self.tmp.name, "decisions.json")
         self.tf = os.path.join(self.tmp.name, "trackers.json")
@@ -213,6 +237,21 @@ class TestLabDryRun(LabCase):
 
 
 class TestLabLive(LabCase):
+    def test_live_open_blocked_by_listing_gate(self):
+        """US-007 扩展：本环境目录无此合约 → 发送前拦截（fail-closed 拒开，零挂单）。"""
+        import r20_backend.exchanges.listing as _listing
+        self.write_decisions(BTC={"action": "BUY_LONG", "confidence": 90, "leverage": 3,
+                                  "margin_usdt": 40.0, "entry_price": 79000.0,
+                                  "take_profit_price": 85000.0, "stop_loss_price": 77000.0})
+        self.use_pool(self.pool(["BTC"], dry=False), "live")
+        ad = _StubAd(positions_rows=[])
+        with patch.dict(os.environ, {"R20_GATE_EXECUTION": "1"}), \
+                patch.object(_listing, "urlopen",
+                             lambda req, timeout=None: io.BytesIO(b"[]")):  # 空目录 = BTC_USDT 不存在
+            acts = lab.run_lab_cycle(ad=ad)
+        self.assertTrue(any("开仓被拒[listing]" in a and "合约对账拒绝" in a for a in acts))
+        self.assertNotIn("place", [c[0] for c in ad.calls], "对账拒开后绝不允许触达下单")
+
     def test_live_open_through_real_router(self):
         self.write_decisions(BTC={"action": "BUY_LONG", "confidence": 90, "leverage": 3,
                                   "margin_usdt": 40.0, "entry_price": 79000.0,
@@ -260,6 +299,43 @@ class TestLabLive(LabCase):
         self.assertEqual(tr2["BTC"]["sl_px"], 79300.0)
         # amend 换发 slB 后巡检见缺口 → 补挂收敛到在册腿
         self.assertIn(tr2["BTC"]["sl_id"], ("slA", "slB"))
+
+    def test_live_protection_releg_before_expiry(self):
+        """G8：腿全在但 attached_ts 距到期 <24h → 主动换腿（新腿挂成→撤旧→记时刷新）。"""
+        import r20_backend.exchanges.listing as _listing
+        tr = {"BTC": {"mode": "live", "asset": "BTC", "side": "long", "entry_px": 79000.0,
+                      "contracts": 57, "tp_px": 85000.0, "sl_px": 77000.0,
+                      "tp_id": "tpA", "sl_id": "slA",
+                      "attached_ts": int(time.time()) - (604800 - 3600)}}  # 距到期 1h
+        json.dump(tr, open(self.tf, "w"))
+        self.write_decisions(BTC={"action": "WAIT", "confidence": 50})
+        self.use_pool(self.pool(["BTC"], dry=False), "live")
+        ad = _StubAd()
+        with patch.dict(os.environ, {"R20_GATE_EXECUTION": "1"}):
+            acts = lab.run_lab_cycle(ad=ad)
+        self.assertTrue(any("主动换腿" in a for a in acts))
+        self.assertTrue(any("换腿完成" in a for a in acts))
+        tr2 = json.load(open(self.tf))
+        self.assertGreater(tr2["BTC"]["attached_ts"], tr["BTC"]["attached_ts"], "换腿后计时刷新")
+        self.assertIn(("cancel_price", "tpA"), ad.calls, "新腿挂成后旧 tp 腿必须撤销")
+        self.assertIn(("cancel_price", "slA"), ad.calls, "新腿挂成后旧 sl 腿必须撤销")
+
+    def test_live_protection_inspected_without_decision(self):
+        """G8：决策断档（本轮无该资产决策）的 live 仓同样被无条件巡检。"""
+        tr = {"SOL": {"mode": "live", "asset": "SOL", "side": "long", "entry_px": 100.0,
+                      "contracts": 5, "tp_px": 110.0, "sl_px": 95.0,
+                      "tp_id": "GONE", "sl_id": "slA",
+                      "attached_ts": int(time.time())}}
+        json.dump(tr, open(self.tf, "w"))
+        self.write_decisions(BTC={"action": "WAIT", "confidence": 50})   # 无 SOL 决策
+        self.use_pool(self.pool(["BTC", "SOL"], dry=False), "live")
+        ad = _StubAd(positions_rows=[{"base": "SOL", "side": "long", "size_signed": 5,
+                                      "mark_price": 100.0, "entry_price": 100.0}])
+        ad.price_orders = [{"id": "slA"}]   # tp 腿消失（模拟到期蒸发）
+        with patch.dict(os.environ, {"R20_GATE_EXECUTION": "1"}):
+            acts = lab.run_lab_cycle(ad=ad)
+        self.assertTrue(any("SOL" in a and "保护缺口已补挂" in a for a in acts),
+                        f"断档仓也必须巡检补挂: {acts}")
 
     def test_live_close_market(self):
         tr = {"BTC": {"mode": "live", "asset": "BTC", "side": "long", "entry_px": 79000.0,

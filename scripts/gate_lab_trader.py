@@ -32,6 +32,13 @@ DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 DECISION_FILE = os.path.join(DATA_DIR, "ai_brain_decisions.json")
 LAB_TRACKER_FILE = os.path.join(DATA_DIR, "gate_lab_trackers.json")
 LAB_LEDGER_FILE = os.path.join(DATA_DIR, "gate_lab_ledger.json")
+
+# G8 保护腿生命周期：触发单 expiration=7 天（Gate 默认 604800），到期即离开
+# open 列表 = 保护蒸发。双保险：① 距到期 <24h 主动换腿（attach 新腿成功后才撤
+# 旧腿，失败不阻塞——reduce_only 双触发短暂共存无害）；② 巡检无条件跑（决策
+# 断档周期也巡检全部 live 仓，不留空窗）。
+PROTECTION_TTL_SECONDS = 604800
+RELEG_LEAD_SECONDS = 86400
 # brain 持仓管理指令流（US-009）：与主链 execute_ai_position_management 同源同语义，
 # instructions 数组含 UPDATE_SL/CLOSE_MARKET/HOLD + suggested_sl_price + confidence。
 PM_FILE = os.path.join(DATA_DIR, "ai_position_management.json")
@@ -351,6 +358,53 @@ def plan_entry(dry, asset, dec, pool, ad, *, own_position=None, margin_mode=None
                        f"SL触发(price{sl_cond}{decision['stop_loss_price']:g}) 双腿reduce_only")}
 
 
+def _inspect_protection_legs(ad, asset: str, t: dict, actions, now_ts: int,
+                             *, handled: set) -> None:
+    """G8 保护腿巡检 + 到期前 24h 主动换腿（live 仓专用；单仓异常不外溢）。
+
+    - 缺腿（tp/sl 任一不在 open 列表）→ 按既有语义补挂；
+    - 腿全在但距到期 <24h（attached_ts + TTL - LEAD）→ 换腿：先 attach 新腿
+      （更新在册 id + attached_ts），成功后再撤旧腿（撤失败不阻塞——
+      reduce_only 双触发短暂共存无害）；先撤后挂留空窗，绝不采用；
+    - 任何巡检/网络异常记动作行返回，本轮其余仓位继续巡检。
+    """
+    handled.add(asset)
+    try:
+        open_ids = {str(o.get("id")) for o in ad.list_protective_orders(asset)}
+    except Exception as exc:
+        actions.append(f"[GateLab] {asset} 保护巡检失败: {exc}")
+        return
+    tp_ok = t.get("tp_id") in open_ids
+    sl_ok = t.get("sl_id") in open_ids
+    if tp_ok and sl_ok:
+        age = now_ts - int(t.get("attached_ts") or 0)
+        if age < PROTECTION_TTL_SECONDS - RELEG_LEAD_SECONDS:
+            return
+        actions.append(f"[GateLab] {asset} 触发单距到期不足24h，主动换腿")
+    try:
+        legs = ad.attach_protective_orders(
+            asset, t.get("side", "long"),
+            tp_px=float(t.get("tp_px") or 0) or None,
+            sl_px=float(t.get("sl_px") or 0) or None)
+        old_ids = [oid for oid in (t.get("tp_id"), t.get("sl_id")) if oid]
+        t.update({"tp_id": legs.get("tp", t.get("tp_id")),
+                  "sl_id": legs.get("sl", t.get("sl_id")),
+                  "attached_ts": now_ts})
+        if tp_ok and sl_ok:
+            # 换腿路径：新腿挂成后才撤旧（撤失败=双触发短暂共存，reduce_only 无害）
+            for oid in old_ids:
+                if oid in open_ids:
+                    try:
+                        ad.cancel_price_order(oid)
+                    except Exception as exc:
+                        actions.append(f"[GateLab] {asset} 旧腿 {oid} 撤销失败(不阻塞): {exc}")
+            actions.append(f"[GateLab] {asset} 换腿完成 → tp={t.get('tp_id')} sl={t.get('sl_id')}")
+        else:
+            actions.append(f"[GateLab] {asset} 保护缺口已补挂")
+    except Exception as exc:
+        actions.append(f"[GateLab] {asset} 保护巡检失败: {exc}")
+
+
 def run_lab_cycle(ad=None, now_ts=None):
     """单轮编排。ad 依赖注入便于全 mock 测试。返回动作列表（供日志/测试断言）。"""
     ad = ad or get_adapter("gate")
@@ -436,7 +490,8 @@ def run_lab_cycle(ad=None, now_ts=None):
                            + (f"（已撤孤儿挂单 {len(swept)} 笔）" if swept else ""))
 
     open_count = sum(1 for a in trackers if a in my_assets)
-    # ② 决策执行 + ③ 持仓管理 + ④ 保护缺口巡检
+    # ② 决策执行 + ③ 持仓管理 + ④ 保护缺口巡检（决策驱动）+ ⑤ G8 无条件巡检
+    handled_assets: set = set()
     for asset, dec in sorted(decisions.items()):
         act = str(dec.get("action") or "").upper()
         conf = float(dec.get("confidence") or 0)
@@ -488,18 +543,9 @@ def run_lab_cycle(ad=None, now_ts=None):
                     except Exception as exc:
                         actions.append(f"[GateLab] {asset} 棘轮失败(本地线保持): {exc}")
             if not dry:
-                try:
-                    open_ids = {str(o.get("id")) for o in ad.list_protective_orders(asset)}
-                    if t.get("tp_id") not in open_ids or t.get("sl_id") not in open_ids:
-                        legs = ad.attach_protective_orders(
-                            asset, t.get("side", "long"),
-                            tp_px=float(t.get("tp_px") or 0) or None,
-                            sl_px=float(t.get("sl_px") or 0) or None)
-                        t.update({"tp_id": legs.get("tp", t.get("tp_id")),
-                                  "sl_id": legs.get("sl", t.get("sl_id"))})
-                        actions.append(f"[GateLab] {asset} 保护缺口已补挂")
-                except Exception as exc:
-                    actions.append(f"[GateLab] {asset} 保护巡检失败: {exc}")
+                # G8：巡检/换腿统一走 helper（缺腿补挂 + 到期前换腿），见函数文档
+                _inspect_protection_legs(ad, asset, t, actions, now_ts or int(time.time()),
+                                         handled=handled_assets)
             continue
 
         if act in ("BUY_LONG", "SELL_SHORT") and conf >= float(pool["min_confidence"]):
@@ -548,6 +594,7 @@ def run_lab_cycle(ad=None, now_ts=None):
                     "tp_px": float(dec.get("take_profit_price") or 0),
                     "sl_px": float(dec.get("stop_loss_price") or 0),
                     "order_id": r.get("order_id"), "tp_id": r.get("tp_id"), "sl_id": r.get("sl_id"),
+                    "attached_ts": now_ts or int(time.time()),   # G8：换腿计时起点
                     "margin_usdt": r.get("margin_usdt"), "leverage": float(dec.get("leverage") or 0),
                     "entry_ts": now_ts or int(time.time()), "rr": r.get("rr"),
                 }
@@ -555,6 +602,14 @@ def run_lab_cycle(ad=None, now_ts=None):
                 actions.append(f"[GateLab] {asset} 开仓{'演算' if dry else ''}: {r.get('detail', '')[:140]}")
             else:
                 actions.append(f"[GateLab] {asset} 开仓被拒[{r.get('stage')}]: {r.get('detail', '')[:120]}")
+
+    # ⑤ G8：保护巡检无条件跑——决策断档的 live 仓（本轮无决策/不新鲜）同样
+    # 巡检 + 换腿，杜绝「只在有决策的周期才被巡检」留下的保护空窗。
+    if not dry:
+        for asset, t in sorted(trackers.items()):
+            if asset not in handled_assets and t.get("mode") == "live":
+                _inspect_protection_legs(ad, asset, t, actions, now_ts or int(time.time()),
+                                         handled=handled_assets)
 
     _atomic_dump(LAB_TRACKER_FILE, trackers)
     return actions
