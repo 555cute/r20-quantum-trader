@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
-OKX Crypto News & Black-Swan Circuit Breaker Harvester
+Crypto News & Black-Swan Circuit Breaker Harvester (US-002: 多源公开快讯 RSS)
 Features:
-1. Harvest high-impact crypto news from OKX (Golden Finance, BlockBeats, TechFlow, WallStreetCN)
+1. Harvest high-impact crypto news directly from public RSS feeds
+   (CoinDesk + Cointelegraph) over urllib.request — no okxcli dependency.
+   Every source fails soft: one dead feed never blanks the whole intelligence layer.
 2. Aggregate real-time multi-coin social & news sentiment (Bullish vs Bearish Ratio)
 3. Detect Black-Swan / Extreme Macro Events and trigger Automatic Circuit Breaker (30-min opening freeze)
 4. Push critical alerts to QQ Channel
@@ -22,7 +24,12 @@ if str(_THIS_DIR) not in sys.path:
 import json
 import time
 import datetime
+import hashlib
+import html
 import re
+import urllib.request
+import xml.etree.ElementTree as ET
+from email.utils import parsedate_to_datetime
 
 WORKSPACE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(WORKSPACE_DIR, "data")
@@ -79,31 +86,68 @@ def is_circuit_breaker_active():
             pass
     return False, {}
 
+def _fetch_rss_feeds():
+    """US-002: 多源公开 RSS 快讯抓取（CoinDesk + Cointelegraph）。
+    每个源独立 fail-soft：单条源挂掉不会清空整个情报层。"""
+    feeds = [
+        ("CoinDesk", "https://feeds.feedburner.com/CoinDesk"),
+        ("Cointelegraph", "https://cointelegraph.com/rss"),
+    ]
+    items = []
+    tz_bj = datetime.timezone(datetime.timedelta(hours=8))
+    for name, url in feeds:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                xml_data = resp.read()
+            root = ET.fromstring(xml_data)
+            for it in root.findall(".//item"):
+                title = (it.findtext("title") or "").strip()
+                link = (it.findtext("link") or "").strip()
+                desc = (it.findtext("description") or "").strip()
+                # strip html tags in desc if simple
+                summary = re.sub(r"<[^>]+>", "", desc).strip()[:200]
+                pub = it.findtext("pubDate")
+                ts_ms = int(time.time() * 1000)
+                time_str = datetime.datetime.now(tz_bj).strftime("%Y-%m-%d %H:%M:%S")
+                if pub:
+                    try:
+                        dt_obj = parsedate_to_datetime(pub)
+                        ts_ms = int(dt_obj.timestamp() * 1000)
+                        time_str = dt_obj.astimezone(tz_bj).strftime("%Y-%m-%d %H:%M:%S")
+                    except Exception:
+                        pass
+                items.append({
+                    "id": f"{name.lower()}-{ts_ms}-{abs(hash(title))%10000}",
+                    "title": title,
+                    "summary": summary,
+                    "time": time_str,
+                    "cTime": str(ts_ms),
+                    "url": link,
+                    "platforms": [name]
+                })
+        except Exception as e:
+            print(f"Warning fetching {name}: {e}")
+    return items
+
 def fetch_and_analyze_news_sentiment():
     tz_bj = datetime.timezone(datetime.timedelta(hours=8))
     now_bj = datetime.datetime.now(tz_bj)
     now_str = now_bj.strftime("%Y-%m-%d %H:%M:%S")
 
-    # 1. News sources：OKX CLI 已移除（news latest/important/coin-sentiment 均无公开
-    #    V5 等价接口）。显式缺失化：不抓取、不以空数据冒充新鲜信号；下方既有
-    #    fail-closed 路径会继续以最后有效缓存供页面并标 stale_sections。
-    #    注意（US-014 前置收尾归因）：新闻模式熔断层在接入新数据源前不再触发，
-    #    但黑天鹅熔断本身已由 ai_factor_trader.check_black_swan_sentinel 的统一
-    #    V5 REST 公共行情路径**复活**（不可判定=不放松），本文件不再是熔断的
-    #    唯一数据通路——这是数据源缺失的显式后果，不是静默降级。
-    news_res_latest: dict = {}
-    news_res_imp: dict = {}
-    
-    raw_news_latest = news_res_latest.get("details", []) if isinstance(news_res_latest, dict) else []
-    raw_news_imp = news_res_imp.get("details", []) if isinstance(news_res_imp, dict) else []
-    
+    # 1. News sources（US-002）：直连多源公开 RSS 快讯（CoinDesk + Cointelegraph），
+    #    不再依赖已移除的 OKX CLI。每源 fail-soft；若全部拉取失败，raw_news 为空，
+    #    下方既有 fail-closed 路径会继续以最后有效缓存供页面并标 stale_sections。
+    raw_news = _fetch_rss_feeds()
+
     seen_ids = set()
-    raw_news = []
-    for item in raw_news_latest + raw_news_imp:
+    deduped_news = []
+    for item in raw_news:
         nid = str(item.get("id", ""))
         if nid and nid not in seen_ids:
             seen_ids.add(nid)
-            raw_news.append(item)
+            deduped_news.append(item)
+    raw_news = deduped_news
             
     # Sort strictly by creation timestamp descending
     raw_news.sort(key=lambda x: int(x.get("cTime", 0) or 0), reverse=True)
@@ -132,9 +176,9 @@ def fetch_and_analyze_news_sentiment():
             "title": title,
             "summary": summary,
             "coins": item.get("ccyList", []),
-            "platforms": item.get("platformList", []),
+            "platforms": item.get("platformList") or item.get("platforms", []),
             "importance": item.get("importance", "high"),
-            "url": item.get("sourceUrl", "")
+            "url": item.get("sourceUrl") or item.get("url", "")
         })
 
     if triggered_threat:
@@ -246,8 +290,9 @@ def fetch_and_analyze_news_sentiment():
     payload = {
         "timestamp": now_str,
         "updated_at": now_str,
-        "source_available": False,
-        "source_reason": "OKX CLI 已移除，news 无公开 V5 等价接口（新闻模式熔断层待新数据源；黑天鹅熔断已由统一行情哨兵复活，缺失≠放宽），当前显示缺失而非中性",
+        "source_available": bool(raw_news),
+        "source_reason": ("多源公开 RSS 快讯（CoinDesk/Cointelegraph）" if raw_news
+                          else "公开 RSS 快讯源全部拉取失败，显示缺失而非中性"),
         "macro_sentiment": macro_env,
         "circuit_breaker": cb_info if cb_active else {"active": False},
         "coins_sentiment": coin_sentiments,
