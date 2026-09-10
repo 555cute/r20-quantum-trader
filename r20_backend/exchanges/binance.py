@@ -23,7 +23,10 @@ INTERVAL_MAP = {  # 内部周期 → Binance interval
 class BinanceAdapter(BaseExchangeAdapter):
     base_url = "https://fapi.binance.com"
     live_url = "https://fapi.binance.com"
-    test_url = "https://demo-fapi.binance.com"   # 官方 Demo Trading 新域名（旧 testnet.binancefuture.com 已过时）
+    test_url = "https://demo-fapi.binance.com"   # 官方 Demo 域。时效审计（2026-09-10）：
+    # PROD=fapi / TESTNET=testnet.binancefuture / DEMO=demo-fapi 三常量在当前官方 SDK 并存，
+    # 旧测试域并未被删除——三域均可经 env_profiles 显式 environment 请求；
+    # 旧 R20_BINANCE_TESTNET=1 兼容映射到 demo（与本仓既有行为逐字节一致）。
     capabilities = ExchangeCapabilities(
         venue="binance",
         display_name="Binance 币安 USDT-M 合约",

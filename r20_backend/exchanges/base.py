@@ -95,15 +95,28 @@ class BaseExchangeAdapter:
     capabilities: ExchangeCapabilities
     base_url: str = ""
     live_url: str = ""
-    test_url: str = ""
+    test_url: str = ""        # 旧单沙盒域声明，仅作未配 profile 场所的兼容兜底
+    environment: str = "live"  # US-001：资金/沙盒档位（live|demo|testnet|sandbox）
 
-    def __init__(self, session: Optional[requests.Session] = None) -> None:
-        import os
-        cap_venue = str(getattr(self.capabilities, "venue", "") or "").upper()
-        if self.test_url and str(os.environ.get(f"R20_{cap_venue}_TESTNET", "0")).strip().lower() in ("1", "true", "yes", "on"):
-            self.base_url = self.test_url
+    def __init__(self, session: Optional[requests.Session] = None,
+                 environment: Optional[str] = None) -> None:
+        """端点解析（US-001 起）：(venue, environment) → env_profiles 单一入口。
+
+        environment=None → 按旧 ``R20_{VENUE}_TESTNET`` 布尔兼容映射
+        （binance→demo 逐字节同旧 URL；gate→sandbox 双候选择优探测；
+        未声明档的场所维持旧 live/test_url 行为）。
+        """
+        from . import env_profiles
+        venue_key = str(getattr(self.capabilities, "venue", "") or "").lower()
+        env = (str(environment or "").strip().lower()
+               or env_profiles.legacy_environment_for(venue_key))
+        if env_profiles.has_env(venue_key, env):
+            self.base_url = env_profiles.resolve_base_url(venue_key, env)
+        elif env != "live" and self.test_url:
+            self.base_url = self.test_url          # 未配 profile 场所的旧兜底
         elif self.live_url:
             self.base_url = self.live_url
+        self.environment = env
         self._session = session
         self._specs_cache: Dict[str, InstrumentSpec] = {}
 

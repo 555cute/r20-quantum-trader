@@ -3,11 +3,12 @@
 上层（因子聚合 / ExecutionRouter / 后台配置）只认 venue 字符串；任何执行类请求
 先过 ``require_execution``，未开闸场所 fail-closed 显式拒绝。
 
-凭证与网络档位（2026-09-09 Phase 2 起）：
+凭证与网络档位（US-001 起 = env_profiles 单一入口）：
 - ``venue_credentials(venue)``：从加密密钥库读 API Key/Secret（只读行情用不到，
   Phase 3 执行与更高限频档消费；后台「多所凭证」面板负责录入）；
-- ``R20_BINANCE_TESTNET`` / ``R20_GATE_TESTNET``=1 且该所适配器声明 test_url 时，
-  注册表实例化即指向官方沙盒端点。
+- 端点档由 ``env_profiles`` 按 (venue, environment) 解析；旧
+  ``R20_BINANCE_TESTNET``/``R20_GATE_TESTNET``=1 兼容映射（binance→demo 同旧 URL、
+  gate→sandbox 双候选探测择优并钉死，禁签名跨域回退）。
 """
 from __future__ import annotations
 
@@ -44,7 +45,7 @@ def execution_open(venue: str) -> bool:
         return str(os.environ.get("R20_GATE_EXECUTION", "0")).strip().lower() in ("1", "true", "yes", "on")
     return ADAPTER_EXECUTION_ENABLED.get(key, False)
 
-_INSTANCES: Dict[str, BaseExchangeAdapter] = {}
+_INSTANCES: Dict[Tuple[str, str], BaseExchangeAdapter] = {}
 
 
 def venue_testnet_enabled(venue: str) -> bool:
@@ -52,14 +53,28 @@ def venue_testnet_enabled(venue: str) -> bool:
     return str(os.environ.get(f"R20_{key.upper()}_TESTNET", "0")).strip().lower() in ("1", "true", "yes", "on")
 
 
-def get_adapter(venue: str) -> BaseExchangeAdapter:
+def get_adapter(venue: str, environment: Optional[str] = None) -> BaseExchangeAdapter:
+    """按 (venue, environment) 取适配器实例（US-001：环境档显式化）。
+
+    environment=None → 旧 R20_{VENUE}_TESTNET 布尔兼容映射（见 env_profiles）。
+    US-002 将把缓存键再升级为 AccountKey (venue, environment, cred-fingerprint)。
+    """
+    from . import env_profiles
     key = str(venue or "").strip().lower()
     cls = _ADAPTERS.get(key)
     if cls is None:
         raise ExchangeCapabilityError(f"未知交易所 venue={venue!r}，可用: {sorted(_ADAPTERS)}")
-    if key not in _INSTANCES:
-        _INSTANCES[key] = cls()
-    return _INSTANCES[key]
+    env = str(environment or "").strip().lower() or env_profiles.legacy_environment_for(key)
+    cache_key = (key, env)
+    if cache_key not in _INSTANCES:
+        _INSTANCES[cache_key] = cls(environment=env)
+    return _INSTANCES[cache_key]
+
+
+def adapter_environment(venue: str) -> str:
+    """该场所当前布尔开关解析出的档位名（观测/诊断用，纯读）。"""
+    from . import env_profiles
+    return env_profiles.legacy_environment_for(str(venue or "").strip().lower())
 
 
 def clear_instances() -> None:

@@ -49,7 +49,8 @@ class GateAPIError(RuntimeError):
 class GateAdapter(BaseExchangeAdapter):
     base_url = "https://api.gateio.ws"
     live_url = "https://api.gateio.ws"
-    test_url = "https://fx-api-testnet.gateio.ws"   # 连续实测 502，暂不可依赖
+    test_url = "https://fx-api-testnet.gateio.ws"   # 官方当前 SDK 仍列之域（时效审计 2026-09-10：不得宣称废弃）；
+    # 沙盒档实由 env_profiles 双候选（此域 + api-testnet.gateapi.io）无凭证探测择优并持久化钉死。
     capabilities = ExchangeCapabilities(
         venue="gate",
         display_name="Gate.io 芝麻开门 USDT 永续",
