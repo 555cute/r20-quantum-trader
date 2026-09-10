@@ -22,7 +22,7 @@ PY="$ROOT/.venv/bin/python3"
 exec 9>"$LOCK"
 flock -n 9 || { echo "watchdog already running"; exit 0; }
 
-log() { echo "[$(date '+%F %T %Z')] $*" >> "$LOG"; }
+log() { echo "[$(TZ=Asia/Shanghai date '+%F %T +08:00')] $*" >> "$LOG"; }
 
 find_backend_pid() {
     local p cmd

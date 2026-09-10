@@ -67,30 +67,58 @@ export function arrow(v: number | null | undefined): string {
 
 /* —— 时间 —— */
 
-function pad(n: number): string {
-  return n < 10 ? `0${n}` : String(n);
+/** Display zone is a product contract, never the browser/OS default. */
+export const DISPLAY_TIME_ZONE = 'Asia/Shanghai';
+export type TimeInput = Date | string | number | null | undefined;
+
+/** Legacy business strings are Beijing wall time; explicitly UTC fields opt in.
+ * Epoch values retain their instant (seconds and milliseconds are both accepted).
+ * An existing Z/offset always wins: never append a second timezone or add 8h twice.
+ */
+export function parseTime(input: TimeInput, naiveZone: 'beijing' | 'utc' = 'beijing'): Date {
+  if (input instanceof Date) return new Date(input.getTime());
+  if (input === null || input === undefined || input === '') return new Date(NaN);
+  if (typeof input === 'number' || /^-?\d+(?:\.\d+)?$/.test(String(input).trim())) {
+    const n = Number(input);
+    return new Date(Math.abs(n) < 1e11 ? n * 1000 : n);
+  }
+  let text = String(input).trim().replace(/\s+UTC$/i, 'Z').replace(/\s*(?:\(北京时间\)|北京时间)$/, '+08:00').replace(' ', 'T');
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) text += 'T00:00:00';
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/.test(text)) {
+    text += naiveZone === 'utc' ? 'Z' : '+08:00';
+  }
+  // Reject ambiguous locale dates instead of silently using the browser timezone.
+  if (!/(?:Z|[+-]\d{2}:?\d{2})$/i.test(text)) return new Date(NaN);
+  return new Date(text);
 }
 
-export function fmtClock(d: Date): string {
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+function beijingParts(input: TimeInput): Record<string, string> | null {
+  const d = parseTime(input);
+  if (Number.isNaN(d.getTime())) return null;
+  return Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
+    timeZone: DISPLAY_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).formatToParts(d).map(p => [p.type, p.value]));
 }
 
-export function fmtDate(d: Date): string {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+export function fmtClock(input: TimeInput): string {
+  const p = beijingParts(input);
+  return p ? `${p.hour}:${p.minute}:${p.second}` : '--';
 }
 
-export function fmtDateTime(input: Date | string | number | null | undefined): string {
-  if (input === null || input === undefined || input === '') return '--';
-  const d = input instanceof Date ? input : new Date(input);
-  if (Number.isNaN(d.getTime())) return String(input);
-  return `${fmtDate(d)} ${fmtClock(d)}`;
+export function fmtDate(input: TimeInput): string {
+  const p = beijingParts(input);
+  return p ? `${p.year}-${p.month}-${p.day}` : '--';
 }
 
-export function fmtHM(input: Date | string | number | null | undefined): string {
-  if (input === null || input === undefined || input === '') return '--';
-  const d = input instanceof Date ? input : new Date(input);
-  if (Number.isNaN(d.getTime())) return String(input);
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+export function fmtDateTime(input: TimeInput): string {
+  if (!beijingParts(input)) return '--';
+  return `${fmtDate(input)} ${fmtClock(input)}`;
+}
+
+export function fmtHM(input: TimeInput): string {
+  const p = beijingParts(input);
+  return p ? `${p.hour}:${p.minute}` : '--';
 }
 
 /** 置信度 → 档位（未校准概率不展示裸数字，悬停/详情给原值） */
@@ -108,12 +136,9 @@ export function cleanReason(v: string | null | undefined): string {
   return v.replace(/^[\p{Extended_Pictographic}\uFE0F\u200D\s]+/u, '').trim() || '--'
 }
 
-/** 后端 UTC 字符串（"YYYY-MM-DD HH:MM:SS"，无时区标记）→ 北京时间显示（用户指令 2026-09-10：全站统一北京时间） */
-export function utcStrToBj(v: string | null | undefined, withDate = false): string {
-  if (!v) return '--'
-  const d = new Date(String(v).trim().replace(' ', 'T') + 'Z')
-  if (Number.isNaN(d.getTime())) return String(v)
-  const opts: Intl.DateTimeFormatOptions = { timeZone: 'Asia/Shanghai', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }
-  if (withDate) Object.assign(opts, { month: '2-digit', day: '2-digit' })
-  return d.toLocaleString('zh-CN', opts)
+/** Explicitly UTC legacy feed fields; offset-aware inputs preserve their instant. */
+export function utcStrToBj(v: TimeInput, withDate = false): string {
+  const d = parseTime(v, 'utc');
+  if (Number.isNaN(d.getTime())) return '--';
+  return withDate ? fmtDateTime(d) : fmtClock(d);
 }

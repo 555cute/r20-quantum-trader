@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /** 相对时间显示（走 i18n），30s 心跳刷新；绝对时间进 title */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { fmtDateTime } from '../../utils/format';
+import { fmtDateTime, parseTime } from '../../utils/format';
 import { useI18n } from '../../composables/useI18n';
 
 const props = defineProps<{ time: string | number | Date }>();
@@ -15,7 +15,7 @@ onMounted(() => {
 onBeforeUnmount(() => window.clearInterval(timer));
 
 const text = computed(() => {
-  const ts = props.time instanceof Date ? props.time : new Date(props.time);
+  const ts = parseTime(props.time);
   const diff = Math.max(0, now.value - ts.getTime());
   if (Number.isNaN(ts.getTime())) return String(props.time);
   const s = Math.floor(diff / 1000);
@@ -27,7 +27,7 @@ const text = computed(() => {
   if (h < 24) return t('time.hoursAgo', undefined, { n: h });
   return t('time.daysAgo', undefined, { n: Math.floor(h / 24) });
 });
-const abs = computed(() => fmtDateTime(props.time));
+const abs = computed(() => `${fmtDateTime(props.time)} 北京时间 (UTC+8)`);
 </script>
 
 <template>

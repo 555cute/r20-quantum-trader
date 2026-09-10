@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtDateTime, utcStrToBj } from '../../utils/format';
 import { useToast } from '../../composables/useToast'
 const toast = useToast()
 import { ref, onMounted } from 'vue'
@@ -138,8 +139,7 @@ async function deleteArchive(hash: string, name: string) {
 
 function formatTimestamp(ts: number) {
   if (!ts) return '未记录'
-  const d = new Date(ts * 1000)
-  return d.toLocaleString("sv-SE")
+  return fmtDateTime(ts * 1000)
 }
 
 onMounted(() => {
@@ -507,7 +507,7 @@ onMounted(() => {
                 {{ arc.description }}
               </p>
               <div class="flex flex-wrap items-center gap-3 text-[11px] text-[var(--ink-2)]">
-                <span>归档时间: {{ arc.archived_at }}</span>
+                <span>归档时间: {{ utcStrToBj(arc.archived_at, true) }}</span>
                 <span>创建者: {{ arc.author }}</span>
                 <span class="truncate max-w-md">{{ arc.summary }}</span>
               </div>

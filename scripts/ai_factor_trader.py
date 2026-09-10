@@ -35,6 +35,7 @@ try:
 except Exception:
     __version__ = "7.6.0"
 
+from r20_backend.time_utils import beijing_day
 from okx_runtime import freeze_environment as freeze_okx_environment, replace_cli_prefix as okx_private_command, unfreeze_environment as unfreeze_okx_environment, selected_environment
 import json
 import math
@@ -397,7 +398,7 @@ def is_circuit_breaker_active(usdt_available: float = None):
             today_pnl = sum(
                 float(t.get("pnl", 0) or 0)
                 for t in ledger
-                if t.get("status") == "closed" and str(t.get("close_time", "")).startswith(today_str)
+                if t.get("status") == "closed" and beijing_day(t.get("close_time")) == today_str
             )
             _loss_cap = effective_daily_loss_limit(usdt_available)
             if today_pnl < -_loss_cap:

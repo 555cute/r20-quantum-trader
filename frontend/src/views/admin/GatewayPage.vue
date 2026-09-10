@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtDateTime } from '../../utils/format';
 import { useToast } from '../../composables/useToast'
 const toast = useToast()
 import { ref, computed, onMounted } from 'vue'
@@ -11,8 +12,7 @@ const { api } = useApi()
 
 /** 调度时间 ISO → MM-DD HH:MM:SS */
 function fmtJobTime(iso: string): string {
-  const v = String(iso || '').replace('T', ' ')
-  return v.length >= 16 ? v.slice(5, 19) : v
+  return fmtDateTime(iso).slice(5)
 }
 const gw = ref<any>(null)
 const loading = ref(true)
@@ -157,7 +157,7 @@ onMounted(load)
                 <td class="py-2.5 px-3" style="color: var(--ink-2);">{{ d.channel || '--' }}</td>
                 <td class="py-2.5 px-3 font-bold" :class="statusColor(d.status)">{{ d.status }}</td>
                 <td class="py-2.5 px-3 num" style="color: var(--ink-2);">{{ d.attempts ?? d.attempt_count ?? 1 }}</td>
-                <td class="py-2.5 px-3 num" style="color: var(--ink-3);">{{ d.created_at || d.time || '--' }}</td>
+                <td class="py-2.5 px-3 num" style="color: var(--ink-3);">{{ fmtDateTime(d.created_at || d.time) }}</td>
                 <td class="py-2.5 px-4 text-right">
                   <button v-if="d.status === 'dead'" @click="replayDelivery(d.id)" class="flex items-center space-x-1 ml-auto px-2 py-1 rounded-md border text-[11px] cursor-pointer transition-colors" style="background-color: var(--warn-bg); border-color: var(--warn-line); color: var(--warn);">
                     <RotateCcw class="w-3 h-3" /><span>重放</span>

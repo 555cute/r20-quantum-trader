@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtDate, fmtDateTime } from '../../utils/format';
 /**
  * 交易台账视图：汇总带 → 筛选条 → 明细表（行点击 → 生命周期抽屉）→ 巡检日志折叠区。
  * 事实源：/api/all trades（交易所持仓史双源交叉验证重建）。
@@ -69,12 +70,12 @@ function exportCsv() {
   const head = ['inst', 'side', 'lever', 'open_time', 'open_px', 'close_time', 'close_px', 'margin', 'fee', 'net_pnl', 'roi_pct', 'duration', 'exit_reason', 'strategy'];
   const lines = [head.join(',')];
   for (const x of filtered.value) {
-    lines.push(head.map((k) => `"${String(x[k] ?? '').replaceAll('"', '""')}"`).join(','));
+    lines.push(head.map((k) => `"${String((k === 'open_time' || k === 'close_time') ? (x[k] ? fmtDateTime(x[k]) + ' +08:00' : '') : (x[k] ?? '')).replaceAll('"', '""')}"`).join(','));
   }
   const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `r20-ledger-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `r20-ledger-${fmtDate(new Date())}.csv`;
   a.click();
   URL.revokeObjectURL(a.href);
   toast.ok(t('dash.ledger.exported'));
@@ -188,7 +189,7 @@ function dirOf(side: string): 'long' | 'short' {
                 <td class="col-num t-faint">{{ fmtNum(Math.abs(Number(x.fee) || 0), 2) }}</td>
                 <td class="num text-xs" style="color: var(--ink-2)">{{ x.duration || '--' }}</td>
                 <td class="text-xs" style="color: var(--ink-2)">{{ cleanReason(x.exit_reason) }}</td>
-                <td class="num text-xs" style="color: var(--ink-3)">{{ String(x.close_time || '').slice(5, 16) }}</td>
+                <td class="num text-xs" style="color: var(--ink-3)">{{ fmtDateTime(x.close_time).slice(5, 16) }}</td>
               </tr>
             </tbody>
           </table>

@@ -25,8 +25,11 @@ import os
 import re
 import tempfile
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+_BJ = timezone(timedelta(hours=8))
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data"
@@ -188,7 +191,7 @@ def load_council_config() -> Dict[str, Any]:
                     if mode not in VALID_CONSENSUS_MODES:
                         data["consensus_mode"] = DEFAULT_CONSENSUS_MODE
                     if _migrate_untouched_preset_prompts(data):
-                        data["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                        data["updated_at"] = datetime.now(_BJ).isoformat(sep=" ", timespec="seconds")
                         _atomic_write_json(COUNCIL_CONFIG_FILE, data)
                     return data
         except Exception:
@@ -199,7 +202,7 @@ def load_council_config() -> Dict[str, Any]:
         "consensus_mode": DEFAULT_CONSENSUS_MODE,
         "timeout_seconds": DEFAULT_COUNCIL_TIMEOUT,
         "roles": {k: dict(v) for k, v in DEFAULT_PRESET_TEMPLATES.items()},
-        "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "updated_at": datetime.now(_BJ).isoformat(sep=" ", timespec="seconds"),
     }
     _atomic_write_json(COUNCIL_CONFIG_FILE, default_config)
     return default_config
@@ -230,7 +233,7 @@ def save_council_config(config: Dict[str, Any]) -> Dict[str, Any]:
         mode = DEFAULT_CONSENSUS_MODE
     config["consensus_mode"] = mode
 
-    config["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    config["updated_at"] = datetime.now(_BJ).isoformat(sep=" ", timespec="seconds")
     _atomic_write_json(COUNCIL_CONFIG_FILE, config)
     return config
 
@@ -271,7 +274,7 @@ def export_council_config() -> Dict[str, Any]:
     return {
         "format": COUNCIL_EXPORT_FORMAT,
         "version": COUNCIL_EXPORT_VERSION,
-        "exported_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "exported_at": datetime.now(_BJ).isoformat(sep=" ", timespec="seconds"),
         "config": {
             "enabled": bool(config.get("enabled", False)),
             "consensus_mode": config.get("consensus_mode", DEFAULT_CONSENSUS_MODE),
@@ -283,7 +286,7 @@ def export_council_config() -> Dict[str, Any]:
 def _backup_council_config() -> str:
     if not COUNCIL_CONFIG_FILE.is_file():
         return ""
-    stamp = time.strftime("%Y%m%d_%H%M%S")
+    stamp = datetime.now(_BJ).strftime("%Y%m%d_%H%M%S")
     dst = DATA_DIR / f"council_config_backup_{stamp}.json"
     dst.write_bytes(COUNCIL_CONFIG_FILE.read_bytes())
     for stale in sorted(DATA_DIR.glob("council_config_backup_*.json"))[:-10]:

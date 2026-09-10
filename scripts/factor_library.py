@@ -22,10 +22,13 @@ if str(_THIS_DIR) not in sys.path:
 
 import json
 import time
+from datetime import datetime, timedelta, timezone
 import subprocess
 import urllib.request
 from typing import Dict, Any, List, Optional
 from concurrent.futures import ThreadPoolExecutor
+
+_BJ = timezone(timedelta(hours=8))
 
 WORKSPACE_DIR = str(_PROJECT_ROOT)
 DATA_DIR = os.path.join(WORKSPACE_DIR, "data")
@@ -493,7 +496,7 @@ def update_factor_library() -> Dict[str, Any]:
 
     snapshot = {
         "timestamp": int(time.time()),
-        "time_str": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "time_str": datetime.now(_BJ).isoformat(sep=" ", timespec="seconds"),
         "instruments": results
     }
 

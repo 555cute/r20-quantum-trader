@@ -24,6 +24,8 @@ from typing import Any, Optional
 
 import websockets
 
+_BJ = datetime.timezone(datetime.timedelta(hours=8))
+
 ROOT = Path(__file__).resolve().parents[1]
 LOG_FILE = ROOT / "logs" / "qq_gateway.log"
 QQ_TOKEN_URL = "https://bots.qq.com/app/getAppAccessToken"
@@ -60,7 +62,7 @@ def acquire_single_instance_lock() -> bool:
 
 def log(msg: str) -> None:
     LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ts = datetime.datetime.now(_BJ).isoformat(sep=" ", timespec="seconds")
     line = f"[{ts}] {msg}"
     print(line, flush=True)
     with LOG_FILE.open("a", encoding="utf-8") as f:

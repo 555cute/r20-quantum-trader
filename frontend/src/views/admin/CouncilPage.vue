@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtDate } from '../../utils/format';
 import { useToast } from '../../composables/useToast'
 const toast = useToast()
 import { ref, onMounted } from 'vue'
@@ -137,7 +138,7 @@ async function exportConfig() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `r20-council-config-${new Date().toISOString().slice(0, 10)}.json`
+    a.download = `r20-council-config-${fmtDate(new Date())}.json`
     a.click()
     URL.revokeObjectURL(url)
     toast.ok('投委会配置已导出为 JSON 包（含全部席位提示词与议事规则）')

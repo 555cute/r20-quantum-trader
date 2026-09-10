@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtDateTime } from '../../utils/format';
 import { ref, computed, onMounted } from 'vue'
 
 import PageHeader from '../../components/admin/PageHeader.vue'
@@ -929,7 +930,7 @@ onMounted(() => {
                   {{ ev.type === 'fallback_hit' ? '✅ 已回退生效' : '⛔ 模型链全灭' }}
                   {{ ev.from_model }}<template v-if="ev.to_model"> → {{ ev.to_model }}</template>
                 </span>
-                <span class="shrink-0" style="color: var(--ink-3);">{{ ev.time_str }} · {{ ev.elapsed_seconds }}s</span>
+                <span class="shrink-0" style="color: var(--ink-3);">{{ fmtDateTime(ev.ts || ev.time_str) }} · {{ ev.elapsed_seconds }}s</span>
               </div>
               <div class="truncate" style="color: var(--ink-2);" :title="(ev.errors || []).join(' | ')">
                 {{ (ev.errors || [])[0] || ev.chain || '' }}

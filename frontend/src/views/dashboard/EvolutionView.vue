@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtDateTime } from '../../utils/format';
 /**
  * 自进化视图：复盘 HUD → 左·裁决与归因与行动 / 右·黄金心法库。
  * 数据源：/api/all 的 review + ai_trading_memory_md（AI 每 6 小时覆写）。
@@ -94,7 +95,7 @@ const md = computed(() => (store.data as any)?.ai_trading_memory_md || '');
     <div class="card grid grid-cols-2 gap-2 p-2 md:grid-cols-5 xl:gap-0 xl:p-0">
       <BaseStat
         :label="t('dash.evolution.hud.at')"
-        :value="review.timestamp ? review.timestamp.slice(5, 16) : '--'"
+        :value="review.timestamp ? fmtDateTime(review.timestamp).slice(5, 16) : '--'"
        
       />
       <BaseStat

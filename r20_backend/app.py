@@ -30,6 +30,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Res
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from pydantic import BaseModel, Field, field_validator
+from r20_backend.time_utils import beijing_day
 from r20_backend.config import refresh_settings, settings
 from r20_backend.version import __version__, APP_NAME, APP_VERSION
 from r20_backend.okx_client import OKXClient
@@ -3318,7 +3319,9 @@ def equity_history(days: int = 14) -> dict[str, Any]:
                 ct = str(r.get("close_time") or "")
                 if len(ct) < 10:
                     continue
-                day = ct[:10]
+                day = beijing_day(ct)
+                if not day:
+                    continue
                 try:
                     daily[day] = daily.get(day, 0.0) + float(r.get("net_pnl") or r.get("pnl") or 0.0)
                 except (TypeError, ValueError):

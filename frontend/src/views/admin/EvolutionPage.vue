@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtDateTime } from '../../utils/format';
 import { useToast } from '../../composables/useToast'
 const toast = useToast()
 import { ref, computed, onMounted } from 'vue'
@@ -319,7 +320,7 @@ onMounted(loadData)
             </span>
           </div>
           <div class="text-[11px]" style="color: var(--ink-2);">
-            复盘时间: <strong class="text-emerald-400 font-bold">{{ evolutionReport.timestamp }}</strong>
+            复盘时间: <strong class="text-emerald-400 font-bold">{{ fmtDateTime(evolutionReport.timestamp) }}</strong>
           </div>
         </div>
 
@@ -524,7 +525,7 @@ onMounted(loadData)
 
               <!-- Footer Audit Line -->
               <div class="flex items-center justify-between text-[11px] pt-1 border-t" style="border-color: var(--line-1); color: var(--ink-3);">
-                <span>收录时间: {{ item.created_at || '--' }} · 支持样本量: {{ item.sample_size || 10 }} 笔</span>
+                <span>收录时间: {{ fmtDateTime(item.created_at) }} · 支持样本量: {{ item.sample_size || 10 }} 笔</span>
                 <span class="text-emerald-500 flex items-center space-x-1">
                   <ShieldCheck class="w-3 h-3" />
                   <span>宪法安全审查: {{ item.shield_status || 'PASSED' }}</span>

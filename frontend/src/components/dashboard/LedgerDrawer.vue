@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtDateTime } from '../../utils/format';
 import { pairLabel } from '../../utils/instId';
 /** 单笔生命周期抽屉：开平仓 / 费用构成 / 盈亏结构 / 策略与归因 */
 import { computed } from 'vue';
@@ -59,11 +60,11 @@ const cells = computed(() => [
         <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
           <div>
             <dt class="t-label">{{ t('dash.ledger.lifecycle.open') }}</dt>
-            <dd class="num mt-0.5" style="color: var(--ink-1)">{{ x.open_time }}</dd>
+            <dd class="num mt-0.5" style="color: var(--ink-1)">{{ fmtDateTime(x.open_time) }}</dd>
           </div>
           <div>
             <dt class="t-label">{{ t('dash.ledger.lifecycle.close') }}</dt>
-            <dd class="num mt-0.5" style="color: var(--ink-1)">{{ holding ? '--' : x.close_time }}</dd>
+            <dd class="num mt-0.5" style="color: var(--ink-1)">{{ holding ? '--' : fmtDateTime(x.close_time) }}</dd>
           </div>
           <div>
             <dt class="t-label">{{ t('dash.ledger.col.hold') }}</dt>

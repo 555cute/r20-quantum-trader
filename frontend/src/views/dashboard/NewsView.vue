@@ -4,7 +4,7 @@ import { computed } from 'vue';
 import { ExternalLink } from 'lucide-vue-next';
 import { useDashboardStore } from '../../stores/dashboard';
 import { useI18n } from '../../composables/useI18n';
-import { fmtNum } from '../../utils/format';
+import { fmtNum, fmtHM } from '../../utils/format';
 import PageHead from '../../components/dashboard/PageHead.vue';
 import BaseEmpty from '../../components/base/BaseEmpty.vue';
 import TimeAgo from '../../components/base/TimeAgo.vue';
@@ -103,7 +103,7 @@ function impTxt(i: string): string {
             <div class="flex items-center gap-2">
               <span class="badge" :class="impCls(item.importance)">{{ impTxt(item.importance) }}</span>
               <span v-for="cc in (item.coins || []).slice(0, 3)" :key="cc" class="badge badge-mono">{{ cc }}</span>
-              <span class="t-faint ms-auto text-xs">{{ item.time?.slice(11, 16) || '' }} · <TimeAgo :time="item.time" /></span>
+              <span class="t-faint ms-auto text-xs">{{ fmtHM(item.time) }} · <TimeAgo :time="item.time" /></span>
             </div>
             <p class="mt-1.5 text-sm font-medium leading-snug group-hover:text-[var(--accent)]" style="color: var(--ink-1)">
               {{ item.title }}

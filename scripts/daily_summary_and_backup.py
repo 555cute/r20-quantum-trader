@@ -19,6 +19,8 @@ LEDGER_JSON_FILE = os.path.join(DATA_DIR, "trading_ledger.json")
 
 os.makedirs(BACKUPS_DIR, exist_ok=True)
 sys.path.append(os.path.join(WORKSPACE_DIR, "scripts"))
+sys.path.insert(0, WORKSPACE_DIR)
+from r20_backend.time_utils import beijing_day
 try:
     from qq_notifier import notify_daily_summary
 except Exception:
@@ -57,7 +59,7 @@ def generate_daily_briefing_and_backup():
         except Exception:
             pass
 
-    closed_today = [t for t in trades if t.get("status") == "closed" and date_str in str(t.get("close_time", ""))]
+    closed_today = [t for t in trades if t.get("status") == "closed" and beijing_day(t.get("close_time")) == date_str]
     total_trades = len(closed_today)
     wins = [t for t in closed_today if float(t.get("pnl", 0)) > 0]
     losses = [t for t in closed_today if float(t.get("pnl", 0)) < 0]

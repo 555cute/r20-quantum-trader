@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtDateTime } from '../../utils/format';
 /** 运行总览：服务健康四卡 → 快捷入口 → 决策快照 + 数据管道 + 最近审计 */
 import { computed, onMounted, ref } from 'vue';
 import {
@@ -163,7 +164,7 @@ function actionLabel(a: string): string {
                 </td>
                 <td class="col-num">{{ fmtNum(d.confidence, 0) }}%</td>
                 <td class="max-w-[280px] truncate text-xs" style="color: var(--ink-2)" :title="d.summary">{{ d.summary }}</td>
-                <td class="col-num text-xs" style="color: var(--ink-3)">{{ String(d.updated_at).slice(11, 19) }}</td>
+                <td class="col-num text-xs" style="color: var(--ink-3)">{{ fmtDateTime(d.updated_at).slice(11, 19) }}</td>
               </tr>
             </tbody>
           </table>
@@ -203,10 +204,10 @@ function actionLabel(a: string): string {
         <div v-else class="space-y-1.5">
           <div v-for="(a, i) in audits" :key="i" class="flex items-center gap-3 text-xs">
             <span class="dot" :class="a.status === 'success' ? 'dot-up' : 'dot-down'" />
-            <span class="num w-36 shrink-0" style="color: var(--ink-3)">{{ a.timestamp }}</span>
+            <span class="num w-36 shrink-0" style="color: var(--ink-3)">{{ fmtDateTime(a.timestamp) }}</span>
             <span class="num font-semibold" style="color: var(--ink-1)">{{ actionLabel(a.action) }}</span>
             <span class="min-w-0 flex-1 truncate" style="color: var(--ink-2)">{{ JSON.stringify(a.detail || {}) }}</span>
-            <TimeAgo :time="a.timestamp" />
+            <TimeAgo :time="fmtDateTime(a.timestamp)" />
           </div>
         </div>
       </div>

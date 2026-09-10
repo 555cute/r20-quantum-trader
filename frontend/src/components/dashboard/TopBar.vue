@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BeijingClock from '../base/BeijingClock.vue';
 /** 前台顶栏：品牌 / 5 tab / 决策透视 / ⌘K / 主题 / 偏好弹层 */
 import { computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -66,6 +67,7 @@ function go(path: string) {
 
       <!-- 右侧动作区 -->
       <div class="ms-auto flex items-center gap-1">
+        <BeijingClock class="mx-1 md:hidden min-[1200px]:block" />
         <button class="btn btn-quiet btn-icon hidden md:inline-flex" :title="t('nav.actions.docs')" @click="go('/docs')">
           <BookOpen class="h-4 w-4" />
         </button>

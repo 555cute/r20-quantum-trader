@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtDateTime } from '../../utils/format';
 /** 决策透视抽屉：本周期实发给大模型的完整提示词（白盒承诺） */
 import { computed } from 'vue';
 import BaseDrawer from '../base/BaseDrawer.vue';
@@ -35,7 +36,7 @@ const tokens = computed(() => Math.round(prompt.value.length / 2.6)); // 中英�
 
     <div v-if="prompt" class="mt-2 flex items-center justify-between text-xs" style="color: var(--ink-3)">
       <span>{{ t('dash.shell.peek.chars', undefined, { n: fmtNum(chars, 0) }) }} · {{ t('dash.shell.peek.tokens', undefined, { n: fmtNum(tokens, 0) }) }}</span>
-      <span>{{ t('dash.shell.peek.generatedAt', undefined, { t: store.data?.timestamp || '--' }) }}</span>
+      <span>{{ t('dash.shell.peek.generatedAt', undefined, { t: fmtDateTime(store.data?.timestamp || '--') }) }}</span>
     </div>
   </BaseDrawer>
 </template>
