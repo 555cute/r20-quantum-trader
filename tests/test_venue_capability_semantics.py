@@ -340,6 +340,80 @@ class TestOkxAttachVerification(unittest.TestCase):
             pending_rows=rows, main_order_state="filled")
         self.assertNotEqual(r["status"], "PROTECTED")      # 账户/合约归属必须一致
 
+    # ---- US-004 观察项②收口：覆盖数量结构性短缺显式 UNPROTECTED ----
+    def _chk(self, sz_exp, rows, state="filled"):
+        return ots.verify_attached_protection(
+            inst_id="BTC-USDT-SWAP",
+            expected_legs=[{"kind": "sl", "side": "buy", "sz": sz_exp,
+                            "x_price": "78000"}],
+            pending_rows=rows, main_order_state=state)
+
+    def test_shortage_row_is_unprotected_with_gap_reason(self):
+        r = self._chk("5", [{"instId": "BTC-USDT-SWAP", "side": "buy",
+                             "sz": "4.000", "xPrice": "78000.0", "algoId": "a9"}])
+        self.assertEqual(r["status"], "UNPROTECTED")          # 短缺≠尚未回读
+        self.assertEqual(r["legs"][0]["state"], "coverage_shortfall")
+        self.assertEqual(r["legs"][0]["reason"], "covered 4 < filled 5")
+        self.assertEqual(r["legs"][0]["algo_ids"], ["a9"])
+
+    def test_empty_readback_on_filled_stays_pending(self):
+        r = self._chk("5", [])
+        self.assertEqual(r["status"], "PROTECTION_PENDING")   # 行缺失=等待语义，非短缺
+
+    def test_full_match_still_protected_after_shortage_split(self):
+        r = self._chk("5", [{"instId": "BTC-USDT-SWAP", "side": "buy",
+                             "sz": "5", "xPrice": "78000", "algoId": "a5"}])
+        self.assertEqual(r["status"], "PROTECTED")
+        self.assertEqual(r["legs"][0]["state"], "protected")
+
+    def test_exact_row_wins_over_coexisting_shortage_rows(self):
+        rows = [{"instId": "BTC-USDT-SWAP", "side": "buy", "sz": "1",
+                 "xPrice": "78000", "algoId": "x"},
+                {"instId": "BTC-USDT-SWAP", "side": "buy", "sz": "5",
+                 "xPrice": "78000", "algoId": "y"}]
+        r = self._chk("5", rows)
+        self.assertEqual(r["status"], "PROTECTED")            # 精确行救场，不误杀
+
+    def test_multi_short_rows_summing_below_expected_is_unprotected(self):
+        rows = [{"instId": "BTC-USDT-SWAP", "side": "buy", "sz": "2",
+                 "xPrice": "78000", "algoId": "m1"},
+                {"instId": "BTC-USDT-SWAP", "side": "buy", "sz": "2",
+                 "xPrice": "78000", "algoId": "m2"}]
+        r = self._chk("5", rows)
+        self.assertEqual(r["status"], "UNPROTECTED")
+        self.assertEqual(r["legs"][0]["reason"], "covered 4 < filled 5")
+
+    def test_multi_rows_summing_to_expected_stay_pending_not_promoted(self):
+        # 多腿合计达期望但无单腿精确匹配：保守留在 PENDING（不冒充精确核验）
+        rows = [{"instId": "BTC-USDT-SWAP", "side": "buy", "sz": "2",
+                 "xPrice": "78000", "algoId": "p1"},
+                {"instId": "BTC-USDT-SWAP", "side": "buy", "sz": "3",
+                 "xPrice": "78000", "algoId": "p2"}]
+        r = self._chk("5", rows)
+        self.assertEqual(r["status"], "PROTECTION_PENDING")
+
+    def test_oversized_or_incomparable_rows_never_claim_shortage(self):
+        big = [{"instId": "BTC-USDT-SWAP", "side": "buy", "sz": "9",
+                "xPrice": "78000", "algoId": "b"}]
+        r = self._chk("5", big)
+        self.assertEqual(r["status"], "PROTECTION_PENDING")    # 超量：中间态保守
+        mixed = [{"instId": "BTC-USDT-SWAP", "side": "buy", "sz": "1",
+                  "xPrice": "78000", "algoId": "s"},
+                 {"instId": "BTC-USDT-SWAP", "side": "buy", "sz": "x?",
+                  "xPrice": "78000", "algoId": "g"}]
+        r2 = self._chk("5", mixed)
+        self.assertEqual(r2["status"], "PROTECTION_PENDING")   # 不可量化行挡短缺武断
+
+    def test_differside_or_trigger_rows_not_counted_as_shortage(self):
+        # side/触发值不匹配的行（如旧棘轮残留腿）不得拼成"短缺"错判
+        rows = [{"instId": "BTC-USDT-SWAP", "side": "sell", "sz": "5",
+                 "xPrice": "78000", "algoId": "sd"},
+                {"instId": "BTC-USDT-SWAP", "side": "buy", "sz": "5",
+                 "xPrice": "66000", "algoId": "tg"}]
+        r = self._chk("5", rows)
+        self.assertEqual(r["status"], "PROTECTION_PENDING")
+        self.assertEqual(r["legs"][0]["state"], "pending_readback")
+
     def test_three_state_enum_declared(self):
         self.assertEqual(set(ots.PROTECTION_STATES),
                          {"PROTECTION_PENDING", "PROTECTED", "UNPROTECTED"})
