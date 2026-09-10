@@ -275,7 +275,7 @@ class AiFactorTraderPositionProtectionTest(unittest.TestCase):
             closed,reason=ai_factor_trader.manage_position_tp_and_trailing(self._factor(),position,trackers,"2026-09-02 15:00:00",actions)
         self.assertTrue(closed); self.assertEqual(reason,"已硬止损")
         self.assertEqual(self.http.calls('/api/v5/trade/close-position'), [
-            ('POST', {'instId': 'SOL-USDT-SWAP', 'mgnMode': 'cross', 'posSide': 'long', 'autoCxl': 'true'})])
+            ('POST', {'instId': 'SOL-USDT-SWAP', 'mgnMode': 'cross', 'posSide': 'long', 'autoCxl': True})])
         self.assertNotIn("SOL-USDT-SWAP_long",trackers)
         self.assertTrue(any("触发硬止损" in item for item in actions))
         if notify_close is not None:
@@ -298,7 +298,7 @@ class AiFactorTraderPositionProtectionTest(unittest.TestCase):
         self.assertEqual(method, 'POST')
         self.assertEqual(body, dict(instId='SOL-USDT-SWAP', side='sell', sz='4', posSide='long',
             tdMode='cross', ordType='oco', tpTriggerPx='106', slTriggerPx='101', tpOrdPx='-1',
-            slOrdPx='-1', reduceOnly='true', cxlOnClosePos='true'))
+            slOrdPx='-1', reduceOnly=True, cxlOnClosePos=True))
         self.assertEqual(len(self.http.calls('/api/v5/trade/orders-algo-pending')), 2)
 
     def test_stale_order_query_failure_aborts_cleanup(self):
@@ -326,7 +326,7 @@ class AiFactorTraderPositionProtectionTest(unittest.TestCase):
             closed,reason=ai_factor_trader.manage_position_tp_and_trailing(self._factor(102.5),position,trackers,"2026-09-02 15:00:00",actions)
         self.assertTrue(closed); self.assertEqual(reason,"保护失效安全退出")
         self.assertEqual(self.http.calls('/api/v5/trade/close-position'), [
-            ('POST', {'instId': 'SOL-USDT-SWAP', 'mgnMode': 'cross', 'posSide': 'long', 'autoCxl': 'true'})])
+            ('POST', {'instId': 'SOL-USDT-SWAP', 'mgnMode': 'cross', 'posSide': 'long', 'autoCxl': True})])
         self.assertNotIn("SOL-USDT-SWAP_long",trackers)
         if notify_close is not None:
             notify_close.assert_called_once_with(inst="SOL", pnl=-4.0, stage="云端保护失效退出", exit_px=102.5)

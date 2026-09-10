@@ -40,11 +40,11 @@ class AlgoHTTP:
                 self.rows.append(row)
                 rows = [{'algoId': 'created', 'sCode': '0'}]
             elif path.endswith('/amend-algos'):
-                for change in body:
-                    for row in self.rows:
-                        if row['algoId'] == change['algoId']:
-                            row['slTriggerPx'] = change['newSlTriggerPx']
-                rows = [{'algoId': body[0]['algoId'], 'sCode': '0'}]
+                assert isinstance(body, dict) and body['instId']
+                for row in self.rows:
+                    if row['algoId'] == body['algoId'] and row['instId'] == body['instId']:
+                        row['slTriggerPx'] = body['newSlTriggerPx']
+                rows = [{'algoId': body['algoId'], 'sCode': '0'}]
             elif path.endswith(('/orders-pending', '/positions')):
                 rows = []
             elif path.endswith('/close-position'):

@@ -91,8 +91,8 @@ class OKXEnvironmentTests(unittest.TestCase):
             result=trade_service.fast_close_confirmed(token,confirmation)
         self.assertEqual(result["status"],"confirmed_closed")
         self.assertEqual(result["canceled_entry_orders"],["11","algo:777"])
-        algo_scan.assert_called_once_with("SOL-USDT-SWAP")
-        algo_cancel.assert_called_once_with(["777"])
+        algo_scan.assert_called_once_with("SOL-USDT-SWAP", env=env)
+        algo_cancel.assert_called_once_with(["777"], inst_id="SOL-USDT-SWAP", env=env)
         calls=[(c.args[0],c.args[1],c.args[2]) for c in request.call_args_list]
         self.assertIn(("POST","/api/v5/trade/cancel-order",{"instId":"SOL-USDT-SWAP","ordId":"11"}),calls)
         self.assertTrue(any(path=="/api/v5/trade/close-position" for _,path,_ in calls))

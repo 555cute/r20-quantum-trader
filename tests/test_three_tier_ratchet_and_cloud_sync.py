@@ -36,7 +36,7 @@ class ThreeTierRatchetAndCloudSyncTests(unittest.TestCase):
         row['slTriggerPx'] = '2400'
         self.assertTrue(aft.sync_cloud_algo_stop('ETH-USDT-SWAP', 'long', 2500))
         self.assertEqual(self.http.calls('/api/v5/trade/amend-algos'), [
-            ('POST', [{'algoId': 'algo_long', 'newSlTriggerPx': '2500', 'newSlOrdPx': '-1'}])])
+            ('POST', {'instId': 'ETH-USDT-SWAP', 'algoId': 'algo_long', 'newSlTriggerPx': '2500', 'newSlOrdPx': '-1'})])
         self.http.rows = []
         self.assertFalse(aft.sync_cloud_algo_stop('ETH-USDT-SWAP', 'long', 2600))
         self.http.failures['/api/v5/trade/orders-algo-pending'] = {'code':'50011','msg':'signature error'}
@@ -282,10 +282,11 @@ class CloudOcoHttpBoundaryTests(unittest.TestCase):
         self.assertEqual(post1.get_method(), "POST")
         self.assertIn("/api/v5/trade/amend-algos", post1.full_url)
         body = json.loads(post1.data.decode())
-        self.assertIsInstance(body, list)
-        self.assertEqual(body[0]["algoId"], "algo_500")
-        self.assertEqual(str(body[0]["newSlTriggerPx"]), "2500")
-        self.assertEqual(body[0]["newSlOrdPx"], "-1")
+        self.assertIsInstance(body, dict)
+        self.assertEqual(body["instId"], "ETH-USDT-SWAP")
+        self.assertEqual(body["algoId"], "algo_500")
+        self.assertEqual(str(body["newSlTriggerPx"]), "2500")
+        self.assertEqual(body["newSlOrdPx"], "-1")
         self.assertEqual(self._headers(post1)["x-simulated-trading"], "1")
 
     def test_missing_credentials_fail_closed_zero_http(self):

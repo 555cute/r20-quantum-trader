@@ -1112,7 +1112,7 @@ def sync_cloud_algo_stop(inst_id: str, pos_side: str, new_sl: float, reason: str
         # Avoid redundant amend if price already matches
         if abs(current_cloud_sl - new_sl) < 1e-6:
             return True
-        okx_rest.amend_algo_sl(live_algo["algoId"], new_sl, new_sl_ord_px="-1")
+        okx_rest.amend_algo_sl(live_algo["algoId"], new_sl, inst_id=inst_id, new_sl_ord_px="-1")
         return True
     except Exception as e:
         print(f"[Cloud OCO Sync Error] {inst_id} {pos_side}: {e}")
@@ -1521,7 +1521,7 @@ def execute_ai_position_management(real_pos_dict, trackers, timestamp_full, exec
                 executed_actions.append(f"[{name}] 未找到真实云端止损单，无法更新")
                 continue
             try:
-                okx_rest.amend_algo_sl(live_algo["algoId"], new_sl, new_sl_ord_px="-1")
+                okx_rest.amend_algo_sl(live_algo["algoId"], new_sl, inst_id=inst_id, new_sl_ord_px="-1")
                 amend_ok = True
             except Exception:
                 amend_ok = False

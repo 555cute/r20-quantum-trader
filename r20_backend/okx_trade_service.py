@@ -122,13 +122,13 @@ def fast_close_confirmed(close_token: str, confirmation: str) -> dict[str, Any]:
 
     # Also cancel any attached/standalone algo orders (such as native cloud OCO orders) to avoid conflicts
     try:
-        for ao in pending_algo_orders(intent["instId"]):
+        for ao in pending_algo_orders(intent["instId"], env=env):
             ao_side = str(ao.get("posSide") or "net").lower()
             if ao_side in {target_side, "net"}:
                 algo_id = str(ao.get("algoId") or "")
                 if algo_id:
                     try:
-                        cancel_algo_orders([algo_id])
+                        cancel_algo_orders([algo_id], inst_id=intent["instId"], env=env)
                         canceled.append(f"algo:{algo_id}")
                     except Exception as exc:
                         logger.warning("Cancel algo order %s failed during close: %s", algo_id, exc)
