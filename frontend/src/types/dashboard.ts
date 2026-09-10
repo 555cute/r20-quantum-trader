@@ -119,6 +119,7 @@ export interface InstrumentFactor {
     stop_loss_price: number
     risk_reward_ratio: string
     summary_reason: string
+    venue_decision?: VenueDecisionEvidence | null
   }
   thought_process?: {
     market_structure?: string
@@ -128,6 +129,54 @@ export interface InstrumentFactor {
     risk_reward_evaluation?: string
   }
   position?: any
+  /**
+   * US-004 · 选所决策证据（US-003 路由落盘 → 决策缓存 → /api/all 透传）。
+   * 后端未接线/老快照时为 null/undefined——消费端必须优雅降级（缺 ≠ 0）。
+   */
+  venue_decision?: VenueDecisionEvidence | null
+}
+
+/** 被淘汰的候选交易所及淘汰阶段（venue_router._stage_of 口径） */
+export interface VenueRejectedRow {
+  venue?: string
+  stage?: string
+  reason?: string
+}
+
+/** US-004 · venue_decision 段的线上结构（纯附加字段，逐键可选） */
+export interface VenueDecisionEvidence {
+  /** 手动选所优先项：'auto' = 评分路由 */
+  preferred_venue?: string
+  /** 中选交易所；null = 全部候选被硬筛淘汰 */
+  venue?: string | null
+  /** OK / OK_HYSTERESIS / ALL_REJECTED / NO_CANDIDATES */
+  reason_code?: string
+  /** 逐所评分/判定明细（人读文本） */
+  reasons?: string[]
+  /** 被淘汰候选及原因 */
+  rejected?: VenueRejectedRow[]
+  hysteresis_applied?: boolean
+  /** 多所分配切片（分配开关 off 时为 null） */
+  allocation?: Array<{ venue?: string; amount_usdt?: number | null }> | null
+  decided_utc?: string
+  /** selected / rejected / budget_rejected / budget_error */
+  outcome?: string
+  skip_reason?: string
+  executed_venue?: string | null
+  budget?: Record<string, unknown> | null
+}
+
+/**
+ * US-004 · 账户区组合风险行（/api/all 顶层 portfolio_risk；US-001 预留层口径）。
+ * 任一字段 null/缺失 = 未知，前端显「--」，严禁填假 0。
+ */
+export interface PortfolioRiskRow {
+  /** 该数据所属资金环境（如 demo-trading / live）；缺省不展示比对 */
+  environment?: string
+  total_budget_usdt?: number | null
+  reserved_usdt?: number | null
+  available_usdt?: number | null
+  updated_utc?: string
 }
 
 export interface LLMRuntime {
@@ -163,5 +212,7 @@ export interface DashboardResponse {
   ai_brain_history?: any[]
   data_health?: any
   state_snapshot?: any
+  /** US-004 · 组合风险占用（预算/已预留/可用余量；未接入时为缺省） */
+  portfolio_risk?: PortfolioRiskRow | null
   [key: string]: any
 }

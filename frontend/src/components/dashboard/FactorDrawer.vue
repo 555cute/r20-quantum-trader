@@ -10,6 +10,7 @@ import ConfBadge from '../base/ConfBadge.vue';
 import DirTag from '../base/DirTag.vue';
 import { useI18n } from '../../composables/useI18n';
 import { fmtNum, fmtPct, fmtPrice, arrow, dirClass, utcStrToBj } from '../../utils/format';
+import { venueLabel, venueColor, stageLabel, decisionBadgeCls, numOrNull, isPlainObj } from '../../utils/venueMeta';
 
 const props = defineProps<{ factor: any | null; crossVenue?: any | null }>();
 const emit = defineEmits<{ (e: 'close'): void; (e: 'pick-symbol', instId: string): void }>();
@@ -102,6 +103,43 @@ const cvHealth = computed(() => {
   });
 });
 const cvUpdated = computed(() => String(props.crossVenue?.updated_utc || ''));
+
+/** US-004 选所决策证据（venue_decision）：US-003 路由层随决策落盘的纯附加字段。
+ *  消费面 factor 顶层优先、decision 嵌套回退；缺数据 → null（区块优雅降级，绝不报错）。 */
+const vd = computed(() => {
+  const raw = f.value.venue_decision ?? d.value.venue_decision ?? null;
+  return isPlainObj(raw) ? raw : null;
+});
+const vdReasons = computed<string[]>(() => {
+  const arr = vd.value?.reasons;
+  return Array.isArray(arr) ? arr.map((x: unknown) => String(x ?? '')).filter(Boolean) : [];
+});
+const vdRejected = computed<Record<string, any>[]>(() => {
+  const arr = vd.value?.rejected;
+  return Array.isArray(arr) ? arr.filter(isPlainObj) : [];
+});
+const vdAllocation = computed<Record<string, any>[]>(() => {
+  const arr = vd.value?.allocation;
+  return Array.isArray(arr) ? arr.filter(isPlainObj) : [];
+});
+const vdBudget = computed(() => (isPlainObj(vd.value?.budget) ? vd.value.budget : null));
+const vdBadgeCls = computed(() => decisionBadgeCls(vd.value));
+const vdIsAuto = computed(() => String(vd.value?.preferred_venue || 'auto').trim().toLowerCase() === 'auto');
+/** 预算预留行文案：limit/前占/本次 逐值 null-safe（"--" ≠ 0） */
+const vdBudgetText = computed(() => {
+  const b = vdBudget.value;
+  if (!b) return '';
+  const parts: string[] = [];
+  const limit = numOrNull(b.limit_usdt);
+  parts.push(`上限 ${limit === null ? '--' : fmtNum(limit, 0) + 'U'}`);
+  const before = numOrNull(b.reserved_before_usdt);
+  if (before !== null) parts.push(`预留前占 ${fmtNum(before, 2)}U`);
+  const thisAmt = numOrNull(b.amount_usdt ?? b.margin_usdt);
+  parts.push(`本次预留 ${thisAmt === null ? '--' : fmtNum(thisAmt, 2) + 'U'}`);
+  if (b.state) parts.push(`态 ${String(b.state)}`);
+  if (b.error) parts.push(String(b.error));
+  return parts.join(' · ');
+});
 </script>
 
 <template>
@@ -145,6 +183,57 @@ const cvUpdated = computed(() => String(props.crossVenue?.updated_utc || ''));
         <p v-if="d.summary_reason || f.reason" class="mt-2.5 border-t pt-2.5 text-xs leading-relaxed" style="color: var(--ink-2); border-color: var(--line-1)">
           {{ d.summary_reason || f.reason }}
         </p>
+      </div>
+
+      <!-- 选所决策证据（US-004：消费 US-003 venue_decision 落盘段；缺数据优雅降级） -->
+      <div class="card-flat p-3.5" data-test="venue-decision">
+        <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <p class="t-label">选所决策 · venue_decision</p>
+          <span v-if="vd?.decided_utc" class="num text-[10px]" style="color: var(--ink-3)">
+            {{ utcStrToBj(String(vd.decided_utc), true) }} 北京
+          </span>
+        </div>
+        <template v-if="vd">
+          <div class="flex flex-wrap items-center gap-1.5">
+            <span class="badge" :style="{ color: vd.venue ? venueColor(vd.venue) : 'var(--ink-3)', borderColor: 'currentColor' }">
+              <span class="dot" :style="{ backgroundColor: vd.venue ? venueColor(vd.venue) : 'var(--ink-3)' }" />
+              中选 {{ vd.venue ? venueLabel(vd.venue) : '未选中' }}
+            </span>
+            <span :class="vdBadgeCls">{{ vd.reason_code || '原因码 --' }}</span>
+            <span v-if="!vdIsAuto" class="badge">手选优先 · {{ venueLabel(vd.preferred_venue) }}</span>
+            <span v-if="vd.hysteresis_applied" class="badge">滞回保留现任</span>
+            <span v-if="vd.outcome" class="badge">{{ vd.outcome }}</span>
+          </div>
+          <p v-if="vd.skip_reason" class="mt-2 text-xs leading-relaxed" style="color: var(--down)">{{ vd.skip_reason }}</p>
+          <ul v-if="vdReasons.length" class="mt-2 space-y-1 border-t pt-2" style="border-color: var(--line-1)">
+            <li v-for="(r, i) in vdReasons" :key="'vd-r-' + i" class="text-xs leading-relaxed" style="color: var(--ink-2)">{{ r }}</li>
+          </ul>
+          <div v-if="vdAllocation.length" class="mt-2 flex flex-wrap gap-1.5">
+            <span v-for="(a, i) in vdAllocation" :key="'vd-a-' + i" class="badge num text-[10px]">
+              分配 {{ venueLabel(a.venue) }} {{ fmtNum(numOrNull(a.amount_usdt), 2) }}U
+            </span>
+          </div>
+          <!-- 被淘汰候选：移动端横滑不折列 -->
+          <div v-if="vdRejected.length" class="mt-2.5">
+            <p class="t-label mb-1">被淘汰候选 · {{ vdRejected.length }} 所</p>
+            <div class="table-scroll-container rounded-lg" style="border: 1px solid var(--line-1)">
+              <table class="table">
+                <thead>
+                  <tr><th>交易所</th><th>淘汰阶段</th><th>原因</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(r, i) in vdRejected" :key="'vd-j-' + i">
+                    <td class="font-semibold" :style="{ color: venueColor(r.venue) }">{{ venueLabel(r.venue) }}</td>
+                    <td><span class="badge">{{ stageLabel(r.stage) }}</span></td>
+                    <td class="max-w-[320px] truncate text-xs" style="color: var(--ink-2)" :title="String(r.reason || '')">{{ r.reason || '--' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <p v-if="vdBudgetText" class="mt-2 border-t pt-2 text-[11px] leading-relaxed" style="border-color: var(--line-1); color: var(--ink-3)">{{ vdBudgetText }}</p>
+        </template>
+        <p v-else class="t-muted text-xs">暂无选所决策证据——该信号本周期未走选所路由链路（接线周期生成后自动展示）。</p>
       </div>
 
       <!-- 数据组 -->

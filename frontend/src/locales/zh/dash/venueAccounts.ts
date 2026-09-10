@@ -35,4 +35,14 @@ export const zhVenueAccounts = {
     ok: '已对账 · {n} 项',
     unavailable: '目录不可用 · 已跳过对账',
   },
+  portfolio: {
+    label: '组合风险占用',
+    total: '总预算 (USDT)',
+    reserved: '已预留',
+    available: '可用余量',
+    usage: '预算占用 {pct}%',
+    pending: '等待预留层数据接入——未知显「—」，不以 0 冒充',
+    envMismatch: '数据环境与当前选择不一致',
+    tip: '口径：组合风险预算原子预留层（pending/unknown 同样占预算），随资金环境隔离',
+  },
 };
