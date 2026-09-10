@@ -144,9 +144,9 @@ function dirOf(a: string): 'long' | 'short' | 'flat' {
       <template v-if="transcript">
         <div class="card-flat flex flex-wrap items-center gap-2 p-3 text-xs">
           <span class="badge badge-info">🏛️ {{ modeLabel }}</span>
-          <span class="t-faint">{{ t('dash.radar.council.totalTime', { n: ((transcript.total_duration_ms || 0) / 1000).toFixed(1) }) }}</span>
+          <span class="t-faint">{{ t('dash.radar.council.totalTime', undefined, { n: ((transcript.total_duration_ms || 0) / 1000).toFixed(1) }) }}</span>
           <span v-if="advisorList.length" class="t-faint">
-            {{ t('dash.radar.council.seatsOk', { ok: advisorList.filter((a: any) => a.status !== 'error').length, n: advisorList.length }) }}
+            {{ t('dash.radar.council.seatsOk', undefined, { ok: advisorList.filter((a: any) => a.status !== 'error').length, n: advisorList.length }) }}
           </span>
         </div>
         <div v-for="(a, i) in advisorList" :key="'adv' + i" class="card-flat p-3"
