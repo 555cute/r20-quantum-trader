@@ -180,11 +180,68 @@ class MultiTimeframeIntegrationTest(unittest.TestCase):
 
 
 class FactorLibraryIntegrationTest(unittest.TestCase):
-    """Test Pillar 6 integration in factor_library.py."""
+    """Test Pillar 6 integration in factor_library.py.
+
+    US-012 封闭律①：结构用例不得触网。行情在 HTTP 边界注入确定性假数据
+    （market_data_service._public_get/_public_post 全部 sys.modules 别名 +
+    factor_library 直连 urllib.request.urlopen），fetch_*/解析/微积分链保持真调用。
+    """
+
+    @staticmethod
+    def _synth_candles_15m(n=24):
+        # OKX 倒序（最新在前）；收盘价二次差分恒正 → 单调加速上行，
+        # 与 CalculusEngineMathTest 同款确定性行情。
+        rows = []
+        for i in range(n):
+            age = n - 1 - i  # 0 = 最新
+            c = 100.0 + age * age
+            o = c + 2 * age + 1
+            rows.append([str(1700000000000 - age * 900000), str(o), str(c + 3), str(c - 3), str(c), str(120 + age)])
+        return rows
+
+    def _fake_public_get(self, path, params=None, timeout=3.5):
+        params = params or {}
+        if path.endswith("/market/books"):
+            return {"code": "0", "data": [{"bids": [["109.9", "5"], ["109.8", "4"], ["109.7", "3"], ["109.6", "2"], ["109.5", "1"]],
+                                            "asks": [["110.1", "2"], ["110.2", "2"], ["110.3", "1"], ["110.4", "1"], ["110.5", "1"]]}]}
+        if path.endswith("/market/candles"):
+            return {"code": "0", "data": self._synth_candles_15m()}
+        if path.endswith("/market/ticker"):
+            return {"code": "0", "data": [{"instId": params.get("instId", "BTC-USDT-SWAP"), "last": "110.0", "bidPx": "109.9", "askPx": "110.1", "open24h": "100.0"}]}
+        return {"code": "0", "data": []}
+
+    def _fake_urlopen(self, req, timeout=None):
+        import io
+        import json
+        from urllib.parse import urlsplit
+        path = urlsplit(req.full_url).path
+        if path.endswith("/market/ticker"):
+            payload = {"code": "0", "data": [{"instId": "BTC-USDT-SWAP", "last": "110.0", "bidPx": "109.9", "askPx": "110.1", "open24h": "100.0"}]}
+        elif path.endswith("/public/funding-rate"):
+            payload = {"code": "0", "data": [{"fundingRate": "0.0001"}]}
+        elif path.endswith("/public/open-interest"):
+            payload = {"code": "0", "data": [{"oiUsd": "500000000"}]}
+        elif path.endswith("long-short-account-ratio"):
+            payload = {"code": "0", "data": [["1700000000000", "1.2"]]}
+        elif path.endswith("taker-volume"):
+            payload = {"code": "0", "data": [["1700000000000", "300", "200"]]}
+        else:
+            payload = {"code": "0", "data": []}
+        return io.BytesIO(json.dumps(payload).encode())
 
     def test_factor_library_structure_contains_math_prob_foundations(self):
+        import contextlib
+        import sys
+        from unittest.mock import patch as _patch
         item = {"instId": "BTC-USDT-SWAP", "name": "BTC", "type": "crypto", "precision": 1}
-        factors = factor_library.compute_instrument_factors(item, {})
+        with contextlib.ExitStack() as stack:
+            for alias in ("market_data_service", "scripts.market_data_service"):
+                mod = sys.modules.get(alias)
+                if mod is not None:
+                    stack.enter_context(_patch.object(mod, "_public_get", side_effect=self._fake_public_get))
+                    stack.enter_context(_patch.object(mod, "_public_post", return_value=None))
+            stack.enter_context(_patch("urllib.request.urlopen", side_effect=self._fake_urlopen))
+            factors = factor_library.compute_instrument_factors(item, {})
         self.assertIn("calculus_dynamics", factors)
         self.assertIn("curvature", factors["calculus_dynamics"])
         self.assertIn("power", factors["calculus_dynamics"])
