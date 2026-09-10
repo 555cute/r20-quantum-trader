@@ -1,37 +1,29 @@
-# R20 Quantum Trader v6.1.0 Preview Standalone Deployment
+# R20 Quantum Trader Standalone Deployment
 
-v6.1.0-preview removes the runtime dependency on QwenPaw. The product is now composed of:
+R20 runs independently of QwenPaw. The product is composed of:
 
 - `r20_backend.app`: standalone FastAPI control plane and read-only monitoring API.
 - `r20_gateway.worker`: the R20-native, single-owner scheduler and durable notification-delivery worker for the 15-minute trader, 60-second factor refresh, 10-minute news refresh, daily reports, evolution review, and nightly backup.
 - `scripts/`: strategy and execution modules, run as isolated Python processes.
-- `.env` + encrypted R20 Secret Store: LLM, optional OKX API Key, and notification credentials.
-- Official `okx` CLI: required by the strategy execution path. CLI OAuth is an optional local credential source and is bound to the Linux service user's `HOME`.
+- `.env` + encrypted R20 Secret Store: LLM, OKX API Key, and notification credentials. A complete OKX key trio is required for private requests and trading; public market data needs no credentials.
+- Native OKX V5 REST signing: the single private connectivity path for the strategy, control plane, and ledger.
 
 ## Install
 
 ```sh
-python3 -m venv .venv
+sh deploy/install.sh
 . .venv/bin/activate
-pip install -r requirements.txt
-npm install -g @okx_ai/okx-trade-cli@^1.4.4
-cp env.example .env
-chmod 600 .env
-python scripts/r20_okx_setup.py  # read-only preflight; READY is required
 ```
 
-Set `LLM_*` and `OKX_*` credentials in `.env`. Never commit this file.
+The installer creates the Python environment, installs requirements, copies `env.example` only when `.env` is absent, and restricts `.env` to mode `0600`. Node.js/npm is needed only if you build the Vue frontend from source (`cd frontend && npm install && npm run build`), not for backend installation or OKX connectivity.
 
-Before the first launch, set a random `R20_SETUP_TOKEN` in `.env`. Open `/admin`, enter it to unlock the setup page, then set a permanent administrator token. The page never displays configured secret values. `.env` is written atomically and set to permission mode `0600`.
+Set `LLM_*` and a random `R20_SETUP_TOKEN` before the first launch. Open `/admin` to complete administrator setup, then configure **API Key / Secret Key / Passphrase** in Account Access. Create separate **DEMO and LIVE** trios, grant only necessary read/trade permissions (never withdrawal), and bind server IPs where possible. Keep `R20_OKX_ENV=demo` for initial validation.
 
-R20 does not execute QwenPaw Skills. The strategy process calls the official `okx` CLI directly, while the control plane prefers signed OKX V5 requests when an environment-specific API Key is configured and otherwise uses safe CLI fallback paths.
+The admin form stores credentials locally with **Fernet encryption**; **blank fields keep existing values**. Direct `OKX_DEMO_*` / `OKX_LIVE_*` entries in `.env` are a plaintext bootstrapping alternative. Never commit either credentials or encryption material. Both services need access to the same project configuration and secret store under appropriate file permissions.
 
-Choose one credential model:
+An incomplete selected profile is **NOT READY**: private operations and trading fail closed. Public REST market data remains available without a key. Server restarts no longer depend on a short-lived login grant: persist `data/r20_secrets.enc` and its matching `data/.r20_secret_key`. Revoked keys, changed IP restrictions, and network faults can still prevent exchange access.
 
-1. **Environment-specific API Key (recommended for servers):** create separate LIVE and DEMO keys, configure them in `/admin`, never grant withdrawal permission, and bind the key to the server IP where possible.
-2. **CLI OAuth (personal single-user deployment):** as the same Linux user that runs both services, run `okx config show --json`, `okx auth status --json`, explicitly choose `global` / `eea` / `us` / `tr`, then run `okx auth login --manual --site <site>`. Complete the browser device flow and run `python scripts/r20_okx_setup.py`.
-
-Never copy or publish another installation's `~/.okx/`; it contains machine-local authorization state. Both services must use the same `User`, `HOME`, and a `PATH` containing the `okx` binary. The supplied systemd units use the dedicated `r20` user and `/home/r20`; adjust both units together if your deployment user differs.
+The authenticated `GET /api/v1/admin/okx/runtime` (management session in `X-R20-Session`) reports `environment`, `mode_configured`, `live_configured`, `demo_configured`, `fingerprint`, `base_url`, `connection: "static-v5-key"`, and `status: "READY" | "NOT_READY"`; `not_ready_reason` is present when unconfigured. This is a **local configuration check**, not an exchange connectivity or permission test. Use a read-only account snapshot to confirm connectivity before enabling trading.
 
 ## Run Locally
 
@@ -76,11 +68,4 @@ sudo systemctl enable --now r20-quantum r20-gateway
 
 Before enabling `r20-gateway`, disable the old QwenPaw cron jobs to prevent duplicate execution. Do not run both schedulers simultaneously. The current Gateway worker owns the scheduler; the legacy `r20_backend.scheduler` and `deploy/r20-scheduler.service` are retained only for compatibility and must not run alongside it.
 
-Before starting the Gateway, verify dependency visibility under the exact service identity:
-
-```sh
-sudo -u r20 env HOME=/home/r20 PATH=/opt/r20-quantum-trader/.venv/bin:/usr/local/bin:/usr/bin:/bin \
-  /opt/r20-quantum-trader/.venv/bin/python /opt/r20-quantum-trader/scripts/r20_okx_setup.py
-```
-
-If this is not `READY`, keep the Gateway stopped. Do not solve it by copying a developer's `.okx` directory.
+Before starting the Gateway, open `/admin` and verify the selected DEMO key profile and a read-only account snapshot. A `NOT_READY` runtime response means trading must remain disabled; `READY` alone does not prove exchange acceptance or override risk controls. Ensure the dedicated service user can read the project configuration and matching encrypted store/key; do not print their contents for diagnostics.
