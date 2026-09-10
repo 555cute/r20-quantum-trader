@@ -15,6 +15,8 @@ from r20_backend.exchanges import ExchangeCapabilityError
 from r20_backend.exchanges.gate import GateAdapter
 
 
+_LISTING_PATCHES = []
+
 def setUpModule():
     """封闭三律（同 fa417ee / test_gate_lab）：宿主 .env 注入的 ambient R20_* 旗标
     （如 R20_GATE_TESTNET=1）会把环境解析到 sandbox 档，令用例自设的
@@ -32,6 +34,15 @@ def setUpModule():
     # 用模块级 tearDownModule 语义恢复
     global _RESTORE_FN
     _RESTORE_FN = _restore
+    # US-007 listing gate 已接入 open_protected_position（fail-open）：本文件只测
+    # 路由/保护语义，合约目录对账由 test_listing_gate + trader 接线用例覆盖——
+    # 模块级钉 ok=True，杜绝 _StubAdapter 路径外的真网目录拉取。
+    from r20_backend.exchanges import listing as _listing
+    _lp = patch.object(_listing, "ensure_contract_listed",
+                       lambda *a, **k: _listing.ListingCheck(
+                           ok=True, reason=None, checked_at="", source="cache"))
+    _lp.start()
+    _LISTING_PATCHES.append(_lp)
 
 
 _RESTORE_FN = None
@@ -40,6 +51,9 @@ _RESTORE_FN = None
 def tearDownModule():
     if _RESTORE_FN:
         _RESTORE_FN()
+    for _p in _LISTING_PATCHES:
+        _p.stop()
+    _LISTING_PATCHES.clear()
 
 
 class TestSigner(unittest.TestCase):
