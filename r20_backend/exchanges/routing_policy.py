@@ -1,4 +1,4 @@
-"""多所分流策略（Gate 平行试验田配置源，单一事实文件 data/venue_routing.json）。
+"""多所分流策略（单一事实文件 data/venue_routing.json）。
 
 安全设计：
 - 默认空池 + dry_run=true——不开配置什么都不会发生；
@@ -20,8 +20,8 @@ effective_mode 输出 {off | dry_run | demo | live}：gate 沙盒档 + 执行开
   "preferred_venue": "auto",            # US-003 手动选所优先：okx|binance|gate|auto
                                         # （缺字段/非法值 → 回退 auto + warn）
   "gate": {
-    "assets": ["BTC"],                 # 试验田币种（canonical 裸币名）
-    "margin_per_trade_usdt": 50.0,     # 每笔保证金上限（试验田独立预算）
+    "assets": ["BTC"],                 # 准入币种（canonical 裸币名）
+    "margin_per_trade_usdt": 50.0,     # 每笔保证金上限（该所独立预算）
     "max_open": 2,                     # 同时最大持仓笔数
     "min_confidence": 80.0,            # 决策置信度门禁（与主链同尺）
     "dry_run": true                    # true=全链路演算不发单（本地轴）

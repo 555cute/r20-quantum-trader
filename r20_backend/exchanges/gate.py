@@ -403,7 +403,7 @@ class GateAdapter(BaseExchangeAdapter):
                                    params={"contract": inst, "id": str(order_id)})
 
     def list_open_orders(self, symbol: str) -> List[Dict[str, Any]]:
-        """该合约未成交普通挂单（G7 联动：试验田对账前先撤孤儿入场挂单用）。"""
+        """该合约未成交普通挂单（G7 联动：对账前先撤孤儿入场挂单用）。"""
         inst = self.native_symbol(symbol)
         data = self.signed_request("GET", "/api/v4/futures/usdt/orders",
                                    params={"contract": inst, "status": "open", "limit": "100"})

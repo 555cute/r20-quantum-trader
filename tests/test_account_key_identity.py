@@ -29,7 +29,7 @@ GATE_SANDBOX_PIN = "https://api-testnet.gateapi.io"   # 候选域之一（钉死
 
 
 def setUpModule():
-    """封闭三律（同 fa417ee / test_gate_lab）：排除宿主 .env 注入的 ambient
+    """封闭三律（同 fa417ee）：排除宿主 .env 注入的 ambient
     R20_* 旗标——R20_GATE_TESTNET=1 会把「单参 = live 档」契约用例的环境解析
     到 sandbox 档（URL/开闸文案全部错档）。环境只由用例自设旗标决定。"""
     _backup = {k: v for k, v in os.environ.items()

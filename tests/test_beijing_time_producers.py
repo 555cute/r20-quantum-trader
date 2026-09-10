@@ -47,8 +47,7 @@ def isolated(path, *names, **deps):
 PRODUCER_PATHS = [
     "r20_backend/llm_manager.py", "r20_backend/council_manager.py",
     "r20_backend/policy_snapshot.py", "scripts/factor_library.py",
-    "scripts/gate_lab_trader.py", "r20_backend/qq_gateway_daemon.py",
-    "scripts/cleanup_disk.py",
+    "r20_backend/qq_gateway_daemon.py", "scripts/cleanup_disk.py",
 ]
 
 
@@ -69,9 +68,6 @@ def test_all_datetime_producer_expressions(path):
         fmt = ast.unparse(node)
         if "%Y%m%d_%H%M%S" in fmt:
             assert value == "20260101_003000"
-        elif "%Y-%m-%d %H:%M:%S" in fmt:
-            assert path.endswith("gate_lab_trader.py")
-            assert value == EXPECTED[:-6]
         else:
             assert value == EXPECTED
             assert dt.datetime.fromisoformat(value).timestamp() == EPOCH
@@ -146,16 +142,6 @@ def test_factor_snapshot_mocked():
     snap = mod.update_factor_library()
     assert snap["timestamp"] == EPOCH
     assert snap["time_str"] == EXPECTED
-
-
-def test_gate_trade_uses_beijing_without_changing_ledger_format(monkeypatch):
-    db = MagicMock()
-    monkeypatch.setitem(__import__("sys").modules, "db_manager", db)
-    mod = isolated("scripts/gate_lab_trader.py", "_record_main_ledger")
-    mod._record_main_ledger({"asset": "BTC", "entry_ts": EPOCH, "mode": "live"})
-    trade = db.record_trade_sqlite.call_args.args[0]
-    assert trade["time"] == EXPECTED[:-6]
-    assert trade["bill_id"] == f"gatelib-live-BTC-{EPOCH}"
 
 
 def test_qq_log_mocked():

@@ -8,7 +8,7 @@ import { useI18n } from '../../composables/useI18n'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
 import { fmtDateTime } from '../../utils/format'
-import { labModeMeta } from '../../utils/labMode'
+import VenueCredentialCard from '../../components/admin/VenueCredentialCard.vue'
 import { Wallet, Save, RefreshCw, Layers, Trash2, Zap } from 'lucide-vue-next'
 
 const { api } = useApi()
@@ -28,7 +28,6 @@ function switchTab(tab: TabKey) {
     positionsLoadedOnce.value = true
     loadPositions()
   }
-  if (tab === 'venues') loadLab()
 }
 
 // ---- LIVE / DEMO API keys (OKX) ----
@@ -53,7 +52,7 @@ const closeModal = ref<{ show: boolean; pos: any } | null>(null)
 const closePhraseInput = ref('')
 const closing = ref(false)
 
-// ---- 多交易所数据源与凭证 (Binance / Gate) ----
+// ---- 多交易所凭证与档位（Binance / Gate 各自独立，互不牵连保存） ----
 const mx = ref<any>(null)
 const mxForm = ref({ binance_api_key: '', binance_secret_key: '', gate_api_key: '', gate_secret_key: '' })
 const mxTestnet = ref({ binance: false, gate: false })
@@ -62,6 +61,8 @@ const gateExec = ref(false)
 const gateExecPhrase = ref('')
 const savingMx = ref(false)
 const savingOkx = ref(false)
+const savingVenue = ref<'binance' | 'gate' | ''>('')
+const probingVenue = ref<'binance' | 'gate' | ''>('')
 
 async function loadAll() {
   loading.value = true
@@ -234,40 +235,74 @@ async function loadMx() {
       preferredVenue.value = mx.value.preferred_venue
     }
   } catch { mx.value = null }
-  await loadLab()
 }
 
-// ---- Gate 试验田状态：模式/四道闸/在途/落账，纯本地只读 ----
-const lab = ref<any>(null)
-async function loadLab() {
-  try { lab.value = await api('/api/v1/admin/multi-exchange/lab-status') } catch { lab.value = null }
+/** 单所档位/凭证检测：重读后端凭证就绪态与公共行情健康（纯只读，零写操作）。 */
+async function probeVenue(venue: 'binance' | 'gate') {
+  probingVenue.value = venue
+  try {
+    await loadMx()
+    const v = mx.value?.venues?.[venue]
+    if (!v) { toast.err(`${venue.toUpperCase()} 状态读取失败`); return }
+    toast.ok(`${venue.toUpperCase()} 凭证${v.has_api_key ? '已就绪' : '未配置'} · 档位 ${v.testnet ? '沙盒' : '实盘'} · 执行闸 ${v.execution_open ? '开' : '关'}`)
+  } catch (e: any) {
+    toast.err(`检测失败：${e.message}`)
+  } finally {
+    probingVenue.value = ''
+  }
 }
 
-async function saveMx() {
+/** 保存撮合路由首选（只写 preferred_venue，不牵连任何凭证字段）。 */
+async function saveRouting() {
   savingMx.value = true
   try {
-    const body: any = {
-      binance_testnet: mxTestnet.value.binance,
-      gate_testnet: mxTestnet.value.gate,
-      preferred_venue: preferredVenue.value,
-    }
-    if (gateExec.value !== !!mx.value?.venues?.gate?.execution_open) {
-      body.gate_execution = gateExec.value
-      body.confirmation = gateExecPhrase.value.trim()
-    }
-    for (const k of ['binance_api_key', 'binance_secret_key', 'gate_api_key', 'gate_secret_key']) {
-      const v = (mxForm.value as any)[k]
-      if (v && v.trim()) body[k] = v.trim()
-    }
-    await api('/api/v1/admin/multi-exchange', { method: 'PUT', body: JSON.stringify(body) })
-    toast.ok('多交易所凭证与路由配置已保存')
-    mxForm.value = { binance_api_key: '', binance_secret_key: '', gate_api_key: '', gate_secret_key: '' }
-    gateExecPhrase.value = ''
+    await api('/api/v1/admin/multi-exchange', {
+      method: 'PUT',
+      body: JSON.stringify({ preferred_venue: preferredVenue.value }),
+    })
+    toast.ok(`撮合路由首选已保存：${preferredVenue.value.toUpperCase()}`)
     await loadMx()
   } catch (e: any) {
     toast.err(`保存失败：${e.message}`)
   } finally {
     savingMx.value = false
+  }
+}
+
+/**
+ * 逐所独立保存凭证与档位：只提交本所键位，留空即不改。
+ * Gate 额外承载执行总闸（变更需精确确认短语，与 UPDATE CAPITAL 同族纪律）。
+ */
+async function saveVenue(venue: 'binance' | 'gate') {
+  savingVenue.value = venue
+  try {
+    const body: any = {}
+    if (venue === 'binance') {
+      body.binance_testnet = mxTestnet.value.binance
+      const k = mxForm.value.binance_api_key.trim()
+      const s = mxForm.value.binance_secret_key.trim()
+      if (k) body.binance_api_key = k
+      if (s) body.binance_secret_key = s
+    } else {
+      body.gate_testnet = mxTestnet.value.gate
+      const k = mxForm.value.gate_api_key.trim()
+      const s = mxForm.value.gate_secret_key.trim()
+      if (k) body.gate_api_key = k
+      if (s) body.gate_secret_key = s
+      if (gateExecDirty.value) {
+        body.gate_execution = gateExec.value
+        body.confirmation = gateExecPhrase.value.trim()
+      }
+    }
+    await api('/api/v1/admin/multi-exchange', { method: 'PUT', body: JSON.stringify(body) })
+    toast.ok(`${venue === 'binance' ? 'Binance' : 'Gate'} 凭证与档位已保存`)
+    if (venue === 'binance') { mxForm.value.binance_api_key = ''; mxForm.value.binance_secret_key = '' }
+    else { mxForm.value.gate_api_key = ''; mxForm.value.gate_secret_key = ''; gateExecPhrase.value = '' }
+    await loadMx()
+  } catch (e: any) {
+    toast.err(`保存失败：${e.message}`)
+  } finally {
+    savingVenue.value = ''
   }
 }
 
@@ -285,6 +320,30 @@ const mxHealthChips = computed(() => {
   }))
 })
 const gateExecDirty = computed(() => gateExec.value !== !!mx.value?.venues?.gate?.execution_open)
+
+/** 三所对称徽章派生：状态未知（后端未加载/所未注册）一律 warn + 文字「状态未知」，绝不升级为已就绪。 */
+type VenueTone = 'up' | 'warn' | 'down'
+function venueStatus(venue: 'binance' | 'gate'): { text: string; tone: VenueTone } {
+  const v = mx.value?.venues?.[venue]
+  if (!v) return { text: '状态未知', tone: 'warn' }
+  return v.has_api_key
+    ? { text: v.execution_open ? '已配置 Key · 执行开闸' : '已配置 Key · 关闸中', tone: 'up' }
+    : { text: '免密公共行情', tone: 'warn' }
+}
+const binanceStatus = computed(() => venueStatus('binance'))
+const gateStatus = computed(() => venueStatus('gate'))
+
+/** 资金档位文字（身份必须有文字，颜色不作唯一识别） */
+const okxEnvText = computed(() => {
+  const env = String(config.value?.editable?.okx_environment || '')
+  return env === 'live' ? 'LIVE 实盘' : env === 'demo' ? 'DEMO 模拟盘' : '未知'
+})
+function envTextOf(venue: 'binance' | 'gate', sandboxLabel: string) {
+  if (!mx.value?.venues?.[venue]) return '未知'
+  return mxTestnet.value[venue] ? sandboxLabel : 'LIVE 实盘'
+}
+const binanceEnvText = computed(() => envTextOf('binance', 'DEMO 沙盒'))
+const gateEnvText = computed(() => envTextOf('gate', 'SANDBOX 沙盒'))
 
 const TABS: Array<{ key: TabKey; label: string }> = [
   { key: 'venues', label: '交易所与路由对等' },
@@ -384,7 +443,7 @@ onMounted(() => { loadAll(); loadMx() })
         <!-- 路由主策略 -->
         <SettingsSection title="撮合路由首选（三所对等）" description="配置 AI 信号的默认撮合交易所。可指定某所优先，或由智能评分路由按流动性、费率优势自动比选（支持 5% 滞回防抖）。">
           <template #actions>
-            <button class="btn btn-primary" :disabled="savingMx" @click="saveMx"><Save class="h-3.5 w-3.5" /> {{ savingMx ? '保存中…' : '保存路由策略' }}</button>
+            <button class="btn btn-primary" :disabled="savingMx" @click="saveRouting"><Save class="h-3.5 w-3.5" /> {{ savingMx ? '保存中…' : '保存路由策略' }}</button>
           </template>
           <div class="space-y-3 rounded-lg border p-3.5" style="background-color: var(--surface-1); border-color: var(--line-1);">
             <div class="grid grid-cols-1 sm:grid-cols-4 gap-2">
@@ -413,7 +472,7 @@ onMounted(() => { loadAll(); loadMx() })
                 <input v-model="preferredVenue" type="radio" value="gate" class="accent-[var(--accent)]" />
                 <div>
                   <div class="text-xs font-bold" style="color: var(--ink-1);">优先 Gate</div>
-                  <div class="text-[10px]" style="color: var(--ink-3);">首选 Gate 永续试验田</div>
+                  <div class="text-[10px]" style="color: var(--ink-3);">首选 Gate USDT 永续</div>
                 </div>
               </label>
             </div>
@@ -424,104 +483,97 @@ onMounted(() => { loadAll(); loadMx() })
           </div>
         </SettingsSection>
 
-        <!-- 三所凭证三列对称卡片 -->
-        <SettingsSection title="三所接入凭证与环境（对称配置）" description="各交易所密钥仅在本机通过 Fernet 加密落盘；所有密钥留空表示不修改原有配置。">
+        <!-- 三所对称凭证卡（同一外壳、同一槽位次序：环境 → 凭证 → 附加 → 检测/保存） -->
+        <SettingsSection title="三所接入凭证与资金档位（对称配置）" description="OKX / Binance / Gate 凭证彼此独立保存，互不牵连；密钥仅在本机 Fernet 加密落盘，留空即不修改原有配置。">
           <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
             <!-- 1. OKX -->
-            <div class="flex flex-col justify-between rounded-lg border p-3" style="background-color: var(--surface-1); border-color: var(--line-1);">
-              <div class="space-y-2.5">
-                <div class="flex items-center justify-between border-b pb-2" style="border-color: var(--line-1);">
-                  <div>
-                    <h4 class="text-xs font-bold" style="color: var(--ink-1);">OKX · 欧易</h4>
-                    <span class="text-[10px]" style="color: var(--ink-3);">V5 REST API 直签</span>
-                  </div>
-                  <span class="text-[10px] px-1.5 py-0.5 rounded border font-bold" :style="okxLinked ? { color: 'var(--up)', borderColor: 'var(--up-line)' } : { color: 'var(--down)', borderColor: 'var(--down-line)' }">
-                    {{ okxLinked ? 'READY' : '未就绪' }}
-                  </span>
-                </div>
-                <div>
-                  <label class="block text-[10px] mb-1" style="color: var(--ink-2);">OKX 资金环境</label>
-                  <select v-model="config.editable.okx_environment" class="input w-full text-xs">
-                    <option value="demo">模拟盘 (DEMO)</option>
-                    <option value="live">实盘 (LIVE)</option>
-                  </select>
-                </div>
-                <div class="space-y-1.5 pt-1">
-                  <div class="text-[10px] font-semibold" style="color: var(--ink-2);">实盘 (LIVE) Key</div>
-                  <input v-model="keys.live_key" type="password" placeholder="API Key（留空不改）" class="input w-full text-xs" />
-                  <input v-model="keys.live_secret" type="password" placeholder="Secret Key" class="input w-full text-xs" />
-                  <input v-model="keys.live_pass" type="password" placeholder="Passphrase" class="input w-full text-xs" />
-                </div>
-                <div class="space-y-1.5 pt-1">
-                  <div class="text-[10px] font-semibold" style="color: var(--ink-2);">模拟盘 (DEMO) Key</div>
-                  <input v-model="keys.demo_key" type="password" placeholder="API Key（留空不改）" class="input w-full text-xs" />
-                  <input v-model="keys.demo_secret" type="password" placeholder="Secret Key" class="input w-full text-xs" />
-                  <input v-model="keys.demo_pass" type="password" placeholder="Passphrase" class="input w-full text-xs" />
-                </div>
+            <VenueCredentialCard
+              name="OKX · 欧易" api-label="V5 REST 直签"
+              :status-text="okxLinked ? '已接入 READY' : '未就绪'" :tone="okxLinked ? 'up' : 'down'"
+              :env-text="okxEnvText" env-label="当前生效资金环境"
+            >
+              <template #env>
+                <label class="block text-[10px] mb-1" style="color: var(--ink-2);">资金环境档位</label>
+                <select v-model="config.editable.okx_environment" class="input w-full text-xs">
+                  <option value="demo">模拟盘 (DEMO)</option>
+                  <option value="live">实盘 (LIVE)</option>
+                </select>
+              </template>
+              <div class="space-y-1.5 pt-1">
+                <div class="text-[10px] font-semibold" style="color: var(--ink-2);">实盘 (LIVE) 三件套</div>
+                <input v-model="keys.live_key" type="password" placeholder="API Key（留空不改）" class="input w-full text-xs" />
+                <input v-model="keys.live_secret" type="password" placeholder="Secret Key" class="input w-full text-xs" />
+                <input v-model="keys.live_pass" type="password" placeholder="Passphrase" class="input w-full text-xs" />
               </div>
-              <div class="pt-3 mt-2 border-t flex items-center justify-between" style="border-color: var(--line-1);">
+              <div class="space-y-1.5 pt-1">
+                <div class="text-[10px] font-semibold" style="color: var(--ink-2);">模拟盘 (DEMO) 三件套</div>
+                <input v-model="keys.demo_key" type="password" placeholder="API Key（留空不改）" class="input w-full text-xs" />
+                <input v-model="keys.demo_secret" type="password" placeholder="Secret Key" class="input w-full text-xs" />
+                <input v-model="keys.demo_pass" type="password" placeholder="Passphrase" class="input w-full text-xs" />
+              </div>
+              <template #extra>
+                <p class="text-[10px] leading-relaxed pt-1" style="color: var(--ink-3);">
+                  切换 LIVE 需二次确认；两档凭证同时保存，运行时按当前档位取用，禁止跨档读取。
+                </p>
+              </template>
+              <template #probe>
                 <button class="btn btn-quiet btn-sm" @click="rediagnose"><RefreshCw class="h-3 w-3" /> 检测</button>
+              </template>
+              <template #save>
                 <button class="btn btn-primary btn-sm" :disabled="savingOkx" @click="saveEnvironment"><Save class="h-3 w-3" /> {{ savingOkx ? '保存中…' : '保存 OKX' }}</button>
-              </div>
-            </div>
+              </template>
+            </VenueCredentialCard>
 
             <!-- 2. Binance -->
-            <div class="flex flex-col justify-between rounded-lg border p-3" style="background-color: var(--surface-1); border-color: var(--line-1);">
-              <div class="space-y-2.5">
-                <div class="flex items-center justify-between border-b pb-2" style="border-color: var(--line-1);">
-                  <div>
-                    <h4 class="text-xs font-bold" style="color: var(--ink-1);">Binance · 币安</h4>
-                    <span class="text-[10px]" style="color: var(--ink-3);">USDT-M 永续合约</span>
-                  </div>
-                  <span class="text-[10px] px-1.5 py-0.5 rounded border font-bold" :style="mx?.venues?.binance?.has_api_key ? { color: 'var(--up)', borderColor: 'var(--up-line)' } : { color: 'var(--ink-3)', borderColor: 'var(--line-2)' }">
-                    {{ mx?.venues?.binance?.has_api_key ? '已配置 Key' : '免密行情' }}
-                  </span>
-                </div>
-                <div>
-                  <label class="block text-[10px] mb-1" style="color: var(--ink-2);">端点网络档位</label>
-                  <label class="flex items-center gap-1.5 text-[11px] cursor-pointer pt-1" style="color: var(--ink-2);">
-                    <input v-model="mxTestnet.binance" type="checkbox" class="accent-[var(--accent)]" />
-                    使用官方 Demo 沙盒 (demo-fapi)
-                  </label>
-                </div>
-                <div class="space-y-1.5 pt-1">
-                  <div class="text-[10px] font-semibold" style="color: var(--ink-2);">执行凭证（可选）</div>
-                  <input v-model="mxForm.binance_api_key" type="text" placeholder="API Key（留空不改）" class="input w-full text-xs" />
-                  <input v-model="mxForm.binance_secret_key" type="password" placeholder="API Secret" class="input w-full text-xs" />
-                </div>
-                <p class="text-[10px] leading-relaxed pt-2" style="color: var(--ink-3);">
-                  跨所行情比对、资金费与深度比对免密即可全自动工作；执行面待独立条件单落地。
+            <VenueCredentialCard
+              name="Binance · 币安" api-label="USDT-M 永续合约"
+              :status-text="binanceStatus.text" :tone="binanceStatus.tone"
+              :env-text="binanceEnvText" env-label="当前生效资金环境"
+            >
+              <template #env>
+                <label class="block text-[10px] mb-1" style="color: var(--ink-2);">端点网络档位</label>
+                <label class="flex items-center gap-1.5 text-[11px] cursor-pointer" style="color: var(--ink-2);">
+                  <input v-model="mxTestnet.binance" type="checkbox" class="accent-[var(--accent)]" />
+                  使用官方 Demo 沙盒域 (demo-fapi)
+                </label>
+              </template>
+              <div class="space-y-1.5 pt-1">
+                <div class="text-[10px] font-semibold" style="color: var(--ink-2);">实盘 / 沙盒执行凭证（可选）</div>
+                <input v-model="mxForm.binance_api_key" type="text" placeholder="API Key（留空不改）" class="input w-full text-xs" />
+                <input v-model="mxForm.binance_secret_key" type="password" placeholder="API Secret" class="input w-full text-xs" />
+              </div>
+              <template #extra>
+                <p class="text-[10px] leading-relaxed pt-1" style="color: var(--ink-3);">
+                  公共行情、基差与资金费比对免密即可工作；配置密钥后账户面与执行面按档位直签。
                 </p>
-              </div>
-              <div class="pt-3 mt-2 border-t flex justify-end" style="border-color: var(--line-1);">
-                <button class="btn btn-primary btn-sm" :disabled="savingMx" @click="saveMx"><Save class="h-3 w-3" /> {{ savingMx ? '保存中…' : '保存 Binance' }}</button>
-              </div>
-            </div>
+              </template>
+              <template #probe>
+                <button class="btn btn-quiet btn-sm" :disabled="probingVenue !== '' && probingVenue !== 'binance'" @click="probeVenue('binance')"><RefreshCw class="h-3 w-3" /> 检测</button>
+              </template>
+              <template #save>
+                <button class="btn btn-primary btn-sm" :disabled="savingVenue !== ''" @click="saveVenue('binance')"><Save class="h-3 w-3" /> {{ savingVenue === 'binance' ? '保存中…' : '保存 Binance' }}</button>
+              </template>
+            </VenueCredentialCard>
 
             <!-- 3. Gate -->
-            <div class="flex flex-col justify-between rounded-lg border p-3" style="background-color: var(--surface-1); border-color: var(--line-1);">
-              <div class="space-y-2.5">
-                <div class="flex items-center justify-between border-b pb-2" style="border-color: var(--line-1);">
-                  <div>
-                    <h4 class="text-xs font-bold" style="color: var(--ink-1);">Gate.io · 芝麻</h4>
-                    <span class="text-[10px]" style="color: var(--ink-3);">V4 永续试验田</span>
-                  </div>
-                  <span class="text-[10px] px-1.5 py-0.5 rounded border font-bold" :style="mx?.venues?.gate?.has_api_key ? { color: 'var(--up)', borderColor: 'var(--up-line)' } : { color: 'var(--ink-3)', borderColor: 'var(--line-2)' }">
-                    {{ mx?.venues?.gate?.has_api_key ? '已配置 Key' : '免密行情' }}
-                  </span>
-                </div>
-                <div>
-                  <label class="block text-[10px] mb-1" style="color: var(--ink-2);">端点网络档位</label>
-                  <label class="flex items-center gap-1.5 text-[11px] cursor-pointer pt-1" style="color: var(--ink-2);">
-                    <input v-model="mxTestnet.gate" type="checkbox" class="accent-[var(--accent)]" />
-                    使用官方沙盒 (fx-api-testnet)
-                  </label>
-                </div>
-                <div class="space-y-1.5 pt-1">
-                  <div class="text-[10px] font-semibold" style="color: var(--ink-2);">执行凭证（实盘试验田必需）</div>
-                  <input v-model="mxForm.gate_api_key" type="text" placeholder="API Key（留空不改）" class="input w-full text-xs" />
-                  <input v-model="mxForm.gate_secret_key" type="password" placeholder="API Secret" class="input w-full text-xs" />
-                </div>
+            <VenueCredentialCard
+              name="Gate.io · 芝麻" api-label="V4 USDT 永续合约"
+              :status-text="gateStatus.text" :tone="gateStatus.tone"
+              :env-text="gateEnvText" env-label="当前生效资金环境"
+            >
+              <template #env>
+                <label class="block text-[10px] mb-1" style="color: var(--ink-2);">端点网络档位</label>
+                <label class="flex items-center gap-1.5 text-[11px] cursor-pointer" style="color: var(--ink-2);">
+                  <input v-model="mxTestnet.gate" type="checkbox" class="accent-[var(--accent)]" />
+                  使用官方沙盒域 (fx-api-testnet)
+                </label>
+              </template>
+              <div class="space-y-1.5 pt-1">
+                <div class="text-[10px] font-semibold" style="color: var(--ink-2);">执行凭证（开启执行路由必需）</div>
+                <input v-model="mxForm.gate_api_key" type="text" placeholder="API Key（留空不改）" class="input w-full text-xs" />
+                <input v-model="mxForm.gate_secret_key" type="password" placeholder="API Secret" class="input w-full text-xs" />
+              </div>
+              <template #extra>
                 <div class="pt-1">
                   <label class="flex items-center gap-1.5 text-[11px] cursor-pointer font-bold" :style="{ color: gateExec ? 'var(--down)' : 'var(--ink-2)' }">
                     <input v-model="gateExec" type="checkbox" class="accent-[var(--accent)]" />
@@ -529,47 +581,32 @@ onMounted(() => { loadAll(); loadMx() })
                   </label>
                   <input v-if="gateExecDirty && gateExec" v-model="gateExecPhrase" placeholder="输入短语：OPEN GATE EXECUTION" class="input w-full text-xs mt-1.5" />
                 </div>
-              </div>
-              <div class="pt-3 mt-2 border-t flex justify-end" style="border-color: var(--line-1);">
-                <button class="btn btn-primary btn-sm" :disabled="savingMx" @click="saveMx"><Save class="h-3 w-3" /> {{ savingMx ? '保存中…' : '保存 Gate' }}</button>
-              </div>
-            </div>
+                <p class="text-[10px] leading-relaxed pt-1" style="color: var(--ink-3);">
+                  关闸状态下仅只读行情与账户探针；开闸后 Gate 才进入撮合路由候选集。
+                </p>
+              </template>
+              <template #probe>
+                <button class="btn btn-quiet btn-sm" :disabled="probingVenue !== '' && probingVenue !== 'gate'" @click="probeVenue('gate')"><RefreshCw class="h-3 w-3" /> 检测</button>
+              </template>
+              <template #save>
+                <button class="btn btn-primary btn-sm" :disabled="savingVenue !== ''" @click="saveVenue('gate')"><Save class="h-3 w-3" /> {{ savingVenue === 'gate' ? '保存中…' : '保存 Gate' }}</button>
+              </template>
+            </VenueCredentialCard>
           </div>
         </SettingsSection>
 
-        <!-- 行情健康与 Gate 试验田看板 -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <SettingsSection title="跨所行情健康容灾" description="公共行情每周期自动探活排序，零网络开销">
-            <template #actions>
-              <button class="btn btn-quiet btn-sm" @click="loadMx"><RefreshCw class="h-3 w-3" /> 重新检测</button>
-            </template>
-            <div v-if="mxHealthChips" class="flex flex-wrap gap-2 text-[11px]">
-              <span v-for="h in mxHealthChips" :key="h.name" class="px-2 py-1 rounded border font-bold num" :style="h.ok === h.total ? { color: 'var(--up)', borderColor: 'var(--up-line)', backgroundColor: 'var(--up-bg)' } : { color: 'var(--warn)', borderColor: 'var(--warn-line)', backgroundColor: 'var(--warn-bg)' }">
-                {{ h.name }} {{ h.ok }}/{{ h.total }} 币{{ h.avg_ms ? ' · ' + h.avg_ms + 'ms' : '' }}
-              </span>
-            </div>
-            <div v-else class="text-[11px]" style="color: var(--ink-3);">尚无周期数据，等待下个 15 分钟周期。</div>
-          </SettingsSection>
-
-          <SettingsSection title="Gate 试验田实时状态" description="四道闸巡检与主台账落单核验">
-            <template #actions>
-              <button class="btn btn-quiet btn-sm" @click="loadLab"><RefreshCw class="h-3 w-3" /> 刷新</button>
-            </template>
-            <template v-if="lab">
-              <div class="flex flex-wrap items-center gap-2 text-[11px]">
-                <span class="px-2 py-0.5 rounded border font-bold" :style="{ color: labModeMeta(lab.mode).color, borderColor: labModeMeta(lab.mode).borderColor, backgroundColor: labModeMeta(lab.mode).backgroundColor }">
-                  {{ labModeMeta(lab.mode).label }}
-                </span>
-                <span :style="{ color: lab.gates?.pool_nonempty ? 'var(--up)' : 'var(--down)' }">{{ lab.gates?.pool_nonempty ? '✓' : '✗' }} 币池 {{ (lab.pool?.assets || []).join('/') || '空' }}</span>
-                <span :style="{ color: lab.gates?.execution_switch ? 'var(--up)' : 'var(--down)' }">{{ lab.gates?.execution_switch ? '✓' : '✗' }} 开关</span>
-                <span :style="{ color: lab.gates?.credentials ? 'var(--up)' : 'var(--down)' }">{{ lab.gates?.credentials ? '✓' : '✗' }} 凭证</span>
-              </div>
-              <div v-if="lab.error" class="mt-1 text-[11px]" style="color: var(--warn);">{{ lab.error }}</div>
-              <div v-if="(lab.trackers || []).length" class="mt-2 text-[11px]">在途仓位: {{ lab.trackers.length }} 笔</div>
-            </template>
-            <div v-else class="text-[11px]" style="color: var(--ink-3);">状态接口未就绪。</div>
-          </SettingsSection>
-        </div>
+        <!-- 跨所行情健康（只读探针，三所共用一行） -->
+        <SettingsSection title="跨所行情健康容灾" description="公共行情每周期自动探活排序，零额外网络开销；任一所属行情劣化只降级该所候选资格，绝不阻塞其他所。">
+          <template #actions>
+            <button class="btn btn-quiet btn-sm" @click="loadMx"><RefreshCw class="h-3 w-3" /> 重新检测</button>
+          </template>
+          <div v-if="mxHealthChips" class="flex flex-wrap gap-2 text-[11px]">
+            <span v-for="h in mxHealthChips" :key="h.name" class="px-2 py-1 rounded border font-bold num" :style="h.ok === h.total ? { color: 'var(--up)', borderColor: 'var(--up-line)', backgroundColor: 'var(--up-bg)' } : { color: 'var(--warn)', borderColor: 'var(--warn-line)', backgroundColor: 'var(--warn-bg)' }">
+              {{ h.name }} {{ h.ok }}/{{ h.total }} 币{{ h.avg_ms ? ' · ' + h.avg_ms + 'ms' : '' }}{{ h.testnet ? ' · 沙盒' : '' }}
+            </span>
+          </div>
+          <div v-else class="text-[11px]" style="color: var(--ink-3);">尚无周期数据，等待下个 15 分钟周期。</div>
+        </SettingsSection>
       </div>
 
       <!-- ============ 页签 2：标的池与初始本金 ============ -->
