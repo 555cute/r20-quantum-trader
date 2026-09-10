@@ -37,25 +37,32 @@ class ThreeTierRatchetAndCloudSyncTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def test_sync_cloud_algo_stop_success_and_idempotence(self):
-        with patch("scripts.ai_factor_trader.run_json_cmd") as mock_cmd:
+        # US-007 后 sync 面走 okx_rest 直签；函数边界断言调用形态
+        with patch.object(aft.okx_rest, "pending_algo_orders") as pending, \
+             patch.object(aft.okx_rest, "amend_algo_sl") as amend:
             # 1. When existing algo already matches new_sl, do not issue redundant amend
-            mock_cmd.return_value = [
+            pending.return_value = [
                 {"state": "live", "posSide": "long", "algoId": "algo_101", "slTriggerPx": "2500.0"}
             ]
             res = aft.sync_cloud_algo_stop("ETH-USDT-SWAP", "long", 2500.0)
             self.assertTrue(res)
-            # Only 1 call to fetch orders, no amend call
-            self.assertEqual(mock_cmd.call_count, 1)
+            pending.assert_called_once_with("ETH-USDT-SWAP")
+            amend.assert_not_called()
 
-            # 2. When existing algo has different slTriggerPx, issue amend
-            mock_cmd.reset_mock()
-            mock_cmd.side_effect = [
-                [{"state": "live", "posSide": "long", "algoId": "algo_101", "slTriggerPx": "2400.0"}],
-                {"code": "0", "msg": "amend success"}
+            # 2. When existing algo has different slTriggerPx, issue amend (market SL px)
+            pending.reset_mock()
+            pending.return_value = [
+                {"state": "live", "posSide": "long", "algoId": "algo_101", "slTriggerPx": "2400.0"}
             ]
+            amend.return_value = [{"algoId": "algo_101", "sCode": "0"}]
             res = aft.sync_cloud_algo_stop("ETH-USDT-SWAP", "long", 2500.0)
             self.assertTrue(res)
-            self.assertEqual(mock_cmd.call_count, 2)
+            amend.assert_called_once_with("algo_101", 2500.0)
+
+    def test_sync_cloud_algo_stop_fail_closed_without_key(self):
+        with patch.object(aft.okx_rest, "pending_algo_orders",
+                          side_effect=aft.okx_rest.OKXNotConfigured("not configured")):
+            self.assertFalse(aft.sync_cloud_algo_stop("ETH-USDT-SWAP", "long", 2500.0))
 
     def test_long_three_tier_ratchet_progression(self):
         f = {
@@ -176,6 +183,81 @@ class ThreeTierRatchetAndCloudSyncTests(unittest.TestCase):
             self.assertTrue(closed)
             self.assertEqual(reason, "已移动止盈")
             mock_close.assert_called_once_with("ETH-USDT-SWAP", "short", 2.0)
+
+
+class CloudOcoHttpBoundaryTests(unittest.TestCase):
+    """US-007 律①零容忍：OCO 补挂/复查全链路必须落在直签 HTTP 边界，
+    绝不复活任何子进程路径（曾把垃圾 OCO 打进真实 demo 账户）。"""
+
+    def setUp(self):
+        from scripts.okx_runtime import freeze_environment, unfreeze_environment
+        freeze_environment({
+            "R20_OKX_ENV": "demo",
+            "OKX_DEMO_API_KEY": "AK-T", "OKX_DEMO_SECRET_KEY": "SK-T", "OKX_DEMO_PASSPHRASE": "PP-T",
+        })
+        self.addCleanup(unfreeze_environment)
+
+    def test_ensure_protection_gap_repair_oversigned_rest_at_http_edge(self):
+        import json as _json
+        import scripts.okx_rest as okx_rest
+        live_row = {"instId": "SOL-USDT-SWAP", "state": "live", "posSide": "long", "side": "sell",
+                    "ordType": "oco", "reduceOnly": "true", "sz": "4", "actualSz": "4",
+                    "tpTriggerPx": "106", "slTriggerPx": "101"}
+        captured = []
+
+        def fake_urlopen(req, timeout=None):
+            captured.append(req)
+            if req.full_url.find("/api/v5/trade/order-algo") >= 0:
+                payload = {"code": "0", "data": [{"algoId": "900", "sCode": "0"}]}
+            else:  # orders-algo-pending
+                first = not any(c.full_url.find("/order-algo") >= 0 for c in captured)
+                payload = {"code": "0", "data": [] if first else [live_row]}
+            body = _json.dumps(payload).encode()
+
+            class _R:
+                def read(self): return body
+                def __enter__(self): return self
+                def __exit__(self, *a): return False
+            return _R()
+
+        with patch.object(okx_rest, "urlopen", fake_urlopen), patch.object(aft.time, "sleep"):
+            ok, detail = aft.ensure_cloud_position_protection("SOL-USDT-SWAP", "long", 4.0, 106.0, 101.0)
+        self.assertTrue(ok, detail)
+        self.assertIn("repaired and verified", detail)
+        places = [c for c in captured if "/api/v5/trade/order-algo" in c.full_url]
+        self.assertEqual(len(places), 1)
+        post = places[0]
+        self.assertEqual(post.get_method(), "POST")
+        body = _json.loads(post.data.decode())
+        self.assertEqual(body["instId"], "SOL-USDT-SWAP")
+        self.assertEqual(body["side"], "sell")            # 平仓方向对偶
+        self.assertEqual(body["posSide"], "long")
+        self.assertEqual(body["ordType"], "oco")
+        self.assertEqual(body["sz"], "4")
+        self.assertEqual(body["tpTriggerPx"], "106")
+        self.assertEqual(body["tpOrdPx"], "-1")           # 市价执行腿
+        self.assertEqual(body["slTriggerPx"], "101")
+        self.assertEqual(body["slOrdPx"], "-1")
+        self.assertEqual(body["reduceOnly"], "true")
+        self.assertEqual(body["cxlOnClosePos"], "true")
+        self.assertEqual(body["tdMode"], "cross")
+        lowered = {k.lower(): v for k, v in post.headers.items()}
+        self.assertEqual(lowered.get("x-simulated-trading"), "1")
+        self.assertTrue({"ok-access-key", "ok-access-sign", "ok-access-timestamp", "ok-access-passphrase"} <= set(lowered))
+        gets = [c for c in captured if "orders-algo-pending" in c.full_url]
+        self.assertGreaterEqual(len(gets), 2)             # 首查 + 至少一次复查
+        self.assertIn("ordType=oco", gets[0].full_url)
+
+    def test_ensure_protection_fail_closed_without_key_zero_network(self):
+        from scripts.okx_runtime import unfreeze_environment, freeze_environment
+        unfreeze_environment()
+        freeze_environment({"R20_OKX_ENV": "demo"})       # 无任何键
+        import scripts.okx_rest as okx_rest
+        with patch.object(okx_rest, "urlopen") as spy:
+            ok, detail = aft.ensure_cloud_position_protection("SOL-USDT-SWAP", "long", 4.0, 106.0, 101.0)
+        self.assertFalse(ok)
+        self.assertIn("NOT READY", detail)
+        spy.assert_not_called()
 
 
 if __name__ == "__main__":

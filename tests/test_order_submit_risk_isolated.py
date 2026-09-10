@@ -19,7 +19,7 @@ import scripts.ai_factor_trader as aft
 
 class SubmitProtectedLimitOrderTests(unittest.TestCase):
     @patch("scripts.ai_factor_trader.okx_rest")
-    @patch("scripts.ai_factor_trader.selected_environment")
+    @patch("scripts.ai_factor_trader.current_environment")
     def test_submit_protected_limit_order_core_rejection(self, mock_env, mock_rest):
         # Environment is real / not simulated to test raw effective prices
         env_obj = MagicMock()
@@ -71,7 +71,7 @@ class SubmitProtectedLimitOrderTests(unittest.TestCase):
         self.assertIn("51001", reason)
 
     @patch("scripts.ai_factor_trader.okx_rest")
-    @patch("scripts.ai_factor_trader.selected_environment")
+    @patch("scripts.ai_factor_trader.current_environment")
     def test_demo_ticker_divergence_uses_market_data_service_not_cli(self, mock_env, mock_rest):
         # Simulated env + demo ticker 10% below quote -> effective prices rescale, then place with attach legs
         env_obj = MagicMock()

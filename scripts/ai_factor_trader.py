@@ -224,47 +224,6 @@ def is_tradfi_market_liquid(asset_type: str) -> bool:
         return True
     return False
 
-def run_cmd_result(cmd, timeout=15):
-    """Return process metadata; callers must inspect returncode before mutating local state."""
-    try:
-        res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
-        parsed = None
-        if res.stdout.strip():
-            try:
-                parsed = json.loads(res.stdout.strip())
-            except json.JSONDecodeError:
-                pass
-        business_ok = True
-        if isinstance(parsed, dict) and "code" in parsed:
-            business_ok = str(parsed.get("code")) == "0"
-        elif isinstance(parsed, list):
-            status_rows = [row for row in parsed if isinstance(row, dict) and "sCode" in row]
-            if status_rows:
-                business_ok = all(str(row.get("sCode")) == "0" for row in status_rows)
-        return {
-            "ok": res.returncode == 0 and business_ok,
-            "returncode": res.returncode,
-            "stdout": res.stdout.strip(),
-            "stderr": res.stderr.strip(),
-            "data": parsed,
-        }
-    except Exception as e:
-        return {"ok": False, "returncode": -1, "stdout": "", "stderr": str(e), "data": None}
-
-
-def run_cmd(cmd, timeout=15):
-    result = run_cmd_result(cmd, timeout)
-    return result["stdout"] if result["ok"] else f"Error: {result['stderr'] or result['stdout']}"
-
-def run_json_cmd(cmd, timeout=15):
-    try:
-        res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
-        if res.returncode == 0 and res.stdout.strip():
-            return json.loads(res.stdout.strip())
-        return None
-    except Exception:
-        return None
-
 def fetch_candles_direct(inst_id: str, bar: str = "15m", limit: int = 45):
     """Direct fetch from OKX Official Market REST API with Keep-Alive connection pooling."""
     return fetch_candles(inst_id, bar=bar, limit=limit)

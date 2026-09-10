@@ -285,16 +285,16 @@ class AiFactorTraderPositionProtectionTest(unittest.TestCase):
         self.assertFalse(closed); self.assertEqual(reason,"持仓监控中"); close.assert_not_called()
 
     def test_cloud_oco_gap_is_repaired_and_verified(self):
-        responses=[
-            {"ok":True,"data":[],"stderr":"","stdout":"[]"},
-            {"ok":True,"data":{"algoId":"88"},"stderr":"","stdout":"{}"},
-            {"ok":True,"data":[{"state":"live","posSide":"long","side":"sell","reduceOnly":"true","sz":"4","tpTriggerPx":"106","slTriggerPx":"101"}],"stderr":"","stdout":"[]"},
-        ]
-        with patch.object(ai_factor_trader,"run_cmd_result",side_effect=responses) as run, patch.object(ai_factor_trader.time,"sleep"):
+        live=[{"state":"live","posSide":"long","side":"sell","reduceOnly":"true","sz":"4","tpTriggerPx":"106","slTriggerPx":"101"}]
+        with patch.object(ai_factor_trader.okx_rest,"pending_algo_orders",side_effect=[[],live]) as pend, \
+             patch.object(ai_factor_trader.okx_rest,"place_algo_oco") as place, \
+             patch.object(ai_factor_trader.time,"sleep"):
             ok,detail=ai_factor_trader.ensure_cloud_position_protection("SOL-USDT-SWAP","long",4,106,101)
         self.assertTrue(ok); self.assertIn("repaired and verified",detail)
-        self.assertIn("--ordType oco",run.call_args_list[1].args[0])
-        self.assertIn("--reduceOnly",run.call_args_list[1].args[0])
+        pend.assert_any_call("SOL-USDT-SWAP")
+        args,kwargs=place.call_args
+        self.assertEqual(args[0],"SOL-USDT-SWAP"); self.assertEqual(args[1],"sell"); self.assertEqual(float(args[2]),4.0)
+        self.assertEqual(kwargs["pos_side"],"long"); self.assertEqual(kwargs["tp_trigger_px"],106); self.assertEqual(kwargs["sl_trigger_px"],101)
 
     def test_stale_order_query_failure_aborts_cleanup(self):
         with patch.object(ai_factor_trader,"okx_rest") as rest:
