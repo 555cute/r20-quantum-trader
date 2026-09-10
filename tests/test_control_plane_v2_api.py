@@ -48,5 +48,19 @@ class ControlPlaneV2ApiTests(unittest.TestCase):
         response=self.client.post('/api/v1/admin/positions/close',headers=self.headers,json={'close_token':'x'*30,'admin_password':'','confirmation':'CLOSE DEMO BTC-USDT-SWAP LONG 1'})
         self.assertEqual(response.status_code,422); self.assertEqual(response.json()['detail'][0]['loc'][-1],'admin_password')
 
+    def test_fast_close_without_key_returns_503(self):
+        # US-009 承接 US-008 契约：OKXNotConfigured → 503 人话，不再被吞进 502
+        from scripts.okx_rest import OKXNotConfigured
+        import os
+        with patch.dict(os.environ, {'R20_MANUAL_CLOSE_ENABLED': '1'}), \
+             patch.object(app_module, 'DATA_DIR', Path(self.temp.name) / 'data'), \
+             patch.object(app_module, 'fast_close_confirmed', side_effect=OKXNotConfigured('请在后台配置 OKX V5 API Key')) as close:
+            response = self.client.post('/api/v1/admin/positions/close', headers=self.headers,
+                                        json={'close_token': 'x' * 30, 'admin_password': 'InitialAdmin123456',
+                                              'confirmation': 'CLOSE DEMO BTC-USDT-SWAP LONG 1'})
+        self.assertEqual(response.status_code, 503, response.text)
+        self.assertIn('OKX API Key', response.json()['detail'])
+        close.assert_called_once()
+
 
 if __name__=='__main__': unittest.main()

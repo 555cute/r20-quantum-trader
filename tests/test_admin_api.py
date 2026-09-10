@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 import r20_backend.app as app_module
@@ -112,66 +113,54 @@ class AdminApiTests(unittest.TestCase):
         self.assertEqual(response.json()["editable"]["initial_capital"],4061.04)
         self.assertEqual(response.json()["editable"]["initial_capital_reset_time"],"2026-08-31 06:57:38")
 
-    def test_okx_oauth_device_flow_endpoints_are_session_protected(self):
-        self.assertEqual(self.client.post("/api/v1/admin/okx/oauth/start",json={"site":"global"}).status_code,401)
-        root=self.login("admin","InitialAdmin123456")
-        from unittest.mock import patch
-        pending={"status":"pending","site":"global","verification_uri":"https://www.okx.com/device","user_code":"ABCD-EFGH","expires_in":600}
-        with patch.object(app_module,"start_oauth_device_login",return_value=pending):
-            response=self.client.post("/api/v1/admin/okx/oauth/start",headers=root,json={"site":"global"})
-        self.assertEqual(response.status_code,200,response.text)
-        self.assertEqual(response.json()["user_code"],"ABCD-EFGH")
-        safe={"status":"logged_in","site":"global","scopes":["demo:read","demo:trade"],"account_label":""}
-        with patch.object(app_module,"oauth_status",return_value=safe):
-            status=self.client.get("/api/v1/admin/okx/oauth/status",headers=root)
-        self.assertEqual(status.status_code,200,status.text)
-        self.assertNotIn("token",status.text.lower())
-
-        # Test logout endpoint
-        self.assertEqual(self.client.post("/api/v1/admin/okx/oauth/logout").status_code, 401)
-        with patch.object(app_module, "oauth_logout", return_value={"status": "logged_out", "message": "OKX OAuth 账号已成功解绑"}):
-            logout_resp = self.client.post("/api/v1/admin/okx/oauth/logout", headers=root)
-        self.assertEqual(logout_resp.status_code, 200)
-        self.assertEqual(logout_resp.json()["status"], "logged_out")
-
-    def test_okx_cli_check_and_install_require_valid_session_and_confirmation(self):
-        self.assertEqual(self.client.get("/api/v1/admin/okx/cli-check").status_code, 401)
-        self.assertEqual(self.client.post("/api/v1/admin/okx/install-cli", json={"confirmation":"INSTALL OKX CLI"}).status_code, 401)
+    def test_okx_oauth_and_cli_endpoints_removed(self):
+        # US-009: OAuth 设备码 / CLI 自检 / CLI 安装路由已物理删除，API Key 为唯一连接方式
         root = self.login("admin", "InitialAdmin123456")
-        from unittest.mock import patch
-        with patch.object(app_module, "check_node_npm", return_value={"ready":True,"node_installed":True,"node_path":"/usr/bin/node","node_version":"20","npm_installed":True,"npm_path":"/usr/bin/npm","npm_version":"10"}):
-            checked=self.client.get("/api/v1/admin/okx/cli-check",headers=root)
-        self.assertEqual(checked.status_code,200,checked.text)
-        self.assertTrue(checked.json()["ready"])
-        bad=self.client.post("/api/v1/admin/okx/install-cli",headers=root,json={"confirmation":"YES"})
-        self.assertEqual(bad.status_code,422)
-        wrong=self.client.post("/api/v1/admin/okx/install-cli",headers=root,json={"confirmation":"INSTALL SOMETHING"})
-        self.assertEqual(wrong.status_code,400)
-        installed={"ok":True,"detail":"OKX CLI 安装成功","path":"/usr/local/bin/okx","version":"1.4.5"}
-        with patch.object(app_module,"install_okx_cli",return_value=installed):
-            response=self.client.post("/api/v1/admin/okx/install-cli",headers=root,json={"confirmation":"INSTALL OKX CLI"})
-        self.assertEqual(response.status_code,200,response.text)
-        self.assertEqual(response.json()["version"],"1.4.5")
+        for method, path in (
+            ("post", "/api/v1/admin/okx/oauth/start"),
+            ("post", "/api/v1/admin/okx/oauth/logout"),
+            ("get", "/api/v1/admin/okx/oauth/status"),
+            ("get", "/api/v1/admin/okx/cli-check"),
+            ("post", "/api/v1/admin/okx/install-cli"),
+        ):
+            response = getattr(self.client, method)(path, headers=root, **({} if method == "get" else {"json": {"site": "global", "confirmation": "INSTALL OKX CLI"}}))
+            self.assertIn(response.status_code, (404, 405), f"{method.upper()} {path} 仍存在：{response.status_code}")
 
-    def test_okx_runtime_diagnostic_requires_session_and_never_returns_secrets(self):
+    def test_okx_runtime_reports_static_key_readiness(self):
+        from scripts.okx_runtime import OKXEnvironment
         self.assertEqual(self.client.get("/api/v1/admin/okx/runtime").status_code, 401)
         headers = self.login("admin", "InitialAdmin123456")
-        fake = {
-            "selected_mode": "demo", "ready": True, "credential_source": "cli-oauth",
-            "cli": {"installed": True, "path": "/usr/local/bin/okx", "version": "1.4.5", "supported": True},
-            "oauth": {"status": "logged_in", "site": "global", "scopes": ["market:read", "demo:read", "demo:trade"], "ready_for_selected_mode": True},
-            "api_key_profiles": [], "static_credentials_configured": False,
-            "read_probe": {"ok": True, "detail": "OKX 私有只读探针通过"},
-            "issues": [], "steps": [], "install_command": "npm install -g @okx_ai/okx-trade-cli@^1.4.4",
-        }
-        from unittest.mock import patch
-        with patch.object(app_module, "diagnose_okx_runtime", return_value=fake):
-            response = self.client.get("/api/v1/admin/okx/runtime", headers=headers)
+        demo = OKXEnvironment("demo", "DEMO_AK", "DEMO_SK", "DEMO_PP")
+        with patch.object(app_module, "okx_selected_environment", return_value=demo):
+            response = self.client.get("/api/v1/admin/okx/runtime", headers=headers, params={"refresh": 1})
         self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertTrue(body["ready"] and body["mode_configured"])
+        self.assertEqual(body["credential_source"], "static-v5-key")
+        self.assertEqual((body["environment"], body["selected_mode"]), ("demo", "demo"))
+        self.assertTrue(body["base_url_ok"])
+        self.assertIsNone(body["not_ready_reason"])
+        self.assertEqual(len(body["fingerprint"]), 12)
         text = response.text.lower()
-        self.assertNotIn("secret_key", text)
-        self.assertNotIn("passphrase", text)
-        self.assertEqual(response.json()["credential_source"], "cli-oauth")
+        for secret in ("demo_sk", "demo_pp", "secret_key", "passphrase"):
+            self.assertNotIn(secret, text)
+        blank = OKXEnvironment("live", "", "", "")
+        with patch.object(app_module, "okx_selected_environment", return_value=blank):
+            missing = self.client.get("/api/v1/admin/okx/runtime", headers=headers, params={"refresh": 1})
+        self.assertEqual(missing.status_code, 200, missing.text)
+        body = missing.json()
+        self.assertFalse(body["ready"] or body["mode_configured"])
+        self.assertEqual(body["credential_source"], "not-configured")
+        self.assertEqual(body["fingerprint"], "")
+        self.assertIn("NOT READY", body["not_ready_reason"])
+
+    def test_account_snapshot_not_ready_returns_503(self):
+        from scripts.okx_rest import OKXNotConfigured
+        headers = self.login("admin", "InitialAdmin123456")
+        with patch.object(app_module, "okx_account_snapshot", side_effect=OKXNotConfigured("请在后台配置 OKX V5 API Key")):
+            response = self.client.get("/api/v1/admin/okx/account-snapshot", headers=headers)
+        self.assertEqual(response.status_code, 503, response.text)
+        self.assertIn("OKX API Key", response.json()["detail"])
 
     def test_interceptor_endpoints_and_sandbox_execution(self):
         self.assertEqual(self.client.get("/api/v1/admin/interceptors").status_code, 401)
