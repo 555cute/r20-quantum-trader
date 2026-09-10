@@ -1,5 +1,4 @@
 <script setup lang="ts">
-// 账户接入仅使用后台加密 V5 API Key；其余页签行为保持不变。
 import { useToast } from '../../composables/useToast'
 const toast = useToast()
 import { ref, computed, onMounted } from 'vue'
@@ -8,9 +7,9 @@ import SettingsSection from '../../components/admin/SettingsSection.vue'
 import { useI18n } from '../../composables/useI18n'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
-import { utcStrToBj, fmtDateTime } from '../../utils/format'
+import { fmtDateTime } from '../../utils/format'
 import { labModeMeta } from '../../utils/labMode'
-import { Wallet, Save, RefreshCw, Layers, Trash2, FlaskConical, Zap } from 'lucide-vue-next'
+import { Wallet, Save, RefreshCw, Layers, Trash2, Zap } from 'lucide-vue-next'
 
 const { api } = useApi()
 const auth = useAuthStore()
@@ -19,8 +18,8 @@ const config = ref<any>(null)
 const runtime = ref<any>(null)
 const loading = ref(true)
 
-type TabKey = 'okx' | 'pool' | 'venues' | 'emergency'
-const activeTab = ref<TabKey>('okx')
+type TabKey = 'venues' | 'pool' | 'emergency'
+const activeTab = ref<TabKey>('venues')
 const positionsLoadedOnce = ref(false)
 
 function switchTab(tab: TabKey) {
@@ -32,7 +31,7 @@ function switchTab(tab: TabKey) {
   if (tab === 'venues') loadLab()
 }
 
-// ---- LIVE / DEMO API keys ----
+// ---- LIVE / DEMO API keys (OKX) ----
 const keys = ref({ live_key: '', live_secret: '', live_pass: '', demo_key: '', demo_secret: '', demo_pass: '' })
 
 // ---- capital ----
@@ -53,6 +52,16 @@ const closePassword = ref('')
 const closeModal = ref<{ show: boolean; pos: any } | null>(null)
 const closePhraseInput = ref('')
 const closing = ref(false)
+
+// ---- 多交易所数据源与凭证 (Binance / Gate) ----
+const mx = ref<any>(null)
+const mxForm = ref({ binance_api_key: '', binance_secret_key: '', gate_api_key: '', gate_secret_key: '' })
+const mxTestnet = ref({ binance: false, gate: false })
+const preferredVenue = ref('auto')
+const gateExec = ref(false)
+const gateExecPhrase = ref('')
+const savingMx = ref(false)
+const savingOkx = ref(false)
 
 async function loadAll() {
   loading.value = true
@@ -98,6 +107,7 @@ async function saveEnvironment() {
       return
     }
   }
+  savingOkx.value = true
   try {
     const body: any = { okx_environment: environment }
     if (keys.value.live_key) body.okx_live_api_key = keys.value.live_key
@@ -112,6 +122,8 @@ async function saveEnvironment() {
     await loadAll()
   } catch (e: any) {
     toast.err(`保存失败：${e.message}`)
+  } finally {
+    savingOkx.value = false
   }
 }
 
@@ -148,30 +160,26 @@ async function addInstrument() {
     const res = await api('/api/v1/admin/instruments', { method: 'POST', body: JSON.stringify({ inst_id: instId }) })
     toast.ok(res.message || `${instId} 已成功加入交易池`)
     newInstId.value = ''
-    const inst = await api('/api/v1/admin/instruments')
-    instruments.value = inst.instruments || []
+    await loadAll()
   } catch (e: any) {
     toast.err(`添加失败：${e.message}`)
   }
 }
 
 async function removeInstrument(item: any) {
-  if (item.protected) { toast.err('BTC 为保底标的，不可删除'); return }
-  if (item.has_tracker) { toast.err(`${item.name} 存在持仓追踪器，禁止移除`); return }
-  const phrase = prompt(`删除交易池标的 ${item.instId}\n输入确认短语：REMOVE ${item.instId}`)
-  if (!phrase) return
+  if (item.protected) { toast.warn('系统保底标的不可删除'); return }
+  if (!confirm(`确定将 ${item.instId} 从交易池移除？`)) return
   try {
-    const res = await api(`/api/v1/admin/instruments/${encodeURIComponent(item.instId)}`, { method: 'DELETE', body: JSON.stringify({ confirmation: phrase.trim().toUpperCase() }) })
+    const res = await api(`/api/v1/admin/instruments/${encodeURIComponent(item.instId)}`, { method: 'DELETE' })
     toast.ok(res.message || `${item.instId} 已从交易池移除`)
-    const inst = await api('/api/v1/admin/instruments')
-    instruments.value = inst.instruments || []
+    await loadAll()
   } catch (e: any) {
     toast.err(`删除失败：${e.message}`)
   }
 }
 
 async function loadPositions() {
-  snapshotState.value = '正在从 OKX 读取当前持仓与挂单…'
+  snapshotState.value = '正在从交易核心读取当前持仓与挂单…'
   try {
     const d = await api('/api/v1/admin/okx/account-snapshot')
     snapshot.value = d
@@ -214,15 +222,6 @@ async function confirmClose() {
   }
 }
 
-// ---- 多交易所数据源与凭证 (Binance / Gate) ----
-const mx = ref<any>(null)
-const mxForm = ref({ binance_api_key: '', binance_secret_key: '', gate_api_key: '', gate_secret_key: '' })
-const mxTestnet = ref({ binance: false, gate: false })
-const preferredVenue = ref('auto')
-const gateExec = ref(false)
-const gateExecPhrase = ref('')
-const savingMx = ref(false)
-
 async function loadMx() {
   try {
     mx.value = await api('/api/v1/admin/multi-exchange')
@@ -261,7 +260,7 @@ async function saveMx() {
       if (v && v.trim()) body[k] = v.trim()
     }
     await api('/api/v1/admin/multi-exchange', { method: 'PUT', body: JSON.stringify(body) })
-    toast.ok('多交易所凭证与网络档位已保存')
+    toast.ok('多交易所凭证与路由配置已保存')
     mxForm.value = { binance_api_key: '', binance_secret_key: '', gate_api_key: '', gate_secret_key: '' }
     gateExecPhrase.value = ''
     await loadMx()
@@ -274,7 +273,6 @@ async function saveMx() {
 
 // ---- 总览派生（纯计算，零请求） ----
 const okxLinked = computed(() => runtime.value?.status === 'READY' && runtime.value?.mode_configured === true)
-const runtimeTone = computed(() => okxLinked.value ? 'good' : 'bad')
 const mxHealthChips = computed(() => {
   const venues = mx.value?.health?.venues
   if (!venues) return null
@@ -289,10 +287,9 @@ const mxHealthChips = computed(() => {
 const gateExecDirty = computed(() => gateExec.value !== !!mx.value?.venues?.gate?.execution_open)
 
 const TABS: Array<{ key: TabKey; label: string }> = [
-  { key: 'okx', label: '账户接入' },
-  { key: 'pool', label: '标的与基准' },
-  { key: 'venues', label: '多交易所' },
-  { key: 'emergency', label: '应急平仓' },
+  { key: 'venues', label: '交易所与路由对等' },
+  { key: 'pool', label: '标的池与初始本金' },
+  { key: 'emergency', label: '应急风控与持仓' },
 ]
 
 function envBadge(env: string) {
@@ -304,111 +301,278 @@ onMounted(() => { loadAll(); loadMx() })
 
 <template>
   <div class="space-y-4 text-xs">
-    <PageHeader :title="t('nav.admin.security')" description="OKX 账号与环境、交易标的池、Binance / Gate 跨所数据源与 Gate 试验田的接入管理">
+    <PageHeader :title="t('nav.admin.security')" description="OKX、Binance、Gate 三交易所凭证、撮合路由策略与标的池对称管理">
       <template #actions>
-        <span v-if="runtime" class="chip">
-          运行环境 <b class="num" :style="{ color: runtime.environment === 'live' ? 'var(--down)' : 'var(--up)' }">{{ envBadge(runtime.environment) }}</b>
-          · 认证 <b>{{ t('admin.overview.keyConnection.method') }}</b>
-          · <b :style="{ color: runtimeTone === 'good' ? 'var(--up)' : 'var(--down)' }">{{ okxLinked ? 'READY' : 'NOT READY' }}</b>
+        <span class="chip flex items-center gap-1.5">
+          <span>选所模式</span>
+          <b class="num" style="color: var(--accent);">{{ preferredVenue.toUpperCase() }}</b>
+          <span class="text-[10px] opacity-70">·</span>
+          <span>环境</span>
+          <b class="num" :style="{ color: runtime?.environment === 'live' ? 'var(--down)' : 'var(--up)' }">{{ envBadge(runtime?.environment) }}</b>
         </span>
       </template>
     </PageHeader>
 
-    <div v-if="loading" class="py-12 text-center" style="color: var(--ink-2);">正在加载…</div>
+    <div v-if="loading" class="py-12 text-center" style="color: var(--ink-2);">正在同步配置…</div>
 
     <template v-else-if="config">
-      <!-- 状态总览条 -->
-      <div class="flex flex-wrap gap-2">
-        <span class="chip">
-          OKX 连接
-          <b :style="{ color: okxLinked ? 'var(--up)' : 'var(--down)' }">{{ okxLinked ? '已接入' : '未接入' }}</b>
-        </span>
-        <span class="chip">初始本金 <b class="num" style="color: var(--up);">{{ config.editable.initial_capital }} U</b></span>
-        <span class="chip">
-          标的池 <b class="num">{{ instruments.length }}/{{ instLimits.maximum }}</b>
-        </span>
-        <span class="chip">
-          跨所行情
-          <template v-if="mxHealthChips">
-            <b v-for="h in mxHealthChips" :key="h.name" class="num" :style="{ color: h.ok === h.total ? 'var(--up)' : 'var(--warn)', marginLeft: '4px' }">{{ h.name }} {{ h.ok }}/{{ h.total }}</b>
-          </template>
-          <b v-else style="color: var(--ink-3);">待周期</b>
-        </span>
-        <span class="chip">
-          Gate 试验田
-          <b v-if="lab" :style="{ color: labModeMeta(lab.mode).color }">{{ labModeMeta(lab.mode).label }}</b>
-          <b v-else style="color: var(--ink-3);">--</b>
-        </span>
+      <!-- 对称状态总览条 -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+        <div class="card card-pad flex flex-col justify-between" style="background-color: var(--surface-1);">
+          <div class="flex items-center justify-between text-[11px]" style="color: var(--ink-3);">
+            <span>OKX · V5 接口</span>
+            <span class="dot" :class="okxLinked ? 'dot-up' : 'dot-down'" />
+          </div>
+          <div class="mt-1 flex items-baseline justify-between">
+            <b class="text-xs font-bold" :style="{ color: okxLinked ? 'var(--up)' : 'var(--down)' }">
+              {{ okxLinked ? '已接入 (READY)' : '未完整配置' }}
+            </b>
+            <span class="num text-[10px]" style="color: var(--ink-3);">{{ envBadge(runtime?.environment) }}</span>
+          </div>
+        </div>
+
+        <div class="card card-pad flex flex-col justify-between" style="background-color: var(--surface-1);">
+          <div class="flex items-center justify-between text-[11px]" style="color: var(--ink-3);">
+            <span>Binance · USDT-M</span>
+            <span class="dot" :class="mx?.venues?.binance?.has_api_key ? 'dot-up' : 'dot-warn'" />
+          </div>
+          <div class="mt-1 flex items-baseline justify-between">
+            <b class="text-xs font-bold" :style="{ color: mx?.venues?.binance?.has_api_key ? 'var(--up)' : 'var(--warn)' }">
+              {{ mx?.venues?.binance?.has_api_key ? '凭证已配置' : '免密公共行情' }}
+            </b>
+            <span class="num text-[10px]" style="color: var(--ink-3);">{{ mxTestnet.binance ? 'DEMO' : 'LIVE' }}</span>
+          </div>
+        </div>
+
+        <div class="card card-pad flex flex-col justify-between" style="background-color: var(--surface-1);">
+          <div class="flex items-center justify-between text-[11px]" style="color: var(--ink-3);">
+            <span>Gate.io · 永续</span>
+            <span class="dot" :class="mx?.venues?.gate?.has_api_key ? 'dot-up' : 'dot-warn'" />
+          </div>
+          <div class="mt-1 flex items-baseline justify-between">
+            <b class="text-xs font-bold" :style="{ color: mx?.venues?.gate?.has_api_key ? 'var(--up)' : 'var(--warn)' }">
+              {{ mx?.venues?.gate?.has_api_key ? (mx?.venues?.gate?.execution_open ? '已开闸实盘' : '已配·关闸中') : '免密公共行情' }}
+            </b>
+            <span class="num text-[10px]" style="color: var(--ink-3);">{{ mxTestnet.gate ? 'TESTNET' : 'LIVE' }}</span>
+          </div>
+        </div>
+
+        <div class="card card-pad flex flex-col justify-between" style="background-color: var(--surface-1);">
+          <div class="flex items-center justify-between text-[11px]" style="color: var(--ink-3);">
+            <span>标的池 & 本金</span>
+            <Layers class="h-3 w-3" style="color: var(--accent);" />
+          </div>
+          <div class="mt-1 flex items-baseline justify-between">
+            <b class="num text-xs font-bold" style="color: var(--ink-1);">{{ instruments.length }}/{{ instLimits.maximum }} 标的</b>
+            <span class="num text-[10px] font-bold" style="color: var(--up);">{{ config.editable.initial_capital }} U</span>
+          </div>
+        </div>
       </div>
 
-      <!-- 页签 -->
-      <div class="flex items-center gap-1.5 border-b pb-2" style="border-color: var(--line-1);">
+      <!-- 选项卡切换 -->
+      <div class="flex items-center gap-2 border-b pb-2 pt-1" style="border-color: var(--line-1);">
         <button
           v-for="tab in TABS" :key="tab.key"
-          class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer"
+          class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer"
           :style="activeTab === tab.key ? { backgroundColor: 'var(--ink-1)', color: 'var(--surface-2)' } : { color: 'var(--ink-2)' }"
           @click="switchTab(tab.key)"
         >{{ tab.label }}</button>
       </div>
 
-      <!-- ============ 页签 1：OKX 账户接入 ============ -->
-      <div v-if="activeTab === 'okx'" class="space-y-4">
-        <SettingsSection :title="t('admin.overview.keyConnection.title')" :description="t('admin.overview.keyConnection.description')">
+      <!-- ============ 页签 1：交易所与路由对等（三平台对称平权配置） ============ -->
+      <div v-if="activeTab === 'venues'" class="space-y-4">
+        <!-- 路由主策略 -->
+        <SettingsSection title="撮合路由首选（三所对等）" description="配置 AI 信号的默认撮合交易所。可指定某所优先，或由智能评分路由按流动性、费率优势自动比选（支持 5% 滞回防抖）。">
           <template #actions>
-            <button class="btn btn-quiet" @click="rediagnose"><RefreshCw class="h-3.5 w-3.5" /> {{ t('admin.overview.keyConnection.refresh') }}</button>
+            <button class="btn btn-primary" :disabled="savingMx" @click="saveMx"><Save class="h-3.5 w-3.5" /> {{ savingMx ? '保存中…' : '保存路由策略' }}</button>
           </template>
-          <div v-if="okxLinked" role="status" class="rounded-lg border p-3" style="color: var(--up); border-color: var(--up-line); background-color: var(--up-bg);">
-            <b>READY · {{ envBadge(runtime.environment) }}</b>
-            <span class="ml-2 num">{{ t('admin.overview.keyConnection.fingerprint') }}: {{ runtime.fingerprint }}</span>
-          </div>
-          <div v-else role="alert" class="rounded-lg border p-3" style="color: var(--down); border-color: var(--down-line); background-color: var(--down-bg);">
-            <b>NOT READY · {{ envBadge(runtime?.environment) }}</b>
-            <p>{{ runtime?.not_ready_reason || t('admin.overview.keyConnection.unavailable') }} — {{ t('admin.overview.keyConnection.blocked') }}</p>
-          </div>
-          <div v-if="runtime" class="mt-3 text-xs space-y-1" style="color: var(--ink-2);">
-            <div>{{ t('admin.overview.keyConnection.method') }} · {{ runtime.base_url }}</div>
-            <div>LIVE: {{ runtime.live_configured ? t('admin.overview.keyConnection.configured') : t('admin.overview.keyConnection.missing') }} · DEMO: {{ runtime.demo_configured ? t('admin.overview.keyConnection.configured') : t('admin.overview.keyConnection.missing') }}</div>
+          <div class="space-y-3 rounded-lg border p-3.5" style="background-color: var(--surface-1); border-color: var(--line-1);">
+            <div class="grid grid-cols-1 sm:grid-cols-4 gap-2">
+              <label class="flex items-center gap-2 p-2.5 rounded-md border cursor-pointer transition-colors" :style="preferredVenue === 'auto' ? { borderColor: 'var(--accent)', backgroundColor: 'var(--surface-2)' } : { borderColor: 'var(--line-1)' }">
+                <input v-model="preferredVenue" type="radio" value="auto" class="accent-[var(--accent)]" />
+                <div>
+                  <div class="text-xs font-bold" style="color: var(--ink-1);">Auto (智能路由)</div>
+                  <div class="text-[10px]" style="color: var(--ink-3);">三所评分 + 滞回防抖</div>
+                </div>
+              </label>
+              <label class="flex items-center gap-2 p-2.5 rounded-md border cursor-pointer transition-colors" :style="preferredVenue === 'okx' ? { borderColor: 'var(--accent)', backgroundColor: 'var(--surface-2)' } : { borderColor: 'var(--line-1)' }">
+                <input v-model="preferredVenue" type="radio" value="okx" class="accent-[var(--accent)]" />
+                <div>
+                  <div class="text-xs font-bold" style="color: var(--ink-1);">优先 OKX</div>
+                  <div class="text-[10px]" style="color: var(--ink-3);">首选 OKX 执行链路</div>
+                </div>
+              </label>
+              <label class="flex items-center gap-2 p-2.5 rounded-md border cursor-pointer transition-colors" :style="preferredVenue === 'binance' ? { borderColor: 'var(--accent)', backgroundColor: 'var(--surface-2)' } : { borderColor: 'var(--line-1)' }">
+                <input v-model="preferredVenue" type="radio" value="binance" class="accent-[var(--accent)]" />
+                <div>
+                  <div class="text-xs font-bold" style="color: var(--ink-1);">优先 Binance</div>
+                  <div class="text-[10px]" style="color: var(--ink-3);">首选币安 USDT-M</div>
+                </div>
+              </label>
+              <label class="flex items-center gap-2 p-2.5 rounded-md border cursor-pointer transition-colors" :style="preferredVenue === 'gate' ? { borderColor: 'var(--accent)', backgroundColor: 'var(--surface-2)' } : { borderColor: 'var(--line-1)' }">
+                <input v-model="preferredVenue" type="radio" value="gate" class="accent-[var(--accent)]" />
+                <div>
+                  <div class="text-xs font-bold" style="color: var(--ink-1);">优先 Gate</div>
+                  <div class="text-[10px]" style="color: var(--ink-3);">首选 Gate 永续试验田</div>
+                </div>
+              </label>
+            </div>
+            <p class="text-[11px] leading-relaxed" style="color: var(--ink-3);">
+              当前生效：<b class="num" style="color: var(--accent);">{{ preferredVenue.toUpperCase() }}</b>。
+              系统实行严密准入护栏：若所选交易所未配置密钥、未开闸或标的未上市，将自动平滑回退，并在决策日志留存证据。
+            </p>
           </div>
         </SettingsSection>
 
-        <SettingsSection :title="t('admin.overview.keyConnection.credentials')" :description="t('admin.overview.keyConnection.storage')">
-          <template #actions>
-            <button class="btn btn-primary" @click="saveEnvironment"><Save class="h-3.5 w-3.5" /> 保存环境与凭证</button>
-          </template>
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
-            <div>
-              <label class="block text-[11px] mb-1" style="color: var(--ink-2);">当前交易环境</label>
-              <select v-model="config.editable.okx_environment" class="input w-full">
-                <option value="demo">模拟盘 DEMO</option>
-                <option value="live">实盘 LIVE</option>
-              </select>
-            </div>
-            <div class="text-[11px] sm:col-span-2 pb-1" style="color: var(--ink-3);">
-              环境切换即时生效于交易核心下一个周期；LIVE 切换须输入确认短语，并确保实盘 Key 权限与 IP 白名单已核对。
-            </div>
-          </div>
-          <div class="mt-3">
-            <p class="text-[11px]" style="color: var(--accent);">LIVE / DEMO API Key</p>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3 p-3 rounded-lg border" style="background-color: var(--surface-1); border-color: var(--line-1);">
-              <div class="space-y-2">
-                <div class="text-[11px] font-bold" style="color: var(--ink-1);">实盘 LIVE Key</div>
-                <input v-model="keys.live_key" type="password" placeholder="API Key（留空保持现有）" class="input w-full" />
-                <input v-model="keys.live_secret" type="password" placeholder="Secret Key" class="input w-full" />
-                <input v-model="keys.live_pass" type="password" placeholder="Passphrase" class="input w-full" />
+        <!-- 三所凭证三列对称卡片 -->
+        <SettingsSection title="三所接入凭证与环境（对称配置）" description="各交易所密钥仅在本机通过 Fernet 加密落盘；所有密钥留空表示不修改原有配置。">
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <!-- 1. OKX -->
+            <div class="flex flex-col justify-between rounded-lg border p-3" style="background-color: var(--surface-1); border-color: var(--line-1);">
+              <div class="space-y-2.5">
+                <div class="flex items-center justify-between border-b pb-2" style="border-color: var(--line-1);">
+                  <div>
+                    <h4 class="text-xs font-bold" style="color: var(--ink-1);">OKX · 欧易</h4>
+                    <span class="text-[10px]" style="color: var(--ink-3);">V5 REST API 直签</span>
+                  </div>
+                  <span class="text-[10px] px-1.5 py-0.5 rounded border font-bold" :style="okxLinked ? { color: 'var(--up)', borderColor: 'var(--up-line)' } : { color: 'var(--down)', borderColor: 'var(--down-line)' }">
+                    {{ okxLinked ? 'READY' : '未就绪' }}
+                  </span>
+                </div>
+                <div>
+                  <label class="block text-[10px] mb-1" style="color: var(--ink-2);">OKX 资金环境</label>
+                  <select v-model="config.editable.okx_environment" class="input w-full text-xs">
+                    <option value="demo">模拟盘 (DEMO)</option>
+                    <option value="live">实盘 (LIVE)</option>
+                  </select>
+                </div>
+                <div class="space-y-1.5 pt-1">
+                  <div class="text-[10px] font-semibold" style="color: var(--ink-2);">实盘 (LIVE) Key</div>
+                  <input v-model="keys.live_key" type="password" placeholder="API Key（留空不改）" class="input w-full text-xs" />
+                  <input v-model="keys.live_secret" type="password" placeholder="Secret Key" class="input w-full text-xs" />
+                  <input v-model="keys.live_pass" type="password" placeholder="Passphrase" class="input w-full text-xs" />
+                </div>
+                <div class="space-y-1.5 pt-1">
+                  <div class="text-[10px] font-semibold" style="color: var(--ink-2);">模拟盘 (DEMO) Key</div>
+                  <input v-model="keys.demo_key" type="password" placeholder="API Key（留空不改）" class="input w-full text-xs" />
+                  <input v-model="keys.demo_secret" type="password" placeholder="Secret Key" class="input w-full text-xs" />
+                  <input v-model="keys.demo_pass" type="password" placeholder="Passphrase" class="input w-full text-xs" />
+                </div>
               </div>
-              <div class="space-y-2">
-                <div class="text-[11px] font-bold" style="color: var(--ink-1);">模拟盘 DEMO Key</div>
-                <input v-model="keys.demo_key" type="password" placeholder="API Key（留空保持现有）" class="input w-full" />
-                <input v-model="keys.demo_secret" type="password" placeholder="Secret Key" class="input w-full" />
-                <input v-model="keys.demo_pass" type="password" placeholder="Passphrase" class="input w-full" />
+              <div class="pt-3 mt-2 border-t flex items-center justify-between" style="border-color: var(--line-1);">
+                <button class="btn btn-quiet btn-sm" @click="rediagnose"><RefreshCw class="h-3 w-3" /> 检测</button>
+                <button class="btn btn-primary btn-sm" :disabled="savingOkx" @click="saveEnvironment"><Save class="h-3 w-3" /> {{ savingOkx ? '保存中…' : '保存 OKX' }}</button>
               </div>
-              <div class="sm:col-span-2 text-[11px]" style="color: var(--ink-3);">{{ t('admin.overview.keyConnection.storage') }}</div>
+            </div>
+
+            <!-- 2. Binance -->
+            <div class="flex flex-col justify-between rounded-lg border p-3" style="background-color: var(--surface-1); border-color: var(--line-1);">
+              <div class="space-y-2.5">
+                <div class="flex items-center justify-between border-b pb-2" style="border-color: var(--line-1);">
+                  <div>
+                    <h4 class="text-xs font-bold" style="color: var(--ink-1);">Binance · 币安</h4>
+                    <span class="text-[10px]" style="color: var(--ink-3);">USDT-M 永续合约</span>
+                  </div>
+                  <span class="text-[10px] px-1.5 py-0.5 rounded border font-bold" :style="mx?.venues?.binance?.has_api_key ? { color: 'var(--up)', borderColor: 'var(--up-line)' } : { color: 'var(--ink-3)', borderColor: 'var(--line-2)' }">
+                    {{ mx?.venues?.binance?.has_api_key ? '已配置 Key' : '免密行情' }}
+                  </span>
+                </div>
+                <div>
+                  <label class="block text-[10px] mb-1" style="color: var(--ink-2);">端点网络档位</label>
+                  <label class="flex items-center gap-1.5 text-[11px] cursor-pointer pt-1" style="color: var(--ink-2);">
+                    <input v-model="mxTestnet.binance" type="checkbox" class="accent-[var(--accent)]" />
+                    使用官方 Demo 沙盒 (demo-fapi)
+                  </label>
+                </div>
+                <div class="space-y-1.5 pt-1">
+                  <div class="text-[10px] font-semibold" style="color: var(--ink-2);">执行凭证（可选）</div>
+                  <input v-model="mxForm.binance_api_key" type="text" placeholder="API Key（留空不改）" class="input w-full text-xs" />
+                  <input v-model="mxForm.binance_secret_key" type="password" placeholder="API Secret" class="input w-full text-xs" />
+                </div>
+                <p class="text-[10px] leading-relaxed pt-2" style="color: var(--ink-3);">
+                  跨所行情比对、资金费与深度比对免密即可全自动工作；执行面待独立条件单落地。
+                </p>
+              </div>
+              <div class="pt-3 mt-2 border-t flex justify-end" style="border-color: var(--line-1);">
+                <button class="btn btn-primary btn-sm" :disabled="savingMx" @click="saveMx"><Save class="h-3 w-3" /> {{ savingMx ? '保存中…' : '保存 Binance' }}</button>
+              </div>
+            </div>
+
+            <!-- 3. Gate -->
+            <div class="flex flex-col justify-between rounded-lg border p-3" style="background-color: var(--surface-1); border-color: var(--line-1);">
+              <div class="space-y-2.5">
+                <div class="flex items-center justify-between border-b pb-2" style="border-color: var(--line-1);">
+                  <div>
+                    <h4 class="text-xs font-bold" style="color: var(--ink-1);">Gate.io · 芝麻</h4>
+                    <span class="text-[10px]" style="color: var(--ink-3);">V4 永续试验田</span>
+                  </div>
+                  <span class="text-[10px] px-1.5 py-0.5 rounded border font-bold" :style="mx?.venues?.gate?.has_api_key ? { color: 'var(--up)', borderColor: 'var(--up-line)' } : { color: 'var(--ink-3)', borderColor: 'var(--line-2)' }">
+                    {{ mx?.venues?.gate?.has_api_key ? '已配置 Key' : '免密行情' }}
+                  </span>
+                </div>
+                <div>
+                  <label class="block text-[10px] mb-1" style="color: var(--ink-2);">端点网络档位</label>
+                  <label class="flex items-center gap-1.5 text-[11px] cursor-pointer pt-1" style="color: var(--ink-2);">
+                    <input v-model="mxTestnet.gate" type="checkbox" class="accent-[var(--accent)]" />
+                    使用官方沙盒 (fx-api-testnet)
+                  </label>
+                </div>
+                <div class="space-y-1.5 pt-1">
+                  <div class="text-[10px] font-semibold" style="color: var(--ink-2);">执行凭证（实盘试验田必需）</div>
+                  <input v-model="mxForm.gate_api_key" type="text" placeholder="API Key（留空不改）" class="input w-full text-xs" />
+                  <input v-model="mxForm.gate_secret_key" type="password" placeholder="API Secret" class="input w-full text-xs" />
+                </div>
+                <div class="pt-1">
+                  <label class="flex items-center gap-1.5 text-[11px] cursor-pointer font-bold" :style="{ color: gateExec ? 'var(--down)' : 'var(--ink-2)' }">
+                    <input v-model="gateExec" type="checkbox" class="accent-[var(--accent)]" />
+                    Gate 执行路由总闸 {{ mx?.venues?.gate?.execution_open ? '(已开闸)' : '(关闸)' }}
+                  </label>
+                  <input v-if="gateExecDirty && gateExec" v-model="gateExecPhrase" placeholder="输入短语：OPEN GATE EXECUTION" class="input w-full text-xs mt-1.5" />
+                </div>
+              </div>
+              <div class="pt-3 mt-2 border-t flex justify-end" style="border-color: var(--line-1);">
+                <button class="btn btn-primary btn-sm" :disabled="savingMx" @click="saveMx"><Save class="h-3 w-3" /> {{ savingMx ? '保存中…' : '保存 Gate' }}</button>
+              </div>
             </div>
           </div>
         </SettingsSection>
+
+        <!-- 行情健康与 Gate 试验田看板 -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <SettingsSection title="跨所行情健康容灾" description="公共行情每周期自动探活排序，零网络开销">
+            <template #actions>
+              <button class="btn btn-quiet btn-sm" @click="loadMx"><RefreshCw class="h-3 w-3" /> 重新检测</button>
+            </template>
+            <div v-if="mxHealthChips" class="flex flex-wrap gap-2 text-[11px]">
+              <span v-for="h in mxHealthChips" :key="h.name" class="px-2 py-1 rounded border font-bold num" :style="h.ok === h.total ? { color: 'var(--up)', borderColor: 'var(--up-line)', backgroundColor: 'var(--up-bg)' } : { color: 'var(--warn)', borderColor: 'var(--warn-line)', backgroundColor: 'var(--warn-bg)' }">
+                {{ h.name }} {{ h.ok }}/{{ h.total }} 币{{ h.avg_ms ? ' · ' + h.avg_ms + 'ms' : '' }}
+              </span>
+            </div>
+            <div v-else class="text-[11px]" style="color: var(--ink-3);">尚无周期数据，等待下个 15 分钟周期。</div>
+          </SettingsSection>
+
+          <SettingsSection title="Gate 试验田实时状态" description="四道闸巡检与主台账落单核验">
+            <template #actions>
+              <button class="btn btn-quiet btn-sm" @click="loadLab"><RefreshCw class="h-3 w-3" /> 刷新</button>
+            </template>
+            <template v-if="lab">
+              <div class="flex flex-wrap items-center gap-2 text-[11px]">
+                <span class="px-2 py-0.5 rounded border font-bold" :style="{ color: labModeMeta(lab.mode).color, borderColor: labModeMeta(lab.mode).borderColor, backgroundColor: labModeMeta(lab.mode).backgroundColor }">
+                  {{ labModeMeta(lab.mode).label }}
+                </span>
+                <span :style="{ color: lab.gates?.pool_nonempty ? 'var(--up)' : 'var(--down)' }">{{ lab.gates?.pool_nonempty ? '✓' : '✗' }} 币池 {{ (lab.pool?.assets || []).join('/') || '空' }}</span>
+                <span :style="{ color: lab.gates?.execution_switch ? 'var(--up)' : 'var(--down)' }">{{ lab.gates?.execution_switch ? '✓' : '✗' }} 开关</span>
+                <span :style="{ color: lab.gates?.credentials ? 'var(--up)' : 'var(--down)' }">{{ lab.gates?.credentials ? '✓' : '✗' }} 凭证</span>
+              </div>
+              <div v-if="lab.error" class="mt-1 text-[11px]" style="color: var(--warn);">{{ lab.error }}</div>
+              <div v-if="(lab.trackers || []).length" class="mt-2 text-[11px]">在途仓位: {{ lab.trackers.length }} 笔</div>
+            </template>
+            <div v-else class="text-[11px]" style="color: var(--ink-3);">状态接口未就绪。</div>
+          </SettingsSection>
+        </div>
       </div>
 
-      <!-- ============ 页签 2：标的与基准 ============ -->
+      <!-- ============ 页签 2：标的池与初始本金 ============ -->
       <div v-if="activeTab === 'pool'" class="space-y-4">
         <SettingsSection title="交易标的池" :description="`当前 ${instruments.length}/${instLimits.maximum} 个 USDT 永续；变更实时同步全网大屏、因果雷达与决策核心。`">
           <template #actions>
@@ -449,10 +613,7 @@ onMounted(() => { loadAll(); loadMx() })
           <p class="pt-3 text-[11px]" style="color: var(--ink-3);">BTC 为系统保底标的不可删除；有在途追踪器的标的禁止移除；最多 {{ instLimits.maximum }} 个；仅支持 USDT 永续。</p>
         </SettingsSection>
 
-        <SettingsSection title="主页盈亏基准 · 初始本金" description="用于主页累计盈亏与权益曲线的起算基准；修改不改变历史起算时间。">
-          <template #actions>
-            <span class="chip">当前基准 <b class="num" style="color: var(--up);">{{ config.editable.initial_capital }} USDT</b></span>
-          </template>
+        <SettingsSection title="初始本金基准" description="累计盈亏、收益率与权益走势的起算基准。修改本金会重置累计 ROI 起算点，不影响历史成交记录。">
           <div class="grid grid-cols-1 sm:grid-cols-[200px_1fr_auto] gap-3 items-end">
             <div>
               <label class="block text-[11px] mb-1" style="color: var(--ink-2);">新初始本金 (USDT)</label>
@@ -468,138 +629,9 @@ onMounted(() => { loadAll(); loadMx() })
         </SettingsSection>
       </div>
 
-      <!-- ============ 页签 3：多交易所 ============ -->
-      <div v-if="activeTab === 'venues'" class="space-y-4">
-        <SettingsSection title="全局选所路由策略（三所平权）" description="配置 AI 信号的默认撮合交易所。可指定某所优先，或交由 AI 评分路由（包含 5% 滞回防抖与手续费/资金费优势比选）。">
-          <template #actions>
-            <button class="btn btn-primary" :disabled="savingMx" @click="saveMx"><Save class="h-3.5 w-3.5" /> {{ savingMx ? '保存中…' : '保存路由策略' }}</button>
-          </template>
-          <div class="space-y-3 rounded-lg border p-3.5" style="background-color: var(--surface-1); border-color: var(--line-1);">
-            <div class="flex flex-wrap items-center gap-4">
-              <label class="flex items-center gap-1.5 cursor-pointer text-xs font-semibold" style="color: var(--ink-1);">
-                <input v-model="preferredVenue" type="radio" value="auto" class="accent-[var(--accent)]" />
-                Auto（AI 智能评分路由 · 滞回防抖）
-              </label>
-              <label class="flex items-center gap-1.5 cursor-pointer text-xs font-semibold" style="color: var(--ink-1);">
-                <input v-model="preferredVenue" type="radio" value="okx" class="accent-[var(--accent)]" />
-                优先 OKX
-              </label>
-              <label class="flex items-center gap-1.5 cursor-pointer text-xs font-semibold" style="color: var(--ink-1);">
-                <input v-model="preferredVenue" type="radio" value="binance" class="accent-[var(--accent)]" />
-                优先 Binance
-              </label>
-              <label class="flex items-center gap-1.5 cursor-pointer text-xs font-semibold" style="color: var(--ink-1);">
-                <input v-model="preferredVenue" type="radio" value="gate" class="accent-[var(--accent)]" />
-                优先 Gate
-              </label>
-            </div>
-            <p class="text-[11px] leading-relaxed" style="color: var(--ink-3);">
-              当前选所首选项：<b class="num" style="color: var(--accent);">{{ preferredVenue.toUpperCase() }}</b>。
-              若指定场所因凭证未配、未开闸或未上市被拒，系统将自动回退并在决策日志与抽屉中留存拒绝证据（rejected 列表）。
-            </p>
-          </div>
-        </SettingsSection>
-
-        <SettingsSection title="行情容灾健康" description="币安 / Gate 公共端点按周期写入健康档案；跨所比对与备源排序自动使用，无需任何密钥。">
-          <template #actions>
-            <button class="btn btn-quiet" @click="loadMx"><RefreshCw class="h-3.5 w-3.5" /> 重新检测</button>
-          </template>
-          <div v-if="mxHealthChips" class="flex flex-wrap items-center gap-2 text-[11px]">
-            <span style="color: var(--ink-3);">更新于 {{ utcStrToBj(mx?.health?.updated_utc, true) }} 北京</span>
-            <span v-for="h in mxHealthChips" :key="h.name" class="px-2 py-0.5 rounded border font-bold num" :style="h.ok === h.total ? { color: 'var(--up)', borderColor: 'var(--up-line)', backgroundColor: 'var(--up-bg)' } : { color: 'var(--warn)', borderColor: 'var(--warn-line)', backgroundColor: 'var(--warn-bg)' }">
-              {{ h.name }} {{ h.ok }}/{{ h.total }} 币{{ h.avg_ms ? ' · ' + h.avg_ms + 'ms' : '' }}{{ h.testnet ? ' · 沙盒' : '' }}
-            </span>
-          </div>
-          <div v-else class="text-[11px]" style="color: var(--ink-3);">尚无健康度数据——等待下一个 15 分钟决策周期自动写入。</div>
-        </SettingsSection>
-
-        <SettingsSection title="凭证与网络档位" description="密钥仅本机 Fernet 加密落盘；留空表示不修改。Gate 执行路由默认关闸——开闸需确认短语。">
-          <template #actions>
-            <button class="btn btn-primary" :disabled="savingMx" @click="saveMx"><Save class="h-3.5 w-3.5" /> {{ savingMx ? '保存中…' : '保存' }}</button>
-          </template>
-          <div class="grid sm:grid-cols-2 gap-4">
-            <div class="space-y-2 rounded-lg border p-3" style="background-color: var(--surface-1); border-color: var(--line-1);">
-              <div class="flex items-center justify-between">
-                <h4 class="text-xs font-bold" style="color: var(--ink-1);">Binance · USDT-M</h4>
-                <span v-if="mx?.venues?.binance?.has_api_key" class="text-[10px] px-1.5 py-0.5 rounded border" style="color: var(--up); border-color: var(--up-line);">凭证已配置</span>
-                <span v-else class="text-[10px] px-1.5 py-0.5 rounded border" style="color: var(--ink-3); border-color: var(--line-2);">免登录行情就绪</span>
-              </div>
-              <input v-model="mxForm.binance_api_key" type="text" placeholder="API Key（可选，执行路由用）" class="input w-full" />
-              <input v-model="mxForm.binance_secret_key" type="password" placeholder="API Secret（可选）" class="input w-full" />
-              <label class="flex items-center gap-2 text-[11px] cursor-pointer" style="color: var(--ink-2);">
-                <input v-model="mxTestnet.binance" type="checkbox" class="accent-[var(--accent)]" />
-                官方 Demo 沙盒端点（demo-fapi）
-              </label>
-              <p class="text-[10px] leading-relaxed" style="color: var(--ink-3);">行情 / 比对 / 容灾无需密钥即生效；执行面待独立条件单双轨工程。</p>
-            </div>
-            <div class="space-y-2 rounded-lg border p-3" style="background-color: var(--surface-1); border-color: var(--line-1);">
-              <div class="flex items-center justify-between">
-                <h4 class="text-xs font-bold" style="color: var(--ink-1);">Gate.io · V4 永续</h4>
-                <span v-if="mx?.venues?.gate?.has_api_key" class="text-[10px] px-1.5 py-0.5 rounded border" style="color: var(--up); border-color: var(--up-line);">凭证已配置</span>
-                <span v-else class="text-[10px] px-1.5 py-0.5 rounded border" style="color: var(--ink-3); border-color: var(--line-2);">免登录行情就绪</span>
-              </div>
-              <input v-model="mxForm.gate_api_key" type="text" placeholder="API Key（试验田 live 必需）" class="input w-full" />
-              <input v-model="mxForm.gate_secret_key" type="password" placeholder="API Secret（试验田 live 必需）" class="input w-full" />
-              <label class="flex items-center gap-2 text-[11px] cursor-pointer" style="color: var(--ink-2);">
-                <input v-model="mxTestnet.gate" type="checkbox" class="accent-[var(--accent)]" />
-                官方永续沙盒端点（fx-api-testnet，实测偶发 502）
-              </label>
-              <label class="flex items-center gap-2 text-[11px] cursor-pointer font-bold" :style="{ color: gateExec ? 'var(--down)' : 'var(--ink-2)' }">
-                <input v-model="gateExec" type="checkbox" class="accent-[var(--accent)]" />
-                Gate 执行路由总闸 {{ mx?.venues?.gate?.execution_open ? '（当前：已开闸）' : '（当前：关闸）' }}
-              </label>
-              <input v-if="gateExecDirty && gateExec" v-model="gateExecPhrase" placeholder="输入确认短语：OPEN GATE EXECUTION" class="input w-full" />
-              <p class="text-[10px] leading-relaxed" style="color: var(--ink-3);">开闸前须已录密钥且试验田币池预检通过；真金首笔建议 20U 最小单。</p>
-            </div>
-          </div>
-        </SettingsSection>
-
-        <SettingsSection title="Gate 试验田状态" description="验田模式、四道闸、在途仓位与主台账落账——纯本地只读，不触发任何交易所请求。">
-          <template #actions>
-            <button class="btn btn-quiet" @click="loadLab"><RefreshCw class="h-3.5 w-3.5" /> 刷新</button>
-          </template>
-          <template v-if="lab">
-            <div class="flex flex-wrap items-center gap-2 text-[11px]">
-              <span class="px-2 py-0.5 rounded border font-bold" :style="{ color: labModeMeta(lab.mode).color, borderColor: labModeMeta(lab.mode).borderColor, backgroundColor: labModeMeta(lab.mode).backgroundColor }">
-                {{ labModeMeta(lab.mode).label }}
-              </span>
-              <span :style="{ color: lab.gates?.pool_nonempty ? 'var(--up)' : 'var(--down)' }">{{ lab.gates?.pool_nonempty ? '✓' : '✗' }} 币池 {{ (lab.pool?.assets || []).join('/') || '空' }}</span>
-              <span :style="{ color: lab.gates?.execution_switch ? 'var(--up)' : 'var(--down)' }">{{ lab.gates?.execution_switch ? '✓' : '✗' }} 执行开关</span>
-              <span :style="{ color: lab.gates?.credentials ? 'var(--up)' : 'var(--down)' }">{{ lab.gates?.credentials ? '✓' : '✗' }} 凭证</span>
-              <span :style="{ color: lab.gates?.dry_run_off ? 'var(--up)' : 'var(--warn)' }">{{ lab.gates?.dry_run_off ? '✓' : '○' }} dry_run 关闭</span>
-            </div>
-            <div v-if="lab.error" class="mt-2 text-[11px]" style="color: var(--warn);">{{ lab.error }}</div>
-            <div v-if="(lab.trackers || []).length" class="mt-3 overflow-x-auto">
-              <table class="w-full text-[11px]" style="color: var(--ink-2);">
-                <thead><tr class="text-left" style="color: var(--ink-3);">
-                  <th class="py-1 pr-3 font-normal">币</th><th class="pr-3 font-normal">方向</th><th class="pr-3 font-normal">张数</th><th class="pr-3 font-normal">入场</th><th class="pr-3 font-normal">TP</th><th class="pr-3 font-normal">SL</th><th class="pr-3 font-normal">保证金U</th><th class="font-normal">模式</th>
-                </tr></thead>
-                <tbody>
-                  <tr v-for="t in lab.trackers" :key="t.asset + (t.mode || '')" class="num" style="border-top: 1px solid var(--line-1);">
-                    <td class="py-1 pr-3 font-bold" style="color: var(--ink-1);">{{ t.asset }}</td>
-                    <td class="pr-3" :style="{ color: t.side === 'long' ? 'var(--up)' : 'var(--down)' }">{{ t.side === 'long' ? '多' : '空' }}</td>
-                    <td class="pr-3">{{ t.contracts ?? t.size_signed ?? '--' }}</td>
-                    <td class="pr-3">{{ t.entry_px ?? '--' }}</td>
-                    <td class="pr-3">{{ t.tp_px ?? '--' }}</td>
-                    <td class="pr-3">{{ t.sl_px ?? '--' }}</td>
-                    <td class="pr-3">{{ t.margin_usdt ?? '--' }}</td>
-                    <td>{{ t.mode === 'live' ? '实单' : '演算' }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <div v-else class="mt-2 text-[11px]" style="color: var(--ink-3);">试验田当前无在途仓位。</div>
-            <div v-if="(lab.ledger_tail || []).length" class="mt-2 text-[10px] space-y-0.5" style="color: var(--ink-3);">
-              <div v-for="(l, i) in lab.ledger_tail" :key="i"><FlaskConical class="inline h-3 w-3 mr-0.5" />落账 · {{ l.asset }} {{ l.reason || 'closed' }} · 入场 {{ l.entry_px ?? '--' }} × {{ l.contracts ?? '--' }} 张 · {{ l.close_ts ? fmtDateTime(l.close_ts * 1000) : '' }}</div>
-            </div>
-          </template>
-          <div v-else class="text-[11px]" style="color: var(--ink-3);">状态接口未就绪——随下次后端重启生效。</div>
-        </SettingsSection>
-      </div>
-
-      <!-- ============ 页签 4：应急平仓 ============ -->
+      <!-- ============ 页签 3：应急风控与持仓 ============ -->
       <div v-if="activeTab === 'emergency'" class="space-y-4">
-        <SettingsSection title="后台手动平仓" description="应急通道：默认禁用。启用后下方持仓表出现「快速平仓」，平仓仍需管理员密码 + 一次性令牌 + 确认短语三重确认。">
+        <SettingsSection title="后台手动平仓总闸" description="应急通道：默认禁用。启用后下方持仓表出现「快速平仓」，平仓仍需管理员密码 + 一次性令牌 + 确认短语三重确认。">
           <template #actions>
             <button class="btn btn-quiet" @click="saveManualClose"><Save class="h-3.5 w-3.5" /> 保存开关</button>
           </template>
@@ -611,7 +643,7 @@ onMounted(() => { loadAll(); loadMx() })
           </label>
         </SettingsSection>
 
-        <SettingsSection title="当前持仓与应急平仓" description="从 OKX 读取实时持仓与挂单快照（只读探针）；平仓流程：复核仓位 → 撤销冲突委托 → autoCxl 市价平仓 → 轮询确认归零。">
+        <SettingsSection title="当前活动持仓与挂单快照" description="从交易系统读取实时持仓与挂单快照（只读探针）；平仓流程：复核仓位 → 撤销冲突委托 → autoCxl 市价平仓 → 轮询确认归零。">
           <template #actions>
             <button class="btn btn-quiet" @click="loadPositions"><Zap class="h-3.5 w-3.5" /> 刷新持仓与挂单</button>
           </template>
@@ -649,7 +681,7 @@ onMounted(() => { loadAll(); loadMx() })
               </tbody>
             </table>
             <div v-else-if="snapshot" class="py-8 text-center text-xs" style="color: var(--up);">✓ 当前环境 0 活跃持仓</div>
-            <div v-else-if="!snapshotState" class="py-8 text-center text-xs" style="color: var(--ink-3);">点击「刷新持仓与挂单」从 OKX 读取最新实时状态。</div>
+            <div v-else-if="!snapshotState" class="py-8 text-center text-xs" style="color: var(--ink-3);">点击「刷新持仓与挂单」读取最新实时状态。</div>
           </div>
         </SettingsSection>
       </div>

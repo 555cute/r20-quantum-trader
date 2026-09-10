@@ -1,7 +1,7 @@
 export const enAdminOverview = {
   keyConnection: {
-    title: "API Key connection status",
-    description: "Only connection method: signed OKX V5 REST. READY means credentials are complete, not that permissions or upstream availability have been verified.",
+    title: "OKX Connection Status",
+    description: "Connection method: signed OKX V5 REST. READY means credentials are configured.",
     method: "Encrypted API Key · V5 REST",
     refresh: "Refresh configuration",
     fingerprint: "Credential fingerprint",
@@ -9,7 +9,7 @@ export const enAdminOverview = {
     blocked: "Trading is blocked",
     configured: "Configured",
     missing: "Not configured",
-    credentials: "Trading environment and API Key",
+    credentials: "OKX Trading Environment and API Key",
     storage: "Separate LIVE / DEMO profiles, encrypted with Fernet. Leave any credential field blank to keep its current value.",
   },
   desc: 'Overall health of the engine, decision brain, data pipeline and physical interceptors',
