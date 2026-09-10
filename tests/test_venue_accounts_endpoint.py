@@ -18,6 +18,13 @@ from unittest.mock import Mock, patch
 
 from fastapi.testclient import TestClient
 
+# 封闭三律：dashboard.app 在模块导入时即启动 2s 周期后台刷新线程（update_cache_cycle
+# → okx_rest 真调 OKX 私有面；r20_backend startup 还会二次点火）。测试进程一次性，
+# 进程内永久钉死循环体为 no-op——不恢复，杜绝任何点火路径的真实出网。
+import dashboard.app as _dashboard_app
+_dashboard_app.stop_dashboard_background_worker()
+_dashboard_app.update_cache_cycle = lambda *a, **k: None
+
 import r20_backend.app as app_module
 from r20_backend.admin_auth import AdminAuthStore
 import scripts.okx_rest as okx_rest
