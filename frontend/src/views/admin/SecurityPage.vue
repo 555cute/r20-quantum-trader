@@ -56,7 +56,10 @@ const closing = ref(false)
 async function loadAll() {
   loading.value = true
   try {
-    const [cfg, rt] = await Promise.all([api('/api/v1/admin/config'), api('/api/v1/admin/okx/runtime?refresh=1')])
+    const [cfg, rt] = await Promise.all([
+      api('/api/v1/admin/config'),
+      api('/api/v1/admin/okx/runtime?refresh=1').catch(() => null),
+    ])
     config.value = cfg
     applyRuntime(rt)
     newCapital.value = String(cfg.editable?.initial_capital ?? '')
@@ -80,6 +83,7 @@ async function rediagnose() {
     applyRuntime(await api('/api/v1/admin/okx/runtime?refresh=1'))
     toast.ok('已刷新 OKX API Key 配置状态')
   } catch (e: any) {
+    runtime.value = null
     toast.err(`诊断失败：${e.message}`)
   }
 }
