@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import r20_backend.notifications as notifications
 import r20_backend.okx_trade_service as okx
+import scripts.okx_rest as okx_rest
 import scripts.prompt_library as prompts
 from r20_gateway.events import GatewayEvent
 from r20_gateway.store import GatewayStore
@@ -25,7 +26,9 @@ class OKXV5Tests(unittest.TestCase):
         captured={}
         def open_(request,timeout=0):
             captured["request"]=request; return Response()
-        with patch.object(okx.urllib.request,"urlopen",side_effect=open_):
+        # 单一签名通道归一后（beaa683），trade_service._request 委托 okx_rest；
+        # 律②：patch 必须打在真实 HTTP 绑定名 scripts.okx_rest.urlopen 上。
+        with patch.object(okx_rest,"urlopen",side_effect=open_):
             self.assertEqual(okx._request("GET","/api/v5/account/positions",{"instType":"SWAP"},env),[])
         req=captured["request"]
         headers={k.lower():v for k,v in req.header_items()}
@@ -41,7 +44,7 @@ class OKXV5Tests(unittest.TestCase):
             def __enter__(self): return self
             def __exit__(self,*_): return False
             def read(self): return b'{"code":"0","data":[{"sCode":"51008","sMsg":"margin"}]}'
-        with patch.object(okx.urllib.request,"urlopen",return_value=Response()):
+        with patch.object(okx_rest,"urlopen",return_value=Response()):
             with self.assertRaises(RuntimeError): okx._request("POST","/api/v5/trade/close-position",{"instId":"BTC-USDT-SWAP"},env)
 
 
