@@ -5,7 +5,8 @@
 - gate: Gate.io V4 永续只读行情适配器
 - okx: OKX V5 公共行情只读适配器
 - env_profiles: (venue, environment) → 端点档单一入口（US-001）
-- registry: venue 注册表 + 执行门禁 require_execution()
+- identity: AccountKey 三元身份 (venue, environment, credential fingerprint)（US-002）
+- registry: venue 注册表 + 执行门禁 require_execution()（双轴开关，US-002）
 """
 from . import env_profiles
 from .base import (
@@ -17,11 +18,18 @@ from .base import (
 )
 from .binance import BinanceAdapter
 from .gate import GateAdapter
+from .identity import (
+    ANON_CREDENTIAL,
+    AccountKey,
+    credential_fingerprint,
+    is_sandbox_environment,
+)
 from .okx import OKXPublicAdapter
 from .registry import (
     ADAPTER_EXECUTION_ENABLED,
     clear_instances,
     execution_open,
+    gate_environment_axis,
     get_adapter,
     is_registered,
     registered_venues,
@@ -38,4 +46,6 @@ __all__ = [
     "get_adapter", "is_registered", "registered_venues", "require_execution",
     "resolve_symbol", "clear_instances", "venue_credentials",
     "venue_testnet_enabled", "env_profiles",
+    "AccountKey", "ANON_CREDENTIAL", "credential_fingerprint",
+    "is_sandbox_environment", "gate_environment_axis",
 ]
