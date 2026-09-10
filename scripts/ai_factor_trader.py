@@ -37,6 +37,13 @@ except Exception:
 
 from r20_backend.time_utils import beijing_day
 
+# US-003 决策面接线：选所路由（US-002）与预算原子预留（US-001）以模块绑定名引用，
+# 接线级测试 patch 模块属性即可完全离线（零出网/零凭证/零真实预留库）。
+from r20_backend import risk_reservation
+from r20_backend import venue_router
+from r20_backend.exchanges import registry as venue_registry
+from r20_backend.exchanges import routing_policy
+
 # 必须用 scripts.okx_runtime 包形式：okx_rest 读的是同一模块实例的冻结环境，
 # 裸 okx_runtime 是另一份 _FROZEN_ENVIRONMENT 全局，freeze 周期对其无效（US-002 命门）。
 from scripts.okx_runtime import (
@@ -47,6 +54,7 @@ from scripts.okx_runtime import (
 )
 import json
 import math
+import tempfile
 import time
 import datetime
 import subprocess
@@ -584,9 +592,334 @@ def prune_trackers(trackers: Dict[str, Any], real_pos_dict: Dict[str, Any]) -> i
     return removed
 
 
-def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: float, price: float, tp_px: float, sl_px: float) -> Tuple[bool, str]:
+# =============================================================================
+# US-003 交易决策面接入：手动选所优先 + 可解释评分路由 + 预算原子预留
+# =============================================================================
+# 主脑信号进下单流程**之前**必须先过选所路由与预算预留；任一失败 → 本轮不下单
+# （fail-closed），并把选所证据（含 rejected）随决策 JSON 落盘。
+# 封闭性约定（测试依赖）：venue_router / risk_reservation / registry /
+# routing_policy / AI_DECISION_CACHE_FILE 全部按**模块绑定名**在本文件引用，
+# 逐项 patch 即可完全离线；本文件绝不直连除 OKX 直签链路以外的下单端点。
+
+AI_DECISION_CACHE_FILE = os.path.join(DATA_DIR, "ai_brain_decisions.json")
+VENUE_HEALTH_FILE = os.path.join(DATA_DIR, "venue_health.json")
+#: 组合风险预算总上限（US-001 预留层封顶口径；0/未配置 = 只累计台账不封顶）
+PORTFOLIO_RISK_BUDGET_ENV = "R20_PORTFOLIO_RISK_BUDGET_USDT"
+#: 场所取数健康度可容忍年龄（brain 15min 周期写盘，给 2 个周期 + 余量）
+VENUE_HEALTH_MAX_AGE_S = 1900.0
+
+#: 已接入真实下单实现的场所 → 提交函数。当前只有 OKX 直签 V5 链路；
+#: binance/gate 执行就绪时在此登记一个提交器即可上线，选所/预算层零改动。
+VENUE_SUBMITTERS: Dict[str, str] = {"okx": "okx_rest.place_order"}
+
+
+def portfolio_risk_budget_usdt() -> float:
+    try:
+        return max(0.0, float(os.getenv(PORTFOLIO_RISK_BUDGET_ENV, "") or 0.0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def load_preferred_venue() -> str:
+    """手动选所优先项（data/venue_routing.json 顶层 preferred_venue）。
+
+    单一事实源在 r20_backend.exchanges.routing_policy：缺字段/非法值由其回退
+    'auto' 并打 warn。此处只做模块绑定转发，方便接线级测试一键切档。
+    """
+    return routing_policy.load_preferred_venue()
+
+
+def venue_execution_ready(venue: str, environment: str) -> bool:
+    """该所在该资金环境下能否真实下单——一律读 registry/能力表，不写死场所名单。
+
+    - OKX：实盘/模拟盘执行走本 trader 的 V5 直签链路（不经适配器），就绪条件 =
+      当前冻结环境凭证齐备且档位一致；
+    - binance/gate：能力表 adapter_execution_flag AND 环境双轴开闸旗标
+      （registry.execution_open 单源判定）——开闸即自动成为真候选，无需改这里。
+    """
+    key = str(venue or "").strip().lower()
+    try:
+        if not venue_registry.is_registered(key):
+            return False
+        if key == "okx":
+            env = current_environment()
+            return bool(env.configured) and str(env.mode) == str(environment)
+        return bool(venue_registry.execution_open(key, environment))
+    except Exception as exc:
+        print(f"[选所路由] warn 场所 {key} 能力表读取失败，按不可执行处理: {exc}")
+        return False
+
+
+def _venue_health_stamp() -> Tuple[Optional[str], Dict[str, Any]]:
+    """venue_health.json → (UTC ISO 观测时刻 | None, venues 观测表)。
+
+    缺文件/坏文件 → (None, {})：跨所观测不存在，绝不编造新鲜度。
+    """
+    try:
+        with open(VENUE_HEALTH_FILE, "r", encoding="utf-8") as handle:
+            raw = json.load(handle) or {}
+        venues = raw.get("venues") if isinstance(raw.get("venues"), dict) else {}
+        stamp = str(raw.get("updated_utc") or "").strip()
+        if stamp:
+            # 文件里是 "YYYY-MM-DD HH:MM:SS" 的 UTC 时刻，补 T/Z 供路由按 UTC 解析
+            stamp = stamp.replace(" ", "T")
+            if not stamp.endswith("Z"):
+                stamp += "Z"
+            return stamp, venues
+    except Exception:
+        pass
+    return None, {}
+
+
+def build_venue_candidates(inst_id: str, environment: str) -> List[Dict[str, Any]]:
+    """路由候选集 = registry 全部已登记场所（okx 真候选 + binance/gate 占位）。
+
+    场所清单与 executable 全部来自能力表，不硬编码；价差/深度/资金费的成本观测
+    输入在跨所证据二期（US-004+）接入前先给 0（评分中性），不猜数。
+    """
+    observed_stamp, venues = _venue_health_stamp()
+    live_stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    cands: List[Dict[str, Any]] = []
+    try:
+        names = list(venue_registry.registered_venues())
+    except Exception as exc:
+        print(f"[选所路由] warn registry 场所清单不可用，回退 OKX 单候选: {exc}")
+        names = ["okx"]
+    for name in names:
+        observed = venues.get(name) if isinstance(venues.get(name), dict) else {}
+        latency = [float(v) for v in (observed.get("latency_ms") or {}).values()
+                   if isinstance(v, (int, float))]
+        avg_latency = sum(latency) / len(latency) if latency else 0.0
+        if name == "okx":
+            # OKX 行情由本巡检周期直连取数（f 全部来自刚拉的 ticker/因子），
+            # 新鲜度基准 = 当前时刻，不依赖跨所观测文件是否存在。
+            stamp = live_stamp
+        elif observed:
+            stamp = observed_stamp
+        else:
+            stamp = None  # 该所无跨所观测记录：诚实交新鲜度闸门判定
+        cands.append({
+            "venue": name,
+            "environment": environment,
+            "executable": venue_execution_ready(name, environment),
+            "fee_rate": MAKER_FEE_RATE,
+            "spread_bps": 0.0,
+            "depth_usd": 0.0,
+            "funding_rate": 0.0,
+            # 观测面唯一可用的稳定性信号：跨所取数平均延迟（ms→bps 同量纲保守折算，
+            # 上限 20bps；无观测 = 0 不惩罚）
+            "stability_penalty": min(20.0, avg_latency / 25.0),
+            "min_notional": 0.0,
+            "min_qty": 0.0,
+            "precision": 0.0,
+            "health_updated_utc": stamp,
+            "health_max_age_s": VENUE_HEALTH_MAX_AGE_S,
+            "price": 0.0,
+            # OKX 是本链路现任所（存量持仓与历史成交都在 OKX）
+            "current_venue": name == "okx",
+        })
+    return cands
+
+
+def reservation_manager():
+    """US-001 预留层单一台账（默认 data/risk_reservation.db）。
+
+    每次取用都新建实例：RiskReservationManager 无进程内态（逐操作短连接 + 表内
+    幂等），实例化只多一次建表；换来的是**总上限热生效**——get_manager 的默认
+    单例会把首次读到的 limit 钉死，风控页改预算要重启进程才生效。
+    """
+    budget = portfolio_risk_budget_usdt()
+    return risk_reservation.get_manager(
+        db_path=risk_reservation.DEFAULT_DB_PATH,
+        total_limit_usdt=budget if budget > 0 else None)
+
+
+def estimate_margin_usdt(notional_usdt: float, margin_usdt: float = 0.0) -> float:
+    """保证金估算：优先执行层算好的真实保证金，缺失时按 3x 保守折算。"""
+    if margin_usdt and float(margin_usdt) > 0:
+        return round(float(margin_usdt), 4)
+    notional = max(0.0, float(notional_usdt or 0.0))
+    return round(notional / 3.0, 4)
+
+
+def _decision_payload(decision, preferred: str) -> Dict[str, Any]:
+    """RouteDecision → 决策 JSON 的 venue_decision 段（纯附加字段）。"""
+    return {
+        "preferred_venue": preferred,
+        "venue": decision.venue,
+        "reason_code": decision.reason_code,
+        "reasons": list(decision.reasons or []),
+        "rejected": [dict(r) for r in (decision.rejected or [])],
+        "hysteresis_applied": bool(decision.hysteresis_applied),
+        "allocation": decision.allocation,
+        "decided_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+
+
+def persist_venue_decision(inst_id: str, venue_decision: Dict[str, Any]) -> bool:
+    """把选所证据并进决策缓存（data/ai_brain_decisions.json）对应标的条目。
+
+    只追加 `venue_decision` 键，既有字段逐键保留（老 reader 无感）；主脑缓存是
+    证据的落盘位置，写回沿用原子替换语义。缓存里没有该标的条目时**不伪造**决策
+    ——直接跳过并 warn（没有主脑决策就没有可附着的决策 JSON）。
+    """
+    try:
+        with open(AI_DECISION_CACHE_FILE, "r", encoding="utf-8") as handle:
+            cache = json.load(handle)
+        if not isinstance(cache, dict) or not isinstance(cache.get(inst_id), dict):
+            print(f"[选所证据] warn {inst_id} 不在决策缓存中，本轮证据不落盘")
+            return False
+        cache[inst_id]["venue_decision"] = venue_decision
+        fd, tmp_path = tempfile.mkstemp(prefix=".venue-decision-", suffix=".tmp",
+                                        dir=os.path.dirname(AI_DECISION_CACHE_FILE))
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(cache, handle, ensure_ascii=False, indent=2)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp_path, AI_DECISION_CACHE_FILE)
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+        return True
+    except Exception as exc:
+        print(f"[选所证据] warn 落盘失败（不影响本轮交易）: {exc}")
+        return False
+
+
+def route_and_reserve_signal(inst_id: str, side: str, size: float, price: float,
+                             notional_usdt: float = 0.0, margin_usdt: float = 0.0,
+                             intent_id: str = "") -> Dict[str, Any]:
+    """选所路由 → 执行面接线校验 → 预算原子预留（US-003 决策面前置闸）。
+
+    返回 {"ok": bool, "error": str|None, "venue": str|None, "decision": dict,
+          "reservation": dict|None}；任何一步不过 → ok=False，调用方本轮不下单。
+    """
+    env = current_environment()
+    environment = str(env.mode)
+    preferred = load_preferred_venue()
+    notional = float(notional_usdt or 0.0) or max(0.0, float(size) * float(price))
+    margin_est = estimate_margin_usdt(notional, margin_usdt)
+    signal = {
+        "inst_id": inst_id,
+        "symbol_canonical": str(inst_id).split("-")[0].upper(),
+        "side": "long" if str(side).lower() in ("buy", "long") else "short",
+        "size_usdt": notional,
+        "price": float(price or 0.0),
+    }
+    candidates = build_venue_candidates(inst_id, environment)
+
+    if preferred != "auto":
+        # 手动选所优先：只让该所参与评估（直取该所），但**仍过 route_signal**，
+        # 以便 executable/listing 的 rejected 证据照常落盘（可解释不因为手选而失效）。
+        candidates = [c for c in candidates if str(c.get("venue")) == preferred]
+        if not candidates:
+            print(f"[选所路由] warn 手选场所 {preferred} 未在 registry 登记，按不可执行候选处理")
+            candidates = [{
+                "venue": preferred,
+                "environment": environment,
+                "executable": False,
+                "health_updated_utc": None,
+                "current_venue": False,
+            }]
+
+    budget_total = portfolio_risk_budget_usdt()
+    try:
+        mgr = reservation_manager()
+        budget_used = mgr.gross_exposure(environment) if budget_total > 0 else 0.0
+    except Exception as exc:
+        mgr = None
+        budget_used = 0.0
+        print(f"[预算预留] warn 预留层不可用，本轮不下单（fail-closed）: {exc}")
+
+    # 预算硬筛**不在路由层重复执行**：路由只负责选所，预算占用由 risk_reservation
+    # 的原子 reserve 单点裁决（口径=保证金，与 notional 混用会双重误杀）。路由层的
+    # budget_view 预筛等 US-004 名义额口径统一后再启用，这里显式传 None。
+    decision = venue_router.route_signal(signal, candidates, budget_view=None)
+    payload = _decision_payload(decision, preferred)
+
+    if decision.venue is None or decision.reason_code in ("ALL_REJECTED", "NO_CANDIDATES"):
+        first = (decision.rejected or [{}])[0]
+        reason = first.get("reason") or "无候选所"
+        payload["outcome"] = "rejected"
+        persist_venue_decision(inst_id, payload)
+        print(f"[选所路由] 本轮不下单 {inst_id}: {decision.reason_code} → {reason}")
+        return {"ok": False, "error": f"路由拒绝: {reason}",
+                "venue": None, "decision": payload, "reservation": None}
+
+    venue = str(decision.venue)
+    payload["outcome"] = "selected"
+    if venue not in VENUE_SUBMITTERS:
+        # 路由可选中未来所，但下单实现只在登记后存在——fail-closed 不硬打 OKX 端点
+        payload["executed_venue"] = None
+        persist_venue_decision(inst_id, payload)
+        reason = f"{venue} 未登记下单实现（VENUE_SUBMITTERS 只有 {sorted(VENUE_SUBMITTERS)}）"
+        print(f"[选所路由] 本轮不下单 {inst_id}: {reason}")
+        return {"ok": False, "error": f"路由拒绝: {reason}",
+                "venue": venue, "decision": payload, "reservation": None}
+
+    if mgr is None:
+        persist_venue_decision(inst_id, payload)
+        return {"ok": False, "error": "预算预留拒绝: 预留层不可用（fail-closed 不下单）",
+                "venue": venue, "decision": payload, "reservation": None}
+
+    intent = str(intent_id or f"{inst_id}:{side}:{int(time.time())}")
+    account_key = (venue, environment, str(env.fingerprint))
+    try:
+        record = mgr.reserve(account_key, intent, margin_est, state="pending")
+    except risk_reservation.ReservationExceeded as exc:
+        payload["budget"] = {"limit_usdt": budget_total, "reserved_before_usdt": budget_used,
+                             "margin_usdt": margin_est, "error": str(exc)}
+        persist_venue_decision(inst_id, payload)
+        print(f"[预算预留] 本轮不下单 {inst_id}: {exc}")
+        return {"ok": False, "error": f"预算预留拒绝: {exc}",
+                "venue": venue, "decision": payload, "reservation": None}
+    except Exception as exc:
+        payload["budget"] = {"limit_usdt": budget_total, "margin_usdt": margin_est,
+                             "error": str(exc)}
+        persist_venue_decision(inst_id, payload)
+        print(f"[预算预留] 本轮不下单 {inst_id}: 预留层异常 {exc}")
+        return {"ok": False, "error": f"预算预留拒绝: {exc}",
+                "venue": venue, "decision": payload, "reservation": None}
+
+    payload["budget"] = {"limit_usdt": budget_total, "account_key": list(account_key),
+                         "intent_id": intent, "amount_usdt": margin_est,
+                         "reserved_before_usdt": budget_used,
+                         "state": record.get("state") if isinstance(record, dict) else None}
+    persist_venue_decision(inst_id, payload)
+    print(f"[选所路由] {inst_id} → {venue}（{decision.reason_code}"
+          + (f"，手选优先 {preferred}" if preferred != "auto" else "")
+          + f"；预留保证金估算 {margin_est}U）")
+    return {"ok": True, "error": None, "venue": venue, "decision": payload,
+            "reservation": {"manager": mgr, "account_key": account_key,
+                            "intent_id": intent, "amount_usdt": margin_est}}
+
+
+def release_signal_reservation(reservation: Dict[str, Any], reason: str = "") -> None:
+    """下单未获受理 → 释放本轮预留（终态 rejected，预算即刻回笼）。"""
+    if not isinstance(reservation, dict):
+        return
+    try:
+        reservation["manager"].release(reservation["account_key"],
+                                       reservation["intent_id"],
+                                       state=risk_reservation.STATE_REJECTED)
+        print(f"[预算预留] 已释放 {reservation['intent_id']}（{reason or '下单未受理'}）")
+    except Exception as exc:
+        print(f"[预算预留] warn 释放失败（交由重启 recovery 处理）: {exc}")
+
+
+def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: float, price: float, tp_px: float, sl_px: float, notional_usdt: float = 0.0, margin_usdt: float = 0.0, intent_id: str = "") -> Tuple[bool, str]:
     """Submit a protected limit order; acceptance is not treated as a fill."""
     env = selected_environment()
+    # ---- US-003 决策面前置闸：选所路由 + 预算原子预留（失败即本轮不下单）----
+    _routing = route_and_reserve_signal(inst_id, side, size, price,
+                                        notional_usdt=notional_usdt,
+                                        margin_usdt=margin_usdt,
+                                        intent_id=intent_id)
+    if not _routing["ok"]:
+        return False, str(_routing.get("error") or "路由拒绝")
+    _reservation = _routing.get("reservation")
+
     # 环境维合约存在性对账（US-007）：目录拉不到 → fail-open 放行（对账是增强不是闸门）；
     # 已下架/未上市（如 SUI 在 demo 被下架）→ fail-closed 拒单，reason 透传。
     try:
@@ -594,6 +927,7 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: f
         _check = ensure_contract_listed("okx", "demo" if env.simulated else "live", inst_id)
         if not _check.ok:
             print(f"[listing gate] 拒绝下单 {inst_id}: {_check.reason}")
+            release_signal_reservation(_reservation, "合约对账拒绝")
             return False, f"合约对账拒绝: {_check.reason}"
     except Exception as _le:
         print(f"[listing gate] warn 对账不可用，跳过（不阻塞）: {_le}")
@@ -636,6 +970,7 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: f
     is_valid, reason, _ = validate_quote_geometry_and_rr(action_type, effective_px, effective_tp, effective_sl)
     if not is_valid:
         print(f"[Order Rejected] 最终有效开仓报价未通过核心安全复验: {reason} (px={effective_px}, tp={effective_tp}, sl={effective_sl})")
+        release_signal_reservation(_reservation, "核心安全复验拒绝")
         return False, f"最终订单核心安全复验拒绝: {reason}"
 
     try:
@@ -645,6 +980,7 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: f
             px=effective_px, attach_tp=effective_tp, attach_sl=effective_sl,
         )
     except Exception as exc:
+        release_signal_reservation(_reservation, "下单异常")
         return False, str(exc)
     order_id = None
     for row in rows:
@@ -652,6 +988,7 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: f
         if order_id:
             break
     if not order_id:
+        release_signal_reservation(_reservation, "交易所未返回可核验订单号")
         return False, "exchange accepted response without a verifiable order id"
     record_open_intent(inst_id, side)
     return True, str(order_id)
@@ -2266,7 +2603,15 @@ def execute_portfolio():
                     if tp_px <= limit_px:
                         tp_px = round(limit_px + max(tp_dist, f["price"] * 0.024), prec)
 
-                    accepted, order_ref = submit_protected_limit_order(inst_id, "buy", "long", actual_sz, limit_px, tp_px, sl_px)
+                    # US-003 决策面接线：就地组装路由/预算入参——名义额（选所硬筛与
+                    # 深度需求）、保证金估算（预算预留金额）、意图号（同一条 AI 决策
+                    # 重投幂等，不重复占预算）。
+                    _notional = actual_sz * ct_val * limit_px
+                    _margin = ai_margin if ai_margin > 0 else (_notional / max(1.0, ai_lever))
+                    _intent = f"{inst_id}:BUY_LONG:{int(ai_info.get('timestamp') or time.time())}"
+                    accepted, order_ref = submit_protected_limit_order(
+                        inst_id, "buy", "long", actual_sz, limit_px, tp_px, sl_px,
+                        notional_usdt=_notional, margin_usdt=_margin, intent_id=_intent)
                     if accepted:
                         if is_scale_in:
                             tracker = trackers.get(f"{inst_id}_long", {})
@@ -2367,7 +2712,13 @@ def execute_portfolio():
                     if tp_px >= limit_px:
                         tp_px = round(limit_px - max(tp_dist, f["price"] * 0.024), prec)
 
-                    accepted, order_ref = submit_protected_limit_order(inst_id, "sell", "short", actual_sz, limit_px, tp_px, sl_px)
+                    # US-003 决策面接线（与多单同构：名义额/保证金估算/幂等意图号）
+                    _notional = actual_sz * ct_val * limit_px
+                    _margin = ai_margin if ai_margin > 0 else (_notional / max(1.0, ai_lever))
+                    _intent = f"{inst_id}:SELL_SHORT:{int(ai_info.get('timestamp') or time.time())}"
+                    accepted, order_ref = submit_protected_limit_order(
+                        inst_id, "sell", "short", actual_sz, limit_px, tp_px, sl_px,
+                        notional_usdt=_notional, margin_usdt=_margin, intent_id=_intent)
                     if accepted:
                         if is_scale_in:
                             tracker = trackers.get(f"{inst_id}_short", {})

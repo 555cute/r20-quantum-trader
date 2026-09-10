@@ -17,6 +17,8 @@ effective_mode 输出 {off | dry_run | demo | live}：gate 沙盒档 + 执行开
 
 配置形状：
 {
+  "preferred_venue": "auto",            # US-003 手动选所优先：okx|binance|gate|auto
+                                        # （缺字段/非法值 → 回退 auto + warn）
   "gate": {
     "assets": ["BTC"],                 # 试验田币种（canonical 裸币名）
     "margin_per_trade_usdt": 50.0,     # 每笔保证金上限（试验田独立预算）
@@ -33,7 +35,8 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List
 
-from .registry import execution_open, gate_environment_axis
+from .registry import (execution_open, gate_environment_axis,
+                       registered_venues)
 
 ROOT = Path(__file__).resolve().parents[2]
 ROUTING_FILE = ROOT / "data" / "venue_routing.json"
@@ -88,6 +91,77 @@ def _gate_execution_ready() -> bool:
         vals = load_secrets()
         return bool(vals.get("GATE_API_KEY") and vals.get("GATE_SECRET_KEY"))
     except Exception:
+        return False
+
+
+def _read_raw_routing() -> Dict[str, Any]:
+    """原始配置 dict（读不到/损坏 → 空 dict；永不抛穿）。"""
+    try:
+        if ROUTING_FILE.exists():
+            raw = json.loads(ROUTING_FILE.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                return raw
+    except Exception:
+        pass
+    return {}
+
+
+#: 手动选所合法值 = 注册表已登记场所 + auto（不硬编码场所名单，新所登记即生效）
+VALID_PREFERRED_VENUES = tuple(sorted(set(registered_venues()) | {"auto"}))
+
+#: 缺字段 warn 只提示一次（下单路径每周期多次读配置，避免刷屏）
+_PREFERRED_MISSING_WARNED = False
+
+
+def load_preferred_venue(raw: Dict[str, Any] = None) -> str:
+    """US-003 手动选所优先项：顶层 preferred_venue ∈ {okx,binance,gate,auto}。
+
+    向后兼容铁律：老配置文件没有该键 → 返回 'auto'（评分路由，行为与 US-003 前
+    逐位一致）；非法值 → warn + 回退 'auto'（fail-safe：宁可回到评分路由，
+    绝不因为一个写错的配置字符串把交易链断掉，也绝不猜某个所）。
+    """
+    global _PREFERRED_MISSING_WARNED
+    data = _read_raw_routing() if raw is None else raw
+    if "preferred_venue" not in data:
+        if not _PREFERRED_MISSING_WARNED:
+            _PREFERRED_MISSING_WARNED = True
+            print("[venue_routing] warn: 配置缺 preferred_venue 字段，回退 auto（评分路由）")
+        return "auto"
+    value = data.get("preferred_venue")
+    key = str(value or "").strip().lower()
+    if key in VALID_PREFERRED_VENUES:
+        return key
+    print(f"[venue_routing] warn: preferred_venue 非法值 {value!r}"
+          f"（允许 {list(VALID_PREFERRED_VENUES)}），回退 auto")
+    return "auto"
+
+
+def save_preferred_venue(venue: str) -> bool:
+    """写顶层 preferred_venue（读-改-写原子替换，gate 等其余键原样保留）。
+
+    老 writer 兼容性：本函数只新增/覆盖一个顶层键，不改 'gate' 子树形状，
+    load_gate_pool 逐键取默认表内的字段，多余键忽略——双向都不崩。
+    """
+    key = str(venue or "").strip().lower()
+    if key not in VALID_PREFERRED_VENUES:
+        print(f"[venue_routing] 拒绝写入非法 preferred_venue: {venue!r}")
+        return False
+    data = _read_raw_routing()
+    data["preferred_venue"] = key
+    tmp = ROUTING_FILE.with_suffix(".json.tmp")
+    try:
+        ROUTING_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n",
+                       encoding="utf-8")
+        os.replace(tmp, ROUTING_FILE)
+        return True
+    except Exception as exc:
+        print(f"[venue_routing] 写盘失败（不改动原配置）: {exc}")
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except Exception:
+            pass
         return False
 
 
