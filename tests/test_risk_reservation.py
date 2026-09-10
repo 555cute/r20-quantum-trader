@@ -146,6 +146,7 @@ class TestPersistenceAndRecovery(RiskReservationTestBase):
         db = os.path.join(self.tmpdir, "resv.db")
         self.mgr.reserve(self.okx_live, "a", 200.0, STATE_PENDING)
         self.mgr.reserve(self.okx_live, "b", 300.0, STATE_CONFIRMED)
+        self.mgr.reserve(self.okx_live, "dead", 100.0, STATE_PENDING)
         self.mgr.reserve(self.okx_live, "dead", 100.0, STATE_CLOSED)  # 已释放不复活
         reborn = RiskReservationManager(db)
         stats = reborn.recovery()  # 保守恢复：未知意图继续占用
@@ -185,7 +186,8 @@ class TestConcurrency(RiskReservationTestBase):
         """AC8: 多线程同账户并发 reserve，总额不超上限，成功数确定。"""
         mgr, tmp = make_manager(total_limit_usdt=1000.0)
         self.addCleanup(lambda: __import__("shutil").rmtree(tmp, ignore_errors=True))
-        results, errors, barrier = [], [], threading.Barrier(8)
+        results, exceeded, errors = [], [], []
+        barrier = threading.Barrier(8)
         lock = threading.Lock()
 
         def worker(i):
@@ -196,7 +198,7 @@ class TestConcurrency(RiskReservationTestBase):
                     results.append(i)
             except ReservationExceeded:
                 with lock:
-                    errors.append(i)
+                    exceeded.append(i)
             except Exception as e:  # 其他异常=测试失败
                 with lock:
                     errors.append(f"unexpected:{e!r}")
@@ -208,6 +210,7 @@ class TestConcurrency(RiskReservationTestBase):
             t.join(timeout=30)
         self.assertEqual(len(errors), 0, f"非预期失败: {errors}")
         self.assertEqual(len(results), 3)  # 1000 上限只容 3×300
+        self.assertEqual(len(exceeded), 5)  # 其余 5 线程正确被拒
         total = mgr.total_reserved(self.okx_live)
         self.assertLessEqual(total, 1000.0)
         self.assertAlmostEqual(total, 900.0)
