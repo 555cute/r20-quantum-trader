@@ -7,7 +7,7 @@
 
 | 场所 | 只读行情 | 断流备源 | 决策证据 | 凭证配置 | 实盘执行 |
 |---|---|---|---|---|---|
-| **OKX V5**（默认主战场） | ✅ | 主源 | ✅ 全因子 | ✅ 三件套/OAuth/CLI | ✅ 生产链路（`ai_factor_trader`） |
+| **OKX V5**（默认主战场） | ✅ | 主源 | ✅ 全因子 | ✅ V5 直签 REST（API Key 唯一） | ✅ 生产链路（`ai_factor_trader`） |
 | **Binance USDT-M** | ✅ 免登录 | ✅（OKX 全断时补 ticker/K线/费率） | ✅ 基差/大户多空比 | ✅ 后台预留 | ⏸ 适配器未实装（独立条件单双轨待建） |
 | **Gate.io V4 永续** | ✅ 免登录 | ✅ | ✅ 基差/费率 | ✅ 后台已收口 | 🔓 已实装：`R20_GATE_EXECUTION=1`（后台第5节开关+确认短语）+ `data/venue_routing.json` 配池；**平行试验田** `scripts/gate_lab_trader.py`（dry_run 默认演算） |
 
