@@ -1971,6 +1971,10 @@ def admin_okx_account_snapshot(x_r20_admin_token: str | None = Header(default=No
 def manual_close_position(payload: ManualCloseRequest) -> dict[str, Any]:
     actor = require_superadmin(REQUEST_SESSION.get())
     refresh_settings()
+    from scripts.okx_runtime import current_environment
+    if not current_environment().configured:
+        # 统一通道 fail-closed：凭据门禁先于功能开关——缺 Key 时端点一律 503，零 HTTP。
+        raise HTTPException(status_code=503, detail="OKX API Key 未配置：需在后台填写完整 LIVE/DEMO 三件套后方可平仓")
     if not settings.manual_close_enabled:
         raise HTTPException(status_code=403, detail="后台手动平仓功能未启用")
     import fcntl
