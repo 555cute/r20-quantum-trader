@@ -706,7 +706,14 @@ def record_trade(trade_data):
 
     try:
         if record_trade_sqlite:
-            record_trade_sqlite(trade_data)
+            # US-003 环境轴贯通：OKX 生产写方按冻结环境传真实档 live|demo；
+            # 环境不可证明时交给 db_manager 兜底 unknown_legacy，绝不冒充。
+            sqlite_row = dict(trade_data)
+            try:
+                sqlite_row.setdefault("environment", current_environment().mode)
+            except Exception:
+                pass
+            record_trade_sqlite(sqlite_row)
     except Exception as e:
         print(f"Failed to record trade to SQLite: {e}")
 

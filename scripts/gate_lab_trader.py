@@ -274,6 +274,8 @@ def _record_main_ledger(t: dict, *, close_px: float = 0.0, pnl=None,
         if approx:
             comment += "；成交价按mark近似"
         bill_id = f"gatelib-{t.get('mode', 'live')}-{asset}-{int(t.get('entry_ts') or time.time())}"
+        _m = str(t.get("mode") or "")
+        mode_env = _m if _m in ("live", "demo") else "unknown_legacy"
         dbm.record_trade_sqlite({
             "bill_id": bill_id,
             "time": datetime.now(_BJ).strftime("%Y-%m-%d %H:%M:%S"),  # trades.time 固定格式，北京时间
@@ -285,6 +287,9 @@ def _record_main_ledger(t: dict, *, close_px: float = 0.0, pnl=None,
             "pnl": pnl_v, "gross_pnl": pnl_v, "fee": 0.0,
             "comment": comment,
             "venue": "gate",
+            # US-003 环境轴：lab mode 与交易所资金环境同名轴（live|demo）；
+            # 意外值不冒充，落 unknown_legacy 由 db_manager 兜底。
+            "environment": mode_env,
         })
         return True, bill_id
     except Exception as exc:

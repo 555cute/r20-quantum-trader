@@ -23,7 +23,8 @@ class OKXPublicAdapter(BaseExchangeAdapter):
         symbol_template="{base}-USDT-SWAP",
         quantity_unit="contracts",
         signed_size=False,
-        supports_attached_tp_sl=True,      # attachAlgoOrds 原生云端 OCO
+        supports_attached_tp_sl=True,      # attachAlgoOrds 附带 TP/SL——但**非原子即时保护**，
+                                           # 完全成交后提交且有 failCode，见 protection_semantics
         trigger_price_default="last",
         max_candle_limit=300,
         bar_case="upper",                  # 15m/1H/4H 混合大小写
@@ -33,6 +34,19 @@ class OKXPublicAdapter(BaseExchangeAdapter):
         supports_orders=False,             # 执行现居 ai_factor_trader 遗留路径
         mainland_ip_restricted=False,
         rate_limit_note="公共行情约 20req/2s，429 常见需退避",
+        # ---- US-004 真实语义声明（审计 2026-09-10 §2 OKX）----
+        order_id_type="string",                 # ordId/algoId 原生字符串
+        native_amend=False,                     # 未核验改单端点，不宣称
+        decimal_amount=False,
+        position_modes=("net", "long_short"),   # posSide 语义；执行在遗留直签链路
+        conditional_family="attached",          # attachAlgoOrds 附带保护
+        protection_semantics="attachAlgoOrds **非受理即原子保护**：官方 attachAlgoClOrdId 说明"
+                             "普通订单完全成交后才提交附带算法单，回执字段含 failCode/failReason"
+                             "——HTTP 200≠受保护，必须回读 pending algo 核验账户/合约/方向/数量/"
+                             "触发值（核验 helper：okx_trade_service.verify_attached_protection）。"
+                             "另 2026-08-20 起 post_only/mmp_and_post_only 失败可只收 canceled 直达"
+                             "终态不先 live（Demo 2026-08-10 生效）——状态机须接受直接终态，"
+                             "不无限等待 live；此变更不针对普通 limit/market/ioc/fok",
     )
 
     # ------------------------------------------------------------------

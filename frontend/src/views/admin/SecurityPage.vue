@@ -9,6 +9,7 @@ import { useI18n } from '../../composables/useI18n'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
 import { utcStrToBj, fmtDateTime } from '../../utils/format'
+import { labModeMeta } from '../../utils/labMode'
 import { Wallet, Save, RefreshCw, Layers, Trash2, FlaskConical, Zap } from 'lucide-vue-next'
 
 const { api } = useApi()
@@ -327,7 +328,7 @@ onMounted(() => { loadAll(); loadMx() })
         </span>
         <span class="chip">
           Gate 试验田
-          <b v-if="lab" :style="{ color: lab.mode === 'live' ? 'var(--up)' : lab.mode === 'dry_run' ? 'var(--warn)' : 'var(--ink-3)' }">{{ lab.mode === 'live' ? 'LIVE 实单' : lab.mode === 'dry_run' ? 'DRY 演算' : 'OFF 停用' }}</b>
+          <b v-if="lab" :style="{ color: labModeMeta(lab.mode).color }">{{ labModeMeta(lab.mode).label }}</b>
           <b v-else style="color: var(--ink-3);">--</b>
         </span>
       </div>
@@ -521,8 +522,8 @@ onMounted(() => { loadAll(); loadMx() })
           </template>
           <template v-if="lab">
             <div class="flex flex-wrap items-center gap-2 text-[11px]">
-              <span class="px-2 py-0.5 rounded border font-bold" :style="lab.mode === 'live' ? { color: 'var(--up)', borderColor: 'var(--up-line)', backgroundColor: 'var(--up-bg)' } : lab.mode === 'dry_run' ? { color: 'var(--warn)', borderColor: 'var(--warn-line)', backgroundColor: 'var(--warn-bg)' } : { color: 'var(--ink-3)', borderColor: 'var(--line-2)' }">
-                {{ lab.mode === 'live' ? 'LIVE 实单' : lab.mode === 'dry_run' ? 'DRY 演算' : 'OFF 停用' }}
+              <span class="px-2 py-0.5 rounded border font-bold" :style="{ color: labModeMeta(lab.mode).color, borderColor: labModeMeta(lab.mode).borderColor, backgroundColor: labModeMeta(lab.mode).backgroundColor }">
+                {{ labModeMeta(lab.mode).label }}
               </span>
               <span :style="{ color: lab.gates?.pool_nonempty ? 'var(--up)' : 'var(--down)' }">{{ lab.gates?.pool_nonempty ? '✓' : '✗' }} 币池 {{ (lab.pool?.assets || []).join('/') || '空' }}</span>
               <span :style="{ color: lab.gates?.execution_switch ? 'var(--up)' : 'var(--down)' }">{{ lab.gates?.execution_switch ? '✓' : '✗' }} 执行开关</span>
