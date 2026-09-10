@@ -43,8 +43,8 @@ const uptime = computed(() => {
 });
 const llm = computed(() => runtime.value?.llm_runtime || {});
 const conf = computed<Record<string, string>>(() => runtime.value?.configuration || {});
-const okxEnv = computed(() => conf.value['OKX 当前环境'] || '--');
-const isDemo = computed(() => okxEnv.value.includes('DEMO') || okxEnv.value.includes('模拟'));
+const venueEnv = computed(() => conf.value['交易场所与路由'] || conf.value['OKX 当前环境'] || '--');
+const isDemo = computed(() => venueEnv.value.includes('DEMO') || venueEnv.value.includes('模拟'));
 const health = computed(() => runtime.value?.data_health || {});
 const healthFiles = computed<any[]>(() => health.value.files || []);
 const decisions = computed<any[]>(() => (runtime.value?.decisions || []).slice(0, 8));
@@ -104,11 +104,11 @@ function actionLabel(a: string): string {
 
       <a class="card card-pad block transition-colors hover:bg-[var(--surface-3)]" href="/admin/security">
         <div class="flex items-center justify-between">
-          <span class="t-label">{{ t('admin.overview.okxEnv') }}</span>
+          <span class="t-label">交易场所与路由</span>
           <Wallet class="h-4 w-4" style="color: var(--ink-3)" />
         </div>
-        <p class="mt-1.5 text-md font-bold" :style="{ color: isDemo ? 'var(--warn)' : 'var(--up)' }">{{ okxEnv }}</p>
-        <p class="t-faint mt-0.5 text-xs">{{ t('admin.overview.okxEnvHint') }}</p>
+        <p class="mt-1.5 text-md font-bold truncate" :style="{ color: isDemo ? 'var(--warn)' : 'var(--up)' }">{{ venueEnv }}</p>
+        <p class="t-faint mt-0.5 text-xs">三所平权配置 · 点击管理</p>
       </a>
     </div>
 

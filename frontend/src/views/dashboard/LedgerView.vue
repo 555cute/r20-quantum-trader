@@ -27,10 +27,18 @@ const all = computed<any[]>(() => (store.data as any)?.trades || []);
 const perf = computed<any>(() => (store.data as any)?.performance || {});
 
 /* —— 筛选 —— */
+const fVenue = ref<string>('all');
 const fStatus = ref<'all' | 'closed' | 'holding'>('closed');
 const fSide = ref<'all' | 'long' | 'short'>('all');
 const fResult = ref<'all' | 'win' | 'loss'>('all');
 const fInst = ref('all');
+
+const venueOptions = [
+  { value: 'all', label: '全部场所' },
+  { value: 'okx', label: 'OKX' },
+  { value: 'binance', label: 'Binance' },
+  { value: 'gate', label: 'Gate' },
+];
 
 const instOptions = computed(() => {
   const set = new Set<string>(all.value.map((x) => x.inst));
@@ -39,6 +47,10 @@ const instOptions = computed(() => {
 
 const filtered = computed(() =>
   all.value.filter((x) => {
+    if (fVenue.value !== 'all') {
+      const v = String(x.venue || 'okx').toLowerCase();
+      if (v !== fVenue.value) return false;
+    }
     if (fStatus.value === 'closed' && x.status === 'holding') return false;
     if (fStatus.value === 'holding' && x.status !== 'holding') return false;
     if (fSide.value !== 'all' && (fSide.value === 'long' ? x.side !== '多' : x.side !== '空')) return false;
@@ -149,7 +161,10 @@ function venueLabel(v: unknown): string {
             { value: 'loss', label: t('dash.ledger.filters.results.loss') },
           ]"
         />
-        <select v-model="fInst" class="field field-sm w-auto ms-auto" @change="page = 1">
+        <select v-model="fVenue" class="field field-sm w-auto ms-auto" @change="page = 1">
+          <option v-for="vo in venueOptions" :key="vo.value" :value="vo.value">{{ vo.label }}</option>
+        </select>
+        <select v-model="fInst" class="field field-sm w-auto" @change="page = 1">
           <option v-for="o in instOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
         </select>
         <span class="t-faint num text-xs shrink-0">{{ t('dash.ledger.filters.n', undefined, { n: filtered.length, total: all.length }) }}</span>

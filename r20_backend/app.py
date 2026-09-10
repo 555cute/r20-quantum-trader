@@ -164,6 +164,7 @@ class MultiExchangeUpdate(BaseModel):
     binance_testnet: bool | None = None
     gate_testnet: bool | None = None
     gate_execution: bool | None = None   # R20_GATE_EXECUTION 总开关（真实验田下单）
+    preferred_venue: str | None = None  # US-003 全局路由首选：okx|binance|gate|auto
     confirmation: str = ""               # 变更执行开关必须精确确认短语
 
 
@@ -579,7 +580,15 @@ def get_admin_configuration() -> dict[str, str]:
 
     has_notify = bool(settings.notification_webhook or getattr(settings, "qq_bot_app_id", None) or getattr(settings, "tg_bot_token", None) or getattr(settings, "wechat_webhook", None))
 
+    pref_venue = "auto"
+    try:
+        from r20_backend.exchanges import routing_policy
+        pref_venue = routing_policy.load_preferred_venue()
+    except Exception:
+        pass
+
     return {
+        "交易场所与路由": f"{'模拟盘 DEMO' if settings.okx_simulated else '实盘 LIVE'} · 选所模式: {pref_venue.upper()}",
         "OKX 当前环境": "模拟盘 DEMO" if settings.okx_simulated else "实盘 LIVE",
         "OKX 实盘凭证": "已完整配置" if settings.okx_live_configured else "未配置",
         "OKX 模拟盘凭证": "已配置" if settings.okx_demo_configured else "未配置",
@@ -1092,7 +1101,10 @@ def admin_multi_exchange_status(x_r20_admin_token: str | None = Header(default=N
             health = json.loads(health_path.read_text(encoding="utf-8"))
     except Exception:
         health = {}
-    return {"venues": venues, "health": health}
+
+    from r20_backend.exchanges import routing_policy
+    pref = routing_policy.load_preferred_venue()
+    return {"venues": venues, "health": health, "preferred_venue": pref}
 
 
 @app.get("/api/v1/admin/multi-exchange/lab-status")
@@ -1193,6 +1205,9 @@ def admin_multi_exchange_update(payload: MultiExchangeUpdate,
         env_values["R20_GATE_EXECUTION"] = "1" if payload.gate_execution else "0"
     if env_values:
         update_env(env_values)
+    if payload.preferred_venue is not None:
+        from r20_backend.exchanges import routing_policy
+        routing_policy.save_preferred_venue(payload.preferred_venue)
     try:
         from r20_backend.exchanges import clear_instances
         clear_instances()
@@ -1202,6 +1217,7 @@ def admin_multi_exchange_update(payload: MultiExchangeUpdate,
         "actor": actor["username"],
         "secret_keys_saved": sorted(secret_values.keys()),
         "env_updated": sorted(env_values.keys()),
+        "preferred_venue": payload.preferred_venue,
     })
     refresh_settings()
     return {"ok": True, "saved_secret_keys": sorted(secret_values.keys())}

@@ -218,6 +218,7 @@ async function confirmClose() {
 const mx = ref<any>(null)
 const mxForm = ref({ binance_api_key: '', binance_secret_key: '', gate_api_key: '', gate_secret_key: '' })
 const mxTestnet = ref({ binance: false, gate: false })
+const preferredVenue = ref('auto')
 const gateExec = ref(false)
 const gateExecPhrase = ref('')
 const savingMx = ref(false)
@@ -229,6 +230,9 @@ async function loadMx() {
       mxTestnet.value.binance = !!mx.value.venues.binance?.testnet
       mxTestnet.value.gate = !!mx.value.venues.gate?.testnet
       gateExec.value = !!mx.value.venues.gate?.execution_open
+    }
+    if (mx.value?.preferred_venue) {
+      preferredVenue.value = mx.value.preferred_venue
     }
   } catch { mx.value = null }
   await loadLab()
@@ -243,7 +247,11 @@ async function loadLab() {
 async function saveMx() {
   savingMx.value = true
   try {
-    const body: any = { binance_testnet: mxTestnet.value.binance, gate_testnet: mxTestnet.value.gate }
+    const body: any = {
+      binance_testnet: mxTestnet.value.binance,
+      gate_testnet: mxTestnet.value.gate,
+      preferred_venue: preferredVenue.value,
+    }
     if (gateExec.value !== !!mx.value?.venues?.gate?.execution_open) {
       body.gate_execution = gateExec.value
       body.confirmation = gateExecPhrase.value.trim()
@@ -462,6 +470,36 @@ onMounted(() => { loadAll(); loadMx() })
 
       <!-- ============ 页签 3：多交易所 ============ -->
       <div v-if="activeTab === 'venues'" class="space-y-4">
+        <SettingsSection title="全局选所路由策略（三所平权）" description="配置 AI 信号的默认撮合交易所。可指定某所优先，或交由 AI 评分路由（包含 5% 滞回防抖与手续费/资金费优势比选）。">
+          <template #actions>
+            <button class="btn btn-primary" :disabled="savingMx" @click="saveMx"><Save class="h-3.5 w-3.5" /> {{ savingMx ? '保存中…' : '保存路由策略' }}</button>
+          </template>
+          <div class="space-y-3 rounded-lg border p-3.5" style="background-color: var(--surface-1); border-color: var(--line-1);">
+            <div class="flex flex-wrap items-center gap-4">
+              <label class="flex items-center gap-1.5 cursor-pointer text-xs font-semibold" style="color: var(--ink-1);">
+                <input v-model="preferredVenue" type="radio" value="auto" class="accent-[var(--accent)]" />
+                Auto（AI 智能评分路由 · 滞回防抖）
+              </label>
+              <label class="flex items-center gap-1.5 cursor-pointer text-xs font-semibold" style="color: var(--ink-1);">
+                <input v-model="preferredVenue" type="radio" value="okx" class="accent-[var(--accent)]" />
+                优先 OKX
+              </label>
+              <label class="flex items-center gap-1.5 cursor-pointer text-xs font-semibold" style="color: var(--ink-1);">
+                <input v-model="preferredVenue" type="radio" value="binance" class="accent-[var(--accent)]" />
+                优先 Binance
+              </label>
+              <label class="flex items-center gap-1.5 cursor-pointer text-xs font-semibold" style="color: var(--ink-1);">
+                <input v-model="preferredVenue" type="radio" value="gate" class="accent-[var(--accent)]" />
+                优先 Gate
+              </label>
+            </div>
+            <p class="text-[11px] leading-relaxed" style="color: var(--ink-3);">
+              当前选所首选项：<b class="num" style="color: var(--accent);">{{ preferredVenue.toUpperCase() }}</b>。
+              若指定场所因凭证未配、未开闸或未上市被拒，系统将自动回退并在决策日志与抽屉中留存拒绝证据（rejected 列表）。
+            </p>
+          </div>
+        </SettingsSection>
+
         <SettingsSection title="行情容灾健康" description="币安 / Gate 公共端点按周期写入健康档案；跨所比对与备源排序自动使用，无需任何密钥。">
           <template #actions>
             <button class="btn btn-quiet" @click="loadMx"><RefreshCw class="h-3.5 w-3.5" /> 重新检测</button>

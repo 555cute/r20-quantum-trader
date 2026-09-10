@@ -247,6 +247,7 @@ def _build_factors_from_local_files(positions, timestamp_full):
         action_val = ai_dec.get("action", ins.get("action", "WAIT"))
         confidence = ai_dec.get("confidence")
         reason = ai_dec.get("summary_reason", ins.get("desc", "新组合标的，雷达与量化特征已接入"))
+        v_decision = ai_info.get("venue_decision") or ai_dec.get("venue_decision")
         strategy_val = "🟢 建议做多" if action_val == "BUY_LONG" else ("🔴 建议做空" if action_val == "SELL_SHORT" else "⚪ AI观望")
         score_val = 2.5 if action_val == "BUY_LONG" else (-2.5 if action_val == "SELL_SHORT" else 0.0)
         m_struct = ai_thought.get("market_structure", f"{ins.get('market_regime', 'CHOP')} ({ins.get('trend_1h', '震荡')})")
@@ -308,6 +309,7 @@ def _build_factors_from_local_files(positions, timestamp_full):
             "volume_and_oi": v_oi,
             "rr_ratio": rr_ratio,
             "thought_process": ai_thought,
+            "venue_decision": v_decision,
             "desc": reason,
             "time_str": ai_info.get("time_str") or state_data.get("timestamp") or timestamp_full,
             "timestamp": ai_info.get("timestamp"),
@@ -358,6 +360,7 @@ def _inject_local_data_into_stale(stale, positions, timestamp_full):
 
     # US-007：跨所快照同为本地文件（venue_health + decisions xvenue），STALE 下保持新鲜
     stale["cross_venue"] = _load_cross_venue_data()
+    stale["portfolio_risk"] = _load_portfolio_risk_data()
 
     # Factors list — rebuilt from local trading_state + ai_brain_decisions
     factors_list, state_data = _build_factors_from_local_files(positions, timestamp_full)
@@ -501,6 +504,29 @@ def get_cache_lock():
     if CACHE_LOCK is None:
         CACHE_LOCK = asyncio.Lock()
     return CACHE_LOCK
+
+def _load_portfolio_risk_data() -> dict:
+    """透传组合风险预留层状态给前台三所面板（零网络，纯本地只读）。"""
+    try:
+        from r20_backend.risk_reservation import get_manager
+        mgr = get_manager()
+        env = "live" if not os.environ.get("R20_SIMULATED") == "1" else "demo"
+        exposure = mgr.gross_exposure(env)
+        total_limit = getattr(mgr, "total_limit_usdt", None) or 10000.0
+        reserved = float(exposure.get("total_reserved_usdt", 0.0) or 0.0)
+        avail = max(0.0, total_limit - reserved)
+        utilization = round((reserved / total_limit) * 100, 1) if total_limit > 0 else 0.0
+        return {
+            "total_limit_usdt": total_limit,
+            "total_reserved_usdt": reserved,
+            "available_usdt": avail,
+            "utilization_pct": utilization,
+            "environment": env,
+            "by_venue": exposure.get("by_venue", {}),
+        }
+    except Exception:
+        return {}
+
 
 def _load_cross_venue_data() -> dict:
     """US-007：多所协调快照透传装配（只读，零网络）。
@@ -1147,6 +1173,7 @@ def update_cache_cycle():
             "volume_and_oi": v_oi,
             "rr_ratio": rr_ratio,
             "thought_process": ai_thought,
+            "venue_decision": ai_info.get("venue_decision") or ai_dec.get("venue_decision"),
             "confluence_15m": m_struct,
             "confluence_1h": v_oi,
             "desc": reason,
@@ -1374,7 +1401,8 @@ def update_cache_cycle():
         "ai_brain_history": ai_history_list,
         "ai_health": build_ai_health(ai_history_list),
         "factor_library": factor_lib_snapshot,
-        "cross_venue": _load_cross_venue_data()
+        "cross_venue": _load_cross_venue_data(),
+        "portfolio_risk": _load_portfolio_risk_data()
     }
     try:
         from r20_backend.llm_manager import get_active_llm_runtime
