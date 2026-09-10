@@ -290,16 +290,6 @@ function envBadge(env: string) {
   return (env || 'demo').toUpperCase()
 }
 
-/** OKX 上游业务故障（如模拟盘写接口 51001/503）的人话注解——只加提示不改语义 */
-function errHint(msg: string): string {
-  const m = String(msg || '')
-  if (/NOT.?READY|未配置|API Key/i.test(m)) return m
-  if (/51001|doesn'?t exist|Service temporarily|502|503/i.test(m)) {
-    return m + '。这是 OKX 模拟盘接口当前异常（非后台问题）：只读数据不受影响，交易所侧已挂的止盈止损保护单仍然有效，请稍后重试或等 OKX 恢复。'
-  }
-  return m
-}
-
 onMounted(() => { loadAll(); loadMx() })
 </script>
 
