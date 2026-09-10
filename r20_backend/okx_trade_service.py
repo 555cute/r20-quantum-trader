@@ -1,17 +1,11 @@
 """Direct signed OKX V5 control-plane client (static API Key only, fail-closed)."""
 from __future__ import annotations
-import base64
-import hashlib
-import hmac
-import json
 import secrets
 import threading
 import time
-import urllib.parse
-import urllib.request
-from datetime import datetime, timezone
 import logging
 from typing import Any
+from scripts import okx_rest
 from scripts.okx_runtime import OKXEnvironment, current_environment
 from scripts.okx_rest import OKXNotConfigured, cancel_algo_orders, pending_algo_orders
 
@@ -22,41 +16,10 @@ _INTENT_LOCK = threading.Lock()
 INTENT_TTL_SECONDS = 90
 
 
-def _timestamp() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-
-
 def _request(method: str, path: str, params: dict[str, Any] | None = None, env: OKXEnvironment | None = None, timeout: int = 20) -> list[dict[str, Any]]:
+    """Compatibility facade; the shared client owns signing and private HTTP."""
     selected = env or current_environment()
-    if not selected.configured:
-        raise OKXNotConfigured(f"OKX {selected.mode.upper()} 静态 API Key 未配置，请在后台「账户接入」配置 V5 API Key 后重试")
-
-    params = params or {}; method = method.upper()
-    query = urllib.parse.urlencode({k:v for k,v in params.items() if v not in (None, "")}) if method == "GET" else ""
-    request_path = path + (f"?{query}" if query else "")
-    body_text = json.dumps({k:v for k,v in params.items() if v not in (None, "")}, separators=(",", ":"), ensure_ascii=False) if method != "GET" else ""
-    timestamp = _timestamp(); prehash = timestamp + method + request_path + body_text
-    signature = base64.b64encode(hmac.new(selected.secret_key.encode(), prehash.encode(), hashlib.sha256).digest()).decode()
-    headers = {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "OK-ACCESS-KEY": selected.api_key,
-        "OK-ACCESS-SIGN": signature,
-        "OK-ACCESS-TIMESTAMP": timestamp,
-        "OK-ACCESS-PASSPHRASE": selected.passphrase,
-    }
-    if selected.simulated: headers["x-simulated-trading"] = "1"
-    request = urllib.request.Request(selected.base_url + request_path, data=body_text.encode() if body_text else None, headers=headers, method=method)
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response: payload = json.loads(response.read().decode("utf-8") or "{}")
-    except Exception as exc: raise RuntimeError(f"OKX V5 网络请求失败：{type(exc).__name__}: {exc}") from exc
-    if str(payload.get("code", "0")) != "0": raise RuntimeError(f"OKX {payload.get('code')}: {payload.get('msg') or '请求失败'}")
-    data = payload.get("data") or []
-    if not isinstance(data, list): data = [data]
-    failures = [row for row in data if isinstance(row, dict) and str(row.get("sCode", "0")) != "0"]
-    if failures: raise RuntimeError(f"OKX {failures[0].get('sCode')}: {failures[0].get('sMsg') or '业务请求失败'}")
-    return [row for row in data if isinstance(row, dict)]
+    return okx_rest.request(method, path, params, env=selected, timeout=timeout)
 
 
 def _create_intent(env: OKXEnvironment, position: dict[str, Any]) -> tuple[str, str]:

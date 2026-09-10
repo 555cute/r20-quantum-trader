@@ -1,22 +1,24 @@
 """Small native OKX REST client; public endpoints work without credentials."""
 from __future__ import annotations
-import base64
-import hashlib
-import hmac
 import json
-import time
-from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
-from .config import settings
+from scripts import okx_rest
+from scripts.okx_runtime import OKXEnvironment, current_environment
 
 
 class OKXClient:
     def __init__(self) -> None:
-        self.base_url = settings.okx_base_url.rstrip("/")
+        self.base_url = "https://www.okx.com"
 
     def _request(self, method: str, path: str, params: dict[str, Any] | None = None) -> Any:
+        # Only these public reads may use the unsigned transport. Every other
+        # path goes through the single fail-closed private transport.
+        if method.upper() != "GET" or path not in {
+            "/api/v5/market/ticker", "/api/v5/market/candles", "/api/v5/public/instruments"
+        }:
+            return okx_rest.request(method, path, params, env=current_environment())
         params = params or {}
         method = method.upper()
         query = urlencode(params) if method == "GET" else ""
@@ -26,18 +28,6 @@ class OKXClient:
         headers = {"User-Agent": "R20-Standalone/6.6.2"}
         if body:
             headers["Content-Type"] = "application/json"
-        if settings.okx_api_key and settings.okx_secret_key and settings.okx_passphrase:
-            timestamp = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-            prehash = timestamp + method + request_path + (body.decode("utf-8") if body else "")
-            digest = hmac.new(settings.okx_secret_key.encode(), prehash.encode(), hashlib.sha256).digest()
-            headers.update({
-                "OK-ACCESS-KEY": settings.okx_api_key,
-                "OK-ACCESS-SIGN": base64.b64encode(digest).decode(),
-                "OK-ACCESS-TIMESTAMP": timestamp,
-                "OK-ACCESS-PASSPHRASE": settings.okx_passphrase,
-            })
-            if settings.okx_simulated:
-                headers["x-simulated-trading"] = "1"
         req = Request(url, data=body, headers=headers, method=method)
         with urlopen(req, timeout=10) as response:
             payload = json.loads(response.read().decode("utf-8"))
@@ -57,17 +47,13 @@ class OKXClient:
             params["instId"] = inst_id
         return self._request("GET", "/api/v5/public/instruments", params)
 
-    def balance(self) -> Any:
-        return self._request("GET", "/api/v5/account/balance")
+    def balance(self, *, env: OKXEnvironment | None = None) -> Any:
+        return okx_rest.balances(env=env or current_environment())
 
-    def positions(self) -> Any:
-        return self._request("GET", "/api/v5/account/positions", {"instType": "SWAP"})
+    def positions(self, *, env: OKXEnvironment | None = None) -> Any:
+        return okx_rest.positions(env=env or current_environment())
 
-    def close_position(self, inst_id: str, pos_side: str) -> Any:
+    def close_position(self, inst_id: str, pos_side: str, *, env: OKXEnvironment | None = None) -> Any:
         if pos_side not in {"long", "short"}:
             raise ValueError("pos_side must be long or short")
-        return self._request(
-            "POST",
-            "/api/v5/trade/close-position",
-            {"instId": inst_id, "mgnMode": "cross", "posSide": pos_side, "autoCxl": "true"},
-        )
+        return okx_rest.close_position(inst_id, pos_side, env=env or current_environment())

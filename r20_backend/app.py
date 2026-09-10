@@ -3459,10 +3459,14 @@ def market_candles(inst_id: str, bar: str = "1H", limit: int = 150, response: Re
 @app.get("/api/v1/account/positions")
 def positions(x_r20_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
     require_admin_header(x_r20_admin_token)
-    if not settings.okx_api_key:
-        raise HTTPException(status_code=503, detail="OKX credentials are not configured in .env")
+    from scripts.okx_runtime import current_environment
+    env = current_environment()
+    if not env.configured:
+        raise HTTPException(status_code=503, detail=f"OKX {env.mode.upper()} NOT READY：请在后台配置完整 API Key 三件套")
     try:
-        return {"positions": okx.positions(), "source": "OKX REST"}
+        return {"positions": okx.positions(env=env), "source": "OKX REST"}
+    except OKXNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"OKX account request failed: {exc}") from exc
 

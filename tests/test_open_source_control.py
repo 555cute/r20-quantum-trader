@@ -66,7 +66,7 @@ class OKXEnvironmentTests(unittest.TestCase):
         # 旧 CLI 回退契约已随 US-008 删除（封闭三律③）：空键必须 OKXNotConfigured 且零网络。
         import scripts.okx_rest as okx_rest
         env = okx_runtime.OKXEnvironment("demo", "", "", "")
-        with patch.object(trade_service.urllib.request, "urlopen") as net:
+        with patch.object(okx_rest, "urlopen") as net:
             with self.assertRaises(okx_rest.OKXNotConfigured):
                 trade_service._request("POST", "/api/v5/trade/cancel-order", {"instId":"SOL-USDT-SWAP","ordId":"123"}, env)
             net.assert_not_called()

@@ -36,7 +36,7 @@ class OKXReadinessContractTests(unittest.TestCase):
         settings_before = vars(config.settings).copy()
         self.addCleanup(lambda: vars(config.settings).update(settings_before))
         self.http = self.patch(rest, 'urlopen', side_effect=AssertionError('private HTTP forbidden'))
-        self.http_std = self.patch(trade.urllib.request, 'urlopen', side_effect=AssertionError('HTTP forbidden'))
+        self.http_std = self.patch(rest, 'urlopen', side_effect=AssertionError('HTTP forbidden'))
         self.patch('socket', 'create_connection', side_effect=AssertionError('external connection forbidden'))
         auth = AdminAuthStore(root / 'auth.db')
         auth.initialize_from_legacy('FakeAdminPassword123')
