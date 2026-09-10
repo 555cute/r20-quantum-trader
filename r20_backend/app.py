@@ -1971,6 +1971,10 @@ def admin_okx_account_snapshot(x_r20_admin_token: str | None = Header(default=No
 def manual_close_position(payload: ManualCloseRequest) -> dict[str, Any]:
     actor = require_superadmin(REQUEST_SESSION.get())
     refresh_settings()
+    from scripts.okx_runtime import current_environment
+    env = current_environment()
+    if not env.configured:
+        raise HTTPException(status_code=503, detail=f"OKX {env.mode.upper()} API Key 未配置：V5 直签是唯一私有通道（fail-closed，无 CLI 回退）")
     if not settings.manual_close_enabled:
         raise HTTPException(status_code=403, detail="后台手动平仓功能未启用")
     import fcntl
