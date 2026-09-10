@@ -207,3 +207,61 @@ class ReconcileOpenOrdersTests(_EnvFreezeMixin, unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class SubmitListingGateTests(_EnvFreezeMixin, unittest.TestCase):
+    """US-007 接线：下单前环境维合约存在性对账（拒单 / fail-open）。"""
+
+    def setUp(self):
+        super().setUp()
+        from r20_backend.exchanges import listing
+        listing._CACHE.clear()  # 隔离 TTL 缓存：每组用例独立的目录态
+
+    def _okx_router(self, ok_order=True):
+        handlers = {
+            ("GET", "/api/v5/market/ticker"): [{"instId": "SUI-USDT-SWAP", "last": "1.0"}],
+            ("POST", "/api/v5/trade/order"): [{
+                "sCode": "0", "sMsg": "", "ordId": "9007199254740999",
+                "clOrdId": "", "tag": "CLI", "ts": "1789000000000"}],
+            ("POST", "/api/v5/trade/orders-algo-pending"): [{
+                "sCode": "0", "sMsg": "", "algoId": "42",
+                "algoClOrdId": "", "ts": "1789000000000"}],
+        }
+        if not ok_order:
+            handlers[("POST", "/api/v5/trade/order")] = [{
+                "sCode": "1", "sMsg": "mock reject", "ordId": "", "clOrdId": "", "tag": "", "ts": "0"}]
+        return _Router(handlers)
+
+    def test_11_listing_gate_rejects_delisted_contract(self):
+        """已下架合约（SUI 案）→ 拒单 + reason 透传，且零下单请求出网。"""
+        listing_router = _Router({
+            ("GET", "/api/v5/public/instruments"): [
+                {"instId": "BTC-USDT-SWAP", "state": "live"}],  # 目录里没有 SUI
+        })
+        okx = self._okx_router()
+        buf = io.StringIO()
+        with patch.object(okx_rest, "urlopen", okx),              patch("r20_backend.exchanges.listing.urlopen", listing_router),              patch.object(trader, "fetch_ticker", return_value=None),              redirect_stdout(buf):
+            ok, reason = trader.submit_protected_limit_order(
+                "SUI-USDT-SWAP", "sell", "short", 1.0, 1.0, 0.9, 1.1)
+        self.assertFalse(ok)
+        self.assertIn("合约对账拒绝", reason)
+        self.assertIn("沙盒未上市", buf.getvalue())  # demo 环境措辞（SUI 案：目录无此合约）
+        posts = [p for m, p in okx.calls if m == "POST"]
+        self.assertEqual(posts, [])  # 零下单请求
+
+    def test_12_listing_gate_fail_open_still_places_order(self):
+        """目录拉取失败 → fail-open 放行，正常下单流程不受阻塞。"""
+        listing_router = _Router({
+            ("GET", "/api/v5/public/instruments"): OSError("network down"),
+        })
+        okx = self._okx_router()
+        buf = io.StringIO()
+        with patch.object(okx_rest, "urlopen", okx), \
+             patch("r20_backend.exchanges.listing.urlopen", listing_router), \
+             patch.object(trader, "fetch_ticker", return_value=None), \
+             redirect_stdout(buf), \
+             self.assertWarns(UserWarning):  # listing 模块 fail-open 时发 warn
+            ok, reason = trader.submit_protected_limit_order(
+                "SUI-USDT-SWAP", "buy", "long", 1.0, 100.0, 107.0, 97.0)
+        self.assertTrue(ok, f"reason={reason}")
+        self.assertTrue(any(m == "POST" and "/api/v5/trade/order" in p for m, p in okx.calls))

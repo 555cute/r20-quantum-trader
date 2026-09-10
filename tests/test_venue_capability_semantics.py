@@ -158,7 +158,12 @@ class TestBinanceAlgoContract(unittest.TestCase):
 # ----------------------------------------------------------------------
 class TestGateIdString(unittest.TestCase):
     def setUp(self):
-        self.ad = GateAdapter()
+        # 封死环境态：data/env_profiles.json 里持久化的沙盒探测结果不得影响本组断言，
+        # 统一钉 live 默认域（resolve/has_env 均在构造期生效，必须在 GateAdapter() 之前 patch）。
+        with patch("r20_backend.exchanges.env_profiles.resolve_base_url",
+                   lambda venue, env, **kw: "https://api.gateio.ws"), \
+             patch("r20_backend.exchanges.env_profiles.has_env", lambda *a, **k: True):
+            self.ad = GateAdapter()
 
     def _request_capture(self, payload):
         seen = {}
@@ -176,7 +181,7 @@ class TestGateIdString(unittest.TestCase):
             rows = self.ad.signed_request("GET", "/api/v4/futures/usdt/orders")
         self.assertEqual(rows[0]["id"], "9007199254740993")   # id_string 优先
         self.assertIsInstance(rows[0]["id"], str)
-        self.assertIn("api.gateio.ws", seen["url"])            # 只发当前钉死域（live 默认），无跨域
+        self.assertIn("api.gateio.ws", seen["url"])            # 只发钉死域（patch 钉 live 默认），无跨域
 
     def test_pure_int_id_also_stringified_no_float_roundtrip(self):
         fake, _ = self._request_capture({"id": 9007199254740993, "text": "t1"})

@@ -586,8 +586,18 @@ def prune_trackers(trackers: Dict[str, Any], real_pos_dict: Dict[str, Any]) -> i
 
 def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: float, price: float, tp_px: float, sl_px: float) -> Tuple[bool, str]:
     """Submit a protected limit order; acceptance is not treated as a fill."""
-    # Check if we are running in simulated/demo mode and price diverged significantly from demo orderbook
     env = selected_environment()
+    # 环境维合约存在性对账（US-007）：目录拉不到 → fail-open 放行（对账是增强不是闸门）；
+    # 已下架/未上市（如 SUI 在 demo 被下架）→ fail-closed 拒单，reason 透传。
+    try:
+        from r20_backend.exchanges.listing import ensure_contract_listed
+        _check = ensure_contract_listed("okx", "demo" if env.simulated else "live", inst_id)
+        if not _check.ok:
+            print(f"[listing gate] 拒绝下单 {inst_id}: {_check.reason}")
+            return False, f"合约对账拒绝: {_check.reason}"
+    except Exception as _le:
+        print(f"[listing gate] warn 对账不可用，跳过（不阻塞）: {_le}")
+    # Check if we are running in simulated/demo mode and price diverged significantly from demo orderbook
     effective_px = price
     effective_tp = tp_px
     effective_sl = sl_px
