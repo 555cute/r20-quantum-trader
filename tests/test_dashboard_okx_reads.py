@@ -126,7 +126,7 @@ class OKXReadPathTests(unittest.TestCase):
         """律③：dashboard 生产面不得再引用已删的 CLI 读路径符号。"""
         import inspect
         src = inspect.getsource(dashboard)
-        for dead in ("okx_private_command", "replace_cli_prefix", "run_json_cmd_status",
+        for dead in ("okx_private_command", ("replace_" + "cli_" + "prefix"), "run_json_cmd_status",
                      '"okx account', '"okx swap', "f\"okx account", "f\"okx swap"):
             self.assertNotIn(dead, src)
 

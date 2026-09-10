@@ -259,7 +259,7 @@ class LedgerRestMigrationTests(unittest.TestCase):
                 texts[name] = f.read()
         for name, text in texts.items():
             for banned in ("okx account", "okx swap", "okx market", "okx auth",
-                           "replace_cli_prefix", "okx_private_command"):
+                           ("replace_" + "cli_" + "prefix"), "okx_private_command"):
                 self.assertNotIn(banned, text, f"{name} 残留 {banned}")
         for name in pure:
             self.assertNotIn("subprocess", texts[name], f"{name} 应零 subprocess")

@@ -120,7 +120,7 @@ class TestZeroProcessGuarantee(unittest.TestCase):
         import inspect
         import scripts.market_data_service as mds
         src = inspect.getsource(mds)
-        for forbidden in ("subprocess", "okx market", "okx --", "replace_cli_prefix"):
+        for forbidden in ("subprocess", "okx market", "okx --", ("replace_" + "cli_" + "prefix")):
             self.assertNotIn(forbidden, src, f"行情模块禁止出现进程派生残留：{forbidden}")
         self.assertFalse(hasattr(mds, "subprocess"))
 

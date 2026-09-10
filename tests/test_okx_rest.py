@@ -316,7 +316,7 @@ class OKXRestHttpBoundaryTests(unittest.TestCase):
 
     def test_module_never_touches_cli_or_subprocess(self):
         source = inspect.getsource(okx_rest)
-        for banned in ("subprocess", "okx --", "replace_cli_prefix", "cli_prefix", "os.environ"):
+        for banned in ("subprocess", "okx --", ("replace_" + "cli_" + "prefix"), ("cli_" + "prefix"), "os.environ"):
             self.assertNotIn(banned, source, f"okx_rest must stay CLI-free: found {banned!r}")
         # 凭证唯一来源 = runtime 的 current_environment（含冻结优先）
         self.assertIn("current_environment", source)

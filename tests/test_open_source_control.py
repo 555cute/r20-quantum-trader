@@ -29,20 +29,30 @@ class OKXEnvironmentTests(unittest.TestCase):
         self.assertEqual((live.mode, live.api_key), ("live", "LIVE_AK"))
         self.assertNotEqual(demo.identity, live.identity)
 
-    def test_legacy_private_command_is_rebound(self):
-        values={"R20_OKX_ENV":"live","OKX_LIVE_API_KEY":"A","OKX_LIVE_SECRET_KEY":"B","OKX_LIVE_PASSPHRASE":"C"}
-        with patch.dict(os.environ, {}, clear=True):
-            command=okx_runtime.replace_cli_prefix("okx --demo account positions --json", values)
-            self.assertTrue(command.startswith("okx --live "))
-            self.assertEqual(os.environ["OKX_API_KEY"], "A")
+    def test_missing_key_fingerprint_is_explicit(self):
+        for mode in ("demo", "live"):
+            with self.subTest(mode=mode):
+                env = okx_runtime.selected_environment({"R20_OKX_ENV": mode})
+                self.assertFalse(env.configured)
+                self.assertEqual(env.fingerprint, f"{mode}-not-configured")
+                self.assertEqual(env.identity, f"okx:{mode}:{mode}-not-configured")
 
     def test_environment_is_frozen_for_cycle(self):
-        first={"R20_OKX_ENV":"demo","OKX_DEMO_API_KEY":"D","OKX_DEMO_SECRET_KEY":"S","OKX_DEMO_PASSPHRASE":"P"}
+        first = {"R20_OKX_ENV": "demo", "OKX_DEMO_API_KEY": "D",
+                 "OKX_DEMO_SECRET_KEY": "S", "OKX_DEMO_PASSPHRASE": "P"}
+        second = {"R20_OKX_ENV": "live", "OKX_LIVE_API_KEY": "L",
+                  "OKX_LIVE_SECRET_KEY": "S", "OKX_LIVE_PASSPHRASE": "P"}
         try:
-            okx_runtime.freeze_environment(first)
-            with patch.dict(os.environ, {"R20_OKX_ENV":"live","OKX_LIVE_API_KEY":"L","OKX_LIVE_SECRET_KEY":"S","OKX_LIVE_PASSPHRASE":"P"}, clear=True):
-                self.assertTrue(okx_runtime.replace_cli_prefix("okx account positions").startswith("okx --demo "))
-        finally: okx_runtime.unfreeze_environment()
+            frozen = okx_runtime.freeze_environment(first)
+            with patch.object(okx_runtime, "_load_dotenv", return_value=second):
+                self.assertIs(okx_runtime.current_environment(), frozen)
+                self.assertIs(okx_runtime.current_environment(second), frozen)
+                self.assertEqual(okx_runtime.selected_environment().mode, "live")
+                self.assertEqual(frozen.api_key, "D")
+                okx_runtime.unfreeze_environment()
+                self.assertEqual(okx_runtime.current_environment().api_key, "L")
+        finally:
+            okx_runtime.unfreeze_environment()
 
     def test_fast_close_rejects_environment_change_before_any_order(self):
         snapshot_env = okx_runtime.OKXEnvironment("demo", "A", "B", "C")
