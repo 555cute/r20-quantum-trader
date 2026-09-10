@@ -65,6 +65,7 @@ class OfflineGuard:
     def audit(self, event, args):
         if event in ('socket.connect', 'socket.getaddrinfo', 'socket.sendto'):
             self.attempts.append(event)
+            self._log_diagnostics(event, args)
             raise RuntimeError('Offline suite blocked network: ' + event)
         if event == 'subprocess.Popen':
             command = args[1]
@@ -102,6 +103,26 @@ class OfflineGuard:
             if self.protected(target, dir_fd):
                 self.writes.append(str(target))
                 raise RuntimeError('Offline suite blocked real resource mutation')
+
+    DIAG_LOG = '/tmp/offline_guard_diagnostics.log'
+
+    def _log_diagnostics(self, event, args):
+        """Append-only attribution: record the blocking call stack. Never
+        suppresses or alters the fail-closed raise above; writes outside the
+        protected roots and never reads config bytes."""
+        try:
+            import traceback
+            stack = traceback.extract_stack()[:-3]
+            test_frames = [f for f in stack
+                           if '/tests/test_' in f.filename or '/unittest/case.py' in f.filename]
+            origin = (f'{test_frames[-1].filename.rsplit("/", 1)[-1]}:{test_frames[-1].lineno}'
+                      f' in {test_frames[-1].name}' if test_frames else 'no-test-frame')
+            with open(self.DIAG_LOG, 'a', encoding='utf-8') as handle:
+                handle.write(f'--- [{len(self.attempts)}] {event} origin={origin}\n')
+                for frame in stack[-14:]:
+                    handle.write(f'    {frame.filename}:{frame.lineno} in {frame.name}\n')
+        except Exception:
+            pass  # diagnostics must never mask the guard
 
     def install(self):
         sys.addaudithook(self.audit)
