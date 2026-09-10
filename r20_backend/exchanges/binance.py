@@ -16,12 +16,29 @@
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import time
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
+from urllib.error import HTTPError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 from .base import (BaseExchangeAdapter, ExchangeCapabilities,
                    ExchangeCapabilityError, InstrumentSpec)
+
+
+class BinanceAPIError(RuntimeError):
+    """Binance 私有 API 业务错误（code 为官方错误码，如 -2014/-2015）。"""
+
+    def __init__(self, code: Any, message: str, status: int = 0):
+        super().__init__(f"Binance [{code}]: {message or 'request failed'}")
+        self.code = code
+        self.message = message
+        self.status = status
+
 
 INTERVAL_MAP = {  # 内部周期 → Binance interval
     "1m": "1m", "3m": "3m", "5m": "5m", "15m": "15m", "30m": "30m",
@@ -50,7 +67,7 @@ class BinanceAdapter(BaseExchangeAdapter):
         bar_case="lower",
         has_top_trader_ratio=True,
         has_taker_ratio=True,
-        supports_account=False,
+        supports_account=True,
         supports_orders=False,              # 门禁不变：下单仍恒被拒
         mainland_ip_restricted=True,
         rate_limit_note="按端点读取勿用概数：new_algo_order 源码记载计订单 10s/1min 计数、"
@@ -302,7 +319,143 @@ class BinanceAdapter(BaseExchangeAdapter):
         return {"method": "DELETE", "path": f"{cls.ALGO_ORDER_PATH}/all",
                 "params": {"symbol": str(symbol).upper()}}
 
-    # ---- 私有发送通道：本仓库无币安签名器，一切私有调用显式未实装（fail-closed）----
+    # ---- 私有面：凭证、签名通道与只读适配（US-004）----
+    def _keys(self) -> tuple[str, str]:
+        from .registry import venue_credentials
+        key, secret = venue_credentials("binance", self.environment)
+        if not key or not secret:
+            raise ExchangeCapabilityError(
+                f"Binance ({self.environment}档) 凭证未配置——请在后台「多交易所凭证」录入 API Key/Secret")
+        return key, secret
+
+    def signed_request(self, method: str, path: str,
+                       params: Optional[Dict[str, Any]] = None,
+                       body: Optional[Dict[str, Any]] = None,
+                       timeout: float = 15.0) -> Any:
+        """Binance USDⓈ-M 私有请求（HMAC-SHA256 签名）。"""
+        key, secret = self._keys()
+        query_dict = dict(params or {})
+        query_dict["timestamp"] = int(time.time() * 1000)
+        query_dict["recvWindow"] = 5000
+        clean_query = {k: v for k, v in query_dict.items() if v not in (None, "")}
+        query_string = urlencode(clean_query)
+        signature = hmac.new(secret.encode("utf-8"), query_string.encode("utf-8"), hashlib.sha256).hexdigest()
+        full_query = f"{query_string}&signature={signature}"
+
+        body_bytes = None
+        headers = {
+            "X-MBX-APIKEY": key,
+            "Accept": "application/json",
+            "User-Agent": "R20-Binance/1.0",
+        }
+
+        m = method.upper()
+        if m in ("GET", "DELETE"):
+            url = f"{self.base_url}{path}?{full_query}"
+        else:
+            url = f"{self.base_url}{path}?{full_query}"
+            if body is not None:
+                body_bytes = json.dumps(body).encode("utf-8")
+                headers["Content-Type"] = "application/json"
+
+        req = Request(url, data=body_bytes, headers=headers, method=m)
+        try:
+            with urlopen(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+                data = json.loads(raw) if raw else None
+                return data
+        except HTTPError as exc:
+            raw = ""
+            try:
+                raw = exc.read().decode("utf-8", errors="replace")
+                payload = json.loads(raw or "{}")
+            except Exception:
+                payload = {}
+            code = payload.get("code") if isinstance(payload, dict) else exc.code
+            msg = payload.get("msg") if isinstance(payload, dict) else (raw[:200] or exc.reason)
+            raise BinanceAPIError(code or exc.code, msg or "request failed", status=exc.code) from exc
+        except Exception as exc:
+            raise BinanceAPIError("network", f"{type(exc).__name__}: {exc}") from exc
+
+    def account_snapshot(self) -> Dict[str, Any]:
+        """获取账户权益与可用保证金快照（USDT-M）。"""
+        data = self.signed_request("GET", "/fapi/v1/account")
+        if not isinstance(data, dict):
+            raise BinanceAPIError("bad_response", "account 返回结构异常")
+
+        equity = float(data.get("totalMarginBalance") or data.get("totalWalletBalance") or 0.0)
+        avail = float(data.get("availableBalance") or data.get("maxWithdrawAmount") or 0.0)
+        pos_m = float(data.get("totalPositionInitialMargin") or data.get("totalInitialMargin") or 0.0)
+        ord_m = float(data.get("totalOpenOrderInitialMargin") or 0.0)
+        upnl = float(data.get("totalUnrealizedProfit") or 0.0)
+
+        return {
+            "venue": "binance",
+            "currency": "USDT",
+            "equity_usdt": equity,
+            "available_usdt": avail,
+            "position_margin": pos_m,
+            "order_margin": ord_m,
+            "unrealized_pnl": upnl,
+            "can_trade": bool(data.get("canTrade", True)),
+            "raw": data,
+        }
+
+    def positions(self) -> List[Dict[str, Any]]:
+        """获取当前活跃持仓列表（USDT-M）。仅返回 positionAmt != 0 的真实持仓。"""
+        data = self.signed_request("GET", "/fapi/v1/positionRisk")
+        rows = data if isinstance(data, list) else []
+        out = []
+        for p in rows:
+            if not isinstance(p, dict):
+                continue
+            amt = float(p.get("positionAmt") or 0.0)
+            if abs(amt) < 1e-12:
+                continue
+            symbol = str(p.get("symbol") or "")
+            out.append({
+                "venue": "binance",
+                "inst_id": symbol,
+                "base": self.canonical(symbol),
+                "side": "long" if amt > 0 else "short",
+                "size_signed": amt,
+                "entry_price": float(p.get("entryPrice") or 0.0),
+                "mark_price": float(p.get("markPrice") or 0.0),
+                "leverage": float(p.get("leverage") or 0.0),
+                "margin": float(p.get("isolatedMargin") or p.get("positionInitialMargin") or 0.0),
+                "margin_mode": str(p.get("marginType") or "cross").lower(),
+                "unrealized_pnl": float(p.get("unRealizedProfit") or 0.0),
+                "liq_price": float(p.get("liquidationPrice") or 0.0) or None,
+                "raw": p,
+            })
+        return out
+
+    def open_orders(self, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
+        """获取当前普通在途订单列表（USDT-M）。"""
+        params = {}
+        if symbol:
+            params["symbol"] = self.native_symbol(symbol)
+        data = self.signed_request("GET", "/fapi/v1/openOrders", params=params)
+        rows = data if isinstance(data, list) else []
+        out = []
+        for o in rows:
+            if not isinstance(o, dict):
+                continue
+            out.append({
+                "venue": "binance",
+                "order_id": str(o.get("orderId") or ""),
+                "client_order_id": str(o.get("clientOrderId") or ""),
+                "inst_id": str(o.get("symbol") or ""),
+                "base": self.canonical(str(o.get("symbol") or "")),
+                "side": str(o.get("side") or "").lower(),
+                "price": float(o.get("price") or 0.0),
+                "size": float(o.get("origQty") or 0.0),
+                "status": str(o.get("status") or ""),
+                "raw": o,
+            })
+        return out
+
+    # ---- 下单执行门禁：下单属 US-005 范围，此处显式 fail-closed ----
     def _private_algo_send(self, request: Dict[str, Any]) -> Any:
         raise ExchangeCapabilityError(
             f"Binance Algo 私有通道未实装（请求已构造: {request['method']} {request['path']}）——"

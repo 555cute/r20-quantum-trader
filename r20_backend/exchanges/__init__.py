@@ -16,9 +16,9 @@ from .base import (
     InstrumentSpec,
     canonical_base,
 )
-from .binance import BinanceAdapter
+from .binance import BinanceAdapter, BinanceAPIError
 from .diagnostics import diagnose_venue_connection
-from .gate import GateAdapter
+from .gate import GateAdapter, GateAPIError
 from .identity import (
     ANON_CREDENTIAL,
     AccountKey,
@@ -43,6 +43,7 @@ from .registry import (
 
 __all__ = [
     "BaseExchangeAdapter", "ExchangeCapabilities", "ExchangeCapabilityError",
+    "BinanceAPIError", "GateAPIError",
     "InstrumentSpec", "canonical_base", "BinanceAdapter", "GateAdapter",
     "OKXPublicAdapter", "ADAPTER_EXECUTION_ENABLED", "execution_open",
     "get_adapter", "is_registered", "registered_venues", "require_execution",

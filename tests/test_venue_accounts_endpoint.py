@@ -60,6 +60,28 @@ class _StubGateAdapter:
             raise self._raises
 
 
+class _StubBinanceAdapter:
+    def __init__(self, rows=None, positions=None, raises=None):
+        self._raises = raises
+        self._rows = rows if rows is not None else [{"orderId": "201"}]
+        self._positions = positions if positions is not None else [{"size_signed": 1.5}]
+
+    def account_snapshot(self):
+        if self._raises:
+            raise self._raises
+        return {"equity_usdt": 800.0, "available_usdt": 750.0}
+
+    def positions(self):
+        if self._raises:
+            raise self._raises
+        return list(self._positions)
+
+    def open_orders(self, symbol=None):
+        if self._raises:
+            raise self._raises
+        return list(self._rows)
+
+
 class VenueAccountsEndpointTests(unittest.TestCase):
     def setUp(self):
         from tests.config_sandbox import isolate_config
@@ -82,6 +104,10 @@ class VenueAccountsEndpointTests(unittest.TestCase):
         p2 = patch.object(gate_mod, "urlopen", self.net_sentry)
         p2.start()
         self.addCleanup(p2.stop)
+        bn_mod = __import__("r20_backend.exchanges.binance", fromlist=["binance"])
+        p3 = patch.object(bn_mod, "urlopen", self.net_sentry)
+        p3.start()
+        self.addCleanup(p3.stop)
 
     def tearDown(self):
         app_module.admin_auth = self.original
@@ -133,14 +159,11 @@ class VenueAccountsEndpointTests(unittest.TestCase):
         req.assert_not_called()
         ga.assert_not_called()
         self.net_sentry.assert_not_called()
-        for key in ("okx", "gate"):
+        for key in ("okx", "gate", "binance"):
             self.assertEqual(v[key]["status"], "unavailable", key)
             for f in ("equity", "available", "positions_count", "open_orders_count", "last_sync_ts"):
                 self.assertIsNone(v[key][f], f"{key}.{f} 未知必须为 None 不填 0")
             self.assertTrue(len(v[key]["reason"]) > 4, f"{key} 缺人话 reason")
-        self.assertEqual(v["binance"]["status"], "not_implemented")
-        self.assertIsNone(v["binance"]["equity"])
-        self.assertIn("未实装", v["binance"]["reason"])
 
     # ---------- 态一·b：档位不符 → 拒跨档读取、零 HTTP ----------
 
@@ -170,8 +193,15 @@ class VenueAccountsEndpointTests(unittest.TestCase):
         raise AssertionError(f"unexpected OKX path {path}")
 
     def test_demo_ready_numbers_and_get_only(self):
-        stub = _StubGateAdapter()
-        ga = Mock(return_value=stub)
+        gate_stub = _StubGateAdapter()
+        binance_stub = _StubBinanceAdapter()
+        def _get_adapter(venue, environment=None):
+            if venue == "gate":
+                return gate_stub
+            elif venue == "binance":
+                return binance_stub
+            raise ValueError(f"unknown {venue}")
+        ga = Mock(side_effect=_get_adapter)
         req = Mock(side_effect=self._okx_rows)
         with patch.object(okx_runtime, "current_environment",
                           return_value=SimpleNamespace(mode="demo", configured=True)):
@@ -190,15 +220,19 @@ class VenueAccountsEndpointTests(unittest.TestCase):
         self.assertEqual(v["gate"]["equity"], 500.0)
         self.assertEqual(v["gate"]["positions_count"], 1)
         self.assertEqual(v["gate"]["open_orders_count"], 1)
-        self.assertEqual(v["binance"]["status"], "not_implemented")
+        self.assertEqual(v["binance"]["status"], "ready")
+        self.assertEqual(v["binance"]["equity"], 800.0)
+        self.assertEqual(v["binance"]["positions_count"], 1)
+        self.assertEqual(v["binance"]["open_orders_count"], 1)
         # 只读铁律：全部私有调用 method=GET；无下单/写路径
         for call in req.call_args_list:
             self.assertEqual(call.args[0], "GET")
-        for method, path in stub.calls:
+        for method, path in gate_stub.calls:
             self.assertEqual(method, "GET")
             self.assertNotIn("/orders?", path)  # 只查 open 列表，非提交
-        # gate demo → sandbox 档（env_profiles 钉死择优域），绝不裸 live
-        ga.assert_called_once_with("gate", environment="sandbox")
+        # gate demo → sandbox 档；binance demo → demo 档
+        ga.assert_any_call("gate", environment="sandbox")
+        ga.assert_any_call("binance", environment="demo")
         # 凭证零回显
         text = json.dumps(v)
         self.assertNotIn('"k"', text)
@@ -240,15 +274,19 @@ class VenueAccountsEndpointTests(unittest.TestCase):
     # ---------- 两环境互不串数据 ----------
 
     def test_live_request_uses_live_profile(self):
-        stub = _StubGateAdapter()
-        ga = Mock(return_value=stub)
+        gate_stub = _StubGateAdapter()
+        binance_stub = _StubBinanceAdapter()
+        def _get_adapter(venue, environment=None):
+            return gate_stub if venue == "gate" else binance_stub
+        ga = Mock(side_effect=_get_adapter)
         with patch.object(okx_runtime, "current_environment",
                           return_value=SimpleNamespace(mode="live", configured=False)):
             with patch.object(exchanges_pkg, "venue_credentials", return_value=("k", "s")):
                 with patch.object(exchanges_pkg, "get_adapter", ga):
                     r = self.client.get("/api/v1/venue_accounts?environment=live", headers=self.auth)
         self.assertEqual(r.json()["environment"], "live")
-        ga.assert_called_once_with("gate", environment="live")
+        ga.assert_any_call("gate", environment="live")
+        ga.assert_any_call("binance", environment="live")
         card = r.json()["venues"]["okx"]
         self.assertEqual(card["status"], "unavailable")  # live 无 Key → 不发 HTTP
         self.net_sentry.assert_not_called()

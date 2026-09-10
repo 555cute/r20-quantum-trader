@@ -3628,18 +3628,46 @@ def _venue_accounts_gate(environment: str) -> dict[str, Any]:
         return _venue_account_unknown("degraded", f"Gate 返回解析失败: {type(exc).__name__}: {exc}")
 
 
-def _venue_accounts_binance() -> dict[str, Any]:
-    """Binance 卡：supports_account=False → not_implemented 显式声明，禁填 0。"""
+def _venue_accounts_binance(environment: str = "demo") -> dict[str, Any]:
+    """Binance 卡：经 (venue, environment) 适配器只读（US-004 实装）。"""
     try:
+        from r20_backend.exchanges import ExchangeCapabilityError, get_adapter, venue_credentials
         from r20_backend.exchanges.binance import BinanceAdapter
         supports = bool(getattr(BinanceAdapter.capabilities, "supports_account", False))
     except Exception as exc:
         return _venue_account_unknown("degraded", f"Binance 能力表读取失败: {type(exc).__name__}: {exc}")
     if not supports:
         return _venue_account_unknown(
-            "not_implemented", "Binance 适配器账户面未实装（supports_account=False，"
-            "P0 阶段仅提供公共行情；账户接入属后续故事，不以任何数值冒充）")
-    return _venue_account_unknown("not_implemented", "Binance 账户面实装中（本卡尚未接线）")
+            "not_implemented", "Binance 适配器账户面未实装（supports_account=False）")
+
+    api_key, secret = venue_credentials("binance", environment)
+    if not api_key or not secret:
+        return _venue_account_unknown(
+            "unavailable", f"Binance {environment.upper()} API Key/Secret 未配置，未发起任何请求；请在后台「多交易所凭证」录入")
+
+    bn_env = "demo" if environment == "demo" else "live"
+    try:
+        ad = get_adapter("binance", environment=bn_env)
+        acct = ad.account_snapshot()
+        positions = [p for p in ad.positions() if abs(float(p.get("size_signed") or 0)) > 1e-12]
+        open_rows = ad.open_orders()
+    except ExchangeCapabilityError as exc:
+        return _venue_account_unknown("unavailable", f"Binance 账户面不可用：{exc}")
+    except Exception as exc:
+        return _venue_account_unknown("degraded", f"Binance 账户读取失败: {type(exc).__name__}: {exc}")
+
+    try:
+        return {
+            "status": "ready",
+            "equity": float(acct.get("equity_usdt") or 0.0),
+            "available": float(acct.get("available_usdt") or 0.0),
+            "positions_count": len(positions),
+            "open_orders_count": len(open_rows if isinstance(open_rows, list) else []),
+            "last_sync_ts": int(time.time() * 1000),
+            "reason": f"Binance {bn_env} 档适配器直读",
+        }
+    except Exception as exc:
+        return _venue_account_unknown("degraded", f"Binance 返回解析失败: {type(exc).__name__}: {exc}")
 
 
 @app.get("/api/v1/venue_accounts")
@@ -3660,7 +3688,7 @@ def venue_accounts(environment: str = Query(default="demo"),
         "venues": {
             "okx": _venue_accounts_okx(env_key),
             "gate": _venue_accounts_gate(env_key),
-            "binance": _venue_accounts_binance(),
+            "binance": _venue_accounts_binance(env_key),
         },
         "captured_at_ms": int(time.time() * 1000),
     }
