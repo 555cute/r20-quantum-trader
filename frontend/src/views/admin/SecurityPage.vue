@@ -1,11 +1,5 @@
 <script setup lang="ts">
-/**
- * 账户与标的（/admin/security）——重做版 2026-09-09
- * 结构：状态总览条 + 四页签（账户接入 / 标的与基准 / 多交易所 / 应急平仓）。
- * 行为契约与旧版逐一对应（OAuth 设备码、CLI 安装短语、环境 LIVE 确认、
- * UPDATE CAPITAL、REMOVE <inst>、平仓双确认、多所凭证、Gate 执行开关
- * OPEN GATE EXECUTION）；端点与字段零改动。色彩全走 CSS 变量令牌。
- */
+// 账户接入仅使用后台加密 V5 API Key；其余页签行为保持不变。
 import { useToast } from '../../composables/useToast'
 const toast = useToast()
 import { ref, computed, onMounted } from 'vue'
@@ -15,7 +9,7 @@ import { useI18n } from '../../composables/useI18n'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
 import { utcStrToBj } from '../../utils/format'
-import { Wallet, Save, KeyRound, RefreshCw, Layers, Trash2, Unlink, Terminal, FlaskConical, Zap } from 'lucide-vue-next'
+import { Wallet, Save, RefreshCw, Layers, Trash2, FlaskConical, Zap } from 'lucide-vue-next'
 
 const { api } = useApi()
 const auth = useAuthStore()
@@ -37,19 +31,7 @@ function switchTab(tab: TabKey) {
   if (tab === 'venues') loadLab()
 }
 
-// ---- OAuth ----
-const oauthSite = ref('global')
-const oauthState = ref('')
-const oauthResult = ref<any>(null)
-const startingOauth = ref(false)
-const loggingOutOauth = ref(false)
-const switchingAccount = ref(false)
-
-// ---- CLI install ----
-const cliCheck = ref<any>(null)
-const installingCli = ref(false)
-
-// ---- backup API keys ----
+// ---- LIVE / DEMO API keys ----
 const keys = ref({ live_key: '', live_secret: '', live_pass: '', demo_key: '', demo_secret: '', demo_pass: '' })
 
 // ---- capital ----
@@ -71,22 +53,14 @@ const closeModal = ref<{ show: boolean; pos: any } | null>(null)
 const closePhraseInput = ref('')
 const closing = ref(false)
 
-const sourceLabel: Record<string, string> = {
-  'static-v5-key': '后台加密 API Key',
-  'cli-oauth': 'OKX 官方 OAuth',
-  'cli-api-key-profile': 'CLI Key Profile',
-  none: '未就绪',
-}
-
 async function loadAll() {
   loading.value = true
   try {
-    const [cfg, rt] = await Promise.all([api('/api/v1/admin/config'), api('/api/v1/admin/okx/runtime')])
+    const [cfg, rt] = await Promise.all([api('/api/v1/admin/config'), api('/api/v1/admin/okx/runtime?refresh=1')])
     config.value = cfg
     applyRuntime(rt)
     newCapital.value = String(cfg.editable?.initial_capital ?? '')
     manualClose.value = !!cfg.editable?.manual_close_enabled
-    oauthSite.value = rt?.oauth?.site || 'global'
     const inst = await api('/api/v1/admin/instruments')
     instruments.value = inst.instruments || []
     instLimits.value = inst.limits || instLimits.value
@@ -104,115 +78,9 @@ function applyRuntime(rt: any) {
 async function rediagnose() {
   try {
     applyRuntime(await api('/api/v1/admin/okx/runtime?refresh=1'))
-    toast.ok('已重新诊断 OKX 连接与私有读取')
+    toast.ok('已刷新 OKX API Key 配置状态')
   } catch (e: any) {
     toast.err(`诊断失败：${e.message}`)
-  }
-}
-
-async function startOauth() {
-  startingOauth.value = true
-  oauthState.value = '正在向 OKX 申请一次性授权码…'
-  oauthResult.value = null
-  try {
-    const d = await api('/api/v1/admin/okx/oauth/start', { method: 'POST', body: JSON.stringify({ site: oauthSite.value }) })
-    if (d.status === 'already_logged_in') {
-      oauthState.value = ''
-      oauthResult.value = { kind: 'logged_in', site: d.site, scopes: d.scopes || [] }
-      await rediagnose()
-    } else {
-      oauthResult.value = { kind: 'device', ...d }
-      oauthState.value = '请在 OKX 官方页面输入验证码完成授权'
-    }
-  } catch (e: any) {
-    oauthState.value = ''
-    oauthResult.value = { kind: 'error', message: e.message }
-  } finally {
-    startingOauth.value = false
-  }
-}
-
-async function checkOauth() {
-  try {
-    const d = await api('/api/v1/admin/okx/oauth/status')
-    if (d.status === 'logged_in') {
-      oauthResult.value = { kind: 'logged_in', site: d.site, scopes: d.scopes || [] }
-      toast.ok('OKX OAuth 授权成功')
-      await rediagnose()
-    } else if (d.status === 'pending') {
-      toast.warn('授权尚未完成，请先在 OKX 页面确认')
-    } else {
-      oauthResult.value = { kind: 'error', message: `当前状态：${d.status}。${d.detail || '授权码可能已过期，请重新发起。'}` }
-    }
-  } catch (e: any) {
-    toast.err(e.message)
-  }
-}
-
-async function logoutOauth() {
-  if (!confirm('确认解绑当前的 OKX OAuth 账户？解绑后可连接新账号。')) return
-  loggingOutOauth.value = true
-  try {
-    const d = await api('/api/v1/admin/okx/oauth/logout', { method: 'POST' })
-    toast.ok(d.message || 'OKX OAuth 账号已解绑')
-    oauthResult.value = null
-    oauthState.value = ''
-    await rediagnose()
-  } catch (e: any) {
-    toast.err(`解绑失败：${e.message}`)
-  } finally {
-    loggingOutOauth.value = false
-  }
-}
-
-async function switchOauthAccount() {
-  if (!confirm('确认更换 OKX 账号？系统将解除当前授权并为您获取新的浏览器授权码。')) return
-  switchingAccount.value = true
-  oauthState.value = '正在切换并向 OKX 申请新的授权码…'
-  oauthResult.value = null
-  try {
-    const d = await api('/api/v1/admin/okx/oauth/start', {
-      method: 'POST',
-      body: JSON.stringify({ site: oauthSite.value, force_relogin: true }),
-    })
-    oauthResult.value = { kind: 'device', ...d }
-    oauthState.value = '请在 OKX 页面登录新账号并完成授权'
-    await rediagnose()
-  } catch (e: any) {
-    oauthState.value = ''
-    oauthResult.value = { kind: 'error', message: e.message }
-  } finally {
-    switchingAccount.value = false
-  }
-}
-
-async function checkCli() {
-  try {
-    cliCheck.value = await api('/api/v1/admin/okx/cli-check')
-  } catch (e: any) {
-    toast.err(`CLI 检测失败：${e.message}`)
-  }
-}
-
-async function installCli() {
-  if (!cliCheck.value) {
-    try { cliCheck.value = await api('/api/v1/admin/okx/cli-check') } catch { /* proceed with confirmation anyway */ }
-  }
-  const currentText = cliCheck.value?.okx_installed
-    ? `当前已安装 ${cliCheck.value.okx_version || '未知版本'}（${cliCheck.value.okx_path || 'PATH 未知'}）。继续将执行安装校验或升级。`
-    : '当前未检测到 OKX CLI，将执行首次安装。'
-  const phrase = prompt(`一键安装 / 升级 OKX CLI\n${currentText}\n输入确认短语：INSTALL OKX CLI`)
-  if (!phrase) return
-  installingCli.value = true
-  try {
-    const d = await api('/api/v1/admin/okx/install-cli', { method: 'POST', body: JSON.stringify({ confirmation: phrase.trim().toUpperCase() }) })
-    toast.ok(`OKX CLI 安装/校验成功：${d.path || ''} ${d.version || ''}`.trim())
-    cliCheck.value = null
-    await rediagnose()
-  } catch (e: any) {
-    toast.err(`CLI 安装失败：${e.message}`)
-  } finally {
-    installingCli.value = false
   }
 }
 
@@ -392,14 +260,8 @@ async function saveMx() {
 }
 
 // ---- 总览派生（纯计算，零请求） ----
-const okxLinked = computed(() => runtime.value?.oauth?.status === 'logged_in' || runtime.value?.credential_source === 'static-v5-key' || runtime.value?.credential_source === 'cli-api-key-profile')
-const runtimeTone = computed(() => {
-  const rt = runtime.value
-  if (!rt) return 'pending'
-  if (rt.ready) return 'good'
-  if (rt.degraded) return 'warn'
-  return 'bad'
-})
+const okxLinked = computed(() => runtime.value?.status === 'READY' && runtime.value?.mode_configured === true)
+const runtimeTone = computed(() => okxLinked.value ? 'good' : 'bad')
 const mxHealthChips = computed(() => {
   const venues = mx.value?.health?.venues
   if (!venues) return null
@@ -427,6 +289,7 @@ function envBadge(env: string) {
 /** OKX 上游业务故障（如模拟盘写接口 51001/503）的人话注解——只加提示不改语义 */
 function errHint(msg: string): string {
   const m = String(msg || '')
+  if (/NOT.?READY|未配置|API Key/i.test(m)) return m
   if (/51001|doesn'?t exist|Service temporarily|502|503/i.test(m)) {
     return m + '。这是 OKX 模拟盘接口当前异常（非后台问题）：只读数据不受影响，交易所侧已挂的止盈止损保护单仍然有效，请稍后重试或等 OKX 恢复。'
   }
@@ -441,9 +304,9 @@ onMounted(() => { loadAll(); loadMx() })
     <PageHeader :title="t('nav.admin.security')" description="OKX 账号与环境、交易标的池、Binance / Gate 跨所数据源与 Gate 试验田的接入管理">
       <template #actions>
         <span v-if="runtime" class="chip">
-          运行环境 <b class="num" :style="{ color: runtime.selected_mode === 'live' ? 'var(--down)' : 'var(--up)' }">{{ envBadge(runtime.selected_mode) }}</b>
-          · 认证 <b>{{ sourceLabel[runtime.credential_source] || runtime.credential_source || '--' }}</b>
-          · <b :style="{ color: runtimeTone === 'good' ? 'var(--up)' : runtimeTone === 'warn' ? 'var(--warn)' : 'var(--down)' }">{{ runtimeTone === 'good' ? '就绪' : runtimeTone === 'warn' ? '降级' : '未就绪' }}</b>
+          运行环境 <b class="num" :style="{ color: runtime.environment === 'live' ? 'var(--down)' : 'var(--up)' }">{{ envBadge(runtime.environment) }}</b>
+          · 认证 <b>{{ t('admin.overview.keyConnection.method') }}</b>
+          · <b :style="{ color: runtimeTone === 'good' ? 'var(--up)' : 'var(--down)' }">{{ okxLinked ? 'READY' : 'NOT READY' }}</b>
         </span>
       </template>
     </PageHeader>
@@ -456,7 +319,6 @@ onMounted(() => { loadAll(); loadMx() })
         <span class="chip">
           OKX 连接
           <b :style="{ color: okxLinked ? 'var(--up)' : 'var(--down)' }">{{ okxLinked ? '已接入' : '未接入' }}</b>
-          <template v-if="runtime?.oauth?.site"> · {{ runtime.oauth.site }}</template>
         </span>
         <span class="chip">初始本金 <b class="num" style="color: var(--up);">{{ config.editable.initial_capital }} U</b></span>
         <span class="chip">
@@ -488,82 +350,25 @@ onMounted(() => { loadAll(); loadMx() })
 
       <!-- ============ 页签 1：OKX 账户接入 ============ -->
       <div v-if="activeTab === 'okx'" class="space-y-4">
-        <SettingsSection title="账号连接与运行诊断" description="OKX 官方 OAuth 授权（推荐）与运行链路诊断；无需向 R20 提供 OKX 密码或 2FA。">
+        <SettingsSection :title="t('admin.overview.keyConnection.title')" :description="t('admin.overview.keyConnection.description')">
           <template #actions>
-            <button class="btn btn-quiet" @click="rediagnose"><RefreshCw class="h-3.5 w-3.5" /> 重新诊断</button>
+            <button class="btn btn-quiet" @click="rediagnose"><RefreshCw class="h-3.5 w-3.5" /> {{ t('admin.overview.keyConnection.refresh') }}</button>
           </template>
-
-          <div v-if="runtime" class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-4">
-            <!-- 左：诊断明细 -->
-            <div class="space-y-3">
-              <div class="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs leading-relaxed" style="color: var(--ink-2);">
-                <div>当前环境 <b class="num" :style="{ color: runtime.selected_mode === 'live' ? 'var(--down)' : 'var(--up)', fontWeight: 700 }">{{ envBadge(runtime.selected_mode) }}</b></div>
-                <div>认证来源 <b style="color: var(--accent);">{{ sourceLabel[runtime.credential_source] || runtime.credential_source || '--' }}</b></div>
-                <div>CLI <span style="color: var(--ink-1);">{{ runtime.cli?.installed ? (runtime.cli.version || '已安装') : '未安装' }}</span></div>
-                <div>OAuth <span style="color: var(--ink-1);">{{ runtime.oauth?.status }}{{ runtime.oauth?.site ? ' · ' + runtime.oauth.site : '' }}</span></div>
-                <div>连接账号 <span style="color: var(--ink-1);">{{ runtime.oauth?.account_label || (runtime.oauth?.status === 'logged_in' ? '已连接（CLI 不返回昵称/UID）' : '--') }}</span></div>
-                <div>权限 <span class="text-[11px]" style="color: var(--ink-3);">{{ (runtime.oauth?.scopes || []).join(', ') || '--' }}</span></div>
-                <div class="col-span-2">只读探针 <span :style="{ color: runtime.read_probe?.ok ? 'var(--up)' : runtimeTone === 'warn' ? 'var(--warn)' : 'var(--down)' }">{{ runtime.read_probe?.detail || '--' }}</span></div>
-                <div v-if="runtime.live_control_probe" class="col-span-2">LIVE 对照探针 <span :style="{ color: runtime.live_control_probe.ok ? 'var(--up)' : 'var(--down)' }">{{ runtime.live_control_probe.detail }}</span></div>
-              </div>
-              <div v-if="runtime.issues?.length" class="rounded-lg border p-2.5 space-y-0.5 text-[11px]" style="border-color: var(--down-line); background-color: var(--down-bg); color: var(--down);">
-                <div v-for="(issue, i) in runtime.issues" :key="i">• {{ issue }}</div>
-              </div>
-              <div v-if="runtime.steps?.length" class="rounded-lg border p-2.5 space-y-0.5 text-[11px]" style="border-color: var(--line-1); background-color: var(--surface-1); color: var(--ink-2);">
-                <div class="font-bold" style="color: var(--ink-1);">操作指引</div>
-                <div v-for="(s, i) in runtime.steps" :key="i">• {{ s }}</div>
-              </div>
-              <div class="flex gap-2">
-                <button class="btn btn-quiet" @click="checkCli"><Terminal class="h-3.5 w-3.5" /> 检测 Node / npm / CLI</button>
-                <button v-if="auth.isSuperadmin" class="btn btn-quiet" :disabled="installingCli" @click="installCli">{{ installingCli ? '安装中…' : '安装 / 升级 CLI' }}</button>
-              </div>
-              <div v-if="cliCheck" class="rounded-lg border p-2.5 text-[11px] space-y-0.5" style="background-color: var(--surface-1); border-color: var(--line-1); color: var(--ink-2);">
-                <div>Node.js：<span :style="{ color: cliCheck.node_installed ? 'var(--up)' : 'var(--down)' }">{{ cliCheck.node_installed ? `✓ ${cliCheck.node_version} (${cliCheck.node_path})` : '✗ 未安装' }}</span></div>
-                <div>npm：<span :style="{ color: cliCheck.npm_installed ? 'var(--up)' : 'var(--down)' }">{{ cliCheck.npm_installed ? `✓ ${cliCheck.npm_version}` : '✗ 未安装' }}</span></div>
-                <div>OKX CLI：<span :style="{ color: cliCheck.okx_installed ? 'var(--up)' : 'var(--down)' }">{{ cliCheck.okx_installed ? `✓ ${cliCheck.okx_version} (${cliCheck.okx_path})` : '✗ 未安装' }}</span></div>
-              </div>
-            </div>
-
-            <!-- 右：OAuth 面板 -->
-            <div class="rounded-lg border p-3.5 space-y-2" style="background-color: var(--surface-1); border-color: var(--line-1);">
-              <div class="text-[11px] font-bold" style="color: var(--ink-1);">官方 OAuth 授权（推荐）</div>
-              <label class="block text-[11px]" style="color: var(--ink-2);">OKX 站点</label>
-              <select v-model="oauthSite" class="input w-full">
-                <option value="global">Global · www.okx.com</option>
-                <option value="eea">EEA · my.okx.com</option>
-                <option value="us">US · app.okx.com</option>
-                <option value="tr">TR · tr.okx.com</option>
-              </select>
-              <template v-if="runtime?.oauth?.status === 'logged_in'">
-                <button v-if="auth.isSuperadmin" class="btn btn-primary w-full" :disabled="switchingAccount || loggingOutOauth" @click="switchOauthAccount" title="解除当前授权并重新在浏览器中连接新 OKX 账号">
-                  <RefreshCw class="h-3.5 w-3.5" :class="switchingAccount ? 'animate-spin' : ''" /> {{ switchingAccount ? '切换中…' : '更换 OKX 账号' }}
-                </button>
-                <button v-if="auth.isSuperadmin" class="btn w-full" :disabled="loggingOutOauth || switchingAccount" style="color: var(--down); border: 1px solid var(--down-line); background: var(--surface-2);" @click="logoutOauth" title="解绑当前 OKX 账号并清除本地授权凭证">
-                  <Unlink class="h-3.5 w-3.5" /> {{ loggingOutOauth ? '解绑中…' : '解绑账号' }}
-                </button>
-              </template>
-              <button v-else-if="auth.isSuperadmin" class="btn btn-primary w-full" :disabled="startingOauth" @click="startOauth">
-                <KeyRound class="h-3.5 w-3.5" /> {{ startingOauth ? '申请授权码中…' : '使用授权码连接 OKX' }}
-              </button>
-              <p v-if="!auth.isSuperadmin" class="text-[11px]" style="color: var(--ink-3);">仅超级管理员可管理账号连接。</p>
-              <div v-if="oauthState" class="text-[11px]" style="color: var(--warn);">{{ oauthState }}</div>
-              <div v-if="oauthResult?.kind === 'device'" class="rounded-lg border p-2.5 space-y-1.5" style="background-color: var(--accent-bg); border-color: var(--accent-line);">
-                <div class="text-[11px] font-bold" style="color: var(--ink-1);">请在浏览器完成 OKX 官方授权</div>
-                <div class="text-[11px] break-all"><a :href="oauthResult.verification_uri" target="_blank" rel="noopener" class="underline" style="color: var(--accent);">{{ oauthResult.verification_uri }}</a></div>
-                <div class="text-center py-1.5 rounded border" style="background-color: var(--surface-2); border-color: var(--line-1);"><span class="text-lg font-semibold tracking-widest num" style="color: var(--ink-1);">{{ oauthResult.user_code }}</span></div>
-                <div class="text-[11px]" style="color: var(--ink-2);">有效期约 {{ Math.ceil(Number(oauthResult.expires_in || 600) / 60) }} 分钟</div>
-                <button class="btn btn-quiet w-full" @click="checkOauth">我已授权，检查状态</button>
-              </div>
-              <div v-else-if="oauthResult?.kind === 'logged_in'" class="rounded-lg border p-2.5 text-[11px]" style="background-color: var(--up-bg); border-color: var(--up-line); color: var(--up);">
-                <div class="flex items-center justify-between"><span>已登录 · 站点 {{ oauthResult.site }}</span><span>已就绪</span></div>
-                <div class="text-[11px] break-all mt-1" style="color: var(--ink-2);">{{ (oauthResult.scopes || []).join(', ') }}</div>
-              </div>
-              <div v-else-if="oauthResult?.kind === 'error'" class="rounded-lg border p-2.5 text-[11px]" style="background-color: var(--down-bg); border-color: var(--down-line); color: var(--down);">{{ oauthResult.message }}</div>
-            </div>
+          <div v-if="okxLinked" role="status" class="rounded-lg border p-3" style="color: var(--up); border-color: var(--up-line); background-color: var(--up-bg);">
+            <b>READY · {{ envBadge(runtime.environment) }}</b>
+            <span class="ml-2 num">{{ t('admin.overview.keyConnection.fingerprint') }}: {{ runtime.fingerprint }}</span>
+          </div>
+          <div v-else role="alert" class="rounded-lg border p-3" style="color: var(--down); border-color: var(--down-line); background-color: var(--down-bg);">
+            <b>NOT READY · {{ envBadge(runtime?.environment) }}</b>
+            <p>{{ runtime?.not_ready_reason || t('admin.overview.keyConnection.unavailable') }} — {{ t('admin.overview.keyConnection.blocked') }}</p>
+          </div>
+          <div v-if="runtime" class="mt-3 text-xs space-y-1" style="color: var(--ink-2);">
+            <div>{{ t('admin.overview.keyConnection.method') }} · {{ runtime.base_url }}</div>
+            <div>LIVE: {{ runtime.live_configured ? t('admin.overview.keyConnection.configured') : t('admin.overview.keyConnection.missing') }} · DEMO: {{ runtime.demo_configured ? t('admin.overview.keyConnection.configured') : t('admin.overview.keyConnection.missing') }}</div>
           </div>
         </SettingsSection>
 
-        <SettingsSection title="交易环境与备用凭证" description="模拟盘 / 实盘环境切换（切 LIVE 需确认短语）；备用 API Key 用于无人值守部署。">
+        <SettingsSection :title="t('admin.overview.keyConnection.credentials')" :description="t('admin.overview.keyConnection.storage')">
           <template #actions>
             <button class="btn btn-primary" @click="saveEnvironment"><Save class="h-3.5 w-3.5" /> 保存环境与凭证</button>
           </template>
@@ -579,8 +384,8 @@ onMounted(() => { loadAll(); loadMx() })
               环境切换即时生效于交易核心下一个周期；LIVE 切换须输入确认短语，并确保实盘 Key 权限与 IP 白名单已核对。
             </div>
           </div>
-          <details class="mt-3">
-            <summary class="cursor-pointer text-[11px] select-none" style="color: var(--accent);">备用方式：分别配置 LIVE / DEMO API Key（无人值守部署）</summary>
+          <div class="mt-3">
+            <p class="text-[11px]" style="color: var(--accent);">LIVE / DEMO API Key</p>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3 p-3 rounded-lg border" style="background-color: var(--surface-1); border-color: var(--line-1);">
               <div class="space-y-2">
                 <div class="text-[11px] font-bold" style="color: var(--ink-1);">实盘 LIVE Key</div>
@@ -594,9 +399,9 @@ onMounted(() => { loadAll(); loadMx() })
                 <input v-model="keys.demo_secret" type="password" placeholder="Secret Key" class="input w-full" />
                 <input v-model="keys.demo_pass" type="password" placeholder="Passphrase" class="input w-full" />
               </div>
-              <div class="sm:col-span-2 text-[11px]" style="color: var(--ink-3);">OAuth 与 API Key 二选一即可。不要为同一运行用户同时配置 CLI API Key Profile 和 OAuth。</div>
+              <div class="sm:col-span-2 text-[11px]" style="color: var(--ink-3);">{{ t('admin.overview.keyConnection.storage') }}</div>
             </div>
-          </details>
+          </div>
         </SettingsSection>
       </div>
 
