@@ -294,8 +294,9 @@ def load_adaptive_config():
     """Fallback config reader maintaining compatibility."""
     return {}
 
-def clean_stale_open_orders() -> Tuple[bool, str]:
+def clean_stale_open_orders(keep_ord_ids: Optional[set] = None) -> Tuple[bool, str]:
     """Cancel stale entry orders; any inability to verify/cancel blocks the trading cycle."""
+    keep_ord_ids = keep_ord_ids or set()
     try:
         open_orders = okx_rest.pending_orders()
     except Exception as exc:
@@ -304,6 +305,8 @@ def clean_stale_open_orders() -> Tuple[bool, str]:
     for order in open_orders:
         inst_id = str(order.get("instId") or "")
         order_id = str(order.get("ordId") or "")
+        if order_id and order_id in keep_ord_ids:
+            continue  # 挂单对账已判定归属（接管），不受超时生命周期清理影响
         state = str(order.get("state", "live")).lower()
         created_at = int(order.get("cTime", now_ts) or now_ts)
         if state not in {"live", "partially_filled"} or not order_id or now_ts - created_at <= 240000:
@@ -314,6 +317,127 @@ def clean_stale_open_orders() -> Tuple[bool, str]:
             return False, f"failed to cancel stale order {inst_id}/{order_id}: {exc}"
         print(f"[挂单生命周期管理] 自动撤销超时挂单: {inst_id} (ordId={order_id}, state={state})")
     return True, "open orders verified"
+
+
+# =============================================================================
+# US-006 重启接管存量挂单——周期级挂单对账
+# =============================================================================
+OPEN_INTENT_FILE = os.path.join(DATA_DIR, "open_order_intents.json")
+OPEN_INTENT_TTL_MS = 6 * 3600 * 1000  # 本地开仓意图有效期；超期 → 周期意图已失效
+
+RECONCILE_REASON_ORPHAN = "无对应意图"
+RECONCILE_REASON_SIDE_MISMATCH = "方向不一致"
+RECONCILE_REASON_INTENT_STALE = "周期意图已失效"
+
+
+def record_open_intent(inst_id: str, side: str, ts_ms: int = None) -> None:
+    """下单成功后记录本地开仓意图，供重启后挂单对账归属（US-006）。"""
+    try:
+        intents = []
+        if os.path.exists(OPEN_INTENT_FILE):
+            try:
+                with open(OPEN_INTENT_FILE, "r", encoding="utf-8") as f:
+                    raw = json.load(f)
+                if isinstance(raw, list):
+                    intents = raw
+            except (ValueError, OSError):
+                intents = []  # 空文件/损坏文件：从空重建，不影响本单交易
+        intents.append({"instId": inst_id, "side": side, "ts": int(ts_ms or time.time() * 1000)})
+        with open(OPEN_INTENT_FILE, "w", encoding="utf-8") as f:
+            json.dump(intents[-200:], f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[挂单对账] 记录开仓意图失败（不影响本单交易）: {e}")
+
+
+def load_open_intents() -> List[Dict[str, Any]]:
+    """读取原始本地开仓意图（不做 TTL 过滤，过期判定交给对账语义分层）。"""
+    try:
+        if os.path.exists(OPEN_INTENT_FILE):
+            with open(OPEN_INTENT_FILE, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+            if isinstance(raw, list):
+                return [i for i in raw if isinstance(i, dict) and i.get("instId")]
+    except Exception as e:
+        print(f"[挂单对账] 读取本地意图失败: {e}")
+    return []
+
+
+def _order_pos_side(side: str) -> str:
+    return "long" if str(side).lower() == "buy" else "short"
+
+
+def reconcile_pending_orders(trackers: Dict[str, Any] = None, now_ms: int = None, pending: List[Dict[str, Any]] = None) -> Tuple[bool, set]:
+    """周期开始（新增下单前）对本账户 USDT-SWAP 存量限价挂单做归属对账（US-006）。
+
+    语义：
+    - 持仓追踪器归属（同合约同方向）→ 接管保留；
+    - 本地开仓意图（决策历史）同合约同方向且未过期 → 接管保留；
+    - 同合约方向不一致 → 撤销（原因=方向不一致）；
+    - 意图存在但超过 TTL → 撤销（原因=周期意图已失效）；
+    - 无任何本地意图可归属 → 撤销（原因=无对应意图）。
+
+    返回 (ok, kept_ord_ids)。ok=False 表示对账自身失败（读取/撤销网络或签名异常）
+    → 调用方必须 fail-closed：本周期禁止新增下单（不是清库）。
+    """
+    now_ms = int(now_ms or time.time() * 1000)
+    if pending is None:
+        try:
+            # GET /api/v5/trade/orders-pending（instType=SWAP，冻结周期环境直签）
+            pending = okx_rest.pending_orders()
+        except Exception as exc:
+            print(f"[挂单对账] warn 读取存量挂单失败: {exc} → fail-closed，本周期禁止新增下单")
+            return False, set()
+    if not isinstance(pending, list):
+        print("[挂单对账] warn 存量挂单响应非列表 → fail-closed，本周期禁止新增下单")
+        return False, set()
+    if trackers is None:
+        trackers = load_trackers()
+    intents = load_open_intents()
+    kept: set = set()
+
+    def _cancel_orphan(reason: str) -> bool:
+        try:
+            okx_rest.cancel_order(inst_id, ord_id)
+        except Exception as exc:
+            print(f"[挂单对账] warn 撤销失败 instId={inst_id} ordId={ord_id}: {exc} → fail-closed，本周期禁止新增下单")
+            return False
+        print(f"[挂单对账] 撤销孤儿单 instId={inst_id} ordId={ord_id} side={side} 原因={reason}")
+        return True
+
+    for order in pending:
+        if not isinstance(order, dict):
+            continue
+        inst_id = str(order.get("instId") or "")
+        ord_id = str(order.get("ordId") or "")
+        side = str(order.get("side") or "").lower()
+        state = str(order.get("state", "live")).lower()
+        if state not in {"live", "partially_filled"} or not inst_id:
+            continue
+        pos_side = _order_pos_side(side)
+        tracker_key = f"{inst_id}_{pos_side}"
+        # 1) 持仓追踪器归属：同合约同方向 → 重启后接管保留
+        if tracker_key in (trackers or {}):
+            print(f"[挂单对账] 接管挂单 instId={inst_id} ordId={ord_id} side={side} 原因=追踪器归属")
+            kept.add(ord_id)
+            continue
+        # 2) 本地开仓意图（决策历史）归属
+        intent = next((i for i in intents if str(i.get("instId")) == inst_id), None)
+        if intent is not None:
+            if str(intent.get("side", "")).lower() != side:
+                if not _cancel_orphan(RECONCILE_REASON_SIDE_MISMATCH):
+                    return False, kept
+                continue
+            if now_ms - int(intent.get("ts", 0) or 0) > OPEN_INTENT_TTL_MS:
+                if not _cancel_orphan(RECONCILE_REASON_INTENT_STALE):
+                    return False, kept
+                continue
+            print(f"[挂单对账] 接管挂单 instId={inst_id} ordId={ord_id} side={side} 原因=意图归属")
+            kept.add(ord_id)
+            continue
+        # 3) 孤儿单：无任何本地意图可归属
+        if not _cancel_orphan(RECONCILE_REASON_ORPHAN):
+            return False, kept
+    return True, kept
 
 def check_black_swan_sentinel() -> Tuple[bool, str]:
     """Minute-level Black Swan Sentinel, driven by the unified V5 REST public
@@ -519,6 +643,7 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: f
             break
     if not order_id:
         return False, "exchange accepted response without a verifiable order id"
+    record_open_intent(inst_id, side)
     return True, str(order_id)
 
 
@@ -1839,8 +1964,15 @@ def execute_portfolio():
     now_dt = datetime.datetime.now(tz_bj)
     timestamp_full = now_dt.strftime("%Y-%m-%d %H:%M:%S")
 
+    # 0a. US-006 周期级挂单对账：重启/新周期接管或撤销存量挂单（在新增下单之前）
+    reconcile_ok, reconciled_kept_ord_ids = reconcile_pending_orders(trackers=load_trackers())
+    if not reconcile_ok:
+        # fail-closed：仅禁止本周期新增下单（不是清库），持仓管理照常执行
+        print("[挂单对账] fail-closed：本周期禁止新增下单（对账失败，不清库）")
+    entries_blocked = not reconcile_ok
+
     # 0. Clean Stale Open Orders & Harvest Real-time News Sentiment
-    orders_ok, orders_error = clean_stale_open_orders()
+    orders_ok, orders_error = clean_stale_open_orders(keep_ord_ids=reconciled_kept_ord_ids)
     if not orders_ok:
         print(f"[Trader] Abort: unable to verify/cancel stale open orders: {orders_error}")
         return None
@@ -2107,6 +2239,9 @@ def execute_portfolio():
                         elif not calculus_accel_ok:
                             print(f"[Pyramiding 拦截] {f['name']} 数理动能衰竭或延续概率偏低 (加速度={c_accel:+.2f}, 概率={p_cont:.1f}%)，禁止追多加仓")
 
+                if allow_entry and entries_blocked:
+                    print(f"[挂单对账] fail-closed 拦截 {f['name']} 新增多单下单（本周期对账失败）")
+                    allow_entry = False
                 if allow_entry:
                     limit_px = round(ai_decision.get("entry_price") if (ai_decision and ai_decision.get("entry_price", 0) > 0) else (f.get("bidPx") or f["price"]), prec)
                     tp_px = round(ai_decision.get("take_profit_price") if (ai_decision and ai_decision.get("take_profit_price", 0) > 0) else (limit_px + tp_dist), prec)
@@ -2205,6 +2340,9 @@ def execute_portfolio():
                         elif not calculus_accel_ok:
                             print(f"[Pyramiding 拦截] {f['name']} 数理动能失速企稳或击穿概率偏低 (加速度={c_accel:+.2f}, 概率={p_break:.1f}%)，禁止追空加仓")
 
+                if allow_entry and entries_blocked:
+                    print(f"[挂单对账] fail-closed 拦截 {f['name']} 新增空单下单（本周期对账失败）")
+                    allow_entry = False
                 if allow_entry:
                     limit_px = round(ai_decision.get("entry_price") if (ai_decision and ai_decision.get("entry_price", 0) > 0) else (f.get("askPx") or f["price"]), prec)
                     tp_px = round(ai_decision.get("take_profit_price") if (ai_decision and ai_decision.get("take_profit_price", 0) > 0) else (limit_px - tp_dist), prec)
