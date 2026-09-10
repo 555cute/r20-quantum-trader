@@ -16,6 +16,10 @@ FRONTEND_CONSUMED_KEYS = ("model", "provider_name", "reasoning_effort", "api_for
 
 
 class LlmRuntimeContractTests(unittest.TestCase):
+    def setUp(self):
+        from tests.config_sandbox import isolate_config
+        isolate_config(self)
+
     def test_runtime_exposes_keys_frontend_reads(self):
         runtime = get_active_llm_runtime()
         for key in FRONTEND_CONSUMED_KEYS:

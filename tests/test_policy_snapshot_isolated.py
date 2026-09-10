@@ -30,6 +30,8 @@ class TestPolicySnapshotIsolated(unittest.TestCase):
     """Offline unit tests for deterministic policy snapshot generation."""
 
     def setUp(self) -> None:
+        from tests.config_sandbox import isolate_config
+        isolate_config(self)
         self.base_prompt_profile: Dict[str, Any] = {
             "id": "stable",
             "name": "全维度波段强化版",

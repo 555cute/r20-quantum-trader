@@ -66,6 +66,8 @@ class CapabilityDetectionTests(unittest.TestCase):
 
 class LlmCredentialRotationTests(unittest.TestCase):
     def setUp(self):
+        from tests.config_sandbox import isolate_config
+        isolate_config(self)
         import r20_backend.llm_manager as lm
         import r20_backend.settings_store as ss
         import r20_backend.config as cfg
@@ -74,7 +76,7 @@ class LlmCredentialRotationTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         #  tripwire：记录真实生产文件指纹，tearDown 校验测试绝无触碰
         self._real_file = ROOT / "data" / "llm_models.json"
-        self._real_hash = self._real_file.read_bytes().hex()[:32] if self._real_file.exists() else ""
+        self._real_hash = self._real_file.stat() if self._real_file.exists() else None
         self._orig = [(lm.LLM_CONFIG_FILE, "llm_manager"), (ss.ENV_FILE, "settings_store")]
         lm.LLM_CONFIG_FILE = Path(self.tmp.name) / "llm_models.json"
         lm.LLM_PROVIDERS_FILE = lm.LLM_CONFIG_FILE  # 兼容别名必须同步 patch，否则端点写真实文件
@@ -103,7 +105,7 @@ class LlmCredentialRotationTests(unittest.TestCase):
         import r20_gateway.secrets as sec
         sec.save_secrets = self._orig_save
         self.tmp.cleanup()
-        after = self._real_file.read_bytes().hex()[:32] if self._real_file.exists() else ""
+        after = self._real_file.stat() if self._real_file.exists() else None
         self.assertEqual(after, self._real_hash, "测试触碰了生产 data/llm_models.json！")
 
     def _raw(self):

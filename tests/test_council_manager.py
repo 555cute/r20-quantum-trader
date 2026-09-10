@@ -13,6 +13,8 @@ from r20_backend.council_manager import (
 
 class TestCouncilManager(unittest.TestCase):
     def setUp(self):
+        from tests.config_sandbox import isolate_config
+        isolate_config(self)
         # Backup council config state
         self.original_cfg = load_council_config()
 
