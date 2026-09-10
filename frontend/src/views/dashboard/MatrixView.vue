@@ -13,6 +13,7 @@ import KpiRibbon from '../../components/dashboard/KpiRibbon.vue';
 import ChartWorkstation from '../../components/dashboard/ChartWorkstation.vue';
 import PositionsOrdersPanel from '../../components/dashboard/PositionsOrdersPanel.vue';
 import FactorMatrix from '../../components/dashboard/FactorMatrix.vue';
+import VenueAccountsPanel from '../../components/dashboard/VenueAccountsPanel.vue';
 
 const store = useDashboardStore();
 const { t } = useI18n();
@@ -44,6 +45,8 @@ watch(focusSymbol, (v) => {
     <PageHead :title="t('dash.matrix.title')" :desc="t('dash.matrix.desc')" />
 
     <KpiRibbon />
+
+    <VenueAccountsPanel />
 
     <div class="grid grid-cols-1 gap-3 xl:grid-cols-12">
       <div class="xl:col-span-8">

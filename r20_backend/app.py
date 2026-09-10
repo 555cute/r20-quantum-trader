@@ -13,7 +13,7 @@ import time
 import urllib.request
 from urllib.parse import urlparse
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data"
@@ -3479,6 +3479,126 @@ def positions(x_r20_admin_token: str | None = Header(default=None)) -> dict[str,
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"OKX account request failed: {exc}") from exc
+
+
+# ---------------------------------------------------------------------------
+# US-005 三所账户对称只读面：GET /api/v1/venue_accounts?environment=demo|live
+# 契约（设计 §8.1 + 时效审计）：登录态、零写调用、凭证不回显；
+# 读不到 = status≠ready 且数值字段 None——**绝不以 0 冒充未知**；
+# 后端不提供任何跨所/跨环境聚合合计字段（demo/live 永不加总）。
+# ---------------------------------------------------------------------------
+
+_VENUE_ACCOUNTS_ENVS = ("demo", "live")
+
+
+def _venue_card_unknown(reason: str, status: str = "unavailable") -> dict[str, Any]:
+    return {"status": status, "equity": None, "available": None,
+            "positions_count": None, "open_orders_count": None,
+            "last_sync_ts": None, "reason": reason}
+
+
+def _okx_f(v: Any) -> Optional[float]:
+    try:
+        s = str(v if v is not None else "").strip()
+        return float(s) if s else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _venue_card_okx(environment: str) -> dict[str, Any]:
+    """OKX：current_environment() fail-closed；未配置/档位不一致不发 HTTP。"""
+    try:
+        from scripts.okx_runtime import current_environment
+        env = current_environment()
+    except Exception as exc:
+        return _venue_card_unknown(f"OKX 环境读取失败: {type(exc).__name__}")
+    if env.mode != environment:
+        return _venue_card_unknown(
+            f"系统当前 OKX 档位为 {env.mode}，与请求环境 {environment} 不一致（拒绝跨环境读数）")
+    if not env.configured:
+        return _venue_card_unknown(
+            f"OKX {env.mode.upper()} API Key 未配置——请在后台「账户接入」录入三件套（未发起任何请求）")
+    try:
+        from scripts import okx_rest
+        bal = okx_rest.request("GET", "/api/v5/account/balance", {"instType": "SWAP"}, env=env)
+        rows = bal if isinstance(bal, list) else []
+        acct = rows[0] if rows and isinstance(rows[0], dict) else {}
+        available = _okx_f(acct.get("availBal"))
+        if available is None:
+            for d in acct.get("details") or []:
+                if isinstance(d, dict) and str(d.get("ccy") or "").upper() == "USDT":
+                    available = _okx_f(d.get("availEq"))
+                    break
+        poss_raw = okx_rest.request("GET", "/api/v5/account/positions", {"instType": "SWAP"}, env=env)
+        pend_raw = okx_rest.request("GET", "/api/v5/trade/orders-pending", {"instType": "SWAP"}, env=env)
+        if not isinstance(poss_raw, list) or not isinstance(pend_raw, list):
+            return _venue_card_unknown("OKX 返回结构异常（positions/orders-pending 非列表）", status="degraded")
+        poss = [p for p in poss_raw if isinstance(p, dict) and abs(float(p.get("pos") or 0)) > 1e-12]
+        card = {"status": "ready" if acct else "degraded",
+                "equity": _okx_f(acct.get("totalEq")),
+                "available": available,
+                "positions_count": len(poss),
+                "open_orders_count": len([o for o in pend_raw if isinstance(o, dict)]),
+                "last_sync_ts": int(time.time() * 1000),
+                "reason": "" if acct else "balance 返回空数据"}
+        return card
+    except Exception as exc:
+        return _venue_card_unknown(f"OKX 读取失败: {type(exc).__name__}: {str(exc)[:160]}", status="degraded")
+
+
+def _venue_card_gate(environment: str) -> dict[str, Any]:
+    """Gate：经 (venue, environment) 适配器只读三查；凭证缺失不发 HTTP。"""
+    try:
+        from r20_backend.exchanges import registry as ex_registry
+        # gate 档位名映射：模拟环境 = env_profiles 的 sandbox 档（US-001 双域钉死）
+        env_key = "live" if environment == "live" else "sandbox"
+        api_key, secret = ex_registry.venue_credentials("gate")
+        if not api_key or not secret:
+            return _venue_card_unknown("Gate API Key/Secret 未配置——请在后台「多交易所凭证」录入（未发起任何请求）")
+        ad = ex_registry.get_adapter("gate", environment=env_key)
+        snap = ad.account_snapshot()
+        positions = ad.positions()
+        open_orders_note = ""
+        try:
+            open_rows = ad.signed_request("GET", "/api/v4/futures/usdt/orders",
+                                          {"status": "open", "limit": "100"})
+            open_cnt = len(open_rows) if isinstance(open_rows, list) else None
+        except Exception:
+            open_cnt = None   # 账户级挂单读取失败 → 未知，不是 0
+        card = {"status": "ready",
+                "equity": _okx_f(snap.get("equity_usdt")),
+                "available": _okx_f(snap.get("available_usdt")),
+                "positions_count": len(positions) if isinstance(positions, list) else None,
+                "open_orders_count": open_cnt,
+                "last_sync_ts": int(time.time() * 1000),
+                "reason": ""}
+        if card["positions_count"] is None or open_cnt is None:
+            card["status"] = "degraded"
+            card["reason"] = "账户可读，部分子项读取失败（未知项显示为 —，不填 0）"
+        return card
+    except Exception as exc:
+        return _venue_card_unknown(f"Gate 读取失败: {type(exc).__name__}: {str(exc)[:160]}")
+
+
+def _venue_card_binance(environment: str) -> dict[str, Any]:
+    """Binance：supports_account=False → not_implemented 显式声明，禁 0 冒充。"""
+    return _venue_card_unknown("Binance 适配器账户面未实装（私有读属 P1 能力范围）——非零、非错误，是「未实装」",
+                               status="not_implemented")
+
+
+@app.get("/api/v1/venue_accounts")
+def venue_accounts(environment: str = Query(default="demo"),
+                   x_r20_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
+    """三所×环境账户对称卡数据源（US-005，只读）。"""
+    require_admin_header(x_r20_admin_token)
+    env = str(environment or "").strip().lower()
+    if env not in _VENUE_ACCOUNTS_ENVS:
+        raise HTTPException(status_code=400, detail="environment 必须是 demo 或 live")
+    return {"environment": env,
+            "captured_at_ms": int(time.time() * 1000),
+            "venues": {"okx": _venue_card_okx(env),
+                       "binance": _venue_card_binance(env),
+                       "gate": _venue_card_gate(env)}}
 
 
 # Preserve the existing public dashboard and its relative-path API contract at /.
