@@ -224,13 +224,19 @@ def require_execution(venue: str, environment: Optional[str] = None) -> None:
     cap = adapter.capabilities
     env = str(getattr(adapter, "environment", "live") or "live")
     if not execution_open(cap.venue, env):
-        needed = ("R20_GATE_DEMO_EXECUTION" if is_sandbox_environment(env)
-                  else "R20_GATE_EXECUTION")
+        if cap.venue == "gate":
+            needed = ("R20_GATE_DEMO_EXECUTION" if is_sandbox_environment(env)
+                      else "R20_GATE_EXECUTION")
+            prompt = f"Gate {env} 档需显式设 {needed}=1（后台凭证就绪后再开）。"
+        elif cap.venue == "binance":
+            needed = ("R20_BINANCE_DEMO_EXECUTION" if is_sandbox_environment(env)
+                      else "R20_BINANCE_EXECUTION")
+            prompt = f"Binance {env} 档需显式设 {needed}=1（后台凭证就绪后再开）。"
+        else:
+            prompt = "当前该场所仅提供只读行情。"
+
         raise ExchangeCapabilityError(
-            f"{cap.display_name}: 适配器执行未开闸。"
-            + (f"Gate {env} 档需显式设 {needed}=1（后台凭证就绪后再开）。"
-               if cap.venue == "gate" else
-               "当前该场所仅提供只读行情。")
+            f"{cap.display_name}: 适配器执行未开闸。{prompt}"
             + ("注：OKX 实盘执行走 ai_factor_trader 遗留链路，不经本路由。"
                if cap.venue == "okx" else "")
         )

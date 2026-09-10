@@ -20,7 +20,7 @@ import hashlib
 import hmac
 import json
 import time
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 from typing import Any, Dict, List, Optional
 from urllib.error import HTTPError
 from urllib.parse import urlencode
@@ -68,7 +68,8 @@ class BinanceAdapter(BaseExchangeAdapter):
         has_top_trader_ratio=True,
         has_taker_ratio=True,
         supports_account=True,
-        supports_orders=False,              # 门禁不变：下单仍恒被拒
+        supports_orders=True,               # US-005：开启下单与保护单执行
+        adapter_execution_flag="R20_BINANCE_EXECUTION",  # US-005：独立执行总闸
         mainland_ip_restricted=True,
         rate_limit_note="按端点读取勿用概数：new_algo_order 源码记载计订单 10s/1min 计数、"
                         "IP 权重 0；普通面 IP 权重 1200/min，429 继续打会 418 封 IP 最长 3 天",
@@ -455,11 +456,190 @@ class BinanceAdapter(BaseExchangeAdapter):
             })
         return out
 
-    # ---- 下单执行门禁：下单属 US-005 范围，此处显式 fail-closed ----
+    # ---- 下单与执行闭环（US-005）----
+    def place_order(self, symbol: str, side: str, contracts: float,
+                    price: Optional[float] = None, tif: str = "gtc",
+                    text: str = "", position_side: Optional[str] = None) -> Dict[str, Any]:
+        """Binance 下单接口（US-005）。
+        contracts: base_asset 下单量（币数，正数）；
+        side: 'long'/'buy' -> 'BUY', 'short'/'sell' -> 'SELL'。
+        """
+        inst = self.native_symbol(symbol)
+        s = "BUY" if str(side).lower() in ("long", "buy") else "SELL"
+        qty = float(contracts)
+        if qty <= 0:
+            raise ValueError(f"下单数量必须为正数，收到: {contracts}")
+
+        spec = self.fetch_instrument_spec(symbol)
+        step = Decimal(str(spec.step_size if spec else 1e-6))
+        qty_dec = (Decimal(str(qty)) / step).to_integral_value(rounding=ROUND_DOWN) * step
+        qty_str = format(qty_dec, "f").rstrip("0").rstrip(".") if "." in format(qty_dec, "f") else format(qty_dec, "f")
+
+        params: Dict[str, Any] = {
+            "symbol": inst,
+            "side": s,
+            "quantity": qty_str,
+        }
+
+        if price is not None and float(price) > 0:
+            params["type"] = "LIMIT"
+            params["timeInForce"] = tif.upper()
+            tick = Decimal(str(spec.tick_size if spec else 0.1))
+            px_dec = (Decimal(str(price)) / tick).to_integral_value(rounding=ROUND_DOWN) * tick
+            params["price"] = format(px_dec, "f").rstrip("0").rstrip(".") if "." in format(px_dec, "f") else format(px_dec, "f")
+        else:
+            params["type"] = "MARKET"
+
+        if text:
+            params["newClientOrderId"] = str(text).strip()
+        if position_side:
+            params["positionSide"] = str(position_side).upper()
+
+        data = self.signed_request("POST", "/fapi/v1/order", params=params)
+        if not isinstance(data, dict):
+            raise BinanceAPIError("bad_response", "下单响应结构异常")
+
+        order_id = str(data.get("orderId") or "")
+        client_oid = str(data.get("clientOrderId") or "")
+        return {
+            "venue": "binance",
+            "id": order_id,
+            "order_id": order_id,
+            "client_order_id": client_oid,
+            "text": client_oid,
+            "status": str(data.get("status") or ""),
+            "symbol": inst,
+            "side": s.lower(),
+            "price": float(data.get("price") or 0.0),
+            "origQty": float(data.get("origQty") or 0.0),
+            "executedQty": float(data.get("executedQty") or 0.0),
+            "raw": data,
+        }
+
+    def create_order(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        """place_order 别名。"""
+        return self.place_order(*args, **kwargs)
+
+    def cancel_order(self, symbol: str, order_id: Optional[str] = None,
+                     client_order_id: Optional[str] = None) -> Dict[str, Any]:
+        """撤销普通委托（US-005）。"""
+        inst = self.native_symbol(symbol)
+        params: Dict[str, Any] = {"symbol": inst}
+        if order_id is not None:
+            params["orderId"] = str(order_id)
+        elif client_order_id:
+            params["origClientOrderId"] = str(client_order_id)
+        else:
+            raise ValueError("撤单需 order_id 或 client_order_id")
+
+        data = self.signed_request("DELETE", "/fapi/v1/order", params=params)
+        return {"venue": "binance", "order_id": str(data.get("orderId") or ""), "status": "CANCELED", "raw": data}
+
+    def cancel_all_orders(self, symbol: str) -> Dict[str, Any]:
+        """撤销该标的所有普通挂单（US-005）。"""
+        inst = self.native_symbol(symbol)
+        data = self.signed_request("DELETE", "/fapi/v1/allOpenOrders", params={"symbol": inst})
+        return {"venue": "binance", "symbol": inst, "result": data}
+
+    def set_leverage(self, symbol: str, leverage: float, margin_mode: str = "cross") -> Any:
+        """设置标的杠杆倍数与保证金模式（US-005）。"""
+        inst = self.native_symbol(symbol)
+        try:
+            self.signed_request("POST", "/fapi/v1/marginType", params={
+                "symbol": inst, "marginType": margin_mode.upper()
+            })
+        except BinanceAPIError as exc:
+            if exc.code != -4046:  # -4046: No need to change margin type.
+                pass
+        return self.signed_request("POST", "/fapi/v1/leverage", params={
+            "symbol": inst, "leverage": int(leverage)
+        })
+
+    def attach_protective_orders(self, symbol: str, side: str,
+                                 tp_px: Optional[float] = None,
+                                 sl_px: Optional[float] = None,
+                                 working_type: str = "CONTRACT_PRICE",
+                                 position_side: Optional[str] = None,
+                                 expiration: Optional[int] = None) -> Dict[str, str]:
+        """挂云端条件止盈止损单（/fapi/v1/algoOrder）（US-005）。
+        - 显式 workingType（默认 CONTRACT_PRICE）；
+        - 多头（long）-> 平仓反向 SELL；空头（short）-> 平仓反向 BUY；
+        - closePosition=True 全平。
+        """
+        inst = self.native_symbol(symbol)
+        opp_side = "SELL" if str(side).lower() in ("long", "buy") else "BUY"
+        wt = self._require_working_type(working_type)
+
+        res = {"tp": "", "sl": ""}
+
+        if tp_px is not None and float(tp_px) > 0:
+            req = self.build_algo_order_request(
+                symbol=inst,
+                side=opp_side,
+                type_="TAKE_PROFIT_MARKET",
+                trigger_price=tp_px,
+                working_type=wt,
+                close_position=True,
+                position_side=position_side,
+            )
+            tp_data = self._private_algo_send(req)
+            if isinstance(tp_data, dict):
+                res["tp"] = str(tp_data.get("algoId") or tp_data.get("orderId") or "")
+
+        if sl_px is not None and float(sl_px) > 0:
+            req = self.build_algo_order_request(
+                symbol=inst,
+                side=opp_side,
+                type_="STOP_MARKET",
+                trigger_price=sl_px,
+                working_type=wt,
+                close_position=True,
+                position_side=position_side,
+            )
+            sl_data = self._private_algo_send(req)
+            if isinstance(sl_data, dict):
+                res["sl"] = str(sl_data.get("algoId") or sl_data.get("orderId") or "")
+
+        return res
+
+    def list_protective_orders(self, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
+        """获取当前活跃的 Algo 条件单列表（US-005）。"""
+        req = self.build_algo_open_orders_request(symbol=self.native_symbol(symbol) if symbol else None)
+        data = self._private_algo_send(req)
+        rows = data if isinstance(data, list) else []
+        out = []
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            algo_id = str(r.get("algoId") or r.get("orderId") or "")
+            out.append({
+                "id": algo_id,
+                "algo_id": algo_id,
+                "symbol": str(r.get("symbol") or ""),
+                "side": str(r.get("side") or "").lower(),
+                "trigger_price": float(r.get("triggerPrice") or 0.0),
+                "type": str(r.get("algoType") or r.get("type") or ""),
+                "raw": r,
+            })
+        return out
+
+    def fast_close_position(self, symbol: str) -> Dict[str, Any]:
+        """市价全平当前持仓（US-005）。"""
+        inst = self.native_symbol(symbol)
+        pos_list = [p for p in self.positions() if p.get("inst_id") == inst]
+        if not pos_list:
+            return {"venue": "binance", "symbol": inst, "closed": False, "reason": "无持仓"}
+        target = pos_list[0]
+        size = abs(float(target.get("size_signed") or 0.0))
+        close_side = "SELL" if target.get("side") == "long" else "BUY"
+        return self.place_order(symbol, close_side, size, price=None)
+
+    # ---- Algo 私有通道发送入口（US-005 实装）----
     def _private_algo_send(self, request: Dict[str, Any]) -> Any:
-        raise ExchangeCapabilityError(
-            f"Binance Algo 私有通道未实装（请求已构造: {request['method']} {request['path']}）——"
-            "supports_orders=False 门禁不变，实装需先接签名器并过执行开闸")
+        m = request["method"]
+        p = request["path"]
+        params = request.get("params") or request.get("body")
+        return self.signed_request(m, p, params=params)
 
     def query_algo_order(self, *, algo_id=None, client_algo_id=None) -> Any:
         return self._private_algo_send(self.build_algo_query_request(

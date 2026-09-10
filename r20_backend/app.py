@@ -178,6 +178,7 @@ class MultiExchangeUpdate(BaseModel):
     binance_testnet: bool | None = None
     gate_testnet: bool | None = None
     gate_execution: bool | None = None   # R20_GATE_EXECUTION 总开关（Gate 执行路由准入）
+    binance_execution: bool | None = None  # R20_BINANCE_EXECUTION 总开关（Binance 执行路由准入）
     preferred_venue: str | None = None  # 全局路由首选：okx|binance|gate|auto
     confirmation: str = ""               # 变更执行开关必须精确确认短语
 
@@ -1209,6 +1210,11 @@ def admin_multi_exchange_update(payload: MultiExchangeUpdate,
             raise HTTPException(status_code=400,
                                 detail="变更执行开关确认短语必须精确为：OPEN GATE EXECUTION")
         env_values["R20_GATE_EXECUTION"] = "1" if payload.gate_execution else "0"
+    if payload.binance_execution is not None:
+        if payload.confirmation.strip().upper() != "OPEN BINANCE EXECUTION":
+            raise HTTPException(status_code=400,
+                                detail="变更执行开关确认短语必须精确为：OPEN BINANCE EXECUTION")
+        env_values["R20_BINANCE_EXECUTION"] = "1" if payload.binance_execution else "0"
     if env_values:
         update_env(env_values)
     if payload.preferred_venue is not None:

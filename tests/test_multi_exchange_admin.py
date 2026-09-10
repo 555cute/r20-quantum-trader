@@ -83,6 +83,22 @@ class MultiExchangeApiTests(unittest.TestCase):
             self.assertEqual(r2.status_code, 200, r2.text)
             self.assertEqual(env_writes, {"R20_GATE_EXECUTION": "1"})
 
+    def test_binance_execution_toggle_requires_exact_phrase(self):
+        # US-005: 币安开闸必须精确短语 OPEN BINANCE EXECUTION
+        env_writes: dict = {}
+        with patch.object(app_module, "update_env", lambda v: env_writes.update(v)), \
+                patch.object(app_module, "save_secrets", lambda v: None), \
+                patch.object(app_module, "refresh_settings", lambda: None):
+            r = self.client.put("/api/v1/admin/multi-exchange", json={
+                "binance_execution": True, "confirmation": "open binance"})
+            self.assertEqual(r.status_code, 400)
+            self.assertEqual(env_writes, {})
+
+            r2 = self.client.put("/api/v1/admin/multi-exchange", json={
+                "binance_execution": True, "confirmation": "OPEN BINANCE EXECUTION"})
+            self.assertEqual(r2.status_code, 200, r2.text)
+            self.assertEqual(env_writes, {"R20_BINANCE_EXECUTION": "1"})
+
     def test_execution_status_field_exposed_in_get(self):
         with patch.object(ex, "venue_credentials", lambda v: ("", "")), \
                 patch.object(ex, "venue_testnet_enabled", lambda v: False), \

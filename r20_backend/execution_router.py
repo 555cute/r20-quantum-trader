@@ -31,8 +31,8 @@ class RouteResult(Dict[str, Any]):
     """dict 子类型：{ok, venue, stage, detail, order_id, tp_id, sl_id, size_signed...}"""
 
 
-def _fail(stage: str, detail: str, **extra: Any) -> RouteResult:
-    r = RouteResult(ok=False, venue="gate", stage=stage, detail=detail)
+def _fail(stage: str, detail: str, venue: str = "gate", **extra: Any) -> RouteResult:
+    r = RouteResult(ok=False, venue=venue, stage=stage, detail=detail)
     r.update(extra)
     return r
 
@@ -43,17 +43,18 @@ def open_protected_position(decision: Dict[str, Any], *,
                             adapter: Any = None,
                             own_position: Optional[Dict[str, Any]] = None,
                             margin_mode: Optional[str] = None) -> RouteResult:
-    """标准决策 → Gate 受保护开仓。全程 fail-closed：任何缺口先撤后抛。
+    """标准决策 → Gate/Binance 受保护开仓（US-005 多所对等）。全程 fail-closed：任何缺口先撤后抛。
 
-    own_position：调用方（lab）在该合约上的在管仓位记录（含 size_signed/side）；
+    own_position：调用方（lab/trader）在该合约上的在管仓位记录（含 size_signed/side）；
     交易所既有仓与之一致视为己仓放行，否则视为外部连坐风险拒开（stage=precheck）。
     margin_mode：由账户实况推导传入（cross/isolated）；缺省维持历史行为 cross。
     """
-    ad = adapter or get_adapter("gate")
+    venue = str(decision.get("venue") or getattr(getattr(adapter, "capabilities", None), "venue", "gate") or "gate").strip().lower()
+    ad = adapter or get_adapter(venue)
     asset = canonical_base(str(decision.get("asset") or decision.get("name") or ""))
     action = str(decision.get("action") or "").upper()
     if not asset:
-        return _fail("validate", "决策缺少 asset/币种")
+        return _fail("validate", "决策缺少 asset/币种", venue=venue)
     try:
         margin = float(decision.get("margin_usdt") or 0)
         leverage = float(decision.get("leverage") or 0)
@@ -61,34 +62,34 @@ def open_protected_position(decision: Dict[str, Any], *,
         tp = float(decision.get("take_profit_price") or 0)
         sl = float(decision.get("stop_loss_price") or 0)
     except (TypeError, ValueError):
-        return _fail("validate", "决策数值字段非法")
+        return _fail("validate", "决策数值字段非法", venue=venue)
     for tag, v in (("margin", margin), ("leverage", leverage), ("entry", entry)):
         if not math.isfinite(v) or v <= 0:
-            return _fail("validate", f"{tag} 必须为有限正数，收到 {v}")
+            return _fail("validate", f"{tag} 必须为有限正数，收到 {v}", venue=venue)
     ok, reason, rr = validate_quote_geometry_and_rr(action, entry, tp, sl)
     if not ok:
-        return _fail("risk_gate", f"物理风控拒绝: {reason}", rr=rr)
+        return _fail("risk_gate", f"物理风控拒绝: {reason}", venue=venue, rr=rr)
 
     # 执行开闸（默认关；env 显式打开且凭证就绪前一切免谈）
-    require_execution("gate")
+    require_execution(venue, environment=str(getattr(ad, "environment", "live") or "live"))
 
-    # 环境维合约存在性对账（US-007 扩展至 gate 链）：下单前核对**本环境**合约
+    # 环境维合约存在性对账（US-007 扩展）：下单前核对**本环境**合约
     # 目录——已下架/未上市在发送前拦截（fail-closed 拒开）；目录拉不到 →
     # fail-open 放行（对账是增强不是风控闸门，绝不阻塞交易）。
     try:
         from .exchanges.listing import ensure_contract_listed
         _check = ensure_contract_listed(
-            "gate", str(getattr(ad, "environment", "live") or "live"),
+            venue, str(getattr(ad, "environment", "live") or "live"),
             ad.native_symbol(asset))
         if not _check.ok:
-            return _fail("listing", f"合约对账拒绝: {_check.reason}")
+            return _fail("listing", f"合约对账拒绝: {_check.reason}", venue=venue)
     except Exception:  # 对账自身异常一律 fail-open（含目录缓存污染等未知面）
         pass
 
     spec = ad.fetch_instrument_spec(asset)
     if spec is None:
-        return _fail("specs", f"Gate 无法获取 {asset} 合约规格（下架或网络故障）")
-    # 价格对齐 Gate tick（order_price_round），防 PRICE_INVALID 拒单
+        return _fail("specs", f"{venue.upper()} 无法获取 {asset} 合约规格（下架或网络故障）", venue=venue)
+
     tick = float(spec.tick_size or 0.1) or 0.1
 
     def _q(px: float) -> float:
@@ -98,23 +99,25 @@ def open_protected_position(decision: Dict[str, Any], *,
     entry, tp, sl = _q(entry), _q(tp), _q(sl)
     ref_price = float(price_ref or 0) or 0.0
     if ref_price <= 0:
-        tick = ad.fetch_ticker(asset) or {}
-        ref_price = float(tick.get("mark_price") or tick.get("last") or 0)
+        tick_data = ad.fetch_ticker(asset) or {}
+        ref_price = float(tick_data.get("mark_price") or tick_data.get("last") or 0)
     if ref_price <= 0:
-        return _fail("price", f"Gate {asset} 现价不可得，禁止盲单")
+        return _fail("price", f"{venue.upper()} {asset} 现价不可得，禁止盲单", venue=venue)
 
     notional = margin * leverage
     contracts = ad.quote_qty_to_native(notional, ref_price, spec)
     if contracts <= 0:
         return _fail("sizing",
-                     f"名义 {notional:.2f}U @ {ref_price:g} 不足 Gate 最小下单量"
-                     f"（每张面值 {spec.ct_val}）")
+                     f"名义 {notional:.2f}U @ {ref_price:g} 不足 {venue.upper()} 最小下单量"
+                     f"（每张面值 {spec.ct_val}）", venue=venue)
     side = "long" if action == "BUY_LONG" else "short"
-    signed = int(contracts) if side == "long" else -int(contracts)
+    is_base_asset = getattr(ad.capabilities, "quantity_unit", "") == "base_asset"
+    signed = contracts if (side == "long") else -contracts
+    if not is_base_asset:
+        signed = int(signed)
+        contracts = int(contracts)
 
-    # —— 外部持仓前置体检（US-009）：同合约存在来源不明/尺寸不符既有仓 = 连坐风险
-    #    （close=true 双腿会平掉全部仓位，含非 lab 名下部分）→ 拒开。
-    #    探针失败连外部仓是否存在都不可见，同样 fail-closed。——
+    # —— 外部持仓前置体检（US-009）：同合约存在来源不明/尺寸不符既有仓 = 连坐风险 ——
     try:
         existing = [p for p in ad.positions()
                     if str(p.get("base") or "").upper() == asset
@@ -122,16 +125,17 @@ def open_protected_position(decision: Dict[str, Any], *,
     except ExchangeCapabilityError:
         raise
     except Exception as exc:
-        return _fail("precheck", f"{asset} 既有持仓探针失败，无法排除外部仓，拒开: {exc}")
+        return _fail("precheck", f"{asset} 既有持仓探针失败，无法排除外部仓，拒开: {exc}", venue=venue)
     for p in existing:
-        ex_signed = int(p.get("size_signed") or 0)
-        own_match = bool(own_position) and ex_signed == int(own_position.get("size_signed") or 0) \
-            and str(own_position.get("side") or "") == str(p.get("side") or "")
+        ex_signed = float(p.get("size_signed") or 0)
+        own_signed = float(own_position.get("size_signed") or 0) if own_position else None
+        own_match = bool(own_position) and abs(ex_signed - (own_signed or 0)) < 1e-6 \
+            and str(own_position.get("side") or "").lower() == str(p.get("side") or "").lower()
         if not own_match:
             return _fail("precheck",
-                         f"{asset} 交易所存在非 lab 在管既有仓 size_signed={ex_signed}({p.get('side')})"
+                         f"{asset} 交易所存在非本系统在管既有仓 size_signed={ex_signed:g}({p.get('side')})"
                          + ("，与 lab 记录不符" if own_position else "，lab 无在管记录")
-                         + "——外部仓连坐拒开", existing_size=ex_signed)
+                         + "——外部仓连坐拒开", venue=venue, existing_size=ex_signed)
 
     # 杠杆档位（失败即止，未下单无风险）；margin_mode 由账户实况推导，缺省 cross
     try:
@@ -139,23 +143,23 @@ def open_protected_position(decision: Dict[str, Any], *,
     except ExchangeCapabilityError:
         raise
     except Exception as exc:
-        return _fail("leverage", f"设置杠杆失败: {exc}")
+        return _fail("leverage", f"设置杠杆失败: {exc}", venue=venue)
 
     # 入场限价单
     try:
-        placed = ad.place_order(asset, side, abs(signed), price=entry)
+        placed = ad.place_order(asset, side, abs(contracts), price=entry)
     except ExchangeCapabilityError:
         raise
     except Exception as exc:
-        return _fail("entry", f"入场委托提交失败: {exc}")
-    order_id = str(placed.get("id") or placed.get("text") or "")
+        return _fail("entry", f"入场委托提交失败: {exc}", venue=venue)
+    order_id = str(placed.get("id") or placed.get("order_id") or placed.get("text") or "")
 
     # 云端 TP/SL 双腿 + 回读验证；任何缺口撤入场单回滚
     try:
         legs = ad.attach_protective_orders(asset, side, tp_px=tp, sl_px=sl,
                                            expiration=trigger_expiration)
         open_orders = ad.list_protective_orders(asset)
-        open_ids = {str(o.get("id")) for o in open_orders if isinstance(o, dict)}
+        open_ids = {str(o.get("id") or o.get("algo_id")) for o in open_orders if isinstance(o, dict)}
         if str(legs.get("tp")) not in open_ids or str(legs.get("sl")) not in open_ids:
             raise RuntimeError("回读未见双腿触发单")
     except Exception as exc:
@@ -166,27 +170,28 @@ def open_protected_position(decision: Dict[str, Any], *,
         except Exception as cexc:
             rollback_note = f"；入场单撤销失败({cexc})——交易所侧 OCO/手动兜底"
         return _fail("protective", f"保护单覆盖失败: {exc}{rollback_note}",
-                     order_id=order_id)
+                     venue=venue, order_id=order_id)
 
-    return RouteResult(ok=True, venue="gate", stage="done", asset=asset,
+    return RouteResult(ok=True, venue=venue, stage="done", asset=asset,
                        action=action, order_id=order_id,
                        tp_id=str(legs.get("tp")), sl_id=str(legs.get("sl")),
-                       size_signed=int(contracts) if side == "long" else -int(contracts),
-                       contracts=int(contracts), notional_usdt=round(notional, 2),
+                       size_signed=signed,
+                       contracts=contracts, notional_usdt=round(notional, 2),
                        ref_price=ref_price, rr=round(rr, 3), leverage=leverage,
-                       detail="入场限价挂单 + TP/SL 双腿云端触发单已回读验证")
+                       detail=f"{venue.upper()} 入场限价挂单 + TP/SL 双腿云端触发单已回读验证")
 
 
-def close_position(symbol: str, *, adapter: Any = None) -> RouteResult:
+def close_position(symbol: str, *, venue: str = "gate", adapter: Any = None) -> RouteResult:
     """市价全平（close=true + ioc），依赖同前：开闸 + 凭证。"""
-    ad = adapter or get_adapter("gate")
-    require_execution("gate")
+    v = str(venue or getattr(getattr(adapter, "capabilities", None), "venue", "gate") or "gate").lower()
+    ad = adapter or get_adapter(v)
+    require_execution(v, environment=str(getattr(ad, "environment", "live") or "live"))
     asset = canonical_base(symbol)
     try:
         data = ad.fast_close_position(asset)
     except ExchangeCapabilityError:
         raise
     except Exception as exc:
-        return _fail("close", f"Gate 平仓失败: {exc}", asset=asset)
-    return RouteResult(ok=True, venue="gate", stage="done", asset=asset,
-                       detail=f"市价全平已提交: {str(data)[:120]}")
+        return _fail("close", f"{v.upper()} 平仓失败: {exc}", venue=v, asset=asset)
+    return RouteResult(ok=True, venue=v, stage="done", asset=asset,
+                       detail=f"{v.upper()} 市价全平已提交: {str(data)[:120]}")

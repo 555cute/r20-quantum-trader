@@ -47,7 +47,7 @@ class BinancePrivateAdapterTests(unittest.TestCase):
     def test_capabilities_declaration(self):
         cap = self.adapter.capabilities
         self.assertTrue(cap.supports_account, "US-004: supports_account 必须声明为 True")
-        self.assertFalse(cap.supports_orders, "US-004: supports_orders 在 US-005 执行故事前保持 False")
+        self.assertTrue(cap.supports_orders, "US-005: supports_orders 声明为 True")
 
     def test_unconfigured_credentials_raises_capability_error(self):
         with patch("r20_backend.exchanges.registry.venue_credentials", return_value=("", "")):
@@ -245,6 +245,215 @@ class BinancePrivateAdapterTests(unittest.TestCase):
 
             self.assertEqual(ctx.exception.code, -2014)
             self.assertIn("API-key format invalid", ctx.exception.message)
+
+
+class BinanceExecutionAndProtectionTests(unittest.TestCase):
+    """US-005：Binance 交易执行闭环与条件单止盈止损单测（全 mock、零出网）。"""
+
+    def setUp(self):
+        self.adapter = BinanceAdapter(environment="live")
+
+    def test_place_order_limit_and_market(self):
+        api_key = "ak"
+        secret_key = "sk"
+
+        captured = []
+
+        def mock_urlopen(req, timeout=15.0):
+            captured.append(req)
+            parsed = urlparse(req.full_url)
+            qs = parse_qs(parsed.query)
+            t = qs.get("type", [""])[0]
+            resp_data = {
+                "orderId": 99881122,
+                "clientOrderId": qs.get("newClientOrderId", ["r20_order"])[0],
+                "symbol": qs.get("symbol", ["BTCUSDT"])[0],
+                "status": "NEW",
+                "price": qs.get("price", ["0.0"])[0],
+                "origQty": qs.get("quantity", ["0.1"])[0],
+                "executedQty": "0.0",
+            }
+            return _FakeResp(json.dumps(resp_data).encode("utf-8"))
+
+        with patch("r20_backend.exchanges.registry.venue_credentials", return_value=(api_key, secret_key)), \
+             patch("r20_backend.exchanges.binance.urlopen", mock_urlopen):
+            # 1. 限价单
+            res_limit = self.adapter.place_order(
+                symbol="BTC", side="buy", contracts=0.25, price=60123.45, text="r20_cid_01"
+            )
+            self.assertEqual(res_limit["venue"], "binance")
+            self.assertEqual(res_limit["order_id"], "99881122")
+            self.assertEqual(res_limit["status"], "NEW")
+            self.assertEqual(res_limit["side"], "buy")
+
+            qs_l = parse_qs(urlparse(captured[-1].full_url).query)
+            self.assertEqual(qs_l["type"], ["LIMIT"])
+            self.assertEqual(qs_l["timeInForce"], ["GTC"])
+            self.assertEqual(qs_l["symbol"], ["BTCUSDT"])
+            self.assertEqual(qs_l["newClientOrderId"], ["r20_cid_01"])
+
+            # 2. 市价单
+            res_market = self.adapter.place_order(symbol="BTC", side="sell", contracts=0.1)
+            qs_m = parse_qs(urlparse(captured[-1].full_url).query)
+            self.assertEqual(qs_m["type"], ["MARKET"])
+            self.assertNotIn("price", qs_m)
+
+    def test_cancel_order_and_cancel_all(self):
+        api_key = "ak"
+        secret_key = "sk"
+
+        captured = []
+
+        def mock_urlopen(req, timeout=15.0):
+            captured.append(req)
+            return _FakeResp(json.dumps({"orderId": 12345, "status": "CANCELED"}).encode("utf-8"))
+
+        with patch("r20_backend.exchanges.registry.venue_credentials", return_value=(api_key, secret_key)), \
+             patch("r20_backend.exchanges.binance.urlopen", mock_urlopen):
+            # 1. 单撤
+            c1 = self.adapter.cancel_order("BTC", order_id="12345")
+            self.assertEqual(c1["order_id"], "12345")
+            self.assertEqual(c1["status"], "CANCELED")
+            qs1 = parse_qs(urlparse(captured[-1].full_url).query)
+            self.assertEqual(qs1["orderId"], ["12345"])
+
+            # 2. 全撤
+            c2 = self.adapter.cancel_all_orders("BTC")
+            self.assertEqual(c2["symbol"], "BTCUSDT")
+            self.assertIn("/fapi/v1/allOpenOrders", captured[-1].full_url)
+
+    def test_attach_protective_orders_algo_service(self):
+        api_key = "ak"
+        secret_key = "sk"
+
+        captured = []
+
+        def mock_urlopen(req, timeout=15.0):
+            captured.append(req)
+            parsed = urlparse(req.full_url)
+            qs = parse_qs(parsed.query)
+            t = qs.get("type", [""])[0]
+            algo_id = 701 if "TAKE_PROFIT" in t else 702
+            return _FakeResp(json.dumps({"algoId": algo_id, "code": "200"}).encode("utf-8"))
+
+        with patch("r20_backend.exchanges.registry.venue_credentials", return_value=(api_key, secret_key)), \
+             patch("r20_backend.exchanges.binance.urlopen", mock_urlopen):
+            # 多头持仓 -> 平仓方向为反向 SELL，closePosition=true 全平
+            legs = self.adapter.attach_protective_orders(
+                symbol="BTC", side="long", tp_px=65000.0, sl_px=58000.0, working_type="CONTRACT_PRICE"
+            )
+            self.assertEqual(legs["tp"], "701")
+            self.assertEqual(legs["sl"], "702")
+
+            self.assertEqual(len(captured), 2)
+            # TP 请求检查
+            tp_qs = parse_qs(urlparse(captured[0].full_url).query)
+            self.assertEqual(tp_qs["symbol"], ["BTCUSDT"])
+            self.assertEqual(tp_qs["side"], ["SELL"])
+            self.assertEqual(tp_qs["type"], ["TAKE_PROFIT_MARKET"])
+            self.assertEqual(tp_qs["closePosition"], ["true"])
+            self.assertEqual(tp_qs["workingType"], ["CONTRACT_PRICE"])
+
+            # SL 请求检查
+            sl_qs = parse_qs(urlparse(captured[1].full_url).query)
+            self.assertEqual(sl_qs["symbol"], ["BTCUSDT"])
+            self.assertEqual(sl_qs["side"], ["SELL"])
+            self.assertEqual(sl_qs["type"], ["STOP_MARKET"])
+            self.assertEqual(sl_qs["closePosition"], ["true"])
+            self.assertEqual(sl_qs["workingType"], ["CONTRACT_PRICE"])
+
+    def test_execution_switch_gatekeeping(self):
+        from r20_backend.exchanges import require_execution, execution_open
+        import os
+
+        # 默认关：require_execution 必须拒绝
+        with patch.dict(os.environ, {"R20_BINANCE_EXECUTION": "0", "R20_BINANCE_DEMO_EXECUTION": "0"}):
+            self.assertFalse(execution_open("binance", "live"))
+            self.assertFalse(execution_open("binance", "demo"))
+            with self.assertRaises(ExchangeCapabilityError) as ctx_live:
+                require_execution("binance", "live")
+            self.assertIn("R20_BINANCE_EXECUTION=1", str(ctx_live.exception))
+
+            with self.assertRaises(ExchangeCapabilityError) as ctx_demo:
+                require_execution("binance", "demo")
+            self.assertIn("R20_BINANCE_DEMO_EXECUTION=1", str(ctx_demo.exception))
+
+        # 开闸放行
+        with patch.dict(os.environ, {"R20_BINANCE_EXECUTION": "1"}):
+            self.assertTrue(execution_open("binance", "live"))
+            # require_execution 不报错
+            require_execution("binance", "live")
+
+    def test_execution_router_integration_with_binance(self):
+        import os
+        from r20_backend import execution_router as er
+
+        ad = self.adapter
+        # Mock 适配器关键动作
+        ad._keys = lambda: ("ak", "sk")
+        ad.fetch_ticker = lambda s: {"last": 60000.0, "mark_price": 60000.0}
+        ad.set_leverage = Mock(return_value={"leverage": 5})
+        ad.place_order = Mock(return_value={"order_id": "112233", "id": "112233", "status": "NEW"})
+        ad.attach_protective_orders = Mock(return_value={"tp": "801", "sl": "802"})
+        ad.list_protective_orders = Mock(return_value=[{"algo_id": "801"}, {"algo_id": "802"}])
+        ad.positions = Mock(return_value=[])
+
+        decision = {
+            "venue": "binance",
+            "asset": "BTC",
+            "action": "BUY_LONG",
+            "margin_usdt": 120.0,
+            "leverage": 5,
+            "entry_price": 60000.0,
+            "take_profit_price": 63000.0,
+            "stop_loss_price": 58500.0,
+        }
+
+        with patch.dict(os.environ, {"R20_BINANCE_EXECUTION": "1", "R20_BINANCE_DEMO_EXECUTION": "1"}):
+            res = er.open_protected_position(decision, adapter=ad)
+
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["venue"], "binance")
+        self.assertEqual(res["stage"], "done")
+        self.assertEqual(res["order_id"], "112233")
+        self.assertEqual(res["tp_id"], "801")
+        self.assertEqual(res["sl_id"], "802")
+        ad.place_order.assert_called_once()
+        ad.attach_protective_orders.assert_called_once()
+
+    def test_execution_router_rollback_on_protective_gap(self):
+        import os
+        from r20_backend import execution_router as er
+
+        ad = self.adapter
+        ad._keys = lambda: ("ak", "sk")
+        ad.fetch_ticker = lambda s: {"last": 60000.0, "mark_price": 60000.0}
+        ad.set_leverage = Mock(return_value={})
+        ad.place_order = Mock(return_value={"order_id": "9999", "id": "9999"})
+        ad.cancel_order = Mock()
+        ad.attach_protective_orders = Mock(return_value={"tp": "801", "sl": "802"})
+        # 回读遗漏 SL 腿，模拟触发保护缺口
+        ad.list_protective_orders = Mock(return_value=[{"algo_id": "801"}])
+        ad.positions = Mock(return_value=[])
+
+        decision = {
+            "venue": "binance",
+            "asset": "BTC",
+            "action": "BUY_LONG",
+            "margin_usdt": 100.0,
+            "leverage": 3,
+            "entry_price": 60000.0,
+            "take_profit_price": 62000.0,
+            "stop_loss_price": 59000.0,
+        }
+
+        with patch.dict(os.environ, {"R20_BINANCE_EXECUTION": "1", "R20_BINANCE_DEMO_EXECUTION": "1"}):
+            res = er.open_protected_position(decision, adapter=ad)
+
+        self.assertFalse(res["ok"])
+        self.assertEqual(res["stage"], "protective")
+        self.assertIn("入场单已撤销", res["detail"])
+        ad.cancel_order.assert_called_once_with("BTC", "9999")
 
 
 if __name__ == "__main__":
