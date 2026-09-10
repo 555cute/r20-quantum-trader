@@ -137,9 +137,19 @@ class CouncilBudgetTests(unittest.TestCase):
         src = Path(cm.__file__).read_text(encoding="utf-8")
         self.assertNotIn("timeout: float = 60.0", src)
 
-    def test_live_config_bumped(self):
-        cfg = json.loads((ROOT / "data" / "council_config.json").read_text(encoding="utf-8"))
+    def test_default_config_persists_budget(self):
+        # A git-ignored deployment config is not a portable test fixture.
+        # Exercise the real default -> save -> disk -> reload contract instead.
+        from tests.config_sandbox import isolate_config
+        import r20_backend.council_manager as cm
+        root = isolate_config(self)
+        self.assertTrue(cm.COUNCIL_CONFIG_FILE.is_relative_to(root))
+        self.assertFalse(cm.COUNCIL_CONFIG_FILE.exists())
+        config = cm.load_council_config()
+        cm.save_council_config(config)
+        cfg = json.loads(cm.COUNCIL_CONFIG_FILE.read_text(encoding="utf-8"))
         self.assertGreaterEqual(float(cfg.get("timeout_seconds") or 0), 240.0)
+        self.assertEqual(cm.load_council_config()["timeout_seconds"], cfg["timeout_seconds"])
 
     def test_cio_contract_no_static_3_anchor(self):
         import r20_backend.council_manager as cm
