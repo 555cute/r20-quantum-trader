@@ -49,14 +49,17 @@ class OKXEnvironment:
 
 
 def selected_environment(values: Mapping[str, str] | None = None) -> OKXEnvironment:
-    env = dict(values or _load_dotenv())
+    env = dict(_load_dotenv() if values is None else values)
     legacy_simulated = str(env.get("OKX_IS_SIMULATED", "1")).lower() in {"1", "true", "yes"}
     mode = str(env.get("R20_OKX_ENV") or ("demo" if legacy_simulated else "live")).lower()
     if mode not in ALLOWED_ENVIRONMENTS: mode = "demo"
     prefix = "OKX_DEMO" if mode == "demo" else "OKX_LIVE"
-    api_key = str(env.get(f"{prefix}_API_KEY") or env.get("OKX_API_KEY") or "")
-    secret_key = str(env.get(f"{prefix}_SECRET_KEY") or env.get("OKX_SECRET_KEY") or "")
-    passphrase = str(env.get(f"{prefix}_PASSPHRASE") or env.get("OKX_PASSPHRASE") or "")
+    # A profile is an atomic credential group. A partially entered profile must
+    # never borrow individual fields from a different (legacy) identity.
+    fields = ("API_KEY", "SECRET_KEY", "PASSPHRASE")
+    profile = tuple(str(env.get(f"{prefix}_{field}") or "") for field in fields)
+    legacy = tuple(str(env.get(f"OKX_{field}") or "") for field in fields)
+    api_key, secret_key, passphrase = profile if any(profile) else legacy
     base_url = str(env.get("OKX_BASE_URL") or "https://www.okx.com").rstrip("/")
     if base_url != "https://www.okx.com": raise ValueError("OKX REST Base URL 只允许 https://www.okx.com")
     return OKXEnvironment(mode, api_key, secret_key, passphrase, base_url, "separate-credentials" if env.get(f"{prefix}_API_KEY") else "legacy-or-oauth")
