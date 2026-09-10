@@ -12,11 +12,14 @@ import re
 import socket
 import tempfile
 import time
+from datetime import datetime, timedelta, timezone
 import urllib.request
 import urllib.error
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
+
+_BJ = timezone(timedelta(hours=8))
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data"
@@ -706,7 +709,7 @@ def record_failover_event(entry: Dict[str, Any]) -> None:
             except Exception:
                 events = []
         entry["ts"] = int(time.time())
-        entry["time_str"] = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
+        entry["time_str"] = datetime.fromtimestamp(entry["ts"], _BJ).isoformat(sep=" ", timespec="seconds")
         events.insert(0, entry)
         _atomic_write_json(FAILOVER_EVENTS_FILE, events[:200])
     except Exception:

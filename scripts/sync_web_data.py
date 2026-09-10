@@ -12,6 +12,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 if str(_THIS_DIR) not in sys.path:
     sys.path.insert(0, str(_THIS_DIR))
 
+from r20_backend.time_utils import beijing_day
 import json
 import time
 import subprocess
@@ -149,7 +150,7 @@ def generate_trading_data():
                 with open(LEDGER_JSON_FILE, "r", encoding="utf-8") as f:
                     t_list = json.load(f)
                     for t in t_list:
-                        if today_str in str(t.get("time", "")):
+                        if beijing_day(t.get("time")) == today_str:
                             p = float(t.get("pnl", 0.0) or 0)
                             if p > 0:
                                 today_win_trades += 1

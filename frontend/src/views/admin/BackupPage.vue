@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtDateTime } from '../../utils/format';
 import { useToast } from '../../composables/useToast'
 const toast = useToast()
 import { ref, computed, onMounted } from 'vue'
@@ -21,8 +22,7 @@ const simple = ref<any>(null)
 function fmtBackupTime(latest: any): string {
   const raw = latest?.finished_at || latest?.started_at || latest?.created_at || latest?.time
   if (!raw) return '--'
-  const s = String(raw)
-  return s.replace('T', ' ').slice(0, 19)
+  return fmtDateTime(raw)
 }
 const targetTypes = ref<any[]>([])
 const status = ref<any>(null)
@@ -244,7 +244,7 @@ function fmtBytes(n: number) {
   return n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.round(n / 1024) + ' KB'
 }
 function fmtTime(ts: number) {
-  return new Date(ts * 1000).toLocaleString('sv-SE', { hour12: false, timeZone: 'Asia/Shanghai' })
+  return fmtDateTime(ts * 1000)
 }
 
 onMounted(load)

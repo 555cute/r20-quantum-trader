@@ -42,6 +42,7 @@ EVOLUTION_LAST_PROMPT_FILE = os.path.join(DATA_DIR, "self_improvement_last_promp
 LOG_FILE = os.path.join(LOGS_DIR, "self_improvement.log")
 EVOLUTION_LOCK_FILE = os.path.join(DATA_DIR, ".self_improvement.lock")
 
+from r20_backend.time_utils import parse_beijing
 from r20_backend.version import __version__
 from instrument_pool import load_instruments
 from prompt_library import active_profile, apply_module_layout
@@ -136,13 +137,9 @@ SIDE_ALIASES = {"多": "long", "空": "short", "long": "long", "short": "short"}
 
 
 def _parse_bj(ts) -> Optional[datetime.datetime]:
-    s = str(ts or "").strip().replace("T", " ")[:19]
-    if not s:
-        return None
-    try:
-        return datetime.datetime.fromisoformat(s).replace(tzinfo=None)
-    except ValueError:
-        return None
+    dt = parse_beijing(ts)
+    # Existing join callers use naive Beijing values; normalize BEFORE removing tz.
+    return dt.replace(tzinfo=None) if dt else None
 
 
 def classify_snapshot_observability(snap) -> str:

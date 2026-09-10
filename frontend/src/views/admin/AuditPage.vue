@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtDateTime } from '../../utils/format';
 import { ref, onMounted } from 'vue'
 import { useI18n } from '../../composables/useI18n'
 import DataTable from '../../components/admin/DataTable.vue'
@@ -90,7 +91,7 @@ onMounted(load)
           @row-click="detailRec = $event"
         >
           <template #cell-timestamp="{ row }">
-            <span class="num" style="color: var(--ink-3);">{{ row.timestamp }}</span>
+            <span class="num" style="color: var(--ink-3);">{{ fmtDateTime(row.timestamp) }}</span>
           </template>
           <template #cell-action="{ row }">
             <span class="font-bold" style="color: var(--accent);">{{ row.action }}</span>

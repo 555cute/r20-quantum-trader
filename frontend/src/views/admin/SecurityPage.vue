@@ -8,7 +8,7 @@ import SettingsSection from '../../components/admin/SettingsSection.vue'
 import { useI18n } from '../../composables/useI18n'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
-import { utcStrToBj } from '../../utils/format'
+import { utcStrToBj, fmtDateTime } from '../../utils/format'
 import { Wallet, Save, RefreshCw, Layers, Trash2, FlaskConical, Zap } from 'lucide-vue-next'
 
 const { api } = useApi()
@@ -551,7 +551,7 @@ onMounted(() => { loadAll(); loadMx() })
             </div>
             <div v-else class="mt-2 text-[11px]" style="color: var(--ink-3);">试验田当前无在途仓位。</div>
             <div v-if="(lab.ledger_tail || []).length" class="mt-2 text-[10px] space-y-0.5" style="color: var(--ink-3);">
-              <div v-for="(l, i) in lab.ledger_tail" :key="i"><FlaskConical class="inline h-3 w-3 mr-0.5" />落账 · {{ l.asset }} {{ l.reason || 'closed' }} · 入场 {{ l.entry_px ?? '--' }} × {{ l.contracts ?? '--' }} 张 · {{ l.close_ts ? new Date(l.close_ts * 1000).toLocaleString('zh-CN', { hour12: false }) : '' }}</div>
+              <div v-for="(l, i) in lab.ledger_tail" :key="i"><FlaskConical class="inline h-3 w-3 mr-0.5" />落账 · {{ l.asset }} {{ l.reason || 'closed' }} · 入场 {{ l.entry_px ?? '--' }} × {{ l.contracts ?? '--' }} 张 · {{ l.close_ts ? fmtDateTime(l.close_ts * 1000) : '' }}</div>
             </div>
           </template>
           <div v-else class="text-[11px]" style="color: var(--ink-3);">状态接口未就绪——随下次后端重启生效。</div>
@@ -579,7 +579,7 @@ onMounted(() => { loadAll(); loadMx() })
           <div v-if="snapshotState" class="text-[11px] pb-2" style="color: var(--warn);">{{ snapshotState }}</div>
           <div v-if="snapshot" class="text-[11px] pb-2" style="color: var(--ink-2);">
             环境 <b :style="{ color: snapshot.environment === 'live' ? 'var(--down)' : 'var(--up)' }">{{ envBadge(snapshot.environment) }}</b>
-            · 持仓 {{ snapshot.positions?.length ?? 0 }} · 挂单 {{ snapshot.orders?.length ?? 0 }} · {{ new Date(snapshot.captured_at_ms).toLocaleString('sv-SE') }}
+            · 持仓 {{ snapshot.positions?.length ?? 0 }} · 挂单 {{ snapshot.orders?.length ?? 0 }} · {{ fmtDateTime(snapshot.captured_at_ms) }}
           </div>
           <div class="overflow-x-auto -mx-4 px-4">
             <table v-if="snapshot?.positions?.length" class="w-full text-left text-xs whitespace-nowrap">

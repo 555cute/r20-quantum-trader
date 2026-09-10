@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtDateTime } from '../../utils/format';
 import { ref, onMounted } from 'vue'
 import { useI18n } from '../../composables/useI18n'
 const { t } = useI18n()
@@ -72,7 +73,7 @@ onMounted(load)
                 <td class="py-2.5 px-4 font-bold" style="color: var(--ink-1);">{{ a.name }}</td>
                 <td class="py-2.5 px-3" style="color: var(--ink-2);">{{ a.role }}</td>
                 <td class="py-2.5 px-3 font-bold" :class="statusColor(a.health)">{{ a.health }}</td>
-                <td class="py-2.5 px-3 num" style="color: var(--ink-3);">{{ a.last_run_at || '尚未调度' }}</td>
+                <td class="py-2.5 px-3 num" style="color: var(--ink-3);">{{ fmtDateTime(a.last_run_at || '尚未调度') }}</td>
                 <td class="py-2.5 px-3 font-bold" :class="statusColor(a.last_run_status)">{{ a.last_run_status }}</td>
                 <td class="py-2.5 px-4 text-right" style="color: var(--ink-2);">{{ a.output_age_seconds != null ? Math.round(a.output_age_seconds / 60) + ' 分钟前' : (a.output ? '冷启动' : '无产物') }}</td>
               </tr>

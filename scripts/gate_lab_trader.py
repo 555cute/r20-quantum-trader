@@ -18,6 +18,9 @@ import json
 import os
 import sys
 import time
+from datetime import datetime, timedelta, timezone
+
+_BJ = timezone(timedelta(hours=8))
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPTS_DIR = os.path.join(PROJECT_ROOT, "scripts")
@@ -273,7 +276,7 @@ def _record_main_ledger(t: dict, *, close_px: float = 0.0, pnl=None,
         bill_id = f"gatelib-{t.get('mode', 'live')}-{asset}-{int(t.get('entry_ts') or time.time())}"
         dbm.record_trade_sqlite({
             "bill_id": bill_id,
-            "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "time": datetime.now(_BJ).strftime("%Y-%m-%d %H:%M:%S"),  # trades.time 固定格式，北京时间
             "inst": f"{asset}_USDT",
             "action": "closed",
             "direction": "多" if side == "long" else "空",
@@ -554,7 +557,7 @@ def run_lab_cycle(ad=None, now_ts=None):
 
 def main():
     mode = effective_mode()
-    ts = time.strftime("%Y-%m-%d %H:%M:%S")
+    ts = datetime.now(_BJ).isoformat(sep=" ", timespec="seconds")
     print(f"[GateLab] {ts} 模式={mode} 池={load_gate_pool()['assets']}")
     if mode == "off":
         print("[GateLab] 池为空(data/venue_routing.json 配 gate.assets)——本轮无动作")

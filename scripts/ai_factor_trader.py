@@ -35,6 +35,8 @@ try:
 except Exception:
     __version__ = "7.6.0"
 
+from r20_backend.time_utils import beijing_day
+
 # 必须用 scripts.okx_runtime 包形式：okx_rest 读的是同一模块实例的冻结环境，
 # 裸 okx_runtime 是另一份 _FROZEN_ENVIRONMENT 全局，freeze 周期对其无效（US-002 命门）。
 from scripts.okx_runtime import (
@@ -370,7 +372,7 @@ def is_circuit_breaker_active(usdt_available: float = None):
             today_pnl = sum(
                 float(t.get("pnl", 0) or 0)
                 for t in ledger
-                if t.get("status") == "closed" and str(t.get("close_time", "")).startswith(today_str)
+                if t.get("status") == "closed" and beijing_day(t.get("close_time")) == today_str
             )
             _loss_cap = effective_daily_loss_limit(usdt_available)
             if today_pnl < -_loss_cap:

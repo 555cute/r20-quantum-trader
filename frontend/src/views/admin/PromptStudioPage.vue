@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtDate, fmtDateTime } from '../../utils/format';
 import { useToast } from '../../composables/useToast'
 const toast = useToast()
 import { ref, computed, onMounted } from 'vue'
@@ -276,7 +277,7 @@ async function exportProfile() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `r20-strategy-${selectedProfile.value?.name || 'profile'}-${new Date().toISOString().slice(0, 10)}.json`
+    a.download = `r20-strategy-${selectedProfile.value?.name || 'profile'}-${fmtDate(new Date())}.json`
     a.click()
     URL.revokeObjectURL(a.href)
     toast.ok(`方案「${selectedProfile.value?.name}」已成功导出为 JSON 策略包`)
@@ -844,7 +845,7 @@ onMounted(loadLib)
         >
           <div>
             <div class="text-xs font-bold" style="color: var(--ink-1);">{{ h.note || h.summary || h.id || h.revision_id }}</div>
-            <div class="text-[11px] num" style="color: var(--ink-3);">{{ h.created_at || h.time }} · {{ h.actor || 'system' }}</div>
+            <div class="text-[11px] num" style="color: var(--ink-3);">{{ fmtDateTime(h.created_at || h.time) }} · {{ h.actor || 'system' }}</div>
           </div>
           <button
             @click="rollback(h.id || h.revision_id)"

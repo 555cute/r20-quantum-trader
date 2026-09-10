@@ -4,6 +4,7 @@ Web Dashboard Application Module
 from __future__ import annotations
 from typing import Any
 from pathlib import Path
+from r20_backend.time_utils import beijing_text
 from scripts import okx_rest
 from scripts.instrument_pool import load_instruments
 import os
@@ -1184,10 +1185,10 @@ def update_cache_cycle():
     valid_ledger_trades = []
     for t in ledger_trades:
         # Check either close_time or open_time >= reset_time
-        c_time = str(t.get("close_time", ""))
-        o_time = str(t.get("open_time", ""))
-        t_time = str(t.get("time", ""))
-        if (c_time and c_time >= reset_time_str) or (o_time and o_time >= reset_time_str) or (t_time and t_time >= reset_time_str) or t.get("status") == "holding":
+        c_time = beijing_text(t.get("close_time"))
+        o_time = beijing_text(t.get("open_time"))
+        t_time = beijing_text(t.get("time"))
+        if (c_time and c_time >= beijing_text(reset_time_str)) or (o_time and o_time >= beijing_text(reset_time_str)) or (t_time and t_time >= beijing_text(reset_time_str)) or t.get("status") == "holding":
             valid_ledger_trades.append(t)
 
     trades_table = valid_ledger_trades[:60]
@@ -1212,8 +1213,8 @@ def update_cache_cycle():
                 if isinstance(snaps, list):
                     # Filter strictly >= reset_time
                     for s in snaps:
-                        s_time = str(s.get("time", ""))
-                        if s_time >= reset_time_str:
+                        s_time = beijing_text(s.get("time"))
+                        if s_time and s_time >= beijing_text(reset_time_str):
                             t_eq = float(s.get("total_eq", s.get("equity", initial_capital_val)) or initial_capital_val)
                             pnl_v = round(t_eq - initial_capital_val, 2)
                             roi_v = round((pnl_v / initial_capital_val * 100), 2)

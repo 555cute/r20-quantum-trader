@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtDateTime } from '../../utils/format';
 /** 决策审计抽屉：宏观研判 / 机会与持仓指令 / 委员会纪要 / 原始记录 */
 import { computed, ref } from 'vue';
 import BaseDrawer from '../base/BaseDrawer.vue';
@@ -56,7 +57,7 @@ function dirOf(a: string): 'long' | 'short' | 'flat' {
   <BaseDrawer
     :open="!!cycle"
     width="680px"
-    :title="t('dash.radar.detail.title', undefined, { t: cycle?.time || '' })"
+    :title="t('dash.radar.detail.title', undefined, { t: fmtDateTime(cycle?.time) })"
     :subtitle="cycle?.policy_version || ''"
     @close="emit('close')"
   >

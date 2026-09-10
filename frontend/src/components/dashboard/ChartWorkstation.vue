@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtDate, fmtHM, fmtClock } from '../../utils/format';
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useDashboardStore } from '../../stores/dashboard'
 import { symOf, instIdOf } from '../../utils/instId'
@@ -40,13 +41,12 @@ registerIndicator({
   calc: (dataList: KLineData[]) => {
     let cumTypicalVol = 0
     let cumVol = 0
-    let lastDay = -1
+    let lastDay = ''
 
     return dataList.map((kLine) => {
-      const d = new Date(kLine.timestamp)
-      const day = d.getUTCDate()
+      const day = fmtDate(kLine.timestamp)
       // 每天重置或者连续累计
-      if (lastDay !== -1 && day !== lastDay) {
+      if (lastDay !== '' && day !== lastDay) {
         cumTypicalVol = 0
         cumVol = 0
       }
@@ -697,18 +697,15 @@ function initChart() {
     formatter: {
       // 纯纯正正的纯数字时间刻度！彻底去除“几日几日”中文，符合用户习惯！
       formatDate: ({ timestamp }) => {
-        const date = new Date(timestamp)
-        const m = String(date.getMonth() + 1).padStart(2, '0')
-        const d = String(date.getDate()).padStart(2, '0')
-        const hh = String(date.getHours()).padStart(2, '0')
-        const mm = String(date.getMinutes()).padStart(2, '0')
+        const md = fmtDate(timestamp).slice(5)
+        const hm = fmtHM(timestamp)
         if (currentPeriod.value === '1D') {
-          return `${m}-${d}`
+          return md
         }
         if (currentPeriod.value === '4H') {
-          return `${m}-${d} ${hh}:${mm}`
+          return `${md} ${hm}`
         }
-        return `${hh}:${mm}`
+        return hm
       },
     },
   })
@@ -865,9 +862,7 @@ function updatePriceLines() {
 // 倒计时
 function updateCountdown() {
   const now = new Date()
-  const sec = now.getSeconds()
-  const min = now.getMinutes()
-  const hr = now.getHours()
+  const [hr = 0, min = 0, sec = 0] = fmtClock(now).split(':').map(Number)
   let remainSec = 0
   if (currentPeriod.value === '15m') {
     remainSec = (15 - (min % 15)) * 60 - sec

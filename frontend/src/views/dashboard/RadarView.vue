@@ -5,7 +5,7 @@ import { ChevronDown } from 'lucide-vue-next';
 import { useDashboardStore } from '../../stores/dashboard';
 import { symOf } from '../../utils/instId';
 import { useI18n } from '../../composables/useI18n';
-import { fmtHM } from '../../utils/format';
+import { fmtHM, fmtDate, parseTime } from '../../utils/format';
 import PageHead from '../../components/dashboard/PageHead.vue';
 import BaseEmpty from '../../components/base/BaseEmpty.vue';
 import DirTag from '../../components/base/DirTag.vue';
@@ -33,7 +33,7 @@ const decisionAgeWarn = computed(() => (aiHealth.value?.decision_age_seconds ?? 
 const selected = ref<any>(null);
 
 function timeOf(c: any): Date {
-  return new Date(String(c.time).replace(' ', 'T'));
+  return parseTime(c.time);
 }
 function hm(c: any) {
   const d = timeOf(c);
@@ -42,8 +42,8 @@ function hm(c: any) {
 function dayOf(c: any): string {
   const d = timeOf(c);
   const today = new Date();
-  const sameDay = d.toDateString() === today.toDateString();
-  return sameDay ? t('dash.news.feed.grouped.today') : d.toLocaleDateString(undefined, { month: '2-digit', day: '2-digit' });
+  const sameDay = fmtDate(d) === fmtDate(today);
+  return sameDay ? t('dash.news.feed.grouped.today') : fmtDate(d);
 }
 /** 按日期分组，保持组内最新在前 */
 const grouped = computed(() => {

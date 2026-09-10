@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fmtDateTime } from '../../utils/format';
 import { useToast } from '../../composables/useToast'
 const toast = useToast()
 import { ref, onMounted } from 'vue'
@@ -181,9 +182,9 @@ onMounted(load)
                 </span>
               </td>
               <td class="py-2.5 px-3 font-bold" :class="u.enabled ? (u.locked_until ? 'text-amber-500' : 'text-emerald-500') : 'text-rose-500'">
-                {{ !u.enabled ? '已停用' : (u.locked_until && new Date(u.locked_until) > new Date() ? '已锁定' : '正常启用') }}
+                {{ !u.enabled ? '已停用' : (u.locked_until && Number(u.locked_until) * 1000 > Date.now() ? '已锁定' : '正常启用') }}
               </td>
-              <td class="py-2.5 px-3 num" style="color: var(--ink-3);">{{ u.last_login_at || '从未登录' }}</td>
+              <td class="py-2.5 px-3 num" style="color: var(--ink-3);">{{ u.last_login_at ? fmtDateTime(u.last_login_at) : '从未登录' }}</td>
               <td class="py-2.5 px-4 text-right whitespace-nowrap space-x-1.5">
                 <button v-if="u.id !== currentUserId" @click="toggleEnabled(u)" class="px-2.5 py-1 rounded-md border text-[11px] transition-all cursor-pointer shadow-xs" style="background-color: var(--surface-1); border-color: var(--line-2); color: var(--ink-1);">
                   <component :is="u.enabled ? Lock : Unlock" class="w-3 h-3 inline" /> {{ u.enabled ? '停用' : '启用' }}

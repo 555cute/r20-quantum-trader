@@ -14,6 +14,8 @@ import glob
 import subprocess
 import datetime
 
+_BJ = datetime.timezone(datetime.timedelta(hours=8))
+
 WORKSPACE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOGS_DIR = os.path.join(WORKSPACE_DIR, "logs")
 MAX_LOG_SIZE_MB = 10
@@ -97,7 +99,7 @@ def run_cleanup_and_check():
         cache_actions = clean_system_caches()
 
     report = {
-        "timestamp": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+        "timestamp": datetime.datetime.now(_BJ).isoformat(sep=" ", timespec="seconds"),
         "disk": disk,
         "log_rotations": log_actions,
         "cache_cleared": cache_actions

@@ -8,6 +8,7 @@ import subprocess
 import sys
 from typing import Any
 
+from r20_backend.time_utils import parse_beijing
 from r20_backend.schedule_store import load_schedule
 from r20_backend.backup_store import list_jobs as list_backup_jobs
 from r20_gateway.store import GatewayStore
@@ -60,7 +61,7 @@ def scheduler_snapshot(store: GatewayStore) -> dict[str, Any]:
     for spec in current_jobs():
         raw = store.get_state(f"job.last.{spec.name}")
         try:
-            last = datetime.fromisoformat(raw) if raw else None
+            last = parse_beijing(raw)
         except ValueError:
             last = None
         value = schedule.get(spec.schedule_key) if spec.schedule_key else None
@@ -87,7 +88,7 @@ class GatewayScheduler:
     def _last_at(self, name: str) -> datetime | None:
         raw = self.store.get_state(f"job.last.{name}")
         try:
-            return datetime.fromisoformat(raw) if raw else None
+            return parse_beijing(raw)
         except ValueError:
             return None
 

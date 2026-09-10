@@ -5,6 +5,7 @@ Validates causal calculus engine, definite integrals, probability theory,
 factor library integration, multi-factor scoring and pyramiding gateways.
 """
 
+import json
 import os
 import sys
 import unittest
@@ -183,8 +184,77 @@ class FactorLibraryIntegrationTest(unittest.TestCase):
     """Test Pillar 6 integration in factor_library.py."""
 
     def test_factor_library_structure_contains_math_prob_foundations(self):
+        # US-012: 结构契约测试零真实网络。注入合成 OKX V5 行情（假数据、测试域语义），
+        # 让 calculus/probability 管线真正离线执行；未预置的 URL 会被记录并判失败，
+        # 防止未来新增外部依赖悄悄降级通过。
         item = {"instId": "BTC-USDT-SWAP", "name": "BTC", "type": "crypto", "precision": 1}
-        factors = factor_library.compute_instrument_factors(item, {})
+
+        def synth_candles(bar_minutes, n=24, base=60000.0):
+            # OKX 惯例：最新在前（倒序）
+            rows = []
+            for i in range(n):
+                idx = n - 1 - i
+                c = base + idx * 10.0
+                o = c - 5.0
+                rows.append([str(1700000000000 + idx * bar_minutes * 60000),
+                             str(o), str(c + 8.0), str(c - 8.0), str(c), "100"])
+            return rows
+
+        class FakeResponse:
+            def __init__(self, payload):
+                self._raw = json.dumps(payload).encode("utf-8")
+            def read(self):
+                return self._raw
+            def __enter__(self):
+                return self
+            def __exit__(self, *exc):
+                return False
+
+        unfaked_urls = []
+
+        def fake_urlopen(req, timeout=None):
+            url = getattr(req, "full_url", str(req))
+            if "/api/v5/market/ticker" in url:
+                payload = {"code": "0", "data": [{"last": "60230", "bidPx": "60229",
+                                                  "askPx": "60231", "open24h": "60000"}]}
+            elif "/api/v5/public/funding-rate" in url:
+                payload = {"code": "0", "data": [{"fundingRate": "0.0001"}]}
+            elif "/api/v5/public/open-interest" in url:
+                payload = {"code": "0", "data": [{"oiUsd": "1234567890"}]}
+            elif "long-short-account-ratio" in url:
+                payload = {"code": "0", "data": [["1700000000000", "2.5"]]}
+            elif "taker-volume" in url:
+                payload = {"code": "0", "data": [["1700000000000", "1200", "800"]]}
+            else:
+                unfaked_urls.append(url)
+                raise AssertionError(f"unfaked external URL in offline test: {url}")
+            return FakeResponse(payload)
+
+        candle_bars = []
+
+        def fake_fetch_candles(inst_id, bar="15m", limit=24, **kw):
+            candle_bars.append((inst_id, bar))
+            return synth_candles(15 if bar == "15m" else 60, n=int(limit))
+
+        def fake_fetch_orderbook(inst_id, sz=5, **kw):
+            return {"bids": [[str(60229 - i), str(10 + i)] for i in range(int(sz))],
+                    "asks": [[str(60231 + i), str(9 + i)] for i in range(int(sz))]}
+
+        def fake_fetch_indicators_batch(inst_id, names, bar="1H", **kw):
+            return {"ADX": {"adx": 25.0}, "KDJ": {"j": 55.0},
+                    "BBWIDTH": {"bbWidth": 2.0}, "CMF": {"cmf": 0.1}}
+
+        with patch.object(factor_library.urllib.request, "urlopen", side_effect=fake_urlopen), \
+                patch.object(factor_library, "fetch_candles", side_effect=fake_fetch_candles), \
+                patch.object(factor_library, "fetch_orderbook_depth", side_effect=fake_fetch_orderbook), \
+                patch.object(factor_library, "fetch_indicators_batch", side_effect=fake_fetch_indicators_batch):
+            factors = factor_library.compute_instrument_factors(item, {})
+
+        self.assertEqual(unfaked_urls, [], "no real network dependency may leak in")
+        self.assertIn(("BTC-USDT-SWAP", "15m"), candle_bars)
+        self.assertIn(("BTC-USDT-SWAP", "1H"), candle_bars)
+        # 假 ticker 数据必须真的流进管线（而非降级默认值）
+        self.assertEqual(factors["price"], 60230.0)
         self.assertIn("calculus_dynamics", factors)
         self.assertIn("curvature", factors["calculus_dynamics"])
         self.assertIn("power", factors["calculus_dynamics"])
