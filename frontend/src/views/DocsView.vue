@@ -215,7 +215,7 @@ onUnmounted(() => {
           </div>
 
           <p class="text-xs sm:text-sm leading-relaxed font-sans" style="color: var(--ink-2);">
-            <strong>R20量子交易系统 (R20 Quantum Trading System)</strong> 是一套专为高波动加密货币（Crypto）打造的<strong>机构级全自动波段量化决策与执行系统</strong>。系统通过 OKX V5 REST API 直签执行私有账户与交易请求，API Key 为唯一连接方式：在后台分别配置 LIVE/DEMO 三件套，凭证采用 Fernet 本地加密存储，留空不改；未配置时显示 NOT READY 并禁止交易，公共行情无需凭证。系统运行在严格的北京时间（UTC+8）自然日财务基准之上，聚焦 1H~4H 大级别顺势波段，以<strong>“胜率第一、宁缺毋滥、三位一体 Fail-Closed 物理硬防线”</strong>为最高风控宗旨。在 v7.5.0 全面集成本地化 TradingView 官方轻量引擎与视觉 LLM 友好型量价形态工作站；v7.6.0 里程碑将全部执行层硬风控阈值从源码剥离，升级为后台可视化「风控管理中心」与三套优质预设套件。
+            <strong>R20量子交易系统 (R20 Quantum Trading System)</strong> 是一套专为高波动加密货币（Crypto）打造的<strong>机构级全自动波段量化决策与多所对等执行系统</strong>。系统原生支持 <strong>OKX / Binance / Gate.io 三所平权对等架构</strong>，通过各所官方 REST API 直签执行私有账户与订单请求，消除单所特权偏置：在管理后台「账户与标的」可分别独立配置三所的 LIVE/DEMO 凭证，敏感凭据采用 Fernet 本地加密存储，留空不改；未配置时该所显示 NOT READY 并禁止交易，公共行情无需凭证。系统运行在严格的北京时间（UTC+8）自然日财务基准之上，聚焦 1H~4H 大级别顺势波段，以<strong>“胜率第一、宁缺毋滥、三所对等 Fail-Closed 物理硬防线”</strong>为最高风控宗旨。
           </p>
 
           <!-- 4 Core Pillars Grid -->
@@ -257,6 +257,16 @@ onUnmounted(() => {
               </div>
               <p class="text-xs leading-relaxed" style="color: var(--ink-2);">
                 每日 20:00 自动读取真实平仓台账流水进行自我反思与痛点归因，自动更新 <code>AI_TRADING_MEMORY.md</code> 长效实战心法，具备时效覆盖与动态经验淘汰机制。
+              </p>
+            </div>
+
+            <div class="p-4 rounded-xl border space-y-2 shadow-xs sm:col-span-2" style="background-color: var(--surface-2); border-color: var(--line-1);">
+              <div class="flex items-center space-x-2 text-xs font-bold" style="color: var(--accent);">
+                <Server class="w-4 h-4" />
+                <span>三所对等执行架构 (Tri-Venue Equal Parity)</span>
+              </div>
+              <p class="text-xs leading-relaxed" style="color: var(--ink-2);">
+                彻底消除单所特权偏置。OKX、Binance 与 Gate.io 三所享有完全对等的 API 直签连接能力、环境状态独立隔离、毫秒级基差与资金费率对齐及统一组合风险预算管线。任何交易所连接异常仅局部降级，绝不影响其余场所的安全运行。
               </p>
             </div>
           </div>
@@ -717,7 +727,7 @@ pip install -r requirements.txt
             </div>
 
             <div class="p-4 rounded-xl border space-y-2 shadow-xs" style="background-color: var(--surface-2); border-color: var(--line-1);">
-              <h3 class="text-sm font-bold" style="color: var(--ink-1);">Q2: 我的 OKX API Key 和大模型密钥会泄露吗？</h3>
+              <h3 class="text-sm font-bold" style="color: var(--ink-1);">Q2: 我的交易所 API Key（OKX / Binance / Gate）和大模型密钥会泄露吗？</h3>
               <p class="text-xs leading-relaxed" style="color: var(--ink-2);">
                 绝不会。系统采用<strong>全本地无害化存储</strong>（本地加密 SQLite 库与环境变量隔离），开源仓库的 <code>.gitignore</code> 已严密阻断任何凭证提交；公开接口及前台响应对所有 Key、Token 与 Secret 均进行强力掩码脱敏（如 <code>sk-***abcd</code>）。
               </p>
