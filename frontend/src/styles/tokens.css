@@ -1,7 +1,9 @@
 /* =========================================================================
    R20 Design Tokens · "Quant Ops Console" 视觉语言基座
+   —— 机构级深色终端：深邃表面台阶 + 1px 微描边 + 内高光 + 品牌辉光
    命名规范：--surface-* 表面台阶 / --line-* 描边 / --ink-* 文字层级 /
             --accent 品牌 / --up --down --warn --info 语义 / --chart-* 图表序列
+            --venue-* 交易所品牌（三所平权：OKX / Binance / Gate）
    运行时切换：:root[data-theme="light"] 与 :root[data-cvd="true"] 覆写
    ========================================================================= */
 
@@ -12,6 +14,7 @@
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   /* —— 字阶（行高随附 1.45~1.6）—— */
+  --text-3xs: 10px;
   --text-2xs: 11px;
   --text-xs: 12px;
   --text-sm: 13px;
@@ -20,15 +23,27 @@
   --text-lg: 16px;
   --text-xl: 20px;
   --text-2xl: 26px;
+  --text-3xl: 34px;
 
   /* —— 圆角 / 控件高度 —— */
   --r-ctl: 6px;
   --r-card: 10px;
   --r-float: 14px;
   --r-pill: 999px;
+  --h-xs: 24px;
   --h-sm: 28px;
   --h-md: 32px;
   --h-lg: 36px;
+  --h-header: 48px;
+
+  /* —— 节奏（全站统一留白，页面不再各写各的）—— */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --gap-card: 12px;
 
   /* —— 层级 —— */
   --z-header: 40;
@@ -39,27 +54,34 @@
   --z-cmdk: 90;
 
   /* —— 动效 —— */
+  --dur-instant: 90ms;
   --dur-fast: 120ms;
   --dur-base: 180ms;
   --dur-slow: 240ms;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
 
-  /* —— 暗色（默认）：Binance 实测台阶值，边框=再上一级表面 —— */
-  --surface-0: #0b0e11; /* canvas */
-  --surface-header: rgba(11, 14, 17, 0.96);
-  --surface-1: #171b21; /* card-subtle */
-  --surface-2: #1e2329; /* card */
-  --surface-3: #2b3139; /* elevated / hover */
-  --surface-input: #0b0e11;
-  --overlay-scrim: rgba(2, 4, 6, 0.72);
+  /* —— 暗色（默认）：五级表面台阶，边框=再上一级表面 —— */
+  --surface-0: #080a0c; /* canvas 画布 */
+  --surface-1: #101418; /* card-subtle / 内凹井 */
+  --surface-2: #161b22; /* card 标准卡 */
+  --surface-3: #21262d; /* elevated / hover */
+  --surface-4: #2b3139; /* float 浮层（dialog/drawer/cmdk/toast） */
+  --surface-header: rgba(8, 10, 12, 0.82);
+  --surface-input: #0a0d10;
+  --overlay-scrim: rgba(2, 4, 6, 0.78);
 
-  --line-1: #2b3139;
-  --line-2: #39404b;
-  --line-3: #4a5262;
+  --line-1: #1f252c;
+  --line-2: #2c333b;
+  --line-3: #3f4855;
+  /* 微描边：卡片顶部 1px 内高光，暗色下区分「贴地」与「浮起」的关键 */
+  --line-hair: rgba(255, 255, 255, 0.045);
+  --line-hair-strong: rgba(255, 255, 255, 0.075);
 
-  --ink-1: #eaecef; /* 正文 */
-  --ink-2: #929aa5; /* 辅助 */
-  --ink-3: #707a8a; /* 列头/微标签，禁用于正文 */
+  --ink-1: #e6edf3; /* 正文 */
+  --ink-2: #98a2ae; /* 辅助 */
+  --ink-3: #6c7885; /* 列头/微标签，禁用于正文 */
+  --ink-faint: #4a545f; /* 占位/禁用/装饰，禁用于任何必读信息 */
   --ink-strong: #ffffff; /* 仅限关键数字/标题 */
 
   --accent: #f7931a; /* BTC 橙 */
@@ -81,16 +103,46 @@
   --info-bg: rgba(76, 143, 255, 0.12);
   --info-line: rgba(76, 143, 255, 0.28);
 
+  /* —— 交易所品牌令牌：三所平权，同一套结构（色/底/线/辉光）—— */
+  --venue-okx: #3880ff;
+  --venue-okx-bg: rgba(56, 128, 255, 0.14);
+  --venue-okx-line: rgba(56, 128, 255, 0.36);
+  --venue-okx-glow: 0 0 14px -2px rgba(56, 128, 255, 0.55);
+  --venue-binance: #f3ba2f;
+  --venue-binance-bg: rgba(243, 186, 47, 0.14);
+  --venue-binance-line: rgba(243, 186, 47, 0.36);
+  --venue-binance-glow: 0 0 14px -2px rgba(243, 186, 47, 0.55);
+  --venue-gate: #00be98;
+  --venue-gate-bg: rgba(0, 190, 152, 0.14);
+  --venue-gate-line: rgba(0, 190, 152, 0.36);
+  --venue-gate-glow: 0 0 14px -2px rgba(0, 190, 152, 0.55);
+  /* 未知/未接入场所的中性档（绝不借用三所色，也不做默认值） */
+  --venue-neutral: #8b949e;
+  --venue-neutral-bg: rgba(139, 148, 158, 0.14);
+  --venue-neutral-line: rgba(139, 148, 158, 0.32);
+  --venue-neutral-glow: none;
+
   --chart-1: #0ecb81;
   --chart-2: #f6465d;
   --chart-3: #f0b90b;
   --chart-4: #4c8fff;
   --chart-5: #a78bfa;
+  --chart-6: #3880ff;
+  --chart-7: #00be98;
 
-  /* 暗色禁投影分层，浮层例外 */
-  --shadow-float: 0 20px 35px -8px rgba(0, 0, 0, 0.7);
-  --shadow-dialog: 0 24px 64px -12px rgba(0, 0, 0, 0.8);
+  /* —— 辉光 / 焦点环 / 投影（暗色靠光与描边分层，不靠重投影）—— */
+  --glow-accent: 0 0 20px -6px rgba(247, 147, 26, 0.55);
+  --glow-up: 0 0 16px -6px rgba(14, 203, 129, 0.5);
+  --glow-down: 0 0 16px -6px rgba(246, 70, 93, 0.5);
+  --glow-warn: 0 0 16px -6px rgba(240, 185, 11, 0.5);
   --ring-accent: 0 0 0 3px rgba(247, 147, 26, 0.22);
+  --ring-focus: 0 0 0 3px rgba(247, 147, 26, 0.22);
+  --ring-danger: 0 0 0 3px rgba(246, 70, 93, 0.2);
+  --hairline-inset: inset 0 1px 0 var(--line-hair);
+  --shadow-card: inset 0 1px 0 var(--line-hair), 0 8px 24px -20px rgba(0, 0, 0, 0.95);
+  --shadow-elevated: inset 0 1px 0 var(--line-hair-strong), 0 14px 34px -18px rgba(0, 0, 0, 0.9);
+  --shadow-float: 0 22px 44px -12px rgba(0, 0, 0, 0.78);
+  --shadow-dialog: 0 30px 78px -18px rgba(0, 0, 0, 0.92);
 }
 
 /* —— 色盲友好（Wong 板 / Bloomberg 蓝朱先例；方向永远另带 ▲▼）—— */
@@ -103,25 +155,31 @@
   --down-line: rgba(213, 94, 0, 0.32);
   --chart-1: #56b4e9;
   --chart-2: #d55e00;
+  /* 场所色是身份色而非方向色，CVD 下保持品牌识别（文字徽章永远在场） */
 }
 
 /* —— 浅色：语义色加深一档保 AA —— */
 :root[data-theme='light'] {
-  --surface-0: #f4f6f8;
-  --surface-header: rgba(255, 255, 255, 0.94);
+  --surface-0: #f2f4f7;
   --surface-1: #ffffff;
   --surface-2: #ffffff;
-  --surface-3: #eef1f4;
+  --surface-3: #eef1f5;
+  --surface-4: #ffffff;
+  --surface-header: rgba(255, 255, 255, 0.88);
   --surface-input: #ffffff;
-  --overlay-scrim: rgba(15, 23, 42, 0.45);
+  --overlay-scrim: rgba(15, 23, 42, 0.42);
 
-  --line-1: #e2e8f0;
-  --line-2: #cbd5e1;
-  --line-3: #94a3b8;
+  --line-1: #e3e8ef;
+  --line-2: #cfd6e0;
+  --line-3: #a9b3c1;
+  /* 浅色下内高光改为顶部白，底部压深 */
+  --line-hair: rgba(15, 23, 42, 0.04);
+  --line-hair-strong: rgba(15, 23, 42, 0.07);
 
   --ink-1: #14202e;
-  --ink-2: #475569;
-  --ink-3: #5b6472;
+  --ink-2: #4b5768;
+  --ink-3: #647284;
+  --ink-faint: #97a3b2;
   --ink-strong: #0b1220;
 
   --accent: #c2600c;
@@ -143,15 +201,44 @@
   --info-bg: rgba(37, 99, 235, 0.08);
   --info-line: rgba(37, 99, 235, 0.25);
 
+  /* 浅色下品牌色压深，保证 4.5:1 文本对比 */
+  --venue-okx: #2f6de0;
+  --venue-okx-bg: rgba(47, 109, 224, 0.1);
+  --venue-okx-line: rgba(47, 109, 224, 0.28);
+  --venue-okx-glow: none;
+  --venue-binance: #9a6b0a;
+  --venue-binance-bg: rgba(154, 107, 10, 0.1);
+  --venue-binance-line: rgba(154, 107, 10, 0.28);
+  --venue-binance-glow: none;
+  --venue-gate: #067a63;
+  --venue-gate-bg: rgba(6, 122, 99, 0.1);
+  --venue-gate-line: rgba(6, 122, 99, 0.28);
+  --venue-gate-glow: none;
+  --venue-neutral: #64748b;
+  --venue-neutral-bg: rgba(100, 116, 139, 0.1);
+  --venue-neutral-line: rgba(100, 116, 139, 0.26);
+  --venue-neutral-glow: none;
+
   --chart-1: #059669;
   --chart-2: #e11d48;
   --chart-3: #d97706;
   --chart-4: #2563eb;
   --chart-5: #7c3aed;
+  --chart-6: #2f6de0;
+  --chart-7: #067a63;
 
-  --shadow-float: 0 10px 25px -5px rgba(15, 23, 42, 0.08);
-  --shadow-dialog: 0 16px 48px -12px rgba(15, 23, 42, 0.18);
+  --glow-accent: none;
+  --glow-up: none;
+  --glow-down: none;
+  --glow-warn: none;
   --ring-accent: 0 0 0 3px rgba(194, 96, 12, 0.18);
+  --ring-focus: 0 0 0 3px rgba(194, 96, 12, 0.18);
+  --ring-danger: 0 0 0 3px rgba(225, 29, 72, 0.16);
+  --hairline-inset: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.05), 0 6px 18px -14px rgba(15, 23, 42, 0.18);
+  --shadow-elevated: 0 1px 2px rgba(15, 23, 42, 0.06), 0 12px 28px -18px rgba(15, 23, 42, 0.28);
+  --shadow-float: 0 12px 30px -8px rgba(15, 23, 42, 0.14);
+  --shadow-dialog: 0 20px 56px -16px rgba(15, 23, 42, 0.24);
 }
 
 :root[data-theme='light'][data-cvd='true'] {
@@ -174,12 +261,14 @@
   --color-surface-1: var(--surface-1);
   --color-surface-2: var(--surface-2);
   --color-surface-3: var(--surface-3);
+  --color-surface-4: var(--surface-4);
   --color-line-1: var(--line-1);
   --color-line-2: var(--line-2);
   --color-line-3: var(--line-3);
   --color-ink-1: var(--ink-1);
   --color-ink-2: var(--ink-2);
   --color-ink-3: var(--ink-3);
+  --color-ink-faint: var(--ink-faint);
   --color-ink-strong: var(--ink-strong);
   --color-accent: var(--accent);
   --color-accent-ink: var(--accent-ink);
@@ -188,11 +277,17 @@
   --color-down: var(--down);
   --color-warn: var(--warn);
   --color-info: var(--info);
+  --color-venue-okx: var(--venue-okx);
+  --color-venue-binance: var(--venue-binance);
+  --color-venue-gate: var(--venue-gate);
+  --color-venue-neutral: var(--venue-neutral);
 
   --radius-ctl: var(--r-ctl);
   --radius-card: var(--r-card);
   --radius-float: var(--r-float);
 
+  --text-3xs: var(--text-3xs);
+  --text-3xs--line-height: 1.4;
   --text-2xs: var(--text-2xs);
   --text-2xs--line-height: 1.5;
   --text-xs: var(--text-xs);
@@ -209,4 +304,6 @@
   --text-xl--line-height: 1.35;
   --text-2xl: var(--text-2xl);
   --text-2xl--line-height: 1.25;
+  --text-3xl: var(--text-3xl);
+  --text-3xl--line-height: 1.2;
 }
