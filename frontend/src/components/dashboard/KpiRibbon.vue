@@ -48,29 +48,10 @@ const okxEquity = computed(() => fmtNum(Number(portfolioSummary.value?.asset_dis
 const binanceEquity = computed(() => fmtNum(Number(portfolioSummary.value?.asset_distribution?.binance?.equity ?? 0), 2));
 const gateEquity = computed(() => fmtNum(Number(portfolioSummary.value?.asset_distribution?.gate?.equity ?? 0), 2));
 
-const venueDistItems = computed(() => [
-  {
-    key: 'okx',
-    label: 'OKX',
-    pct: distOkx.value,
-    equity: okxEquity.value,
-    color: 'var(--venue-okx, #3880ff)',
-  },
-  {
-    key: 'binance',
-    label: 'Binance',
-    pct: distBinance.value,
-    equity: binanceEquity.value,
-    color: 'var(--venue-binance, #f3ba2f)',
-  },
-  {
-    key: 'gate',
-    label: 'Gate.io',
-    pct: distGate.value,
-    equity: gateEquity.value,
-    color: 'var(--venue-gate, #00be98)',
-  },
-]);
+const distHint = computed(() => {
+  if (!hasMultiVenue.value) return t('dash.matrix.kpi.equityTip');
+  return `多所对等聚合 · OKX: ${distOkx.value}% · Binance: ${distBinance.value}% · Gate: ${distGate.value}%`;
+});
 
 const todayNet = computed(() => Number(today.value.net_realized ?? today.value.total_pnl ?? 0));
 const todayTrades = computed(() => Number(today.value.win_trades ?? 0) + Number(today.value.loss_trades ?? 0));
@@ -127,66 +108,10 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="card space-y-2.5 p-2 sm:p-2.5 xl:p-3.5">
+  <div class="card space-y-2 p-2 sm:p-2.5 xl:p-3">
     <!-- 顶层状态栏 -->
     <div class="flex items-center justify-between border-b px-1 sm:px-2 pb-2" style="border-color: var(--line-1)">
       <DataStatus />
-    </div>
-
-    <!-- 多所组合总权益与交互式三色资产分布中枢 -->
-    <div class="flex flex-col gap-2 rounded-xl border p-2.5 sm:p-3" style="border-color: var(--line-1); background-color: var(--surface-1)">
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 text-xs">
-        <!-- 组合总权益 -->
-        <div class="flex items-center gap-2">
-          <Layers class="h-4 w-4 text-[var(--accent)]" />
-          <span class="font-bold text-xs sm:text-sm text-[var(--ink-strong)]">
-            多所组合总权益
-          </span>
-          <span class="num font-extrabold text-sm sm:text-base text-[var(--ink-strong)]">
-            $ {{ totalAggregatedEquity }} U
-          </span>
-          <span
-            class="badge text-3xs font-semibold px-1.5 py-0.5"
-            :class="isLiveEnv ? 'badge-up' : 'badge-warn'"
-          >
-            {{ envBadgeText }}
-          </span>
-          <span class="badge text-3xs hidden sm:inline-flex" style="background: var(--surface-3); color: var(--ink-2)">
-            {{ portfolioSummary?.active_venues_count || 3 }} 所对等协同
-          </span>
-        </div>
-
-        <!-- 三所资产份额指示器 -->
-        <div class="flex items-center justify-between sm:justify-end gap-3 text-2xs num">
-          <div
-            v-for="item in venueDistItems"
-            :key="item.key"
-            class="group relative flex items-center gap-1.5 cursor-pointer py-0.5"
-            :title="`${item.label}: ${item.equity} U (${item.pct}%)`"
-          >
-            <span class="h-2 w-2 rounded-full transition-transform group-hover:scale-125" :style="{ backgroundColor: item.color }" />
-            <span class="font-semibold text-[var(--ink-1)]">{{ item.label }}</span>
-            <span class="tabular-nums font-bold" :style="{ color: item.color }">{{ item.pct }}%</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- 交互式三色资产分配横条 (带平滑过渡与悬停高亮) -->
-      <div
-        class="group relative flex h-2 w-full overflow-hidden rounded-full transition-all"
-        style="background-color: var(--surface-3)"
-      >
-        <div
-          v-for="item in venueDistItems"
-          :key="item.key"
-          :style="{
-            width: `${item.pct}%`,
-            backgroundColor: item.color,
-          }"
-          class="h-full transition-all duration-300 hover:brightness-125 hover:opacity-95"
-          :title="`${item.label}: ${item.equity} U (${item.pct}%)`"
-        />
-      </div>
     </div>
 
     <!-- 六格核心指标卡片矩阵 -->
@@ -194,7 +119,7 @@ onMounted(async () => {
       <BaseStat
         :label="`[${envBadgeText}] ${hasMultiVenue ? '组合总权益 (U)' : t('dash.matrix.kpi.equity')}`"
         :value="totalAggregatedEquity"
-        :hint="hasMultiVenue ? `${envBadgeText}多所对等聚合权益` : t('dash.matrix.kpi.equityTip')"
+        :hint="distHint"
       >
         <template #extra>
           <span class="num text-xs font-semibold" :class="todayNet >= 0 ? 'up' : 'down'">

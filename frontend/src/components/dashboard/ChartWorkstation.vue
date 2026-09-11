@@ -1308,59 +1308,6 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 跨所基差与资金费率微型看板 -->
-    <div
-      class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 border-b px-3 py-1.5 text-2xs"
-      style="border-color: var(--line-1); background-color: var(--surface-0)"
-    >
-      <div class="flex items-center gap-1.5">
-        <span class="font-bold text-[11px]" style="color: var(--ink-strong)">
-          {{ t('dash.matrix.chart.crossVenue.title') }}
-        </span>
-        <span class="badge text-3xs" style="background: var(--surface-3); color: var(--ink-3)">
-          {{ t('dash.matrix.chart.crossVenue.syncTime') }}
-        </span>
-      </div>
-
-      <div class="flex flex-wrap items-center gap-x-4 gap-y-1 num">
-        <!-- OKX -->
-        <div class="flex items-center gap-1">
-          <span class="h-1.5 w-1.5 rounded-full" style="background-color: var(--venue-okx, #3880ff)" />
-          <span class="font-bold" style="color: var(--venue-okx, #3880ff)">OKX</span>
-          <span style="color: var(--ink-1)">{{ okxPrice ? (okxPrice >= 100 ? okxPrice.toFixed(1) : okxPrice.toFixed(4)) : '--' }}</span>
-          <span v-if="isValidFunding(okxFunding)" class="t-faint text-[10px] pl-0.5">
-            {{ Number(okxFunding) >= 0 ? '+' : '' }}{{ (Number(okxFunding) * 100).toFixed(4) }}%
-          </span>
-        </div>
-
-        <!-- Binance -->
-        <div class="flex items-center gap-1">
-          <span class="h-1.5 w-1.5 rounded-full" style="background-color: var(--venue-binance, #f3ba2f)" />
-          <span class="font-bold" style="color: var(--venue-binance, #f3ba2f)">Binance</span>
-          <span style="color: var(--ink-1)">{{ binancePrice ? (binancePrice >= 100 ? binancePrice.toFixed(1) : binancePrice.toFixed(4)) : '--' }}</span>
-          <span v-if="binanceBasisPct !== null" :class="binanceBasisPct >= 0 ? 'up' : 'down'" class="text-[10px] pl-0.5 font-semibold">
-            {{ binanceBasisPct >= 0 ? '+' : '' }}{{ (binanceBasisPct * 100).toFixed(2) }}%
-          </span>
-          <span v-if="isValidFunding(binanceFunding)" class="t-faint text-[10px] pl-0.5">
-            {{ Number(binanceFunding) >= 0 ? '+' : '' }}{{ (Number(binanceFunding) * 100).toFixed(4) }}%
-          </span>
-        </div>
-
-        <!-- Gate -->
-        <div class="flex items-center gap-1">
-          <span class="h-1.5 w-1.5 rounded-full" style="background-color: var(--venue-gate, #00be98)" />
-          <span class="font-bold" style="color: var(--venue-gate, #00be98)">Gate</span>
-          <span style="color: var(--ink-1)">{{ gatePrice ? (gatePrice >= 100 ? gatePrice.toFixed(1) : gatePrice.toFixed(4)) : '--' }}</span>
-          <span v-if="gateBasisPct !== null" :class="gateBasisPct >= 0 ? 'up' : 'down'" class="text-[10px] pl-0.5 font-semibold">
-            {{ gateBasisPct >= 0 ? '+' : '' }}{{ (gateBasisPct * 100).toFixed(2) }}%
-          </span>
-          <span v-if="isValidFunding(gateFunding)" class="t-faint text-[10px] pl-0.5">
-            {{ Number(gateFunding) >= 0 ? '+' : '' }}{{ (Number(gateFunding) * 100).toFixed(4) }}%
-          </span>
-        </div>
-      </div>
-    </div>
-
     <!-- 图表画布 -->
     <div
       ref="chartContainer"

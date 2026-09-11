@@ -10,7 +10,6 @@ import { useUi } from '../../composables/useUi';
 import { APP_VERSION, APP_NAME } from '../../config/version';
 import BeijingClock from '../base/BeijingClock.vue';
 import SettingsPopover from './SettingsPopover.vue';
-import VenueCapsule from './VenueCapsule.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -95,9 +94,6 @@ function go(path: string) {
 
       <!-- 右侧动作区 -->
       <div class="ms-auto flex items-center gap-1 sm:gap-1.5">
-        <!-- 三所对等连接胶囊 -->
-        <VenueCapsule />
-
         <!-- 时钟（宽屏常驻） -->
         <BeijingClock class="mx-1 hidden xl:block" />
 

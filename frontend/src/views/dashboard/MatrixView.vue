@@ -1,22 +1,22 @@
 <script setup lang="ts">
 /**
- * 实盘矩阵视图：KPI 带 → 左图表(8) + 右持仓挂单(4) → 因子矩阵。
- * 交互主线：任何位置的选币（矩阵行 / 持仓行 / ⌘K）都汇聚到图表。
+ * 实盘矩阵大板：Chart-First 机构级双翼操盘终端
+ * 1. 顶层极简 KPI HUD
+ * 2. 核心操盘区：左·量价工作站 (8) + 右·在手持仓与在途委托 (4)
+ * 3. 资产管理区：三所对等账户卡与组合风险
+ * 4. 动力学矩阵：全市场因子动能
  */
 import { computed, ref, watch } from 'vue';
 import { useDashboardStore } from '../../stores/dashboard';
 import { symOf } from '../../utils/instId';
-import { useI18n } from '../../composables/useI18n';
 import { useUi } from '../../composables/useUi';
-import PageHead from '../../components/dashboard/PageHead.vue';
 import KpiRibbon from '../../components/dashboard/KpiRibbon.vue';
-import VenueAccountsPanel from '../../components/dashboard/VenueAccountsPanel.vue';
 import ChartWorkstation from '../../components/dashboard/ChartWorkstation.vue';
 import PositionsOrdersPanel from '../../components/dashboard/PositionsOrdersPanel.vue';
+import VenueAccountsPanel from '../../components/dashboard/VenueAccountsPanel.vue';
 import FactorMatrix from '../../components/dashboard/FactorMatrix.vue';
 
 const store = useDashboardStore();
-const { t } = useI18n();
 const { focusSymbol } = useUi();
 
 const chart = ref<InstanceType<typeof ChartWorkstation> | null>(null);
@@ -41,13 +41,11 @@ watch(focusSymbol, (v) => {
 </script>
 
 <template>
-  <div class="space-y-2.5 sm:space-y-3">
-    <PageHead :title="t('dash.matrix.title')" :desc="t('dash.matrix.desc')" />
-
+  <div class="space-y-3">
+    <!-- 1. 顶层极简资产风控 HUD -->
     <KpiRibbon />
 
-    <VenueAccountsPanel />
-
+    <!-- 2. 首屏核心双翼操盘台 (Chart-first: 左·K线量价工作站 67% + 右·在手持仓与委托 33%) -->
     <div class="grid grid-cols-1 gap-3 xl:grid-cols-12">
       <div class="xl:col-span-8">
         <ChartWorkstation ref="chart" :initial-symbol="initialSymbol" />
@@ -57,6 +55,10 @@ watch(focusSymbol, (v) => {
       </div>
     </div>
 
+    <!-- 3. 三所对等账户与资金风控舱 -->
+    <VenueAccountsPanel />
+
+    <!-- 4. 因子动能与决策矩阵 -->
     <FactorMatrix @pick-symbol="pick" />
   </div>
 </template>
