@@ -21,13 +21,24 @@ def check_risk(package: dict, decision: dict, context: dict) -> tuple[bool, str]
     except (ValueError, TypeError):
         return False, "订单价格几何参数缺失或非浮点数，安全降级为 WAIT。"
 
+    # 动态读取全局最低盈亏比门禁（单一事实源：scripts/risk_constants.py）
+    try:
+        from scripts.risk_constants import MIN_RISK_REWARD_RATIO
+        min_rr = float(MIN_RISK_REWARD_RATIO)
+    except Exception:
+        try:
+            import os
+            min_rr = float(os.getenv("R20_MIN_RISK_REWARD", "2.0"))
+        except Exception:
+            min_rr = 2.0
+
     rr = 0.0
     if action == "BUY_LONG" and entry > sl > 0 and tp > entry:
         rr = (tp - entry) / (entry - sl)
     elif action == "SELL_SHORT" and sl > entry > tp > 0:
         rr = (entry - tp) / (sl - entry)
 
-    if rr < 2.0:
-        return False, f"模型报价盈亏比 {rr:.2f}R 未满足真实 2R 门禁，执行层降级为 WAIT。"
+    if rr < min_rr:
+        return False, f"模型报价盈亏比 {rr:.2f}R 未满足全局风控 {min_rr:.1f}R 门禁，执行层降级为 WAIT。"
 
     return True, ""

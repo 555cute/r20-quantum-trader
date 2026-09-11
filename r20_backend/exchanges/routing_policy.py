@@ -41,39 +41,72 @@ from .registry import (execution_open, gate_environment_axis,
 ROOT = Path(__file__).resolve().parents[2]
 ROUTING_FILE = ROOT / "data" / "venue_routing.json"
 
-DEFAULT_GATE_POOL: Dict[str, Any] = {
-    "assets": [],
-    "margin_per_trade_usdt": 50.0,
-    "max_open": 2,
-    "min_confidence": 80.0,
-    "dry_run": True,
-}
+
+def global_risk_defaults() -> Dict[str, Any]:
+    """单一事实源风控基线（来自 scripts/risk_constants.py 与 .env）。"""
+    try:
+        from scripts.risk_constants import (
+            MAX_CONCURRENT_POSITIONS,
+            MAX_SINGLE_ASSET_MARGIN,
+            MIN_ENTRY_CONFIDENCE,
+        )
+        return {
+            "margin_per_trade_usdt": float(MAX_SINGLE_ASSET_MARGIN or 50.0),
+            "max_open": int(MAX_CONCURRENT_POSITIONS or 5),
+            "min_confidence": float(MIN_ENTRY_CONFIDENCE or 72.0),
+        }
+    except Exception:
+        return {
+            "margin_per_trade_usdt": 50.0,
+            "max_open": 5,
+            "min_confidence": 72.0,
+        }
 
 
-def load_gate_pool() -> Dict[str, Any]:
-    pool = dict(DEFAULT_GATE_POOL)
+def load_venue_pool(venue: str) -> Dict[str, Any]:
+    """统一多所池配置加载：优先读取各所覆盖项，缺省自动继承全局风控单一事实源。"""
+    vkey = str(venue or "").strip().lower()
+    defaults = global_risk_defaults()
+    base_pool: Dict[str, Any] = {
+        "assets": [],
+        "margin_per_trade_usdt": defaults["margin_per_trade_usdt"],
+        "max_open": defaults["max_open"],
+        "min_confidence": defaults["min_confidence"],
+        "dry_run": False if vkey != "gate" else True,
+    }
     try:
         if ROUTING_FILE.exists():
             raw = json.loads(ROUTING_FILE.read_text(encoding="utf-8"))
-            gate = raw.get("gate") or {}
-            if isinstance(gate, dict):
-                for k in DEFAULT_GATE_POOL:
-                    if k in gate:
-                        pool[k] = gate[k]
+            v_cfg = raw.get(vkey) or {}
+            if isinstance(v_cfg, dict):
+                for k in ("assets", "dry_run"):
+                    if k in v_cfg:
+                        base_pool[k] = v_cfg[k]
+                # 数值风控参数：若配置且 > 0 则覆盖，未配置或 0/负数则继承全局风控默认值
+                for k in ("margin_per_trade_usdt", "max_open", "min_confidence"):
+                    if k in v_cfg and v_cfg[k] not in (None, 0, ""):
+                        base_pool[k] = v_cfg[k]
     except Exception:
         pass
-    assets = [str(a).upper() for a in (pool.get("assets") or []) if str(a).strip()]
-    pool["assets"] = sorted(set(assets))
+    assets = [str(a).upper() for a in (base_pool.get("assets") or []) if str(a).strip()]
+    base_pool["assets"] = sorted(set(assets))
     try:
-        pool["margin_per_trade_usdt"] = max(0.0, float(pool.get("margin_per_trade_usdt") or 0))
-        pool["max_open"] = max(0, int(pool.get("max_open") or 0))
-        pool["min_confidence"] = min(100.0, max(0.0, float(pool.get("min_confidence") or 80.0)))
+        base_pool["margin_per_trade_usdt"] = max(0.0, float(base_pool.get("margin_per_trade_usdt") or defaults["margin_per_trade_usdt"]))
+        base_pool["max_open"] = max(1, int(base_pool.get("max_open") or defaults["max_open"]))
+        base_pool["min_confidence"] = min(100.0, max(0.0, float(base_pool.get("min_confidence") or defaults["min_confidence"])))
     except (TypeError, ValueError):
         pass
-    # fail-safe：执行未开闸（按当前资金环境轴判定）或凭证缺失 → 强制 dry_run
-    if not _gate_execution_ready():
-        pool["dry_run"] = True
-    return pool
+    if vkey == "gate" and not _gate_execution_ready():
+        base_pool["dry_run"] = True
+    return base_pool
+
+
+def load_gate_pool() -> Dict[str, Any]:
+    return load_venue_pool("gate")
+
+
+def load_binance_pool() -> Dict[str, Any]:
+    return load_venue_pool("binance")
 
 
 def _gate_execution_ready() -> bool:

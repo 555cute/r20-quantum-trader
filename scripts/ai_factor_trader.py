@@ -73,6 +73,7 @@ from risk_constants import (
     MAX_SCALE_IN_COUNT,
     MAX_SINGLE_ASSET_MARGIN,
     MAX_LEVERAGE,
+    MIN_LEVERAGE,
     MIN_ENTRY_CONFIDENCE,
     MIN_SCALE_IN_CONFIDENCE,
     MIN_SCALE_IN_PROFIT_RATIO,
@@ -1179,8 +1180,10 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: f
         try:
             from r20_backend import execution_router
             asset_canonical = str(inst_id).split("-")[0].upper()
-            margin_val = float(venue_ctx.get("margin_usdt") or (size * price / 3.0)) if isinstance(venue_ctx, dict) else (size * price / 3.0)
-            lever_val = float(venue_ctx.get("leverage") or 3.0) if isinstance(venue_ctx, dict) else 3.0
+            default_lever = float(MIN_LEVERAGE or 3.0)
+            margin_val = float(venue_ctx.get("margin_usdt") or (size * price / default_lever)) if isinstance(venue_ctx, dict) else (size * price / default_lever)
+            lever_val = float(venue_ctx.get("leverage") or default_lever) if isinstance(venue_ctx, dict) else default_lever
+            lever_val = max(float(MIN_LEVERAGE or 1.0), min(float(MAX_LEVERAGE or 20.0), lever_val))
 
             res = execution_router.open_protected_position({
                 "venue": target_venue,

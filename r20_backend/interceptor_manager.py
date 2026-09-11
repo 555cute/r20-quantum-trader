@@ -275,16 +275,23 @@ def _load_module_from_file(file_path: Path) -> Any:
 
 
 def _conf_floor_for(inst_id: str) -> float:
-    """置信度安全底线：读标的池每标的 conf_floor（如 DOGE=80），未配置回退全局 75。
-    池文件读取失败时同样 fail-closed 到 75（不低于历史全局底线）。"""
+    """置信度安全底线：读标的池每标的 conf_floor（如 DOGE=80），未配置回退全局。
+    池文件读取失败时同样 fail-closed（不低于全局底线）。"""
     try:
         from scripts.instrument_pool import load_instruments
         for item in load_instruments():
             if str(item.get("instId", "")).upper() == inst_id.upper():
-                return float(item.get("conf_floor", 75.0) or 75.0)
+                if item.get("conf_floor"):
+                    return float(item["conf_floor"])
     except Exception:
         pass
-    return 75.0
+    if "DOGE" in inst_id.upper():
+        return 80.0
+    try:
+        from scripts.risk_constants import MIN_ENTRY_CONFIDENCE
+        return float(MIN_ENTRY_CONFIDENCE)
+    except Exception:
+        return 75.0
 
 
 def run_interceptor_pipeline(package: dict[str, Any], decision: dict[str, Any], context: dict[str, Any]) -> tuple[str, str, float]:
