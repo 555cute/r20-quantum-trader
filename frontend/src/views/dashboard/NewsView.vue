@@ -31,14 +31,14 @@ const { t } = useI18n();
 
 // 选中的币种过滤状态（null 为不过滤展示全部）
 const selectedCoin = ref<string | null>(null);
-// 选中的来源过滤状态（all 为全部，支持 'OKX官方' | '金十数据' | '全球宏观'）
+// 选中的来源过滤状态（all 为全部，支持 '加密快讯' | 'OKX官方' | '金十数据' | '全球宏观'）
 const selectedSource = ref<string>('all');
 
 const ni = computed<any>(() => (store.data as any)?.news_intelligence || {});
 const macro = computed(() => ni.value.macro_sentiment || '偏多震荡');
 const rawNews = computed<any[]>(() => ni.value.latest_news || []);
 const freshAt = computed(() => ni.value.news_fresh_at || ni.value.timestamp || '');
-const sourceReason = computed(() => ni.value.source_reason || 'OKX官方公告 + 金十数据宏观快讯');
+const sourceReason = computed(() => ni.value.source_reason || '加密货币快讯 + 金十数据宏观快讯');
 const isSourceActive = computed(() => ni.value.source_available !== false);
 
 // 黑天鹅熔断状态
@@ -101,6 +101,15 @@ function toggleCoinFilter(sym: string) {
   } else {
     selectedCoin.value = sym;
   }
+}
+
+// 来源筛选按钮激活态：「加密快讯」用专属翡翠绿高亮，与金十红形成区隔
+function sourceBtnStyle(key: string): Record<string, string> {
+  if (selectedSource.value !== key) return { color: 'var(--ink-3)' };
+  if (key === '加密快讯') {
+    return { backgroundColor: '#10b98128', color: '#10b981', fontWeight: 'bold' };
+  }
+  return { backgroundColor: 'var(--surface-3)', color: 'var(--ink-strong)', fontWeight: 'bold' };
 }
 
 function labelCls(l: string): string {
@@ -312,13 +321,14 @@ async function refreshNews() {
               <button
                 v-for="s in [
                   { key: 'all', label: '全部' },
-                  { key: 'OKX官方', label: 'OKX官方' },
+                  { key: '加密快讯', label: '加密快讯' },
                   { key: '金十数据', label: '金十数据' },
                   { key: '全球宏观', label: '宏观快讯' },
+                  { key: 'OKX官方', label: 'OKX风控' },
                 ]"
                 :key="s.key"
                 class="px-2 py-0.5 rounded transition-colors"
-                :style="selectedSource === s.key ? { backgroundColor: 'var(--surface-3)', color: 'var(--ink-strong)', fontWeight: 'bold' } : { color: 'var(--ink-3)' }"
+                :style="sourceBtnStyle(s.key)"
                 @click="selectedSource = s.key"
               >
                 {{ s.label }}
@@ -358,7 +368,9 @@ async function refreshNews() {
                 v-for="plat in (item.platforms || [])"
                 :key="plat"
                 class="badge text-3xs font-bold"
-                :style="plat === 'OKX官方'
+                :style="plat === '加密快讯'
+                  ? { backgroundColor: '#10b98118', borderColor: '#10b98138', color: '#10b981' }
+                  : plat === 'OKX官方'
                   ? { backgroundColor: '#3880ff15', borderColor: '#3880ff33', color: '#3880ff' }
                   : plat === '金十数据'
                   ? { backgroundColor: '#e0242415', borderColor: '#e0242433', color: '#e02424' }
