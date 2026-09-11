@@ -209,6 +209,8 @@ def build_lifecycle_ledger():
             "inst": inst,
             "side": side,
             "venue": "okx",   # G10 读侧贯通：本 builder 全源 OKX V5，源头标注场所
+            "account_mode": env.mode.upper(),
+            "environment": env.mode.lower(),
             "lever": f"{lever}x",
             "strategy": strat_tag,
             "margin": margin_usdt,
@@ -221,6 +223,7 @@ def build_lifecycle_ledger():
             "open_fee": round(fee, 4),
             "close_fee": 0.0,
             "fee": round(fee, 2),
+            "funding_fee": 0.0,
             "pnl": round(upl, 2),
             "net_pnl": round(upl, 2),
             "roi_pct": roi_pct,
@@ -316,11 +319,15 @@ def build_lifecycle_ledger():
             else:
                 exit_reason = "🎯 目标止盈达成" if net_pnl > 3.0 else ("🛑 止损出场" if net_pnl < -1.0 else "🛡️ 保本平仓")
 
+        funding_fee = round(float(h.get("fundingFee") or 0.0), 4)
+
         trades_lifecycle.append({
             "id": f"pos_hist_{u_ts}_{inst}",
             "inst": inst,
             "side": side,
             "venue": "okx",   # G10：同上，OKX 历史行源头标注
+            "account_mode": env.mode.upper(),
+            "environment": env.mode.lower(),
             "lever": f"{lever}x",
             "strategy": strat_tag,
             "margin": margin_usdt,
@@ -333,6 +340,7 @@ def build_lifecycle_ledger():
             "open_fee": round(fee / 2.0, 4),
             "close_fee": round(fee / 2.0, 4),
             "fee": round(fee, 2),
+            "funding_fee": funding_fee,
             "pnl": net_pnl,
             "net_pnl": net_pnl,
             "roi": roi_pct,
@@ -342,10 +350,14 @@ def build_lifecycle_ledger():
             "exit_reason": exit_reason
         })
 
+    # 多所台账协同（US-009）：保留非 OKX 场所的历史与在途记录，杜绝覆盖冲刷
+    other_venue_trades = [t for t in old_trades if t.get("venue") and t.get("venue") != "okx"]
+    combined_trades = trades_lifecycle + other_venue_trades
+
     fd, tmp_path = tempfile.mkstemp(prefix=".ledger-", suffix=".tmp", dir=DATA_DIR)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(trades_lifecycle, f, ensure_ascii=False, indent=2)
+            json.dump(combined_trades, f, ensure_ascii=False, indent=2)
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp_path, LEDGER_JSON_FILE)

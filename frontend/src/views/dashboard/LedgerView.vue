@@ -28,6 +28,7 @@ const perf = computed<any>(() => (store.data as any)?.performance || {});
 
 /* —— 筛选 —— */
 const fVenue = ref<string>('all');
+const fMode = ref<'all' | 'live' | 'demo'>('all');
 const fStatus = ref<'all' | 'closed' | 'holding'>('closed');
 const fSide = ref<'all' | 'long' | 'short'>('all');
 const fResult = ref<'all' | 'win' | 'loss'>('all');
@@ -40,6 +41,12 @@ const venueOptions = [
   { value: 'gate', label: 'Gate' },
 ];
 
+const modeOptions = [
+  { value: 'all', label: '全部账户' },
+  { value: 'live', label: '实盘 (Live)' },
+  { value: 'demo', label: '模拟 (Demo)' },
+];
+
 const instOptions = computed(() => {
   const set = new Set<string>(all.value.map((x) => x.inst));
   return [{ value: 'all', label: t('common.all') }, ...Array.from(set).sort().map((s) => ({ value: s, label: s }))];
@@ -50,6 +57,11 @@ const filtered = computed(() =>
     if (fVenue.value !== 'all') {
       const v = String(x.venue || 'okx').toLowerCase();
       if (v !== fVenue.value) return false;
+    }
+    if (fMode.value !== 'all') {
+      const m = String(x.account_mode || x.environment || 'live').toLowerCase();
+      if (fMode.value === 'live' && !m.includes('live')) return false;
+      if (fMode.value === 'demo' && !m.includes('demo')) return false;
     }
     if (fStatus.value === 'closed' && x.status === 'holding') return false;
     if (fStatus.value === 'holding' && x.status !== 'holding') return false;
@@ -67,9 +79,12 @@ const PAGE = 20;
 const pageCount = computed(() => Math.max(1, Math.ceil(filtered.value.length / PAGE)));
 const rows = computed(() => filtered.value.slice((page.value - 1) * PAGE, page.value * PAGE));
 
-/* —— 汇总 —— */
+/* —— 汇总（US-009 包含资金费透视卡） —— */
 const netSum = computed(() => filtered.value.reduce((s, x) => s + (Number(x.net_pnl) || 0), 0));
 const feeSum = computed(() => filtered.value.reduce((s, x) => s + Math.abs(Number(x.fee) || 0), 0));
+const fundingSum = computed(() => filtered.value.reduce((s, x) => s + (Number(x.funding_fee) || 0), 0));
+const fundingIncome = computed(() => filtered.value.reduce((s, x) => s + Math.max(0, Number(x.funding_fee) || 0), 0));
+const fundingExpense = computed(() => filtered.value.reduce((s, x) => s + Math.abs(Math.min(0, Number(x.funding_fee) || 0)), 0));
 const wins = computed(() => filtered.value.filter((x) => Number(x.net_pnl) > 0).length);
 const winRate = computed(() => (filtered.value.length ? Math.round((wins.value / filtered.value.length) * 1000) / 10 : null));
 const best = computed(() => (perf.value.leaderboard || [])[0]);
@@ -77,9 +92,9 @@ const best = computed(() => (perf.value.leaderboard || [])[0]);
 /* —— 详情 —— */
 const detail = ref<any>(null);
 
-/* —— CSV 导出 —— */
+/* —— CSV 导出（US-009 包含 venue 与 account_mode） —— */
 function exportCsv() {
-  const head = ['inst', 'venue', 'side', 'lever', 'open_time', 'open_px', 'close_time', 'close_px', 'margin', 'fee', 'net_pnl', 'roi_pct', 'duration', 'exit_reason', 'strategy'];
+  const head = ['inst', 'venue', 'account_mode', 'side', 'lever', 'open_time', 'open_px', 'close_time', 'close_px', 'margin', 'fee', 'funding_fee', 'net_pnl', 'roi_pct', 'duration', 'exit_reason', 'strategy'];
   const lines = [head.join(',')];
   for (const x of filtered.value) {
     lines.push(head.map((k) => `"${String((k === 'open_time' || k === 'close_time') ? (x[k] ? fmtDateTime(x[k]) + ' +08:00' : '') : (x[k] ?? '')).replaceAll('"', '""')}"`).join(','));
@@ -107,7 +122,7 @@ function venueLabel(v: unknown): string {
 <template>
   <div class="space-y-3">
 
-    <!-- 汇总带 -->
+    <!-- 汇总带（US-009 包含资金费收支透视与净已实现盈亏） -->
     <div class="card grid grid-cols-2 gap-2 p-2 md:grid-cols-3 xl:grid-cols-6 xl:gap-0 xl:p-0">
       <BaseStat :label="t('dash.ledger.summary.total')" :value="fmtNum(filtered.length, 0)" />
       <BaseStat
@@ -115,22 +130,20 @@ function venueLabel(v: unknown): string {
         :value="winRate != null ? fmtNum(winRate, 1) + '%' : '--'"
         :delta="`${wins} / ${filtered.length}`"
         delta-tone="muted"
-       
+      />
+      <BaseStat :label="t('dash.ledger.summary.net')" :value="fmtSigned(netSum)" :delta-tone="netSum >= 0 ? 'up' : 'down'" />
+      <BaseStat :label="t('dash.ledger.summary.fees')" :value="`-${fmtNum(feeSum, 2)}`" delta-tone="muted" />
+      <BaseStat
+        label="资金费净收支"
+        :value="fmtSigned(fundingSum)"
+        :delta="`+${fmtNum(fundingIncome, 2)} / -${fmtNum(fundingExpense, 2)}`"
+        :delta-tone="fundingSum >= 0 ? 'up' : 'down'"
+        hint="累计资金费用净额与收支细分"
       />
       <BaseStat
         :label="t('dash.ledger.summary.pf')"
         :value="perf.profit_factor != null ? fmtNum(perf.profit_factor, 2) : '--'"
         :hint="t('dash.ledger.summary.tipPf')"
-       
-      />
-      <BaseStat :label="t('dash.ledger.summary.net')" :value="fmtSigned(netSum)" :delta-tone="netSum >= 0 ? 'up' : 'down'" />
-      <BaseStat :label="t('dash.ledger.summary.fees')" :value="`-${fmtNum(feeSum, 2)}`" delta-tone="muted" />
-      <BaseStat
-        v-if="best"
-        :label="t('dash.ledger.summary.best')"
-        :value="best.inst"
-        :delta="fmtSigned(best.pnl)"
-        delta-tone="up"
       />
     </div>
 
@@ -164,6 +177,9 @@ function venueLabel(v: unknown): string {
         <select v-model="fVenue" class="field field-sm w-auto ms-auto" @change="page = 1">
           <option v-for="vo in venueOptions" :key="vo.value" :value="vo.value">{{ vo.label }}</option>
         </select>
+        <select v-model="fMode" class="field field-sm w-auto" @change="page = 1">
+          <option v-for="mo in modeOptions" :key="mo.value" :value="mo.value">{{ mo.label }}</option>
+        </select>
         <select v-model="fInst" class="field field-sm w-auto" @change="page = 1">
           <option v-for="o in instOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
         </select>
@@ -192,12 +208,25 @@ function venueLabel(v: unknown): string {
             <tbody>
               <tr v-for="x in rows" :key="x.id" class="clickable" @click="detail = x">
                 <td>
-                  <div class="flex items-center gap-2">
+                  <div class="flex items-center gap-1.5 flex-wrap">
                     <CryptoLogo :symbol="x.inst" :size="16" />
                     <span class="num font-semibold" style="color: var(--ink-strong)">{{ x.inst }}</span>
                     <DirTag :dir="dirOf(x.side)" />
                     <span class="badge badge-mono hidden xl:inline-flex">{{ x.lever }}</span>
-                    <span v-if="x.venue" class="badge badge-mono hidden sm:inline-flex" :title="t('dash.ledger.venue')">{{ venueLabel(x.venue) }}</span>
+                    <!-- US-009: 交易所与账户环境徽章 -->
+                    <span
+                      v-if="x.venue"
+                      class="badge text-3xs font-bold px-1 py-0.2 rounded"
+                      :style="String(x.venue).toLowerCase() === 'binance' ? { color: '#f3ba2f', borderColor: '#f3ba2f33', backgroundColor: '#f3ba2f15' } : String(x.venue).toLowerCase() === 'gate' ? { color: '#00be98', borderColor: '#00be9833', backgroundColor: '#00be9815' } : { color: '#3880ff', borderColor: '#3880ff33', backgroundColor: '#3880ff15' }"
+                    >
+                      {{ venueLabel(x.venue) }}
+                    </span>
+                    <span
+                      class="badge text-3xs px-1 py-0.2 rounded"
+                      :class="String(x.account_mode || x.environment || 'live').toUpperCase() === 'LIVE' ? 'badge-up' : 'badge-warn'"
+                    >
+                      {{ String(x.account_mode || x.environment || 'live').toUpperCase() }}
+                    </span>
                     <span v-if="x.council?.ran" class="badge badge-up" :title="x.council.adopted_role ? t('dash.ledger.council.adopted', undefined, { seat: x.council.adopted_role }) : t('dash.ledger.council.ran')">🏛️</span>
                     <span v-else-if="x.council" class="badge badge-warn" :title="t('dash.ledger.council.degraded')">⚡</span>
                   </div>
@@ -208,7 +237,12 @@ function venueLabel(v: unknown): string {
                   {{ arrow(x.net_pnl) }} {{ fmtSigned(x.net_pnl) }}
                   <span class="t-faint block text-2xs">{{ fmtPct(x.roi_pct) }}</span>
                 </td>
-                <td class="col-num t-faint">{{ fmtNum(Math.abs(Number(x.fee) || 0), 2) }}</td>
+                <td class="col-num t-faint">
+                  <span>{{ fmtNum(Math.abs(Number(x.fee) || 0), 2) }}</span>
+                  <span v-if="Number(x.funding_fee || 0) !== 0" class="block text-3xs num" :class="Number(x.funding_fee) >= 0 ? 'up' : 'down'">
+                    资: {{ Number(x.funding_fee) >= 0 ? '+' : '' }}{{ fmtNum(x.funding_fee, 2) }}
+                  </span>
+                </td>
                 <td class="num text-xs" style="color: var(--ink-2)">{{ x.duration || '--' }}</td>
                 <td class="text-xs" style="color: var(--ink-2)">{{ cleanReason(x.exit_reason) }}</td>
                 <td class="num text-xs" style="color: var(--ink-3)">{{ fmtDateTime(x.close_time).slice(5, 16) }}</td>
