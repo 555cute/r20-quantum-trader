@@ -46,17 +46,36 @@ class TestNewsSentimentHarvester(unittest.TestCase):
         self.assertNotIn("SOL", coins)
 
     def test_fetch_okx_announcements_parsing(self):
+        """US-001 降噪：发新币/赚币理财类公告必须被剔除，下架与维护类安全公告必须保留。"""
         fake_resp = {
             "code": "0",
             "data": [
                 {
                     "details": [
                         {
-                            "title": "OKX to list NEWCOIN X-Perp",
+                            "title": "欧易关于 ORCLUSD X-合约（X-Perp）正式上线的公告",
                             "url": "https://www.okx.com/help/newcoin",
                             "pTime": "1789138000000",
                             "annType": "announcements-new-listings",
-                        }
+                        },
+                        {
+                            "title": "Spark USDT (X Layer) 链上赚币产品上线",
+                            "url": "https://www.okx.com/help/earn",
+                            "pTime": "1789138000001",
+                            "annType": "announcements-earn-and-loan",
+                        },
+                        {
+                            "title": "欧易关于 ICXUSDT 永续合约下线的公告",
+                            "url": "https://www.okx.com/help/icx",
+                            "pTime": "1789138000002",
+                            "annType": "announcements-delistings",
+                        },
+                        {
+                            "title": "欧易关于系统升级维护的公告",
+                            "url": "https://www.okx.com/help/maintenance",
+                            "pTime": "1789138000003",
+                            "annType": "公告",
+                        },
                     ]
                 }
             ],
@@ -67,10 +86,25 @@ class TestNewsSentimentHarvester(unittest.TestCase):
         mock_resp.__enter__.return_value = mock_resp
 
         with patch("urllib.request.urlopen", return_value=mock_resp):
-            items = harvester.fetch_okx_announcements(limit=5)
-            self.assertEqual(len(items), 1)
-            self.assertEqual(items[0]["title"], "OKX to list NEWCOIN X-Perp")
+            items = harvester.fetch_okx_announcements(limit=10)
+            titles = [it["title"] for it in items]
+            # 发新币与赚币理财类噪音必须被彻底过滤
+            self.assertNotIn("欧易关于 ORCLUSD X-合约（X-Perp）正式上线的公告", titles)
+            self.assertNotIn("Spark USDT (X Layer) 链上赚币产品上线", titles)
+            # 下架风险与系统维护类安全公告必须保留
+            self.assertEqual(len(items), 2)
+            self.assertIn("欧易关于 ICXUSDT 永续合约下线的公告", titles)
+            self.assertIn("欧易关于系统升级维护的公告", titles)
             self.assertIn("OKX官方", items[0]["platforms"])
+
+    def test_okx_ann_is_actionable_english(self):
+        """英文标题兜底：list/launch 类剔除，delist/maintenance 类保留（\b 边界不误伤 delist）。"""
+        self.assertFalse(harvester._okx_ann_is_actionable("OKX to list NEWCOIN X-Perp", "announcements-new-listings"))
+        self.assertFalse(harvester._okx_ann_is_actionable("OKX Launches Tokenized Stocks Trading", "公告"))
+        self.assertTrue(harvester._okx_ann_is_actionable("OKX to delist perpetual futures for ICXUSDT", "announcements-delistings"))
+        self.assertTrue(harvester._okx_ann_is_actionable("Scheduled System Maintenance Notice", "公告"))
+        self.assertTrue(harvester._okx_ann_is_actionable("Notice on Adjustment of Margin and Position Limits", "公告"))
+        self.assertFalse(harvester._okx_ann_is_actionable("欧易上线全新理财产品赚币活动", "公告"))
 
     def test_fetch_jin10_macro_news_parsing(self):
         fake_jin10 = {

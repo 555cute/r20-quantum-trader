@@ -143,9 +143,76 @@ def _extract_coins(title: str, summary: str, target_coins: list) -> list:
     return found[:4]
 
 
+# ---------------- US-001: OKX 公告降噪（剔除发新币/营销噪音，仅留运维安全通告） ----------------
+# 直接拒绝的营销/上币类公告栏目：对量化交易与风控纯属噪音
+OKX_NOISE_ANN_TYPES = {
+    "announcements-new-listings",      # 新币/新合约/X-Perp/代币化股票上线
+    "announcements-earn-and-loan",     # 赚币/理财/借贷推广
+    "announcements-campaigns",         # 营销活动与交易赛
+    "announcements-web3",              # Web3/DEX 钱包类宣传通告
+    "announcements-launch",            # 首发/上线活动
+}
+
+# 真正关乎交易安全的公告栏目白名单：下架摘牌、停机维护、风控参数调整等
+OKX_SAFELIST_ANN_TYPES = {
+    "announcements-delistings",           # 币对/合约下架摘牌风险
+    "announcements-system-maintenance",   # 系统停机维护与升级
+    "announcements-futures",              # 合约风控参数（保证金/限仓/杠杆）调整
+    "announcements-risk",                 # 风控与清算通告
+    "announcements-regulation",           # 监管合规与地区清退
+}
+
+# 标题级中文噪音关键词（即便栏目未知也一律剔除）
+OKX_NOISE_TITLE_KEYWORDS = [
+    "正式上线", "上线", "首发", "新增上线", "代币化股票", "X-合约", "X-Perp",
+    "赚币", "理财", "借贷", "充值", "提现通道开通", "活动", "交易赛", "邀请",
+    "空投", "推广", "上新",
+]
+
+# 标题级中文安全关键词（关乎持仓与出入金安全的运维/风控通告）
+OKX_SAFETY_TITLE_KEYWORDS = [
+    "维护", "停机", "升级", "下线", "下架", "摘牌", "清退",
+    "风控", "保证金", "强平", "限仓", "杠杆调整", "暂停提现", "暂停充值",
+    "停止提现", "合约调整", "价格区间", "做市", "清算",
+]
+
+# 英文标题兜底（Accept-Language 失效时的英文公告）；\b 边界保证 list/listing 不误伤 delist/delisting
+_OKX_NOISE_EN_RE = re.compile(
+    r"\b(list|lists|listed|listing|listings|launch|launches|launched|launching|"
+    r"airdrop|airdrops|campaign|campaigns|earn|promo|promos|promotion|promotions|"
+    r"tokenized|web3)\b", re.IGNORECASE)
+_OKX_SAFETY_EN_RE = re.compile(
+    r"\b(delist|delists|delisted|delisting|maintenance|upgrade|upgrades|"
+    r"suspend|suspends|suspended|suspension|halt|halts|halted|"
+    r"liquidation|liquidations|margin|withdrawal|withdrawals|"
+    r"position\s*limits?|reduce\s*only|delisting)\b", re.IGNORECASE)
+
+
+def _okx_ann_is_actionable(title: str, ann_type: str) -> bool:
+    """US-001 降噪判定：仅当公告属于真正关乎交易安全的运维/风控通告才返回 True。
+
+    剔除上币/新合约/理财推广/营销活动类公告；保留下架摘牌、系统维护停机、
+    风控参数（保证金/强平/限仓）调整与安全清退类通报。"""
+    atype = str(ann_type or "").strip().lower()
+    if atype in OKX_NOISE_ANN_TYPES:
+        return False
+    if any(kw in title for kw in OKX_NOISE_TITLE_KEYWORDS):
+        return False
+    if _OKX_NOISE_EN_RE.search(title):
+        return False
+    if atype in OKX_SAFELIST_ANN_TYPES:
+        return True
+    if any(kw in title for kw in OKX_SAFETY_TITLE_KEYWORDS):
+        return True
+    if _OKX_SAFETY_EN_RE.search(title):
+        return True
+    return False
+
+
 def fetch_okx_announcements(limit=15) -> list:
     """OKX 官方公告流抓取（/api/v5/support/announcements）。
-    第一时间捕获上币、下架、风控调整与系统维护公告，零第三方 RSS 依赖。"""
+    US-001 降噪：彻底剔除发新币/X-合约上线/赚币理财等营销通告，
+    仅保留下架摘牌、系统维护停机与风控参数调整等真正关乎交易安全的公告。"""
     tz_bj = datetime.timezone(datetime.timedelta(hours=8))
     items = []
     try:
@@ -166,6 +233,10 @@ def fetch_okx_announcements(limit=15) -> list:
                     continue
                 url = str(it.get("url") or "")
                 ann_type = str(it.get("annType") or "公告")
+                # US-001 降噪：发新币/X-合约/赚币理财/营销活动类通告一律丢弃，
+                # 仅留下架摘牌、系统维护停机与风控参数调整等交易安全通报。
+                if not _okx_ann_is_actionable(title, ann_type):
+                    continue
                 p_time = int(it.get("pTime") or it.get("businessPTime") or (time.time() * 1000))
                 time_str = datetime.datetime.fromtimestamp(p_time / 1000.0, tz=tz_bj).strftime("%Y-%m-%d %H:%M:%S")
                 summary = f"OKX官方通告【{ann_type}】: {title}"
@@ -310,10 +381,9 @@ def fetch_and_analyze_news_sentiment():
             seen_ids.add(nid)
             deduped_news.append(item)
 
-    # 保障 OKX 官方公告与金十宏观要闻双向足额露出，避免单方时间差挤占
-    top_okx = [n for n in deduped_news if "OKX官方" in n.get("platforms", [])][:15]
-    top_other = [n for n in deduped_news if "OKX官方" not in n.get("platforms", [])][:20]
-    raw_news = sorted(top_okx + top_other, key=lambda x: int(x.get("cTime", 0) or 0), reverse=True)
+    # US-001 降噪：移除 OKX 官方公告 15 条硬保底。OKX 公告多为发新币噪音，
+    # 经降噪后剩余的下架/维护/风控安全通告按时间自然并入快讯流，无通告则不硬塞。
+    raw_news = sorted(deduped_news, key=lambda x: int(x.get("cTime", 0) or 0), reverse=True)
 
     parsed_news = []
     triggered_threat = None
