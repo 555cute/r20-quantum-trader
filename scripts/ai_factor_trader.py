@@ -41,6 +41,7 @@ from r20_backend.time_utils import beijing_day
 # 接线级测试 patch 模块属性即可完全离线（零出网/零凭证/零真实预留库）。
 from r20_backend import risk_reservation
 from r20_backend import venue_router
+from r20_backend.exchanges import canonical_base
 from r20_backend.exchanges import registry as venue_registry
 from r20_backend.exchanges import routing_policy
 
@@ -1114,11 +1115,18 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: f
 
     # 环境维合约存在性对账（US-007）：目录拉不到 → fail-open 放行（对账是增强不是闸门）；
     # 已下架/未上市（如 SUI 在 demo 被下架）→ fail-closed 拒单，reason 透传。
+    #
+    # Listing Gate Parity（三所平权命门）：inst_id 是 OKX 形态（BTC-USDT-SWAP），而
+    # binance 目录键是 BTCUSDT、gate 是 BTC_USDT——直接拿 inst_id 去外所目录对账必然
+    # 查不到 → 误判「沙盒未上市」，导致非 OKX 所一单都开不了。对账前必须先经
+    # native_symbol_pure 翻译成目标所原生合约码（纯元数据，绝不实例化适配器→零出网）。
     try:
         from r20_backend.exchanges.listing import ensure_contract_listed
-        _check = ensure_contract_listed(target_venue, "demo" if env.simulated else "live", inst_id)
+        native_contract = venue_registry.native_symbol_pure(
+            canonical_base(inst_id), target_venue)
+        _check = ensure_contract_listed(target_venue, "demo" if env.simulated else "live", native_contract)
         if not _check.ok:
-            print(f"[listing gate] 拒绝下单 {inst_id} ({target_venue}): {_check.reason}")
+            print(f"[listing gate] 拒绝下单 {inst_id}→{native_contract} ({target_venue}): {_check.reason}")
             release_signal_reservation(_reservation, "合约对账拒绝")
             return False, f"合约对账拒绝: {_check.reason}"
     except Exception as _le:
