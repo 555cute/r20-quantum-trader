@@ -380,7 +380,7 @@ class BinanceAdapter(BaseExchangeAdapter):
 
     def account_snapshot(self) -> Dict[str, Any]:
         """获取账户权益与可用保证金快照（USDT-M）。"""
-        data = self.signed_request("GET", "/fapi/v1/account")
+        data = self.signed_request("GET", "/fapi/v2/account")
         if not isinstance(data, dict):
             raise BinanceAPIError("bad_response", "account 返回结构异常")
 
@@ -404,7 +404,7 @@ class BinanceAdapter(BaseExchangeAdapter):
 
     def positions(self) -> List[Dict[str, Any]]:
         """获取当前活跃持仓列表（USDT-M）。仅返回 positionAmt != 0 的真实持仓。"""
-        data = self.signed_request("GET", "/fapi/v1/positionRisk")
+        data = self.signed_request("GET", "/fapi/v2/positionRisk")
         rows = data if isinstance(data, list) else []
         out = []
         for p in rows:

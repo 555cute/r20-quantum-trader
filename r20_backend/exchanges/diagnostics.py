@@ -223,7 +223,7 @@ def _diagnose_okx(env: str, is_sandbox: bool, ak: str, sk: str, pp: str,
 def _diagnose_binance(env: str, is_sandbox: bool, ak: str, sk: str,
                       caller: Callable, timeout: float, t0: float) -> Dict[str, Any]:
     base_url = env_profiles.resolve_base_url("binance", env)
-    path = "/fapi/v1/account"
+    path = "/fapi/v2/account"
     ts_ms = int(time.time() * 1000)
     query = f"timestamp={ts_ms}&recvWindow=5000"
     signature = hmac.new(sk.encode("utf-8"), query.encode("utf-8"), hashlib.sha256).hexdigest()

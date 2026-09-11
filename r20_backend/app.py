@@ -3587,13 +3587,22 @@ def _venue_accounts_okx(environment: str) -> dict[str, Any]:
     out = {"status": "ready", "reason": f"OKX {env.mode.upper()} 直签只读"}
     try:
         row = (bal or [{}])[0]
-        out["equity"] = float(row.get("totalEq") or row.get("eq") or 0) if (row.get("totalEq") or row.get("eq")) else None
-        avail = None
+        # 严格优先读取 USDT 合约账户专属权益（杜绝被账户内其他现货币种的 totalEq 污染）
+        usdt_detail = None
         for d in (row.get("details") or []):
-            if str(d.get("ccy", "")).upper() == "USDT" and d.get("availEq") not in (None, ""):
-                avail = float(d["availEq"])
+            if str(d.get("ccy", "")).upper() == "USDT":
+                usdt_detail = d
                 break
-        out["available"] = avail
+
+        if usdt_detail and (usdt_detail.get("eq") not in (None, "") or usdt_detail.get("cashBal") not in (None, "")):
+            eq_val = float(usdt_detail.get("eq") or usdt_detail.get("cashBal") or 0.0)
+            avail_val = float(usdt_detail.get("availEq") or usdt_detail.get("availBal") or eq_val)
+        else:
+            eq_val = float(row.get("totalEq") or row.get("eq") or 0.0)
+            avail_val = float(usdt_detail.get("availEq") or usdt_detail.get("availBal") or eq_val) if usdt_detail else eq_val
+
+        out["equity"] = eq_val if eq_val > 0 else None
+        out["available"] = avail_val
         out["positions_count"] = sum(1 for p in (pos or []) if abs(float(p.get("pos") or 0)) > 1e-12)
         out["open_orders_count"] = len(pend or [])
         out["last_sync_ts"] = int(time.time() * 1000)

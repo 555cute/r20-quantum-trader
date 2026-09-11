@@ -529,7 +529,7 @@ def _load_portfolio_risk_data() -> dict:
 
 
 def _load_multi_venue_portfolio(total_eq: float, avail_eq: float, positions: list, orders: list) -> dict:
-    """US-006：dashboard /api/all 组合多所资产与权益快照（纯只读，零网络）。"""
+    """US-006/US-007：dashboard /api/all 组合多所资产与权益快照（OKX + Gate + Binance 全量对账）。"""
     try:
         from r20_backend.portfolio_aggregator import aggregate_venue_accounts
         env = "demo" if os.environ.get("OKX_IS_SIMULATED", "1") == "1" else "live"
@@ -541,9 +541,15 @@ def _load_multi_venue_portfolio(total_eq: float, avail_eq: float, positions: lis
                 "positions_count": len(positions) if isinstance(positions, list) else 0,
                 "open_orders_count": len(orders) if isinstance(orders, list) else 0,
             },
-            "binance": {"status": "unavailable", "equity": None},
-            "gate": {"status": "unavailable", "equity": None},
         }
+        try:
+            from r20_backend.app import _venue_accounts_gate, _venue_accounts_binance
+            venues_map["gate"] = _venue_accounts_gate(env)
+            venues_map["binance"] = _venue_accounts_binance(env)
+        except Exception:
+            venues_map["gate"] = {"status": "unavailable", "equity": None}
+            venues_map["binance"] = {"status": "unavailable", "equity": None}
+
         return aggregate_venue_accounts(venues_map, env)
     except Exception:
         return {}
