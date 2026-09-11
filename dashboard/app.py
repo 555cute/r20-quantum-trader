@@ -523,7 +523,19 @@ def _load_portfolio_risk_data() -> dict:
             budget_val = float(budget_raw) if budget_raw else 0.0
         except ValueError:
             budget_val = 0.0
-        total_budget = budget_val if budget_val > 0 else None
+
+        if budget_val <= 0:
+            # 单一事实源派生：最高持仓数 × 单标的保证金绝对封顶
+            try:
+                from scripts.risk_constants import MAX_CONCURRENT_POSITIONS_CAP, MAX_SINGLE_ASSET_MARGIN
+                from scripts.instrument_pool import load_instruments
+                pool_len = len(load_instruments() or []) or 8
+                max_pos = MAX_CONCURRENT_POSITIONS_CAP if MAX_CONCURRENT_POSITIONS_CAP > 0 else pool_len
+                budget_val = float(max_pos * (MAX_SINGLE_ASSET_MARGIN or 600.0))
+            except Exception:
+                budget_val = 5000.0
+
+        total_budget = budget_val if budget_val > 0 else 5000.0
         env = "demo" if os.environ.get("OKX_IS_SIMULATED", "1") == "1" else "live"
         from r20_backend.risk_reservation import get_manager
         mgr = get_manager()

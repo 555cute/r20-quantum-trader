@@ -26,6 +26,10 @@ GROUPS = [
 # 所有 min/max/default 均为「原生值」（比例类为小数），前端按 display_scale 换算显示。
 _PARAMS: list[dict[str, Any]] = [
     # ── 组1 仓位与敞口 ──
+    {"key": "R20_PORTFOLIO_RISK_BUDGET_USDT", "group": "exposure",
+     "label": "组合风险总预算（全所资金池）", "label_en": "Portfolio Risk Budget",
+     "desc": "全系统三所合计可支配的风险预算总上限（USDT）。0 = 自动按持仓上限×单标的保证金绝对封顶派生。",
+     "type": "float", "min": 0.0, "max": 1000000.0, "step": 100.0, "unit": "USDT", "display_scale": 1},
     {"key": "R20_MAX_CONCURRENT_POSITIONS", "group": "exposure",
      "label": "最高持仓数（总仓位上限）", "label_en": "Max Concurrent Positions",
      "desc": "全系统同时持有的仓位总数上限。0 = 自动跟随标的池容量；超过池容量的配置会被钳制到池容量。",
@@ -111,6 +115,7 @@ SUITES: list[dict[str, Any]] = [
      "desc": "适合新账户、小资金或高波动恶劣行情：仓位少而精、置信度与盈亏比门槛拉高、杠杆压至 3x、"
              "彻底禁止金字塔加仓、日亏 3% 即熔断。牺牲部分机会换极低回撤。",
      "values": {
+         "R20_PORTFOLIO_RISK_BUDGET_USDT": 0.0,
          "R20_MAX_CONCURRENT_POSITIONS": 4, "R20_MAX_SAME_DIRECTION_POSITIONS": 2,
          "R20_MAX_MARGIN_EQUITY_RATIO": 0.10, "R20_SINGLE_ASSET_EQUITY_RATIO": 0.20,
          "R20_MAX_SINGLE_ASSET_MARGIN_USDT": 300.0, "R20_MIN_LEVERAGE": 2.0, "R20_MAX_LEVERAGE": 3.0,
@@ -127,6 +132,7 @@ SUITES: list[dict[str, Any]] = [
      "desc": "适合明确单边主升/主跌浪与老手账户：同向放宽至 4 仓吃足趋势、置信度门禁降至 72% 抢先上车、"
              "允许 2 次金字塔加仓放大盈利单、持仓时间放宽至 16 小时。回撤与熔断线同步放大，风险自负。",
      "values": {
+         "R20_PORTFOLIO_RISK_BUDGET_USDT": 0.0,
          "R20_MAX_CONCURRENT_POSITIONS": 0, "R20_MAX_SAME_DIRECTION_POSITIONS": 4,
          "R20_MAX_MARGIN_EQUITY_RATIO": 0.25, "R20_SINGLE_ASSET_EQUITY_RATIO": 0.40,
          "R20_MAX_SINGLE_ASSET_MARGIN_USDT": 800.0, "R20_MIN_LEVERAGE": 5.0, "R20_MAX_LEVERAGE": 7.0,

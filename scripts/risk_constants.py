@@ -89,11 +89,15 @@ MIN_SCALE_IN_PROFIT_RATIO = _env_float("R20_MIN_SCALE_IN_PROFIT_RATIO", 0.008)
 # 加仓必须达到的最低 AI 置信度（%）。
 MIN_SCALE_IN_CONFIDENCE = _env_float("R20_MIN_SCALE_IN_CONFIDENCE", 75.0)
 
+# 组合风险总预算（USDT，0 = 自动跟随持仓上限 × 单标的保证金绝对封顶派生）。
+PORTFOLIO_RISK_BUDGET_USDT = _env_float("R20_PORTFOLIO_RISK_BUDGET_USDT", 0.0)
+
 # ── 默认值表（供后台风控管理页 schema 引用，键 = 环境变量名） ────
 # 注意：必须是字面量默认值，绝不能引用上面「已按 .env 解析」的常量——
 # 否则后台进程在用户应用过套件后重启，DEFAULTS 会被 .env 污染，
 # 导致「均衡波段」套件写入用户当前值、UI「默认」提示失真。
 DEFAULTS = {
+    "R20_PORTFOLIO_RISK_BUDGET_USDT": 0.0,
     "R20_MAX_CONCURRENT_POSITIONS": 0,
     "R20_MAX_SAME_DIRECTION_POSITIONS": 3,
     "R20_MAX_MARGIN_EQUITY_RATIO": 0.20,
