@@ -3680,22 +3680,26 @@ def _venue_accounts_binance(environment: str = "demo") -> dict[str, Any]:
 def venue_accounts(environment: str = Query(default="demo"),
                    x_r20_admin_token: str | None = Header(default=None),
                    x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
-    """US-005：按资金环境（demo|live）逐所返回真实账户卡——登录态 + 纯只读。
+    """US-005/US-006：按资金环境（demo|live）逐所返回真实账户卡与组合风险聚合——登录态 + 纯只读。
 
     铁律：未知≠0（读不到一律 None+reason）；零写调用零下单路径；凭证不回显；
-    两环境数据绝不加总（响应无合计字段，前端按环境分组展示）。
+    两环境数据绝不跨环境加总（demo 与 live 严格物理隔离分区计算）。
     """
     env_key = str(environment or "").strip().lower()
     if env_key not in ("demo", "live"):
         raise HTTPException(status_code=400, detail="environment 只允许 demo 或 live")
     require_admin_header(x_r20_admin_token, x_r20_session)
+    venues_map = {
+        "okx": _venue_accounts_okx(env_key),
+        "gate": _venue_accounts_gate(env_key),
+        "binance": _venue_accounts_binance(env_key),
+    }
+    from r20_backend.portfolio_aggregator import aggregate_venue_accounts
+    summary = aggregate_venue_accounts(venues_map, env_key)
     return {
         "environment": env_key,
-        "venues": {
-            "okx": _venue_accounts_okx(env_key),
-            "gate": _venue_accounts_gate(env_key),
-            "binance": _venue_accounts_binance(env_key),
-        },
+        "venues": venues_map,
+        "portfolio_summary": summary,
         "captured_at_ms": int(time.time() * 1000),
     }
 

@@ -528,6 +528,27 @@ def _load_portfolio_risk_data() -> dict:
         return {}
 
 
+def _load_multi_venue_portfolio(total_eq: float, avail_eq: float, positions: list, orders: list) -> dict:
+    """US-006：dashboard /api/all 组合多所资产与权益快照（纯只读，零网络）。"""
+    try:
+        from r20_backend.portfolio_aggregator import aggregate_venue_accounts
+        env = "demo" if os.environ.get("OKX_IS_SIMULATED", "1") == "1" else "live"
+        venues_map = {
+            "okx": {
+                "status": "ready" if total_eq > 0 else "unavailable",
+                "equity": total_eq,
+                "available": avail_eq,
+                "positions_count": len(positions) if isinstance(positions, list) else 0,
+                "open_orders_count": len(orders) if isinstance(orders, list) else 0,
+            },
+            "binance": {"status": "unavailable", "equity": None},
+            "gate": {"status": "unavailable", "equity": None},
+        }
+        return aggregate_venue_accounts(venues_map, env)
+    except Exception:
+        return {}
+
+
 def _load_cross_venue_data() -> dict:
     """US-007：多所协调快照透传装配（只读，零网络）。
 
@@ -1402,7 +1423,8 @@ def update_cache_cycle():
         "ai_health": build_ai_health(ai_history_list),
         "factor_library": factor_lib_snapshot,
         "cross_venue": _load_cross_venue_data(),
-        "portfolio_risk": _load_portfolio_risk_data()
+        "portfolio_risk": _load_portfolio_risk_data(),
+        "multi_venue_portfolio": _load_multi_venue_portfolio(total_eq, avail_eq, positions, orders_data)
     }
     try:
         from r20_backend.llm_manager import get_active_llm_runtime

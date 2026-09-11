@@ -125,23 +125,23 @@ class VenueAccountsEndpointTests(unittest.TestCase):
         r = self.client.get("/api/v1/venue_accounts", headers=self.auth)  # 缺省=demo 合法
         self.assertEqual(r.status_code, 200)
 
-    # ---------- 响应形状：键面严格、无聚合 ----------
+    # ---------- 响应形状：键面严格、US-006 组合风险聚合 ----------
 
-    def test_shape_no_aggregate_fields(self):
+    def test_shape_and_portfolio_summary(self):
         with patch.object(okx_runtime, "current_environment",
                           return_value=SimpleNamespace(mode="demo", configured=False)):
             with patch.object(exchanges_pkg, "venue_credentials", return_value=("", "")):
                 r = self.client.get("/api/v1/venue_accounts?environment=demo", headers=self.auth)
         self.assertEqual(r.status_code, 200, r.text)
         body = r.json()
-        self.assertEqual(set(body), {"environment", "venues", "captured_at_ms"})
+        self.assertEqual(set(body), {"environment", "venues", "portfolio_summary", "captured_at_ms"})
         self.assertEqual(set(body["venues"]), {"okx", "gate", "binance"})
         for venue, card in body["venues"].items():
             self.assertEqual(set(card), CONTRACT_KEYS, venue)
-        # 任何合计字段不得存在（顶层与 venues 内均禁）
-        flat = json.dumps(body).lower()
-        for banned in ("total_eq", "total_equity", "sum", "aggregate"):
-            self.assertNotIn(banned, flat)
+        summary = body["portfolio_summary"]
+        self.assertEqual(summary["environment"], "demo")
+        self.assertEqual(summary["total_equity"], 0.0)
+        self.assertEqual(summary["active_venues_count"], 0)
 
     # ---------- 态一：无凭证 → unavailable 且零 HTTP ----------
 
@@ -237,6 +237,18 @@ class VenueAccountsEndpointTests(unittest.TestCase):
         text = json.dumps(v)
         self.assertNotIn('"k"', text)
         self.assertNotIn('"s"', text)
+
+        # US-006: 组合风险与权益聚合断言
+        summary = r.json()["portfolio_summary"]
+        self.assertEqual(summary["environment"], "demo")
+        self.assertAlmostEqual(summary["total_equity"], 2300.5)  # 1000.5 + 500.0 + 800.0
+        self.assertAlmostEqual(summary["total_available"], 2000.25)  # 800.25 + 450.0 + 750.0
+        self.assertEqual(summary["active_venues_count"], 3)
+        self.assertEqual(set(summary["reporting_venues"]), {"okx", "gate", "binance"})
+        dist = summary["asset_distribution"]
+        self.assertAlmostEqual(dist["okx"]["share_pct"], round(1000.5 / 2300.5 * 100, 2))
+        self.assertAlmostEqual(dist["gate"]["share_pct"], round(500.0 / 2300.5 * 100, 2))
+        self.assertAlmostEqual(dist["binance"]["share_pct"], round(800.0 / 2300.5 * 100, 2))
 
     # ---------- 态三：部分未知（Gate 读炸 → degraded，其余不受累） ----------
 
