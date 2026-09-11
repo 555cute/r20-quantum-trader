@@ -8,6 +8,7 @@ import { useI18n } from '../../composables/useI18n'
 import { useApi } from '../../composables/useApi'
 import { useAuthStore } from '../../stores/auth'
 import { fmtDateTime } from '../../utils/format'
+import { nativeSymbol } from '../../utils/instId'
 import VenueCredentialCard from '../../components/admin/VenueCredentialCard.vue'
 import { Wallet, Save, RefreshCw, Layers, Trash2, Zap } from 'lucide-vue-next'
 
@@ -695,6 +696,7 @@ onMounted(() => { loadAll(); loadMx() })
                   <th class="py-2 pl-0 pr-4">合约代码</th>
                   <th class="py-2 px-3">名称</th>
                   <th class="py-2 px-3">类型</th>
+                  <th class="py-2 px-3">三所对等合约映射</th>
                   <th class="py-2 px-3">风控状态</th>
                   <th class="py-2 px-4 text-right">操作</th>
                 </tr>
@@ -704,6 +706,19 @@ onMounted(() => { loadAll(); loadMx() })
                   <td class="py-2 pl-0 pr-4 font-bold num" style="color: var(--ink-1);">{{ item.instId }}</td>
                   <td class="py-2 px-3" style="color: var(--ink-2);">{{ item.name }}</td>
                   <td class="py-2 px-3 num" style="color: var(--ink-3);">{{ item.ctType || 'SWAP' }}</td>
+                  <td class="py-2 px-3">
+                    <div class="flex items-center gap-1.5 flex-wrap num text-[10px]">
+                      <span class="badge text-3xs font-mono" style="color: var(--venue-okx, #3880ff); border-color: rgba(56, 128, 255, 0.3)">
+                        OKX: {{ nativeSymbol(item.instId, 'okx') }}
+                      </span>
+                      <span class="badge text-3xs font-mono" style="color: var(--venue-binance, #f3ba2f); border-color: rgba(243, 186, 47, 0.3)">
+                        BN: {{ nativeSymbol(item.instId, 'binance') }}
+                      </span>
+                      <span class="badge text-3xs font-mono" style="color: var(--venue-gate, #00be98); border-color: rgba(0, 190, 152, 0.3)">
+                        GT: {{ nativeSymbol(item.instId, 'gate') }}
+                      </span>
+                    </div>
+                  </td>
                   <td class="py-2 px-3">
                     <span v-if="item.protected" class="px-1.5 py-0.5 rounded-[3px] text-[11px] font-bold border" style="background-color: var(--warn-bg); border-color: var(--warn-line); color: var(--warn);">保底必选</span>
                     <span v-else-if="item.has_tracker" class="px-1.5 py-0.5 rounded-[3px] text-[11px] font-bold border" style="background-color: var(--accent-bg); border-color: var(--accent-line); color: var(--accent);">持仓中</span>
