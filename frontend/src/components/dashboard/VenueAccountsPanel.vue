@@ -4,7 +4,7 @@ import { computed, onMounted, ref } from 'vue';
 import { FlaskConical, RefreshCw, ShieldCheck } from 'lucide-vue-next';
 import { useI18n } from '../../composables/useI18n';
 import { fmtNum, utcStrToBj } from '../../utils/format';
-import { numOrNull, isPlainObj } from '../../utils/venueMeta';
+import { numOrNull, isPlainObj, VENUE_KEYS, venueLabel } from '../../utils/venueMeta';
 import { useDashboardStore } from '../../stores/dashboard';
 import { useVenueAccountsStore, type VenueKey } from '../../stores/venueAccounts';
 import { useListingStatusStore } from '../../stores/listingStatus';
@@ -15,7 +15,7 @@ const listing = useListingStatusStore();
 const dash = useDashboardStore();
 const { t } = useI18n();
 
-const VENUES: VenueKey[] = ['okx', 'gate', 'binance'];
+const VENUES = VENUE_KEYS;
 const isDemo = computed(() => store.environment === 'demo');
 const isMobileExpanded = ref(false);
 
@@ -126,17 +126,19 @@ function refreshAll(): void {
         </button>
       </div>
       <div class="grid grid-cols-3 gap-1.5 text-center">
-        <div class="p-1.5 rounded" style="background: var(--surface-1)">
-          <span class="block text-3xs font-bold" style="color: #3880ff">OKX</span>
-          <span class="num font-bold text-xs" style="color: var(--ink-strong)">{{ pMoney(store.venues?.okx?.equity) }}</span>
-        </div>
-        <div class="p-1.5 rounded" style="background: var(--surface-1)">
-          <span class="block text-3xs font-bold" style="color: #f3ba2f">Binance</span>
-          <span class="num font-bold text-xs" style="color: var(--ink-strong)">{{ pMoney(store.venues?.binance?.equity) }}</span>
-        </div>
-        <div class="p-1.5 rounded" style="background: var(--surface-1)">
-          <span class="block text-3xs font-bold" style="color: #00be98">Gate</span>
-          <span class="num font-bold text-xs" style="color: var(--ink-strong)">{{ pMoney(store.venues?.gate?.equity) }}</span>
+        <div
+          v-for="v in VENUES"
+          :key="v"
+          class="p-1.5 rounded"
+          style="background: var(--surface-1)"
+        >
+          <span
+            class="block text-3xs font-bold"
+            :style="{ color: `var(--venue-${v})` }"
+          >
+            {{ venueLabel(v) }}
+          </span>
+          <span class="num font-bold text-xs" style="color: var(--ink-strong)">{{ pMoney(store.venues?.[v]?.equity) }}</span>
         </div>
       </div>
     </div>

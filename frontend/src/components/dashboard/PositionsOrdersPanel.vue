@@ -1,9 +1,11 @@
 <script setup lang="ts">
-/** 持仓 ⇄ 挂单分段面板：行点击联动图表选币 */
+/** 持仓 ⇄ 挂单分段面板：行点击联动图表选币，三所对等平权呈现 */
 import { computed, ref } from 'vue';
 import { useDashboardStore } from '../../stores/dashboard';
 import { useI18n } from '../../composables/useI18n';
 import { fmtNum, fmtSigned, fmtPct, fmtPrice, arrow } from '../../utils/format';
+import { VENUE_KEYS, venueLabel, venueShortLabel, venueOfRecord, type VenueKey } from '../../utils/venueMeta';
+import { venueOfSymbol, canonicalBase } from '../../utils/instId';
 import BaseSegmented from '../base/BaseSegmented.vue';
 import BaseEmpty from '../base/BaseEmpty.vue';
 import DirTag from '../base/DirTag.vue';
@@ -16,17 +18,15 @@ const { t } = useI18n();
 
 const tab = ref<'positions' | 'orders'>('positions');
 
-type VenueFilter = 'all' | 'okx' | 'binance' | 'gate';
+type VenueFilter = 'all' | VenueKey;
 const selectedVenue = ref<VenueFilter>('all');
 
 const positions = computed(() => store.positions);
 const orders = computed(() => store.pendingOrders);
 
-function getVenueOf(item: any): string {
-  const v = String(item?.venue || item?.exchange || '').toLowerCase();
-  if (v.includes('binance')) return 'binance';
-  if (v.includes('gate')) return 'gate';
-  return 'okx';
+function getVenueOf(item: any): VenueKey | 'other' {
+  const v = venueOfRecord(item, venueOfSymbol);
+  return v || 'okx'; // 如果实在无法归类，解析为默认或原始标的对应场所
 }
 
 function getModeOf(item: any): 'LIVE' | 'DEMO' {
@@ -59,14 +59,32 @@ function orderDir(o: any): 'long' | 'short' {
   return String(o.posSide || (o.side === 'buy' ? 'long' : 'short')).toLowerCase() as any;
 }
 function symOf(x: { instId?: string; name?: string }): string {
-  return x.name || String(x.instId || '').split('-')[0];
+  if (x.name) return x.name;
+  const raw = String(x.instId || '');
+  return canonicalBase(raw) || raw.split('-')[0];
 }
+
+const venueFilterTabs = computed(() => [
+  { key: 'all' as VenueFilter, label: '全部', color: 'var(--ink-2)' },
+  { key: 'okx' as VenueFilter, label: 'OKX', color: 'var(--venue-okx, #3880ff)' },
+  { key: 'binance' as VenueFilter, label: 'Binance', color: 'var(--venue-binance, #f3ba2f)' },
+  { key: 'gate' as VenueFilter, label: 'Gate', color: 'var(--venue-gate, #00be98)' },
+]);
+
+const brandStyleMap: Record<string, { color: string; borderColor: string; backgroundColor: string }> = {
+  okx: { color: 'var(--venue-okx, #3880ff)', borderColor: 'rgba(56, 128, 255, 0.25)', backgroundColor: 'rgba(56, 128, 255, 0.08)' },
+  binance: { color: 'var(--venue-binance, #f3ba2f)', borderColor: 'rgba(243, 186, 47, 0.25)', backgroundColor: 'rgba(243, 186, 47, 0.08)' },
+  gate: { color: 'var(--venue-gate, #00be98)', borderColor: 'rgba(0, 190, 152, 0.25)', backgroundColor: 'rgba(0, 190, 152, 0.08)' },
+};
 </script>
 
 <template>
   <div class="card flex h-full flex-col overflow-hidden">
-    <!-- 面板头：分段 + 交易所筛选 -->
-    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b px-2.5 sm:px-3 py-2 sm:py-2.5" style="border-color: var(--line-1)">
+    <!-- 面板头：分段选择 + 交易所平权筛选 -->
+    <div
+      class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b px-2.5 sm:px-3 py-2 sm:py-2.5"
+      style="border-color: var(--line-1)"
+    >
       <div class="flex items-center justify-between sm:justify-start gap-2">
         <BaseSegmented
           v-model="tab"
@@ -80,21 +98,36 @@ function symOf(x: { instId?: string; name?: string }): string {
         </span>
       </div>
 
-      <!-- 交易所筛选 -->
-      <div class="flex items-center justify-between sm:justify-end gap-1 rounded-md p-0.5 w-full sm:w-auto" style="background-color: var(--surface-2); border: 1px solid var(--line-1)">
+      <!-- 交易所平权筛选器 (对等四选项卡) -->
+      <div
+        class="flex items-center justify-between sm:justify-end gap-1 rounded-lg p-0.5 w-full sm:w-auto"
+        style="background-color: var(--surface-2); border: 1px solid var(--line-1)"
+        role="tablist"
+      >
         <button
-          v-for="v in [
-            { key: 'all', label: '全部' },
-            { key: 'okx', label: 'OKX' },
-            { key: 'binance', label: 'Binance' },
-            { key: 'gate', label: 'Gate' },
-          ]"
+          v-for="v in venueFilterTabs"
           :key="v.key"
-          class="flex-1 sm:flex-initial text-center px-2 py-0.5 rounded text-2xs transition-colors"
-          :style="selectedVenue === v.key ? { backgroundColor: 'var(--surface-3)', color: 'var(--ink-strong)', fontWeight: 'bold' } : { color: 'var(--ink-3)' }"
-          @click="selectedVenue = v.key as any"
+          type="button"
+          class="flex-1 sm:flex-initial flex items-center justify-center gap-1 px-2.5 py-1 rounded-md text-2xs transition-all cursor-pointer"
+          :style="
+            selectedVenue === v.key
+              ? {
+                  backgroundColor: 'var(--surface-3)',
+                  color: 'var(--ink-strong)',
+                  fontWeight: 'bold',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                  borderColor: 'var(--line-2)',
+                }
+              : { color: 'var(--ink-3)' }
+          "
+          @click="selectedVenue = v.key"
         >
-          {{ v.label }}
+          <span
+            v-if="v.key !== 'all'"
+            class="h-1.5 w-1.5 rounded-full"
+            :style="{ backgroundColor: v.color }"
+          />
+          <span>{{ v.label }}</span>
         </button>
       </div>
     </div>
@@ -118,21 +151,22 @@ function symOf(x: { instId?: string; name?: string }): string {
           <tr
             v-for="p in filteredPositions"
             :key="p.instId + p.side"
-            class="clickable"
+            class="clickable transition-colors hover:bg-[var(--surface-2)]"
             :title="t('dash.matrix.chart.pickHint')"
             @click="emit('pick-symbol', p.instId)"
           >
             <td>
               <div class="flex items-center gap-1.5 flex-wrap">
-                <span class="num font-semibold text-xs sm:text-sm" style="color: var(--ink-strong)">{{ symOf(p) }}</span>
+                <span class="num font-bold text-xs sm:text-sm" style="color: var(--ink-strong)">{{ symOf(p) }}</span>
                 <DirTag :dir="p.side" />
-                <!-- 交易所与环境标签 -->
+                <!-- 显眼交易所品牌徽章 -->
                 <span
-                  class="badge text-3xs font-bold px-1 py-0.2 rounded"
-                  :style="getVenueOf(p) === 'binance' ? { color: '#f3ba2f', borderColor: '#f3ba2f33', backgroundColor: '#f3ba2f15' } : getVenueOf(p) === 'gate' ? { color: '#00be98', borderColor: '#00be9833', backgroundColor: '#00be9815' } : { color: '#3880ff', borderColor: '#3880ff33', backgroundColor: '#3880ff15' }"
+                  class="badge text-3xs font-bold px-1.5 py-0.5 rounded border"
+                  :style="brandStyleMap[getVenueOf(p)] || brandStyleMap.okx"
                 >
-                  {{ getVenueOf(p).toUpperCase() }}
+                  {{ venueShortLabel(getVenueOf(p)) }}
                 </span>
+                <!-- 资金环境标签 -->
                 <span
                   class="badge text-3xs px-1 py-0.2 rounded"
                   :class="getModeOf(p) === 'LIVE' ? 'badge-up' : 'badge-warn'"
@@ -186,21 +220,22 @@ function symOf(x: { instId?: string; name?: string }): string {
           <tr
             v-for="o in filteredOrders"
             :key="o.ordId"
-            class="clickable"
+            class="clickable transition-colors hover:bg-[var(--surface-2)]"
             :title="t('dash.matrix.chart.pickHint')"
             @click="emit('pick-symbol', o.instId)"
           >
             <td>
               <div class="flex items-center gap-1.5 flex-wrap">
-                <span class="num font-semibold" style="color: var(--ink-strong)">{{ symOf(o) }}</span>
+                <span class="num font-bold" style="color: var(--ink-strong)">{{ symOf(o) }}</span>
                 <DirTag :dir="orderDir(o)" />
-                <!-- 交易所与环境标签 -->
+                <!-- 显眼交易所品牌徽章 -->
                 <span
-                  class="badge text-3xs font-bold px-1 py-0.2 rounded"
-                  :style="getVenueOf(o) === 'binance' ? { color: '#f3ba2f', borderColor: '#f3ba2f33', backgroundColor: '#f3ba2f15' } : getVenueOf(o) === 'gate' ? { color: '#00be98', borderColor: '#00be9833', backgroundColor: '#00be9815' } : { color: '#3880ff', borderColor: '#3880ff33', backgroundColor: '#3880ff15' }"
+                  class="badge text-3xs font-bold px-1.5 py-0.5 rounded border"
+                  :style="brandStyleMap[getVenueOf(o)] || brandStyleMap.okx"
                 >
-                  {{ getVenueOf(o).toUpperCase() }}
+                  {{ venueShortLabel(getVenueOf(o)) }}
                 </span>
+                <!-- 资金环境标签 -->
                 <span
                   class="badge text-3xs px-1 py-0.2 rounded"
                   :class="getModeOf(o) === 'LIVE' ? 'badge-up' : 'badge-warn'"
