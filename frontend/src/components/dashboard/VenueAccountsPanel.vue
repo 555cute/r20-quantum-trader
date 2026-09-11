@@ -1,9 +1,5 @@
 <script setup lang="ts">
-/**
- * US-005 · 账户区「环境优先」面板：先选实盘/模拟，再看三所同构卡。
- * 铁律：两环境数据绝不加总（后端无合计字段，前端也不求和展示）；
- * 未知显「—」+文字状态徽章（颜色不作唯一识别）；身份必须有文字。
- */
+/** 三所账户面板：环境切换 + 账户卡 + 组合风险占用。 */
 import { computed, onMounted, ref } from 'vue';
 import { FlaskConical, RefreshCw, ShieldCheck } from 'lucide-vue-next';
 import { useI18n } from '../../composables/useI18n';
@@ -23,8 +19,7 @@ const VENUES: VenueKey[] = ['okx', 'gate', 'binance'];
 const isDemo = computed(() => store.environment === 'demo');
 const isMobileExpanded = ref(false);
 
-/** US-004 · 组合风险占用行（/api/all portfolio_risk，US-001 预留层口径）。
- *  铁律同账户卡：null/缺字段 = 未知显「—」，绝不以 0 冒充；两环境绝不加总。 */
+/** 组合风险占用行。 */
 const portfolio = computed(() => {
   const raw = (dash.data as any)?.portfolio_risk;
   return isPlainObj(raw) ? raw : null;
@@ -62,7 +57,7 @@ onMounted(() => {
   void listing.refresh(store.environment);
 });
 
-/** 环境切换：账户与合约目录两条数据轴同步换挡（旧数据各自清空，防串显）。 */
+/** 环境切换：账户与合约目录两条数据轴同步换挡。 */
 function switchEnvironment(env: 'demo' | 'live'): void {
   store.setEnvironment(env);
   void listing.refresh(env);
@@ -77,17 +72,9 @@ function refreshAll(): void {
 <template>
   <section class="card card-pad space-y-3" data-test="venue-accounts-panel">
     <div class="flex flex-wrap items-center justify-between gap-2">
-      <div class="min-w-0">
-        <h2 class="text-sm font-bold" style="color: var(--ink-strong)">{{ t('dash.venueAccounts.title') }}</h2>
-        <p class="t-faint text-xs">
-          {{ t('dash.venueAccounts.desc') }} ·
-          <span class="font-medium" :style="{ color: isDemo ? 'var(--warn)' : 'var(--up)' }">
-            当前视角：{{ isDemo ? '模拟盘 (Demo)' : '实盘 (Live)' }}
-          </span>
-        </p>
-      </div>
+      <h2 class="text-sm font-bold" style="color: var(--ink-strong)">{{ t('dash.venueAccounts.title') }}</h2>
       <div class="flex flex-wrap items-center gap-2">
-        <!-- 账户环境透视切换药丸：平滑过渡，无缝换挡 -->
+        <!-- 环境切换药丸 -->
         <div
           class="flex items-center gap-0.5 rounded-md p-0.5"
           style="background: var(--surface-2); border: 1px solid var(--line-1)"
@@ -166,7 +153,7 @@ function refreshAll(): void {
       />
     </div>
 
-    <!-- US-004 · 组合风险占用行：总预算 / 已预留 / 可用余量（未知≠0；随环境隔离） -->
+    <!-- 组合风险占用行 -->
     <div class="border-t pt-2.5" style="border-color: var(--line-1)" data-test="portfolio-risk" :title="t('dash.venueAccounts.portfolio.tip')">
       <div class="flex flex-wrap items-center gap-2">
         <p class="t-label shrink-0">{{ t('dash.venueAccounts.portfolio.label') }}</p>

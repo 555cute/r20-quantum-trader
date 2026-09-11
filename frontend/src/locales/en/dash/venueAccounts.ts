@@ -1,7 +1,7 @@
-/** US-005 · Tri-venue symmetric account cards (environment-first; unknown is never 0) */
+/** Tri-venue account cards */
 export const enVenueAccounts = {
   title: 'Venue Accounts',
-  desc: 'Pick the funding environment first, then read real per-venue accounts; unreadable values show "—" and are never faked as 0; live and demo are never summed',
+  desc: '',
   envLabel: 'Funding environment',
   envDemo: 'Demo',
   envLive: 'Live',
@@ -41,8 +41,8 @@ export const enVenueAccounts = {
     reserved: 'Reserved',
     available: 'Available',
     usage: 'Budget used {pct}%',
-    pending: 'Awaiting reservation-layer data — unknown shows "—", never a fake 0',
+    pending: 'Awaiting reservation layer data',
     envMismatch: 'Data environment differs from current selection',
-    tip: 'Basis: atomic portfolio-risk reservation layer (pending/unknown also reserve budget), isolated by funding environment',
+    tip: 'Portfolio risk budget',
   },
 };

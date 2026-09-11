@@ -1,13 +1,13 @@
-/** US-005 · 三所账户对称卡（环境优先；未知≠填0） */
+/** 三所账户卡 */
 export const zhVenueAccounts = {
   title: '三所账户',
-  desc: '先选资金环境，再看三所真实账户；读不到的数据显式标「—」，不以 0 冒充；实盘与模拟永不加总',
+  desc: '',
   envLabel: '资金环境',
   envDemo: '模拟盘',
   envLive: '实盘',
   refresh: '刷新',
   loading: '同步中…',
-  needsAuth: '登录后台后可见真实账户数据',
+  needsAuth: '登录后查看真实账户数据',
   captured: '拉取于',
   unknown: '—',
   venueNames: {
@@ -41,8 +41,8 @@ export const zhVenueAccounts = {
     reserved: '已预留',
     available: '可用余量',
     usage: '预算占用 {pct}%',
-    pending: '等待预留层数据接入——未知显「—」，不以 0 冒充',
+    pending: '等待预留层数据接入',
     envMismatch: '数据环境与当前选择不一致',
-    tip: '口径：组合风险预算原子预留层（pending/unknown 同样占预算），随资金环境隔离',
+    tip: '组合风险预算',
   },
 };
