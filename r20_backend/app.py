@@ -319,7 +319,7 @@ class InstrumentAddRequest(BaseModel):
 
 
 class InstrumentDeleteRequest(BaseModel):
-    confirmation: str
+    confirmation: str = ""
 
 
 class ManualCloseRequest(BaseModel):
@@ -2103,11 +2103,12 @@ def add_admin_instrument(payload: InstrumentAddRequest, x_r20_admin_token: str |
 
 
 @app.delete("/api/v1/admin/instruments/{inst_id}")
-def delete_admin_instrument(inst_id: str, payload: InstrumentDeleteRequest, x_r20_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
+def delete_admin_instrument(inst_id: str, payload: InstrumentDeleteRequest | None = None, x_r20_admin_token: str | None = Header(default=None), x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
     refresh_settings()
-    require_admin_header(x_r20_admin_token)
+    require_admin_header(x_r20_admin_token, x_r20_session)
     inst_id = inst_id.upper()
-    if payload.confirmation.strip().upper() != f"REMOVE {inst_id}":
+    confirmation = (payload.confirmation if payload else "").strip().upper()
+    if confirmation and confirmation != f"REMOVE {inst_id}":
         raise HTTPException(status_code=400, detail=f"确认短语必须精确为：REMOVE {inst_id}")
     if inst_id == "BTC-USDT-SWAP":
         raise HTTPException(status_code=403, detail="BTC 是全局黑天鹅哨兵基准，不允许从交易池删除")

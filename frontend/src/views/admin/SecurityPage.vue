@@ -172,7 +172,10 @@ async function removeInstrument(item: any) {
   if (item.protected) { toast.warn('系统保底标的不可删除'); return }
   if (!confirm(`确定将 ${item.instId} 从交易池移除？`)) return
   try {
-    const res = await api(`/api/v1/admin/instruments/${encodeURIComponent(item.instId)}`, { method: 'DELETE' })
+    const res = await api(`/api/v1/admin/instruments/${encodeURIComponent(item.instId)}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ confirmation: `REMOVE ${item.instId}` })
+    })
     toast.ok(res.message || `${item.instId} 已从交易池移除`)
     await loadAll()
   } catch (e: any) {
