@@ -31,6 +31,8 @@ const { t } = useI18n();
 
 // 选中的币种过滤状态（null 为不过滤展示全部）
 const selectedCoin = ref<string | null>(null);
+// 选中的来源过滤状态（all 为全部，支持 'OKX官方' | '金十数据' | '全球宏观'）
+const selectedSource = ref<string>('all');
 
 const ni = computed<any>(() => (store.data as any)?.news_intelligence || {});
 const macro = computed(() => ni.value.macro_sentiment || '偏多震荡');
@@ -76,13 +78,17 @@ const pinnedNews = computed(() => {
   return high || rawNews.value[0];
 });
 
-// 按选中币种过滤后的快讯流
+// 按选中币种与来源过滤后的快讯流
 const filteredNews = computed(() => {
-  if (!selectedCoin.value) return rawNews.value;
+  let list = rawNews.value;
+  if (selectedSource.value !== 'all') {
+    list = list.filter((item) => (item.platforms || []).some((p: string) => p.includes(selectedSource.value)));
+  }
+  if (!selectedCoin.value) return list;
   const target = selectedCoin.value.toUpperCase();
-  return rawNews.value.filter((item) => {
-    const list = (item.coins || []).map((c: string) => String(c).toUpperCase());
-    if (list.includes(target)) return true;
+  return list.filter((item) => {
+    const coinList = (item.coins || []).map((c: string) => String(c).toUpperCase());
+    if (coinList.includes(target)) return true;
     const title = String(item.title || '').toUpperCase();
     const summary = String(item.summary || '').toUpperCase();
     return title.includes(target) || summary.includes(target);
@@ -298,9 +304,26 @@ async function refreshNews() {
 
       <!-- 右：快讯流 (Intelligence Feed) -->
       <div class="card overflow-hidden xl:col-span-8 flex flex-col">
-        <div class="flex items-center justify-between border-b px-3.5 py-2.5" style="border-color: var(--line-1)">
-          <div class="flex items-center gap-2">
+        <div class="flex items-center justify-between border-b px-3.5 py-2.5 flex-wrap gap-2" style="border-color: var(--line-1)">
+          <div class="flex items-center gap-2 flex-wrap">
             <h2 class="text-sm font-bold" style="color: var(--ink-strong)">{{ t('dash.news.feed.title') }}</h2>
+            <!-- 来源分类筛选按钮 -->
+            <div class="flex items-center gap-0.5 p-0.5 rounded-md text-2xs" style="background-color: var(--surface-2); border: 1px solid var(--line-1);">
+              <button
+                v-for="s in [
+                  { key: 'all', label: '全部' },
+                  { key: 'OKX官方', label: 'OKX官方' },
+                  { key: '金十数据', label: '金十数据' },
+                  { key: '全球宏观', label: '宏观快讯' },
+                ]"
+                :key="s.key"
+                class="px-2 py-0.5 rounded transition-colors"
+                :style="selectedSource === s.key ? { backgroundColor: 'var(--surface-3)', color: 'var(--ink-strong)', fontWeight: 'bold' } : { color: 'var(--ink-3)' }"
+                @click="selectedSource = s.key"
+              >
+                {{ s.label }}
+              </button>
+            </div>
             <span v-if="selectedCoin" class="badge badge-accent text-2xs flex items-center gap-1">
               <Filter class="h-2.5 w-2.5" /> {{ selectedCoin }} 过滤
             </span>
@@ -308,11 +331,11 @@ async function refreshNews() {
           <div class="flex items-center gap-2">
             <span class="t-faint text-2xs">共 {{ filteredNews.length }} 条快讯</span>
             <button
-              v-if="selectedCoin"
+              v-if="selectedCoin || selectedSource !== 'all'"
               class="btn btn-ghost btn-sm text-2xs"
-              @click="selectedCoin = null"
+              @click="selectedCoin = null; selectedSource = 'all'"
             >
-              显示全部
+              重置筛选
             </button>
           </div>
         </div>
@@ -334,8 +357,12 @@ async function refreshNews() {
               <span
                 v-for="plat in (item.platforms || [])"
                 :key="plat"
-                class="badge text-3xs font-medium"
-                style="background-color: var(--surface-3); border-color: var(--line-1); color: var(--ink-2)"
+                class="badge text-3xs font-bold"
+                :style="plat === 'OKX官方'
+                  ? { backgroundColor: '#3880ff15', borderColor: '#3880ff33', color: '#3880ff' }
+                  : plat === '金十数据'
+                  ? { backgroundColor: '#e0242415', borderColor: '#e0242433', color: '#e02424' }
+                  : { backgroundColor: 'var(--surface-3)', borderColor: 'var(--line-1)', color: 'var(--ink-2)' }"
               >
                 {{ plat }}
               </span>

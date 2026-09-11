@@ -150,7 +150,13 @@ def fetch_okx_announcements(limit=15) -> list:
     items = []
     try:
         url = "https://www.okx.com/api/v5/support/announcements"
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            }
+        )
         with urllib.request.urlopen(req, timeout=6) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         for group in data.get("data", []):
@@ -292,7 +298,9 @@ def fetch_and_analyze_news_sentiment():
     now_str = now_bj.strftime("%Y-%m-%d %H:%M:%S")
 
     # 1. News sources：直连 OKX 官方公告流 + 金十数据宏观快讯，淘汰旧第三方 RSS。
-    raw_news = fetch_okx_announcements(limit=15) + fetch_jin10_macro_news(limit=20)
+    okx_news = fetch_okx_announcements(limit=20)
+    jin10_news = fetch_jin10_macro_news(limit=25)
+    raw_news = okx_news + jin10_news
 
     seen_ids = set()
     deduped_news = []
@@ -301,11 +309,11 @@ def fetch_and_analyze_news_sentiment():
         if nid and nid not in seen_ids:
             seen_ids.add(nid)
             deduped_news.append(item)
-    raw_news = deduped_news
-            
-    # Sort strictly by creation timestamp descending
-    raw_news.sort(key=lambda x: int(x.get("cTime", 0) or 0), reverse=True)
-    raw_news = raw_news[:25]
+
+    # 保障 OKX 官方公告与金十宏观要闻双向足额露出，避免单方时间差挤占
+    top_okx = [n for n in deduped_news if "OKX官方" in n.get("platforms", [])][:15]
+    top_other = [n for n in deduped_news if "OKX官方" not in n.get("platforms", [])][:20]
+    raw_news = sorted(top_okx + top_other, key=lambda x: int(x.get("cTime", 0) or 0), reverse=True)
 
     parsed_news = []
     triggered_threat = None
@@ -409,7 +417,7 @@ def fetch_and_analyze_news_sentiment():
         "macro_sentiment": macro_env,
         "circuit_breaker": cb_info if cb_active else {"active": False},
         "coins_sentiment": coin_sentiments,
-        "latest_news": parsed_news[:15],
+        "latest_news": parsed_news[:35],
         # Freshness of the *content* (newest item time), not of this run.
         "news_fresh_at": (parsed_news[0]["time"] if parsed_news else None),
     }
