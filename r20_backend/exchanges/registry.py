@@ -50,9 +50,9 @@ def execution_open(venue: str, environment: str = "live") -> bool:
     """场所执行开闸的统一判定（运行时读 env，支持热切换无需改码）。
 
     G9 单源判定 = 能力表 ``adapter_execution_flag`` 声明 AND 环境双轴旗标：
-    - 能力表未声明旗标（okx 实盘走 ai_factor_trader 直签链路、binance orders
-      未实装）→ 结构性恒关，与 env 无关；
-    - 已声明（gate）：live 档读声明旗标原样，沙盒档（sandbox/demo/testnet）
+    - 能力表未声明旗标（okx 实盘走 ai_factor_trader 直签链路）→ 结构性恒关，
+      与 env 无关；binance/gate 均已声明（US-005 起三家执行面平权）；
+    - 已声明（gate/binance）：live 档读声明旗标原样，沙盒档（sandbox/demo/testnet）
       读 ``<前缀>DEMO_EXECUTION`` 变体（R20_GATE_EXECUTION→R20_GATE_DEMO_
       EXECUTION）——打开只放行**模拟盘真实发送**，绝不标示/充当 LIVE 实盘。
     单参调用 ``execution_open(venue)`` = live 档语义，逐字节兼容旧判定。

@@ -33,8 +33,8 @@ def setUpModule():
     R20_* 旗标——R20_GATE_TESTNET=1 会把「单参 = live 档」契约用例的环境解析
     到 sandbox 档（URL/开闸文案全部错档）。环境只由用例自设旗标决定。"""
     _backup = {k: v for k, v in os.environ.items()
-               if k.startswith(("R20_BINANCE_TESTNET", "R20_GATE_TESTNET",
-                                "R20_GATE_EXECUTION", "R20_GATE_DEMO_EXECUTION",
+               if k.startswith(("R20_BINANCE_TESTNET", "R20_BINANCE_EXECUTION", "R20_BINANCE_DEMO_EXECUTION",
+                                "R20_GATE_TESTNET", "R20_GATE_EXECUTION", "R20_GATE_DEMO_EXECUTION",
                                 "R20_OKX_ENV", "R20_OKX_TESTNET"))}
     for k in _backup:
         os.environ.pop(k, None)

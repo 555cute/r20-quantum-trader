@@ -608,9 +608,12 @@ PORTFOLIO_RISK_BUDGET_ENV = "R20_PORTFOLIO_RISK_BUDGET_USDT"
 #: 场所取数健康度可容忍年龄（brain 15min 周期写盘，给 2 个周期 + 余量）
 VENUE_HEALTH_MAX_AGE_S = 1900.0
 
-#: 已接入真实下单实现的场所 → 提交函数。当前只有 OKX 直签 V5 链路；
-#: binance/gate 执行就绪时在此登记一个提交器即可上线，选所/预算层零改动。
-VENUE_SUBMITTERS: Dict[str, str] = {"okx": "okx_rest.place_order"}
+#: 已接入真实下单实现的场所 → 提交函数。三所对等支持原生受保护开仓。
+VENUE_SUBMITTERS: Dict[str, str] = {
+    "okx": "okx_rest.place_order",
+    "gate": "execution_router.open_protected_position",
+    "binance": "execution_router.open_protected_position",
+}
 
 
 def portfolio_risk_budget_usdt() -> float:
@@ -648,6 +651,43 @@ def venue_execution_ready(venue: str, environment: str) -> bool:
     except Exception as exc:
         print(f"[选所路由] warn 场所 {key} 能力表读取失败，按不可执行处理: {exc}")
         return False
+
+
+def fetch_other_venue_positions(environment: str) -> Tuple[bool, Dict[str, List[Dict[str, Any]]], str]:
+    """跨所持仓快照（多所封顶用）：非 OKX 且已开闸场所的活跃持仓。
+
+    三所平权开单后，仓位/同向上限必须把 Gate/Binance 的在管仓位算进来——
+    否则每所各顶满上限，全系统实际敞口 = 上限 × 场所数（风控口径失真）。
+
+    语义（fail-closed）：
+    - 返回 (ok, {venue: [normalized_pos...]}, error)。任一开闸所读取失败 →
+      ok=False，调用方本周期禁止新增开仓（宁可不计数错杀，不可漏计超卖）；
+    - 未开闸所不参与读取也不构成失败（结构性无仓位来源）；
+    - 孤儿持仓纪律：本函数**只计数不处置**——外所来源不明的仓可能是用户
+      手动仓位，绝不清算，仅 warn 提示并占用额度；
+    - 每所单次读取，异常捕获后连同场所名返回，不静默吞。
+    """
+    snapshot: Dict[str, List[Dict[str, Any]]] = {}
+    try:
+        names = list(venue_registry.registered_venues())
+    except Exception as exc:
+        return False, {}, f"registry 场所清单不可用: {exc}"
+    for name in names:
+        if name == "okx":
+            continue
+        if not venue_execution_ready(name, environment):
+            continue
+        try:
+            ad = venue_registry.get_adapter(name)
+            rows = ad.positions() or []
+            live = [p for p in rows if abs(float(p.get("size_signed") or 0)) > 1e-12]
+            snapshot[name] = live
+            for p in live:
+                print(f"[跨所封顶] {name} {p.get('inst_id')} {p.get('side')} "
+                      f"size={p.get('size_signed')} 纳入本周期仓位配额（只计数不处置）")
+        except Exception as exc:
+            return False, {}, f"{name} 持仓读取失败: {exc}"
+    return True, snapshot, ""
 
 
 def _venue_health_stamp() -> Tuple[Optional[str], Dict[str, Any]]:
@@ -698,17 +738,20 @@ def build_venue_candidates(inst_id: str, environment: str) -> List[Dict[str, Any
             stamp = observed_stamp
         else:
             stamp = None  # 该所无跨所观测记录：诚实交新鲜度闸门判定
+        # 费率平权与返佣优势：Gate 80% 返佣 Maker 净成本约 0.0001 (2.0bps 双腿)；OKX/Binance 约 0.0002 (4.0bps 双腿)
+        eff_fee = (MAKER_FEE_RATE * 0.5) if name == "gate" else MAKER_FEE_RATE
+        # 延迟稳定性惩罚：300ms 以内正常网络零惩罚，超出部分温和计入（上限 5bps）
+        eff_stab = max(0.0, min(5.0, (avg_latency - 300.0) / 100.0)) if avg_latency > 0 else 0.0
+
         cands.append({
             "venue": name,
             "environment": environment,
             "executable": venue_execution_ready(name, environment),
-            "fee_rate": MAKER_FEE_RATE,
+            "fee_rate": eff_fee,
             "spread_bps": 0.0,
             "depth_usd": 0.0,
             "funding_rate": 0.0,
-            # 观测面唯一可用的稳定性信号：跨所取数平均延迟（ms→bps 同量纲保守折算，
-            # 上限 20bps；无观测 = 0 不惩罚）
-            "stability_penalty": min(20.0, avg_latency / 25.0),
+            "stability_penalty": eff_stab,
             "min_notional": 0.0,
             "min_qty": 0.0,
             "precision": 0.0,
@@ -856,7 +899,9 @@ def route_and_reserve_signal(inst_id: str, side: str, size: float, price: float,
     # 预算硬筛**不在路由层重复执行**：路由只负责选所，预算占用由 risk_reservation
     # 的原子 reserve 单点裁决（口径=保证金，与 notional 混用会双重误杀）。路由层的
     # budget_view 预筛等 US-004 名义额口径统一后再启用，这里显式传 None。
-    decision = venue_router.route_signal(signal, candidates, budget_view=None)
+    r_mode = routing_policy.load_routing_mode()
+    cfg = venue_router.RouterConfig(routing_mode=r_mode)
+    decision = venue_router.route_signal(signal, candidates, budget_view=None, config=cfg)
     payload = _decision_payload(decision, preferred)
 
     if decision.venue is None or decision.reason_code in ("ALL_REJECTED", "NO_CANDIDATES"):
@@ -944,6 +989,7 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: f
     """
     env = selected_environment()
     _reservation = None
+    target_venue = "okx"
     if isinstance(venue_ctx, dict):
         # ---- US-003 决策面前置闸：选所路由 + 预算原子预留（失败即本轮不下单）----
         _routing = route_and_reserve_signal(
@@ -954,6 +1000,7 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: f
         if not _routing["ok"]:
             return False, str(_routing.get("error") or "路由拒绝")
         _reservation = _routing.get("reservation")
+        target_venue = str(_routing.get("venue") or "okx").lower()
     else:
         print(f"[US-003 决策面] warn {inst_id} 提交未携带 venue_ctx——"
               f"未经选所路由/预算预留，仅限非 AI 信号通用路径")
@@ -962,9 +1009,9 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: f
     # 已下架/未上市（如 SUI 在 demo 被下架）→ fail-closed 拒单，reason 透传。
     try:
         from r20_backend.exchanges.listing import ensure_contract_listed
-        _check = ensure_contract_listed("okx", "demo" if env.simulated else "live", inst_id)
+        _check = ensure_contract_listed(target_venue, "demo" if env.simulated else "live", inst_id)
         if not _check.ok:
-            print(f"[listing gate] 拒绝下单 {inst_id}: {_check.reason}")
+            print(f"[listing gate] 拒绝下单 {inst_id} ({target_venue}): {_check.reason}")
             release_signal_reservation(_reservation, "合约对账拒绝")
             return False, f"合约对账拒绝: {_check.reason}"
     except Exception as _le:
@@ -974,7 +1021,7 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: f
     effective_tp = tp_px
     effective_sl = sl_px
 
-    if env.simulated:
+    if env.simulated and target_venue == "okx":
         try:
             demo_ticker = fetch_ticker(inst_id)
             if demo_ticker and demo_ticker.get("last"):
@@ -1011,6 +1058,41 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: f
         release_signal_reservation(_reservation, "核心安全复验拒绝")
         return False, f"最终订单核心安全复验拒绝: {reason}"
 
+    # 多所平权执行：若路由选定 Gate 或 Binance，走统一原生受保护执行路由
+    if target_venue in ("gate", "binance"):
+        try:
+            from r20_backend import execution_router
+            asset_canonical = str(inst_id).split("-")[0].upper()
+            margin_val = float(venue_ctx.get("margin_usdt") or (size * price / 3.0)) if isinstance(venue_ctx, dict) else (size * price / 3.0)
+            lever_val = float(venue_ctx.get("leverage") or 3.0) if isinstance(venue_ctx, dict) else 3.0
+
+            res = execution_router.open_protected_position({
+                "venue": target_venue,
+                "asset": asset_canonical,
+                "action": action_type,
+                "margin_usdt": margin_val,
+                "leverage": lever_val,
+                "entry_price": effective_px,
+                "take_profit_price": effective_tp,
+                "stop_loss_price": effective_sl,
+            })
+            if not res.get("ok"):
+                detail = res.get("detail") or "多所执行路由拒绝"
+                release_signal_reservation(_reservation, detail)
+                return False, f"{target_venue.upper()} 下单失败: {detail}"
+
+            order_id = str(res.get("order_id") or res.get("tp_id") or f"{target_venue}-ok")
+            record_open_intent(inst_id, side)
+            if _reservation:
+                try:
+                    _reservation["manager"].confirm(_reservation["account_key"], _reservation["intent_id"])
+                except Exception:
+                    pass
+            return True, order_id
+        except Exception as exc:
+            release_signal_reservation(_reservation, f"多所执行异常: {exc}")
+            return False, f"{target_venue.upper()} 执行异常: {exc}"
+
     try:
         rows = okx_rest.place_order(
             inst_id, side, f"{size:g}",
@@ -1029,6 +1111,11 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: f
         release_signal_reservation(_reservation, "交易所未返回可核验订单号")
         return False, "exchange accepted response without a verifiable order id"
     record_open_intent(inst_id, side)
+    if _reservation:
+        try:
+            _reservation["manager"].confirm(_reservation["account_key"], _reservation["intent_id"])
+        except Exception:
+            pass
     return True, str(order_id)
 
 
@@ -2422,6 +2509,29 @@ def execute_portfolio():
     reserved_slot_count = active_pos_count + len(pending_inst_ids)
     reserved_long_count = long_count + pending_long_count
     reserved_short_count = short_count + pending_short_count
+
+    # 1a. 跨所封顶（三所平权开单后的风控收口）：开闸所（gate/binance）的
+    # 活跃持仓计入总仓/同向配额；读取失败 → 本周期禁止新增开仓（fail-closed，
+    # 与挂单对账同一把尺——宁停不错）。孤儿仓只计数不处置（可能是用户手动仓）。
+    try:
+        _xv_env = str(current_environment().mode)
+    except Exception as _xv_exc:
+        _xv_env = ""
+        print(f"[跨所封顶] warn 周期冻结环境不可得（{_xv_exc}），按不可信环境处理")
+    xv_ok, xv_positions_by_venue, xv_error = fetch_other_venue_positions(_xv_env)
+    xv_enabled = bool(_xv_env) and any(venue_execution_ready(v, _xv_env)
+                                       for v in ("gate", "binance"))
+    if (xv_enabled or not _xv_env) and not xv_ok:
+        print(f"[跨所封顶] fail-closed 本周期禁止新增开仓: {xv_error or '环境轴不可得'}")
+        entries_blocked = True
+    else:
+        for _v, _rows in (xv_positions_by_venue or {}).items():
+            for _p in _rows:
+                reserved_slot_count += 1
+                if str(_p.get("side", "")).lower() == "long":
+                    reserved_long_count += 1
+                else:
+                    reserved_short_count += 1
 
     try:
         bal_res = okx_rest.balances()

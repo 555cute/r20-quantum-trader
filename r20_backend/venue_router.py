@@ -55,6 +55,7 @@ class RouterConfig:
     depth_penalty_max_bps: float = DEPTH_PENALTY_MAX_BPS
     incumbent_bonus_bps: float = INCUMBENT_BONUS_BPS
     health_max_age_s_default: float = 900.0
+    routing_mode: str = "auto"          # "auto"(成本优先) | "balanced"(多所均衡轮换)
     now_utc: Optional[str] = None       # 测试注入「当前时刻」（ISO8601）；None=真实时钟
 
 
@@ -100,9 +101,22 @@ def _hard_filters(signal: Dict[str, Any], cand: Dict[str, Any],
     if cand.get("executable") is not True:
         fails.append("执行开闸关：executable=False")
 
+    # 原生合约代码对齐（防跨所 inst_id 格式错位导致误杀）
+    raw_sym = str(signal.get("symbol_canonical") or signal.get("inst_id") or "")
+    native_contract = raw_sym
+    try:
+        from .exchanges.base import canonical_base
+        from .exchanges import get_adapter
+        base_sym = canonical_base(raw_sym)
+        if base_sym:
+            ad = get_adapter(venue)
+            native_contract = ad.native_symbol(base_sym)
+    except Exception:
+        pass
+
     check = listing.ensure_contract_listed(
         venue, str(cand.get("environment", "live")),
-        str(signal.get("inst_id") or signal.get("symbol_canonical") or ""))
+        native_contract)
     if not check.ok:
         fails.append(f"listing gate 拒：{check.reason}")
     elif check.reason and _LISTING_FAILOPEN_MARK in check.reason:
@@ -306,6 +320,30 @@ def route_signal(signal: Dict[str, Any], candidates: List[Dict[str, Any]],
                              rejected=rejected)
 
     scores = {str(c["venue"]): _score(c, signal, cfg, reasons) for c in alive}
+
+    # 多所均衡轮换模式：若多所均通过硬筛且成本在容忍区间内，按标的哈希均衡分散开单
+    if cfg.routing_mode == "balanced" and len(alive) > 1:
+        canonical = str(signal.get("symbol_canonical") or signal.get("inst_id") or "").split("-")[0].upper()
+        is_scale_in = bool(signal.get("is_scale_in"))
+        incumbent = next((str(c.get("venue")) for c in alive if c.get("current_venue")), None)
+        # 仅加仓且现任所在场时保留现任所，新开仓一律多所平权均衡轮换
+        if not (is_scale_in and incumbent and incumbent in scores):
+            min_score = min(scores.values())
+            tolerable = [c for c in alive if scores[str(c["venue"])] <= min_score + 15.0]
+            if len(tolerable) > 1:
+                sorted_venues = sorted(str(c["venue"]) for c in tolerable)
+                winner = sorted_venues[abs(hash(canonical)) % len(sorted_venues)]
+                reasons.append(f"均衡模式生效：在合格候选 {sorted_venues} 中，标的 {canonical} 均衡轮动分发至 {winner}")
+                allocation = split_allocation(signal, alive, budget_view, cfg, pre_alive=alive)
+                return RouteDecision(
+                    venue=winner,
+                    reason_code="OK_BALANCED",
+                    reasons=reasons,
+                    rejected=rejected,
+                    hysteresis_applied=False,
+                    allocation=allocation,
+                )
+
     winner, hyst = _apply_hysteresis(alive, scores, cfg, reasons)
     reasons.append(f"选中 {winner}（成本 {scores[winner]:.2f}bps，最低者"
                    + ("，经滞回保留现任" if hyst else "）"))

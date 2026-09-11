@@ -179,17 +179,33 @@ class TestManualPreferredVenue(_WiringSandbox):
 
     def test_manual_preferred_venue_without_submitter_skips_order(self):
         self._write_cache(["BTC-USDT-SWAP"])
-        # 手选 gate 且 gate 已开闸：路由会选中它，但本链路只有 OKX 直签提交器
-        ok, ref = self._submit(preferred="gate", executable={"gate": True},
-                               health=_health_with("gate"))
-        self.assertFalse(ok)
-        self.assertTrue(ref.startswith("路由拒绝: "), ref)
-        self.assertEqual(self.calls, [], "未登记执行面的所绝不能打到 OKX 下单端点")
-        vd = self._venue_decision()
-        self.assertEqual(vd["venue"], "gate")
-        self.assertEqual(vd["outcome"], "selected")
-        self.assertIn("未登记下单实现", vd["skip_reason"])
-        self.assertIn("本轮不下单", self.out)
+        # 手选未登记 submitter 的所（以仅留 OKX 提交器模拟）：路由选中它但跳过下单
+        with patch.dict(trader.VENUE_SUBMITTERS, {"okx": "okx_rest.place_order"}, clear=True):
+            ok, ref = self._submit(preferred="gate", executable={"gate": True},
+                                   health=_health_with("gate"))
+            self.assertFalse(ok)
+            self.assertTrue(ref.startswith("路由拒绝: "), ref)
+            self.assertEqual(self.calls, [], "未登记执行面的所绝不能打到 OKX 下单端点")
+            vd = self._venue_decision()
+            self.assertEqual(vd["venue"], "gate")
+            self.assertEqual(vd["outcome"], "selected")
+            self.assertIn("未登记下单实现", vd["skip_reason"])
+            self.assertIn("本轮不下单", self.out)
+
+    def test_manual_preferred_venue_with_gate_dispatches_execution_router(self):
+        self._write_cache(["BTC-USDT-SWAP"])
+        fake_res = {"ok": True, "order_id": "GATE-ORDER-888", "detail": "gate success"}
+        with patch("r20_backend.execution_router.open_protected_position", return_value=fake_res) as mock_open:
+            ok, ref = self._submit(preferred="gate", executable={"gate": True},
+                                   health=_health_with("gate"))
+            self.assertTrue(ok, ref)
+            self.assertEqual(ref, "GATE-ORDER-888")
+            self.assertEqual(self.calls, [], "Gate 下单不得打到 OKX 端点")
+            mock_open.assert_called_once()
+            called_decision = mock_open.call_args[0][0]
+            self.assertEqual(called_decision["venue"], "gate")
+            self.assertEqual(called_decision["asset"], "BTC")
+            self.assertEqual(called_decision["action"], "BUY_LONG")
 
     def test_manual_preferred_venue_not_executable_rejected_with_evidence(self):
         self._write_cache(["BTC-USDT-SWAP"])
@@ -416,6 +432,77 @@ class TestPreferredVenueConfigCompatibility(unittest.TestCase):
         self.assertEqual(set(routing_policy.VALID_PREFERRED_VENUES),
                          set(routing_policy.registered_venues()) | {"auto"},
                          "合法值来自注册表，不硬编码场所名单")
+
+
+class TestCrossVenueCap(_WiringSandbox):
+    """跨所封顶：开闸所持仓纳入配额；读取失败 fail-closed；未开闸所跳过。"""
+
+    class _DelegatingRegistry:
+        """真实 registry 全委托，只钉 get_adapter——零出网假持仓。"""
+        def __init__(self, positions_by_venue, fail_venues=()):
+            # 构造期捕获真实 registry 引用（此时尚未 patch），避免 __getattr__
+            # 在 patch 生效期间解析 trader.venue_registry 命中代理自身 → 递归
+            self._real = trader.venue_registry
+            self._pos = positions_by_venue
+            self._fail = set(fail_venues)
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+        def get_adapter(self, venue, environment=None):
+            v = str(venue).lower()
+            if v in self._fail:
+                raise RuntimeError(f"{v} simulated outage")
+            rows = self._pos.get(v, [])
+            return type("_Ad", (), {"positions": staticmethod(lambda r=rows: r)})()
+
+    def _fetch(self, positions_by_venue, ready, fail_venues=()):
+        reg = self._DelegatingRegistry(positions_by_venue, fail_venues)
+        with patch.object(trader, "venue_registry", reg), \
+                patch.object(trader, "venue_execution_ready",
+                             lambda v, e: bool(ready.get(v, False))):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                ok, snap, err = trader.fetch_other_venue_positions("demo")
+        return ok, snap, err, buf.getvalue()
+
+    def test_open_venue_positions_counted(self):
+        ok, snap, err, out = self._fetch(
+            {"gate": [{"inst_id": "BTC_USDT", "side": "long", "size_signed": 2}],
+             "binance": [{"inst_id": "ETHUSDT", "side": "short", "size_signed": -0.5}]},
+            ready={"gate": True, "binance": True})
+        self.assertTrue(ok, err)
+        self.assertEqual(len(snap["gate"]), 1)
+        self.assertEqual(len(snap["binance"]), 1)
+        self.assertIn("纳入本周期仓位配额", out)
+
+    def test_zero_size_rows_excluded(self):
+        ok, snap, err, _ = self._fetch(
+            {"gate": [{"inst_id": "BTC_USDT", "side": "long", "size_signed": 0.0},
+                      {"inst_id": "SOL_USDT", "side": "short", "size_signed": -3}]},
+            ready={"gate": True})
+        self.assertTrue(ok, err)
+        self.assertEqual(len(snap["gate"]), 1, "0 尺寸记录不是活跃持仓")
+
+    def test_unreadable_open_venue_fails_closed(self):
+        ok, snap, err, out = self._fetch(
+            {"binance": [{"inst_id": "ETHUSDT", "side": "long", "size_signed": 1}]},
+            ready={"gate": True, "binance": True}, fail_venues=("gate",))
+        self.assertFalse(ok, "开闸所读仓失败必须 ok=False（调用方拒新增开仓）")
+        self.assertIn("gate", err)
+
+    def test_closed_venues_skipped_not_counted(self):
+        ok, snap, err, _ = self._fetch({}, ready={"gate": False, "binance": False})
+        self.assertTrue(ok, err)
+        self.assertEqual(snap, {}, "未开闸所无仓位来源，结构性跳过")
+
+    def test_negative_size_side_inferred(self):
+        # Gate/Binance 归一化契约：side 字段随 size_signed 正负（long/short）
+        ok, snap, err, _ = self._fetch(
+            {"gate": [{"inst_id": "X_USDT", "side": "short", "size_signed": -1}]},
+            ready={"gate": True})
+        self.assertTrue(ok, err)
+        self.assertEqual(snap["gate"][0]["side"], "short")
 
 
 if __name__ == "__main__":

@@ -80,8 +80,16 @@ def has_env(venue: str, environment: str) -> bool:
 
 
 def get_profile(venue: str, environment: str) -> EnvProfile:
-    prof = PROFILES.get((str(venue).lower(), str(environment).lower()))
+    vkey = str(venue).lower()
+    ekey = str(environment).lower()
+    prof = PROFILES.get((vkey, ekey))
     if prof is None:
+        # 沙盒环境名别名兼容（demo / sandbox / testnet 自动对齐）
+        from .identity import is_sandbox_environment
+        if is_sandbox_environment(ekey):
+            for candidate in ("demo", "sandbox", "testnet"):
+                if (vkey, candidate) in PROFILES:
+                    return PROFILES[(vkey, candidate)]
         raise ExchangeCapabilityError(
             f"未知环境档 venue={venue!r} environment={environment!r}"
             f"，可用: {sorted(PROFILES)}")

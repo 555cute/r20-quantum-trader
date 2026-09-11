@@ -130,6 +130,13 @@ def load_preferred_venue(raw: Dict[str, Any] = None) -> str:
     return "auto"
 
 
+def load_routing_mode(raw: Dict[str, Any] = None) -> str:
+    """选所路由模式：'auto'(纯成本最优) | 'balanced'(多所均衡轮动开单)。"""
+    data = _read_raw_routing() if raw is None else raw
+    mode = str(data.get("routing_mode", "auto")).strip().lower()
+    return mode if mode in ("auto", "balanced", "split") else "auto"
+
+
 def save_preferred_venue(venue: str) -> bool:
     """写顶层 preferred_venue（读-改-写原子替换，gate 等其余键原样保留）。
 

@@ -265,9 +265,18 @@ class TestOkxPublicAdapter(unittest.TestCase):
 class TestRegistryThreeVenues(unittest.TestCase):
     def test_three_venues_registered_readonly_gate(self):
         self.assertEqual(registered_venues(), ["binance", "gate", "okx"])
-        for v in ("okx", "binance", "gate"):
-            with self.assertRaises(ExchangeCapabilityError):
-                require_execution(v)
+        # 契约是「默认关闸 fail-closed」——必须隔离宿主 ambient 旗标
+        # （后台开闸 R20_GATE_EXECUTION/R20_BINANCE_EXECUTION=1 后，
+        #  不清环境直接跑 require_execution 会命中真开闸，测试假设漂移）
+        import os
+        from unittest.mock import patch
+        with patch.dict("os.environ", {}, clear=False):
+            for k in ("R20_GATE_EXECUTION", "R20_GATE_DEMO_EXECUTION",
+                      "R20_BINANCE_EXECUTION", "R20_BINANCE_DEMO_EXECUTION"):
+                os.environ.pop(k, None)
+            for v in ("okx", "binance", "gate"):
+                with self.assertRaises(ExchangeCapabilityError):
+                    require_execution(v)
         self.assertIs(get_adapter("OKX"), get_adapter("okx"))
 
 
