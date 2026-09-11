@@ -34,7 +34,7 @@ function regimeOf(f: any): string {
   if (r.includes('range')) return t('dash.matrix.matrix.regime.range');
   return '';
 }
-/** 多空比（OKX 前5%大户口径；缺失或 N/A 显示 --） */
+/** 多空比（全市场综合大户口径；缺失或 N/A 显示 --） */
 function lsOf(f: any): string {
   const v = Number(f.lsRatio);
   return Number.isFinite(v) && v > 0 ? v.toFixed(2) : '--';

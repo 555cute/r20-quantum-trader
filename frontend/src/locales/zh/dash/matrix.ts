@@ -164,7 +164,7 @@ export const zhMatrix = {
       range: '震荡区间',
       chaos: '杂波',
     },
-    smartTip: 'OKX 前 5% 大户多空持仓比：>1 多头占优，数据缺失显示 --',
+    smartTip: '全市场大户多空持仓比（综合跨所主力口径）：>1 多头占优，数据缺失显示 --',
     detailTitle: '因子透视 · {sym}',
     market: '行情快照',
     calculus: '微积分动力学',

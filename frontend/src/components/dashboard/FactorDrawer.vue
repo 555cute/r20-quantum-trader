@@ -60,6 +60,74 @@ const smart = computed(() => [
   row('OI', asIs(f.value.oiUsd)),
 ]);
 
+/** 三所对等行情与基差对照行 */
+interface VenueQuoteRow {
+  key: string;
+  label: string;
+  brandColor: string;
+  price: string;
+  basisText: string;
+  basisTone: string;
+  lsRatio: string;
+  fundingText: string;
+  fundingTone: string;
+}
+
+const venueQuoteComparison = computed<VenueQuoteRow[]>(() => {
+  const s = cvSymbol.value;
+  const basePx = Number(f.value.price || 0);
+
+  // 1. OKX
+  const okxF = f.value.fundingRate != null ? f.value.fundingRate : null;
+  const okxFNum = okxF !== null && !isNaN(Number(okxF)) ? Number(okxF) : null;
+
+  // 2. Binance
+  const binPx = s?.bin_last != null ? Number(s.bin_last) : null;
+  const binBasis = s?.bin_basis_pct != null ? Number(s.bin_basis_pct) : null;
+  const binF = s?.bin_funding_pct != null ? Number(s.bin_funding_pct) : null;
+
+  // 3. Gate
+  const gatePx = s?.gate_last != null ? Number(s.gate_last) : null;
+  const gateBasis = s?.gate_basis_pct != null ? Number(s.gate_basis_pct) : null;
+  const gateF = s?.gate_funding_pct != null ? Number(s.gate_funding_pct) : null;
+
+  return [
+    {
+      key: 'okx',
+      label: 'OKX',
+      brandColor: 'var(--venue-okx, #3880ff)',
+      price: basePx > 0 ? fmtPrice(basePx) : '--',
+      basisText: '基准',
+      basisTone: 't-faint',
+      lsRatio: asIs(f.value.lsRatio),
+      fundingText: okxFNum !== null ? `${okxFNum >= 0 ? '+' : ''}${(okxFNum * 100).toFixed(4)}%` : asIs(okxF),
+      fundingTone: okxFNum !== null ? (okxFNum >= 0 ? 'up' : 'down') : '',
+    },
+    {
+      key: 'binance',
+      label: 'Binance',
+      brandColor: 'var(--venue-binance, #f3ba2f)',
+      price: binPx !== null ? fmtPrice(binPx) : '--',
+      basisText: binBasis !== null ? `${binBasis >= 0 ? '+' : ''}${(binBasis * 100).toFixed(2)}%` : '--',
+      basisTone: binBasis !== null ? (binBasis >= 0 ? 'up' : 'down') : 't-faint',
+      lsRatio: s?.bin_ls != null ? fmtNum(Number(s.bin_ls), 2) : '--',
+      fundingText: binF !== null ? `${binF >= 0 ? '+' : ''}${(binF * 100).toFixed(4)}%` : '--',
+      fundingTone: binF !== null ? (binF >= 0 ? 'up' : 'down') : '',
+    },
+    {
+      key: 'gate',
+      label: 'Gate.io',
+      brandColor: 'var(--venue-gate, #00be98)',
+      price: gatePx !== null ? fmtPrice(gatePx) : '--',
+      basisText: gateBasis !== null ? `${gateBasis >= 0 ? '+' : ''}${(gateBasis * 100).toFixed(2)}%` : '--',
+      basisTone: gateBasis !== null ? (gateBasis >= 0 ? 'up' : 'down') : 't-faint',
+      lsRatio: s?.gate_ls != null ? fmtNum(Number(s.gate_ls), 2) : '--',
+      fundingText: gateF !== null ? `${gateF >= 0 ? '+' : ''}${(gateF * 100).toFixed(4)}%` : '--',
+      fundingTone: gateF !== null ? (gateF >= 0 ? 'up' : 'down') : '',
+    },
+  ];
+});
+
 /** US-007 跨所块：本币 OKX/币安/Gate 价与基差 + 双所大户比/费率 + 三所取数健康。
  * 消费面统一走后端合并好的 by_asset（symbols 仅作旧快照兼容回退）；缺值 "--"。 */
 const cvSymbol = computed(() => {
@@ -76,19 +144,6 @@ function _num(v: unknown, digits = 2): string {
 function _px(v: unknown): string {
   return _missing(v) ? '--' : fmtPrice(Number(v));
 }
-function _basis(v: unknown): string {
-  return _missing(v) ? '' : ` (${fmtPct(Number(v), 2, false)})`;
-}
-const cvRows = computed(() => {
-  const s = cvSymbol.value;
-  return [
-    row('OKX', fmtPrice(f.value.price), ''),
-    row('Binance', s ? _px(s.bin_last) + _basis(s.bin_basis_pct) : '--', dirClass(s?.bin_basis_pct)),
-    row('Gate', s ? _px(s.gate_last) + _basis(s.gate_basis_pct) : '--', dirClass(s?.gate_basis_pct)),
-    row('L/S 币安/Gate', s ? `${_num(s.bin_ls)} / ${_num(s.gate_ls)}` : '--', ''),
-    row('Fund% 币安/Gate', s ? `${_num(s.bin_funding_pct, 4)} / ${_num(s.gate_funding_pct, 4)}` : '--', ''),
-  ];
-});
 const cvHealth = computed(() => {
   const v = props.crossVenue?.venues || {};
   return ['okx', 'binance', 'gate'].map((k) => {
@@ -252,36 +307,61 @@ const vdBudgetText = computed(() => {
         </div>
       </div>
 
-      <div class="card-flat p-3">
-        <p class="t-label mb-2">{{ t('dash.news.smart.title') }} · OKX</p>
-        <dl class="grid grid-cols-3 gap-2 text-center">
-          <div v-for="r in smart" :key="r.label">
-            <dt class="t-label truncate">{{ r.label }}</dt>
-            <dd class="num text-sm font-semibold" :class="r.cls">{{ r.value }}</dd>
+      <!-- 三所对等行情与基差费率全览表 -->
+      <div class="card-flat p-3.5 space-y-2.5">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex items-center gap-1.5">
+            <span class="t-label font-bold text-xs" style="color: var(--ink-strong)">三所实时行情与基差费率对照</span>
+            <span class="badge text-3xs" style="background: var(--surface-3); color: var(--ink-3)">对等采样</span>
           </div>
-        </dl>
-      </div>
-
-      <!-- 跨所协调（US-007：/api/all cross_venue 消费端） -->
-      <div class="card-flat p-3">
-        <div class="mb-2 flex items-baseline justify-between gap-2">
-          <p class="t-label">跨所 · Binance / Gate</p>
-          <span v-if="cvUpdated" class="num text-[10px]" style="color: var(--ink-3)">{{ utcStrToBj(cvUpdated, true) }} 北京</span>
-        </div>
-        <div class="mb-2 flex flex-wrap gap-1.5">
-          <span v-for="h in cvHealth" :key="h.key"
-                class="badge num text-[10px]"
-                :style="h.testnet ? 'color:#56B4E9;border-color:currentColor' : (h.fail > 0 ? 'color:var(--warn, #F0B90B);border-color:currentColor' : (h.fresh ? 'color:var(--up);border-color:currentColor' : 'color:var(--ink-3);border-color:currentColor'))">
-            {{ h.key.toUpperCase() }} {{ h.fresh ? `${h.ok}/${h.ok + h.fail}` : '--' }}<template v-if="h.avg"> · {{ h.avg }}ms</template><template v-if="h.testnet"> · TN</template>
+          <span v-if="cvUpdated" class="num text-[10px]" style="color: var(--ink-3)">
+            {{ utcStrToBj(cvUpdated, true) }} 北京
           </span>
         </div>
-        <dl class="space-y-1.5">
-          <div v-for="r in cvRows" :key="r.label" class="flex items-baseline justify-between gap-3 text-xs">
-            <dt style="color: var(--ink-3)">{{ r.label }}</dt>
-            <dd class="num font-semibold" :class="r.cls" style="color: var(--ink-1)">{{ r.value }}</dd>
-          </div>
-        </dl>
-        <p v-if="!cvSymbol" class="t-muted mt-2 text-[11px]">该币暂无跨所快照——等待下一个 15 分钟决策周期生成。</p>
+
+        <!-- 三所健康度微徽章 -->
+        <div class="flex flex-wrap gap-1.5">
+          <span
+            v-for="h in cvHealth"
+            :key="h.key"
+            class="badge num text-[10px]"
+            :style="h.testnet ? 'color:#56B4E9;border-color:currentColor' : (h.fail > 0 ? 'color:var(--warn, #F0B90B);border-color:currentColor' : (h.fresh ? 'color:var(--up);border-color:currentColor' : 'color:var(--ink-3);border-color:currentColor'))"
+          >
+            {{ h.key.toUpperCase() }} {{ h.fresh ? `${h.ok}/${h.ok + h.fail}` : '--' }}
+            <template v-if="h.avg"> · {{ h.avg }}ms</template>
+            <template v-if="h.testnet"> · TN</template>
+          </span>
+        </div>
+
+        <!-- 对照表格 -->
+        <div class="overflow-x-auto rounded-lg border" style="border-color: var(--line-1)">
+          <table class="table !text-xs">
+            <thead>
+              <tr>
+                <th>交易所</th>
+                <th class="col-num">现价</th>
+                <th class="col-num">相对基差</th>
+                <th class="col-num">多空比</th>
+                <th class="col-num">资金费率</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="q in venueQuoteComparison" :key="q.key">
+                <td>
+                  <div class="flex items-center gap-1.5">
+                    <span class="h-2 w-2 rounded-full" :style="{ backgroundColor: q.brandColor }" />
+                    <span class="font-bold" :style="{ color: q.brandColor }">{{ q.label }}</span>
+                  </div>
+                </td>
+                <td class="col-num font-semibold" style="color: var(--ink-1)">{{ q.price }}</td>
+                <td class="col-num" :class="q.basisTone">{{ q.basisText }}</td>
+                <td class="col-num">{{ q.lsRatio }}</td>
+                <td class="col-num" :class="q.fundingTone">{{ q.fundingText }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p v-if="!cvSymbol" class="t-muted text-[11px]">该币暂无跨所快照——等待下一个 15 分钟决策周期生成。</p>
       </div>
 
       <!-- 推演过程 -->

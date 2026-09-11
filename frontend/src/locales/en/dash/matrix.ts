@@ -153,7 +153,7 @@ export const enMatrix = {
     adxTip: 'Trend strength: ADX < 18 is noise, entries blocked',
     cmfTip: 'Money-flow direction: positive = net inflow',
     regime: { trendUp: 'Up trend', trendDown: 'Down trend', range: 'Range', chaos: 'Noise' },
-    smartTip: 'L/S ratio of top 5% holders on OKX; >1 = long-skewed; -- when unavailable',
+    smartTip: 'Aggregated top-holder L/S ratio across exchanges; >1 = long-skewed; -- when unavailable',
     detailTitle: 'Factor detail · {sym}',
     market: 'Market snapshot',
     calculus: 'Calculus dynamics',
