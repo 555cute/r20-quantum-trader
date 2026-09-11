@@ -1,9 +1,5 @@
 <script setup lang="ts">
-/**
- * 三所对称凭证卡外壳：OKX / Binance / Gate 共用同一结构——
- * 头部（所名 + 接口档 + 文字状态徽章）→ 资金环境档位 → 凭证区 → 附加区 → 页脚动作。
- * 原则：结构对称、身份必须有文字、颜色仅作辅助（tone 未知即 warn，绝不升级成更强执行态）。
- */
+/** 三所凭证卡外壳：所名 + 接口档 + 状态徽章 → 资金档位 → 凭证区 → 附加区 → 页脚动作。 */
 import { computed } from 'vue'
 
 const props = withDefaults(defineProps<{

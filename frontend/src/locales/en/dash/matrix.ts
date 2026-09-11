@@ -1,6 +1,6 @@
 export const enMatrix = {
   title: 'Live Matrix',
-  desc: 'Account, positions, orders and factor momentum on one screen. The AI decides every 15 minutes.',
+  desc: 'Account, positions, orders and factor matrix on one screen.',
   kpi: {
     equity: 'Total equity',
     todayPnl: 'Realized today',
@@ -12,7 +12,7 @@ export const enMatrix = {
     todayTip: 'Net realized PnL since 00:00 UTC+8',
     floatTip: 'Unrealized PnL at mark price',
     marginTip: 'Used margin / total equity',
-    ocoTip: 'Every position must carry exchange-side TP/SL (Fail-Closed)',
+    ocoTip: 'Cloud TP/SL coverage',
     allCovered: 'Full coverage',
     missN: '{n} missing',
     day14: '14 days',
@@ -21,7 +21,7 @@ export const enMatrix = {
   positions: {
     tab: 'Positions',
     title: 'Open positions',
-    empty: 'Flat now — the AI is waiting for a better structure',
+    empty: 'Flat',
     col: {
       symbol: 'Symbol',
       dir: 'Side',
@@ -39,14 +39,14 @@ export const enMatrix = {
     },
     ocoOk: 'Armed',
     ocoMiss: 'Missing',
-    ocoMissHint: 'No exchange-side protection; will be re-armed next cycle',
-    aiManaged: 'Position lifecycle is managed by the AI',
+    ocoMissHint: 'No exchange-side protection',
+    aiManaged: 'AI-managed positions',
     detail: 'Position detail',
   },
   orders: {
     tab: 'Open orders',
     title: 'Pending orders',
-    empty: 'No pending orders — the AI re-paces entries each cycle',
+    empty: 'No pending orders',
     col: {
       symbol: 'Symbol',
       dir: 'Side',
@@ -60,9 +60,9 @@ export const enMatrix = {
     },
     decisionTime: 'Inference time',
     cancel: 'Cancel',
-    aiManaged: 'Orders are AI-managed: they get canceled or re-priced when the tape shifts',
+    aiManaged: 'AI-managed orders',
     cancelTitle: 'Cancel order',
-    cancelDesc: '{dir} limit order for {sym} @ {price} will be canceled. The AI re-evaluates next cycle.',
+    cancelDesc: '{dir} limit order for {sym} @ {price} will be canceled.',
     canceled: 'Order canceled',
     typeMaker: 'Limit',
     typeAlgo: 'Conditional',

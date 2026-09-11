@@ -195,7 +195,6 @@ onMounted(loadData)
       <Info class="w-3.5 h-3.5 shrink-0 mt-0.5" style="color: var(--accent, var(--info));" />
       <div class="space-y-1">
         <p>{{ effectText || '保存后下一巡检周期自动生效，无需重启。' }}</p>
-        <p class="opacity-80">注：本页为执行层代码硬拦截；「物理拦截插件」与「提示词工坊」中的 AI 侧门禁（如置信度、顺势铁律）在各自页面独立配置，双层防线互为兜底。</p>
       </div>
     </div>
 

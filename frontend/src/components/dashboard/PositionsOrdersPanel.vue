@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** 持仓 ⇄ 挂单 分段面板：行点击联动图表选币；OCO 状态白盒呈现 */
+/** 持仓 ⇄ 挂单分段面板：行点击联动图表选币 */
 import { computed, ref } from 'vue';
 import { useDashboardStore } from '../../stores/dashboard';
 import { useI18n } from '../../composables/useI18n';
@@ -65,7 +65,7 @@ function symOf(x: { instId?: string; name?: string }): string {
 
 <template>
   <div class="card flex h-full flex-col overflow-hidden">
-    <!-- 面板头：分段 + 药丸筛选 (移动端响应式双行自适应) -->
+    <!-- 面板头：分段 + 交易所筛选 -->
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b px-2.5 sm:px-3 py-2 sm:py-2.5" style="border-color: var(--line-1)">
       <div class="flex items-center justify-between sm:justify-start gap-2">
         <BaseSegmented
@@ -80,7 +80,7 @@ function symOf(x: { instId?: string; name?: string }): string {
         </span>
       </div>
 
-      <!-- US-007 · 交易所筛选药丸 (移动端全宽平铺，桌面端靠右) -->
+      <!-- 交易所筛选 -->
       <div class="flex items-center justify-between sm:justify-end gap-1 rounded-md p-0.5 w-full sm:w-auto" style="background-color: var(--surface-2); border: 1px solid var(--line-1)">
         <button
           v-for="v in [
@@ -126,7 +126,7 @@ function symOf(x: { instId?: string; name?: string }): string {
               <div class="flex items-center gap-1.5 flex-wrap">
                 <span class="num font-semibold text-xs sm:text-sm" style="color: var(--ink-strong)">{{ symOf(p) }}</span>
                 <DirTag :dir="p.side" />
-                <!-- US-007 · 交易所与环境模式标签 -->
+                <!-- 交易所与环境标签 -->
                 <span
                   class="badge text-3xs font-bold px-1 py-0.2 rounded"
                   :style="getVenueOf(p) === 'binance' ? { color: '#f3ba2f', borderColor: '#f3ba2f33', backgroundColor: '#f3ba2f15' } : getVenueOf(p) === 'gate' ? { color: '#00be98', borderColor: '#00be9833', backgroundColor: '#00be9815' } : { color: '#3880ff', borderColor: '#3880ff33', backgroundColor: '#3880ff15' }"
@@ -194,7 +194,7 @@ function symOf(x: { instId?: string; name?: string }): string {
               <div class="flex items-center gap-1.5 flex-wrap">
                 <span class="num font-semibold" style="color: var(--ink-strong)">{{ symOf(o) }}</span>
                 <DirTag :dir="orderDir(o)" />
-                <!-- US-007 · 交易所与环境模式标签 -->
+                <!-- 交易所与环境标签 -->
                 <span
                   class="badge text-3xs font-bold px-1 py-0.2 rounded"
                   :style="getVenueOf(o) === 'binance' ? { color: '#f3ba2f', borderColor: '#f3ba2f33', backgroundColor: '#f3ba2f15' } : getVenueOf(o) === 'gate' ? { color: '#00be98', borderColor: '#00be9833', backgroundColor: '#00be9815' } : { color: '#3880ff', borderColor: '#3880ff33', backgroundColor: '#3880ff15' }"

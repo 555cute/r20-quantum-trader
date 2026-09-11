@@ -1,7 +1,7 @@
 /** 实盘矩阵：KPI 带 / 持仓 / 挂单 / K线工作站 / 因子矩阵 */
 export const zhMatrix = {
   title: '实盘矩阵',
-  desc: '账户、持仓、挂单与全标的因子动能同屏监控，AI 主脑每 15 分钟裁决一次',
+  desc: '账户、持仓、挂单与因子矩阵同屏监控',
 
   kpi: {
     equity: '账户总权益',
@@ -14,7 +14,7 @@ export const zhMatrix = {
     todayTip: '今日 00:00（UTC+8）以来平仓实现的净盈亏',
     floatTip: '在途持仓按标记价计算的未实现盈亏',
     marginTip: '已用保证金 / 账户总权益',
-    ocoTip: '每笔持仓必须 100% 覆盖交易所云端止盈止损（Fail-Closed）',
+    ocoTip: '云端止盈止损覆盖率',
     allCovered: '全覆盖',
     missN: '{n} 笔缺失',
     day14: '近 14 日',
@@ -24,7 +24,7 @@ export const zhMatrix = {
   positions: {
     tab: '活动持仓',
     title: '活动持仓',
-    empty: '当前空仓，AI 正在等待更好的入场结构',
+    empty: '当前空仓',
     col: {
       symbol: '标的',
       dir: '方向',
@@ -42,15 +42,15 @@ export const zhMatrix = {
     },
     ocoOk: '已挂',
     ocoMiss: '未挂',
-    ocoMissHint: '交易所侧无止盈止损保护，等待下个周期补挂',
-    aiManaged: '持仓生命周期由 AI 自主管理',
+    ocoMissHint: '交易所侧无止盈止损保护',
+    aiManaged: '持仓由 AI 管理',
     detail: '持仓详情',
   },
 
   orders: {
     tab: '在途挂单',
     title: '在途限价挂单',
-    empty: '无在途挂单，AI 将在下个周期按研判重新布单',
+    empty: '无在途挂单',
     col: {
       symbol: '标的',
       dir: '方向',
@@ -64,9 +64,9 @@ export const zhMatrix = {
     },
     decisionTime: '推理时间',
     cancel: '撤销',
-    aiManaged: '挂单由 AI 动态管理：行情偏离或时机变化时会自动撤改',
+    aiManaged: '挂单由 AI 动态管理',
     cancelTitle: '撤销挂单',
-    cancelDesc: '{sym} {dir} 限价单 @ {price} 将被撤销，AI 会在下个周期重新评估入场时机。',
+    cancelDesc: '{sym} {dir} 限价单 @ {price} 将被撤销。',
     canceled: '挂单已撤销',
     typeMaker: '限价',
     typeAlgo: '条件单',

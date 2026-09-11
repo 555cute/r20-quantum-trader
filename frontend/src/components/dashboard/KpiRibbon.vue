@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** KPI 带：单行六格，每格必带副值/走势锚点；绿红只作文字色 */
+/** KPI 带：单行六格，每格带副值与走势 */
 import { computed, onMounted, ref } from 'vue';
 import { ShieldCheck } from 'lucide-vue-next';
 import { useDashboardStore } from '../../stores/dashboard';
@@ -19,7 +19,7 @@ const today = computed(() => (store.data as any)?.today_stats || {});
 
 const equity = computed(() => fmtNum(Number(account.value.total_eq || 0), 2));
 
-/** US-007 / 问题1修复 · 多所组合总权益与保证金占用严密对账 */
+/** 多所组合总权益与保证金占用 */
 const isLiveEnv = computed(() => venueStore.environment === 'live');
 const envBadgeText = computed(() => (isLiveEnv.value ? '实盘' : '模拟'));
 
@@ -62,7 +62,7 @@ const floatRoi = computed(() =>
 const longCount = computed(() => store.positions.filter((p) => p.side === 'long').length);
 const shortCount = computed(() => store.positions.filter((p) => p.side === 'short').length);
 
-/** 真实保证金占用：严格按实际持仓已占用保证金计算，绝不误用未划转资金差额 */
+/** 实际持仓已占用保证金 */
 const actualMarginUsed = computed(() => {
   if (posMargin.value > 0) return posMargin.value;
   const sum = portfolioSummary.value;
@@ -84,7 +84,7 @@ const ocoCoverage = computed(() => {
   return { pct: Math.round((ok / total) * 100), missing: total - ok };
 });
 
-/* 14 日净值走势（一次性拉取，失败静默） */
+/* 14 日净值走势 */
 const eqSeries = ref<number[]>([]);
 onMounted(async () => {
   try {
@@ -101,7 +101,7 @@ onMounted(async () => {
   <div class="card space-y-2 p-2 sm:p-2.5 xl:p-3">
     <div class="flex items-center justify-between border-b px-1.5 sm:px-2.5 pb-2" style="border-color: var(--line-1)"><DataStatus /></div>
 
-    <!-- US-007 · 多所组合总权益与资产分配条 (Asset Allocation Bar) - 移动端自适应响应式 -->
+    <!-- 多所组合总权益与资产分配条 -->
     <div v-if="hasMultiVenue" class="flex flex-col gap-1.5 px-1.5 sm:px-2.5 pb-1.5 border-b" style="border-color: var(--line-1)">
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-2xs" style="color: var(--ink-3)">
         <div class="flex items-center justify-between sm:justify-start gap-2">

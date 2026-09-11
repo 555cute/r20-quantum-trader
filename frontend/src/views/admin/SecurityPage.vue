@@ -181,7 +181,7 @@ async function removeInstrument(item: any) {
 }
 
 async function loadPositions() {
-  snapshotState.value = '正在从交易核心读取当前持仓与挂单…'
+  snapshotState.value = '正在读取持仓与挂单…'
   try {
     const d = await api('/api/v1/admin/okx/account-snapshot')
     snapshot.value = d
@@ -241,7 +241,7 @@ async function loadMx() {
   } catch { mx.value = null }
 }
 
-/** 单所档位/凭证连接诊断（US-003）：支持未保存凭证的实弹预检与公共网络连通性探测。 */
+/** 单所凭证连接诊断：支持未保存凭证的预检与公共连通性探测。 */
 async function probeVenue(venue: 'binance' | 'gate' | 'okx') {
   probingVenue.value = venue
   try {
@@ -312,10 +312,7 @@ async function saveRouting() {
   }
 }
 
-/**
- * 逐所独立保存凭证与档位：只提交本所键位，留空即不改。
- * Gate 额外承载执行总闸（变更需精确确认短语，与 UPDATE CAPITAL 同族纪律）。
- */
+/** 逐所保存凭证与档位：只提交本所键位，留空即不改；Gate 另承载执行总闸。 */
 async function saveVenue(venue: 'binance' | 'gate') {
   savingVenue.value = venue
   try {
@@ -364,7 +361,7 @@ const mxHealthChips = computed(() => {
 })
 const gateExecDirty = computed(() => gateExec.value !== !!mx.value?.venues?.gate?.execution_open)
 
-/** 三所对称徽章派生：状态未知（后端未加载/所未注册）一律 warn + 文字「状态未知」，绝不升级为已就绪。 */
+/** 三所状态徽章：未知一律 warn，不升级为已就绪。 */
 type VenueTone = 'up' | 'warn' | 'down'
 function venueStatus(venue: 'binance' | 'gate'): { text: string; tone: VenueTone } {
   const v = mx.value?.venues?.[venue]
@@ -376,7 +373,7 @@ function venueStatus(venue: 'binance' | 'gate'): { text: string; tone: VenueTone
 const binanceStatus = computed(() => venueStatus('binance'))
 const gateStatus = computed(() => venueStatus('gate'))
 
-/** 资金档位文字（身份必须有文字，颜色不作唯一识别） */
+/** 资金档位文字 */
 const okxEnvText = computed(() => {
   const env = String(config.value?.editable?.okx_environment || '')
   return env === 'live' ? 'LIVE 实盘' : env === 'demo' ? 'DEMO 模拟盘' : '未知'
@@ -389,7 +386,7 @@ const binanceEnvText = computed(() => envTextOf('binance', 'DEMO 沙盒'))
 const gateEnvText = computed(() => envTextOf('gate', 'SANDBOX 沙盒'))
 
 const TABS: Array<{ key: TabKey; label: string }> = [
-  { key: 'venues', label: '交易所与路由对等' },
+  { key: 'venues', label: '交易所与路由' },
   { key: 'pool', label: '交易标的池' },
   { key: 'emergency', label: '应急风控与持仓' },
 ]
@@ -421,7 +418,7 @@ onMounted(() => { loadAll(); loadMx() })
     <div v-if="loading" class="py-12 text-center" style="color: var(--ink-2);">正在同步配置…</div>
 
     <template v-else-if="config">
-      <!-- 对称状态总览条 -->
+      <!-- 状态总览条 -->
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
         <div class="card card-pad flex flex-col justify-between" style="background-color: var(--surface-1);">
           <div class="flex items-center justify-between text-[11px]" style="color: var(--ink-3);">
@@ -484,10 +481,10 @@ onMounted(() => { loadAll(); loadMx() })
         >{{ tab.label }}</button>
       </div>
 
-      <!-- ============ 页签 1：交易所与路由对等（三平台对称平权配置） ============ -->
+      <!-- ============ 页签 1：交易所与路由 ============ -->
       <div v-if="activeTab === 'venues'" class="space-y-4">
         <!-- 路由主策略 -->
-        <SettingsSection title="撮合路由策略（三所平权）" description="路由模式决定信号如何分发到 OKX / Binance / Gate；手选优先只让指定所参与评估。">
+        <SettingsSection title="撮合路由策略" description="配置 AI 信号的默认撮合交易所。">
           <template #actions>
             <button class="btn btn-primary" :disabled="savingMx" @click="saveRouting"><Save class="h-3.5 w-3.5" /> {{ savingMx ? '保存中…' : '保存路由策略' }}</button>
           </template>
@@ -550,19 +547,19 @@ onMounted(() => { loadAll(); loadMx() })
             <p class="text-[11px] leading-relaxed" style="color: var(--ink-3);">
               当前生效：<b class="num" style="color: var(--accent);">{{ routingMode.toUpperCase() }}</b>
               <template v-if="preferredVenue !== 'auto'"> + 手选 <b class="num" style="color: var(--accent);">{{ preferredVenue.toUpperCase() }}</b></template>。
-              未配置或未开闸的所自动退出候选；跨所持仓统一计入总仓/同向封顶。
+              未配置或未开闸的所自动退出候选。
             </p>
           </div>
         </SettingsSection>
 
-        <!-- 三所对称凭证卡（同一外壳、同一槽位次序：环境 → 凭证 → 附加 → 检测/保存） -->
-        <SettingsSection title="三所接入凭证与资金档位（对称配置）" description="三所独立凭证加密存储与测试网档位配置。">
+        <!-- 三所凭证卡 -->
+        <SettingsSection title="三所接入凭证与资金档位" description="三所独立凭证加密存储与测试网档位配置。">
           <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
             <!-- 1. OKX -->
             <VenueCredentialCard
               name="OKX · 欧易" api-label="V5 REST 直签"
               :status-text="okxLinked ? '已接入 READY' : '未就绪'" :tone="okxLinked ? 'up' : 'down'"
-              :env-text="okxEnvText" env-label="当前生效资金环境"
+              :env-text="okxEnvText" env-label="资金环境"
             >
               <template #env>
                 <label class="block text-[10px] mb-1" style="color: var(--ink-2);">资金环境档位</label>
@@ -585,7 +582,7 @@ onMounted(() => { loadAll(); loadMx() })
               </div>
               <template #extra>
                 <p class="text-[10px] leading-relaxed pt-1" style="color: var(--ink-3);">
-                  切换 LIVE 需二次确认；两档凭证同时保存，运行时按当前档位取用，禁止跨档读取。
+                  切换 LIVE 需二次确认。
                 </p>
               </template>
               <template #probe>
@@ -600,7 +597,7 @@ onMounted(() => { loadAll(); loadMx() })
             <VenueCredentialCard
               name="Binance · 币安" api-label="USDT-M 永续合约"
               :status-text="binanceStatus.text" :tone="binanceStatus.tone"
-              :env-text="binanceEnvText" env-label="当前生效资金环境"
+              :env-text="binanceEnvText" env-label="资金环境"
             >
               <template #env>
                 <label class="block text-[10px] mb-1" style="color: var(--ink-2);">端点网络档位</label>
@@ -616,7 +613,7 @@ onMounted(() => { loadAll(); loadMx() })
               </div>
               <template #extra>
                 <p class="text-[10px] leading-relaxed pt-1" style="color: var(--ink-3);">
-                  公共行情、基差与资金费比对免密即可工作；配置密钥后账户面与执行面按档位直签。
+                  免密即可读取公共行情；配置密钥后支持账户与执行。
                 </p>
               </template>
               <template #probe>
@@ -631,7 +628,7 @@ onMounted(() => { loadAll(); loadMx() })
             <VenueCredentialCard
               name="Gate.io · 芝麻" api-label="V4 USDT 永续合约"
               :status-text="gateStatus.text" :tone="gateStatus.tone"
-              :env-text="gateEnvText" env-label="当前生效资金环境"
+              :env-text="gateEnvText" env-label="资金环境"
             >
               <template #env>
                 <label class="block text-[10px] mb-1" style="color: var(--ink-2);">端点网络档位</label>
@@ -654,7 +651,7 @@ onMounted(() => { loadAll(); loadMx() })
                   <input v-if="gateExecDirty && gateExec" v-model="gateExecPhrase" placeholder="输入短语：OPEN GATE EXECUTION" class="input w-full text-xs mt-1.5" />
                 </div>
                 <p class="text-[10px] leading-relaxed pt-1" style="color: var(--ink-3);">
-                  关闸状态下仅只读行情与账户探针；开闸后 Gate 才进入撮合路由候选集。
+                  关闸时仅只读行情与账户探针；开闸后进入撮合路由。
                 </p>
               </template>
               <template #probe>
@@ -667,8 +664,8 @@ onMounted(() => { loadAll(); loadMx() })
           </div>
         </SettingsSection>
 
-        <!-- 跨所行情健康（只读探针，三所共用一行） -->
-        <SettingsSection title="跨所行情健康容灾" description="公共行情每周期自动探活排序，零额外网络开销；任一所属行情劣化只降级该所候选资格，绝不阻塞其他所。">
+        <!-- 跨所行情健康 -->
+        <SettingsSection title="跨所行情健康容灾" description="多所行情源自动健康监测与路由评分。">
           <template #actions>
             <button class="btn btn-quiet btn-sm" @click="loadMx"><RefreshCw class="h-3 w-3" /> 重新检测</button>
           </template>
@@ -683,7 +680,7 @@ onMounted(() => { loadAll(); loadMx() })
 
       <!-- ============ 页签 2：标的池与初始本金 ============ -->
       <div v-if="activeTab === 'pool'" class="space-y-4">
-        <SettingsSection title="交易标的池" :description="`当前 ${instruments.length}/${instLimits.maximum} 个 USDT 永续；变更实时同步全网大屏、因果雷达与决策核心。`">
+        <SettingsSection title="交易标的池" description="USDT 永续合约标的池管理。">
           <template #actions>
             <input v-model="newInstId" placeholder="例如: XRP-USDT-SWAP" class="input w-44" @keyup.enter="addInstrument" />
             <button class="btn btn-primary" @click="addInstrument"><Layers class="h-3.5 w-3.5" /> 添加标的</button>
@@ -717,27 +714,27 @@ onMounted(() => { loadAll(); loadMx() })
                 </tr>
               </tbody>
             </table>
-            <div v-else class="py-8 text-center text-xs" style="color: var(--ink-3);">标的池为空——至少保留保底标的 BTC-USDT-SWAP。</div>
+            <div v-else class="py-8 text-center text-xs" style="color: var(--ink-3);">标的池为空。</div>
           </div>
-          <p class="pt-3 text-[11px]" style="color: var(--ink-3);">BTC 为系统保底标的不可删除；有在途追踪器的标的禁止移除；最多 {{ instLimits.maximum }} 个；仅支持 USDT 永续。</p>
+          <p class="pt-3 text-[11px]" style="color: var(--ink-3);">保底标的与持仓中的标的不可移除；上限 {{ instLimits.maximum }} 个，仅支持 USDT 永续。</p>
         </SettingsSection>
       </div>
 
       <!-- ============ 页签 3：应急风控与持仓 ============ -->
       <div v-if="activeTab === 'emergency'" class="space-y-4">
-        <SettingsSection title="后台手动平仓总闸" description="应急通道：默认禁用。启用后下方持仓表出现「快速平仓」，平仓仍需管理员密码 + 一次性令牌 + 确认短语三重确认。">
+        <SettingsSection title="后台手动平仓总闸" description="应急市价平仓开关。">
           <template #actions>
             <button class="btn btn-quiet" @click="saveManualClose"><Save class="h-3.5 w-3.5" /> 保存开关</button>
           </template>
           <label class="flex items-center gap-2 cursor-pointer w-fit">
             <input v-model="manualClose" type="checkbox" class="accent-[var(--accent)]" />
             <span class="text-xs" :style="{ color: manualClose ? 'var(--warn)' : 'var(--ink-2)', fontWeight: manualClose ? 700 : 400 }">
-              {{ manualClose ? '已启用——允许后台市价应急平仓' : '已禁用——交易核心自主管理，后台不提供手动平仓' }}
+              {{ manualClose ? '已启用：允许后台市价平仓' : '已禁用：交易核心自主管理' }}
             </span>
           </label>
         </SettingsSection>
 
-        <SettingsSection title="当前活动持仓与挂单快照" description="从交易系统读取实时持仓与挂单快照（只读探针）；平仓流程：复核仓位 → 撤销冲突委托 → autoCxl 市价平仓 → 轮询确认归零。">
+        <SettingsSection title="当前活动持仓与挂单快照" description="实时持仓与挂单状态探针。">
           <template #actions>
             <button class="btn btn-quiet" @click="loadPositions"><Zap class="h-3.5 w-3.5" /> 刷新持仓与挂单</button>
           </template>
@@ -775,7 +772,7 @@ onMounted(() => { loadAll(); loadMx() })
               </tbody>
             </table>
             <div v-else-if="snapshot" class="py-8 text-center text-xs" style="color: var(--up);">✓ 当前环境 0 活跃持仓</div>
-            <div v-else-if="!snapshotState" class="py-8 text-center text-xs" style="color: var(--ink-3);">点击「刷新持仓与挂单」读取最新实时状态。</div>
+            <div v-else-if="!snapshotState" class="py-8 text-center text-xs" style="color: var(--ink-3);">点击「刷新持仓与挂单」读取实时状态。</div>
           </div>
         </SettingsSection>
       </div>
