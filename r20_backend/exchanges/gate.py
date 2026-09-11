@@ -406,9 +406,26 @@ class GateAdapter(BaseExchangeAdapter):
         return data if isinstance(data, list) else []
 
     def fast_close_position(self, symbol: str, text: str = "") -> Dict[str, Any]:
+        """市价全平当前持仓（双向与单向模式自适应）。"""
         inst = self.native_symbol(symbol)
-        order = {"contract": inst, "size": 0, "close": True, "price": "0", "tif": "ioc",
-                 "text": text or f"t-r20c{int(time.time() * 1000) % 100000000}"}
+        pos_list = [p for p in self.positions() if p.get("inst_id") == inst or p.get("base") == symbol]
+        if not pos_list:
+            return {"venue": "gate", "symbol": inst, "closed": False, "reason": "无持仓"}
+        target = pos_list[0]
+        signed_sz = float(target.get("size_signed", 0) or 0)
+        if abs(signed_sz) < 1e-12:
+            return {"venue": "gate", "symbol": inst, "closed": False, "reason": "持仓为0"}
+
+        # 反向市价全平
+        close_sz = -int(signed_sz)
+        order = {
+            "contract": inst,
+            "size": close_sz,
+            "price": "0",
+            "tif": "ioc",
+            "reduce_only": True,
+            "text": text or f"t-r20c{int(time.time() * 1000) % 100000000}",
+        }
         data = self.signed_request("POST", "/api/v4/futures/usdt/orders", body=order)
         return data if isinstance(data, dict) else {"raw": data}
 
