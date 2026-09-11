@@ -760,9 +760,9 @@ def restore_archived_policy(
             ):
                 try:
                     from r20_backend import risk_config
-                    from r20_backend.config import save_env
+                    from r20_backend.settings_store import update_env
                     env_updates = risk_config.normalize(payload["risk_config"])
-                    save_env(env_updates)
+                    update_env(env_updates)
                 except Exception as e:
                     logger.warning("Failed to restore risk config: %s", e)
 
