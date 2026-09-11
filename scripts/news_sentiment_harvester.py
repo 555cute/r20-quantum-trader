@@ -143,6 +143,57 @@ def _extract_coins(title: str, summary: str, target_coins: list) -> list:
     return found[:4]
 
 
+# ---------------- US-002/US-003: 专业 7x24 加密货币即时快讯流（金色财经实时快讯开放流） ----------------
+def fetch_crypto_flash_news(limit=25) -> list:
+    """7x24 专业加密货币即时快讯流抓取（金色财经实时快讯开放流）。
+    第一时间捕获行业突发、比特币/以太坊要闻、巨鲸异动与监管风向，彻底替代低价值发新币公告。"""
+    tz_bj = datetime.timezone(datetime.timedelta(hours=8))
+    items = []
+    try:
+        url = f"http://api.coinmeta.info/live/list?limit={min(50, limit)}"
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                "Accept": "application/json",
+            }
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        for date_item in (data.get("list", []) or []):
+            for live in (date_item.get("lives", []) or []):
+                content = str(live.get("content") or "").strip()
+                if not content:
+                    continue
+                # 优先提取【...】作为标题，正文移除标题前缀；若无则取首句
+                title_match = re.search(r"【(.*?)】", content)
+                if title_match:
+                    title = title_match.group(1).strip()
+                    summary = re.sub(r"【.*?】", "", content).strip()
+                else:
+                    parts = re.split(r"[。！!？?\n]", content)
+                    title = parts[0].strip()[:70]
+                    summary = content[:200]
+                c_time_sec = int(live.get("created_at") or time.time())
+                p_time = c_time_sec * 1000
+                time_str = datetime.datetime.fromtimestamp(c_time_sec, tz=tz_bj).strftime("%Y-%m-%d %H:%M:%S")
+                coins = _extract_coins(title, summary, TARGET_COINS)
+                items.append({
+                    "id": f"crypto-{live.get('id') or p_time}",
+                    "title": title,
+                    "summary": summary or title,
+                    "time": time_str,
+                    "cTime": str(p_time),
+                    "url": "https://www.jinse.cn",
+                    "platforms": ["加密快讯"],
+                    "coins": coins,
+                    "importance": _classify_importance(title, summary),
+                })
+    except Exception as e:
+        print(f"[news_harvester] warn 加密快讯抓取异常: {e}")
+    return items[:limit]
+
+
 # ---------------- US-001: OKX 公告降噪（剔除发新币/营销噪音，仅留运维安全通告） ----------------
 # 直接拒绝的营销/上币类公告栏目：对量化交易与风控纯属噪音
 OKX_NOISE_ANN_TYPES = {
@@ -423,10 +474,11 @@ def fetch_and_analyze_news_sentiment():
     now_bj = datetime.datetime.now(tz_bj)
     now_str = now_bj.strftime("%Y-%m-%d %H:%M:%S")
 
-    # 1. News sources：直连 OKX 官方公告流 + 金十数据宏观快讯，淘汰旧第三方 RSS。
-    okx_news = fetch_okx_announcements(limit=20)
+    # 1. News sources：直连专业加密货币快讯流 + OKX官方运维风控公告 + 金十数据宏观快讯
+    crypto_news = fetch_crypto_flash_news(limit=25)
+    okx_news = fetch_okx_announcements(limit=10)
     jin10_news = fetch_jin10_macro_news(limit=25)
-    raw_news = okx_news + jin10_news
+    raw_news = crypto_news + okx_news + jin10_news
 
     seen_ids = set()
     deduped_news = []
@@ -537,8 +589,8 @@ def fetch_and_analyze_news_sentiment():
         "timestamp": now_str,
         "updated_at": now_str,
         "source_available": bool(raw_news),
-        "source_reason": ("OKX官方公告 + 金十数据宏观要闻 + OKX Rubik多空数据" if raw_news
-                          else "OKX官方公告与金十数据拉取失败，显示缺失而非中性"),
+        "source_reason": ("加密货币快讯 + 金十数据宏观要闻 + OKX多空数据" if raw_news
+                          else "加密快讯与金十数据拉取失败，显示缺失而非中性"),
         "macro_sentiment": macro_env,
         "circuit_breaker": cb_info if cb_active else {"active": False},
         "coins_sentiment": coin_sentiments,

@@ -1,5 +1,6 @@
-"""Unit tests for the upgraded OKX & Jin10 News & Sentiment Harvester."""
+"""Unit tests for the upgraded Crypto-Flash & OKX & Jin10 News & Sentiment Harvester."""
 
+import datetime
 import json
 import os
 import tempfile
@@ -44,6 +45,80 @@ class TestNewsSentimentHarvester(unittest.TestCase):
         self.assertIn("BTC", coins)
         self.assertIn("ETH", coins)
         self.assertNotIn("SOL", coins)
+
+    def test_fetch_crypto_flash_news_parsing(self):
+        """US-002 加密快讯流：金色财经实时快讯开放流解析——【】标题提取、正文去前缀、
+        无标题取首句、空白条目丢弃、北京时间与影响等级/币种识别。"""
+        fake_flash = {
+            "list": [
+                {
+                    "date": "2026-09-12",
+                    "lives": [
+                        {
+                            "id": 9001,
+                            "created_at": 1789138000,
+                            "content": "【比特币突破12万美元创历史新高】巨鲸地址大额增持BTC，以太坊ETH同步走强。",
+                        },
+                        {
+                            "id": 9002,
+                            "created_at": 1789138060,
+                            "content": "某交易所因遭黑客攻击已暂停提币，用户资产被盗。",
+                        },
+                        {"id": 9003, "created_at": 1789138120, "content": "   "},
+                    ],
+                },
+                {"date": "2026-09-11", "lives": []},
+            ]
+        }
+
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps(fake_flash).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+
+        with patch("urllib.request.urlopen", return_value=mock_resp) as mock_open:
+            items = harvester.fetch_crypto_flash_news(limit=25)
+
+        # 请求必须打到 coinmeta 实时快讯开放流
+        called_url = mock_open.call_args[0][0].full_url
+        self.assertIn("api.coinmeta.info/live/list", called_url)
+
+        # 空白正文条目被丢弃，共 2 条
+        self.assertEqual(len(items), 2)
+
+        first = items[0]
+        self.assertEqual(first["id"], "crypto-9001")
+        # 【...】 提取为标题，正文移除标题前缀
+        self.assertEqual(first["title"], "比特币突破12万美元创历史新高")
+        self.assertNotIn("【", first["summary"])
+        self.assertEqual(first["summary"], "巨鲸地址大额增持BTC，以太坊ETH同步走强。")
+        self.assertEqual(first["platforms"], ["加密快讯"])
+        self.assertEqual(first["url"], "https://www.jinse.cn")
+        # 毫秒时间戳与北京时间展示串
+        self.assertEqual(first["cTime"], "1789138000000")
+        tz_bj = datetime.timezone(datetime.timedelta(hours=8))
+        self.assertEqual(
+            first["time"],
+            datetime.datetime.fromtimestamp(1789138000, tz=tz_bj).strftime("%Y-%m-%d %H:%M:%S"),
+        )
+        # 币种识别与影响等级（创历史新高 → mid，非盲目 high）
+        self.assertIn("BTC", first["coins"])
+        self.assertIn("ETH", first["coins"])
+        self.assertEqual(first["importance"], "mid")
+
+        second = items[1]
+        # 无【】时取首句为标题
+        self.assertEqual(second["title"], "某交易所因遭黑客攻击已暂停提币，用户资产被盗")
+        self.assertEqual(second["importance"], "high")
+        self.assertEqual(second["id"], "crypto-9002")
+
+        # limit 截断生效
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            limited = harvester.fetch_crypto_flash_news(limit=1)
+        self.assertEqual(len(limited), 1)
+
+        # 抓取异常必须 fail-soft：返回空列表而非抛出
+        with patch("urllib.request.urlopen", side_effect=OSError("network down")):
+            self.assertEqual(harvester.fetch_crypto_flash_news(limit=5), [])
 
     def test_fetch_okx_announcements_parsing(self):
         """US-001 降噪：发新币/赚币理财类公告必须被剔除，下架与维护类安全公告必须保留。"""
@@ -169,6 +244,17 @@ class TestNewsSentimentHarvester(unittest.TestCase):
             self.assertEqual(res["bearish_ratio"], "40.0%")
 
     def test_full_harvester_pipeline(self):
+        fake_crypto = [{
+            "id": "crypto-9001",
+            "title": "比特币突破12万美元创历史新高",
+            "summary": "巨鲸地址大额增持BTC。",
+            "time": "2026-09-11 20:06:40",
+            "cTime": "1789138600000",
+            "url": "https://www.jinse.cn",
+            "platforms": ["加密快讯"],
+            "coins": ["BTC"],
+            "importance": "mid",
+        }]
         fake_ann = [{
             "id": "okx-1",
             "title": "OKX系统维护正常完成",
@@ -204,17 +290,23 @@ class TestNewsSentimentHarvester(unittest.TestCase):
             "sentiment_factor_score": 0.30,
         }
 
-        with patch.object(harvester, "fetch_okx_announcements", return_value=fake_ann), \
+        with patch.object(harvester, "fetch_crypto_flash_news", return_value=fake_crypto) as mock_crypto, \
+             patch.object(harvester, "fetch_okx_announcements", return_value=fake_ann), \
              patch.object(harvester, "fetch_jin10_macro_news", return_value=fake_j10), \
              patch.object(harvester, "fetch_okx_rubik_sentiment", return_value=fake_rubik), \
              patch.object(harvester, "load_instruments", return_value=[{"name": "BTC", "instId": "BTC-USDT-SWAP"}]):
 
             payload = harvester.fetch_and_analyze_news_sentiment()
 
+            # 三源聚合并存：加密快讯流为第一优先数据源
+            mock_crypto.assert_called_once_with(limit=25)
             self.assertTrue(payload["source_available"])
-            self.assertIn("OKX官方公告", payload["source_reason"])
+            self.assertIn("加密货币快讯", payload["source_reason"])
             self.assertIn("金十数据", payload["source_reason"])
-            self.assertEqual(len(payload["latest_news"]), 2)
+            self.assertEqual(len(payload["latest_news"]), 3)
+            # 按 cTime 倒序：加密快讯最新，排在最前
+            self.assertEqual(payload["latest_news"][0]["id"], "crypto-9001")
+            self.assertEqual(payload["latest_news"][0]["platforms"], ["加密快讯"])
             self.assertIn("BTC", payload["coins_sentiment"])
             self.assertEqual(payload["coins_sentiment"]["BTC"]["label"], "bullish")
             self.assertTrue(os.path.exists(self.cache_file))
