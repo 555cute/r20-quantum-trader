@@ -95,16 +95,19 @@ onBeforeUnmount(() => {
         :style="{ paddingTop: 'max(10vh, 24px)' }"
         @mousedown.self="closeOnScrim && emit('close')"
       >
-        <div class="fixed inset-0" style="background-color: var(--overlay-scrim)" aria-hidden="true" />
+        <div class="fixed inset-0" style="background-color: var(--overlay-scrim); backdrop-filter: blur(4px) saturate(120%)" aria-hidden="true" />
         <Transition name="pop" appear>
           <div
             ref="panel"
             role="dialog"
             aria-modal="true"
             tabindex="-1"
-            class="float-panel relative w-full outline-none"
-            :style="{ maxWidth: width, outline: tone === 'danger' ? '1px solid var(--down-line)' : undefined }"
+            class="float-panel dialog-panel relative w-full outline-none"
+            :class="tone === 'danger' && 'is-danger'"
+            :style="{ maxWidth: width }"
           >
+            <!-- 顶部强调条（danger 常亮红，其余品牌橙渐隐） -->
+            <span class="dialog-accent" aria-hidden="true" />
             <!-- 头部 -->
             <div
               v-if="title || $slots.title || showClose"
@@ -115,7 +118,7 @@ onBeforeUnmount(() => {
                 <h3 class="text-base font-semibold" style="color: var(--ink-strong)">
                   <slot name="title">{{ title }}</slot>
                 </h3>
-                <p v-if="desc" class="mt-0.5 text-xs" style="color: var(--ink-2)">{{ desc }}</p>
+                <p v-if="desc" class="mt-0.5 text-xs leading-relaxed" style="color: var(--ink-2)">{{ desc }}</p>
               </div>
               <button
                 v-if="showClose"
@@ -136,7 +139,7 @@ onBeforeUnmount(() => {
             <div
               v-if="$slots.footer"
               class="flex items-center justify-end gap-2 px-5 py-3.5"
-              style="border-top: 1px solid var(--line-1)"
+              style="border-top: 1px solid var(--line-1); background-color: var(--surface-3)"
             >
               <slot name="footer" />
             </div>
@@ -146,3 +149,20 @@ onBeforeUnmount(() => {
     </Transition>
   </Teleport>
 </template>
+
+<style scoped>
+.dialog-panel {
+  border-radius: var(--r-float);
+  overflow: hidden;
+}
+.dialog-panel.is-danger { border-color: var(--down-line); box-shadow: var(--shadow-dialog), var(--ring-danger); }
+.dialog-accent {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), transparent 70%);
+  pointer-events: none;
+}
+.is-danger .dialog-accent { background: linear-gradient(90deg, var(--down), transparent 70%); }
+</style>

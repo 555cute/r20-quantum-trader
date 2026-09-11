@@ -38,6 +38,7 @@ button { font-family: inherit; }
 /* 数字：全局表格数字，行情跳动不抖 */
 .num {
   font-variant-numeric: tabular-nums slashed-zero;
+  font-feature-settings: 'tnum' 1, 'cv01' 1;
   letter-spacing: -0.01em;
 }
 code, kbd, pre, .mono {
@@ -45,10 +46,14 @@ code, kbd, pre, .mono {
   font-variant-numeric: tabular-nums;
 }
 
+/* 标题统一收紧字距（机构终端观感的关键 1px） */
+h1, h2, h3, h4 { letter-spacing: -0.012em; }
+h5, h6 { letter-spacing: -0.005em; }
+
 /* 焦点：品牌环，键盘可达 */
 :focus-visible {
   outline: none;
-  box-shadow: var(--ring-accent);
+  box-shadow: var(--ring-focus);
   border-radius: var(--r-ctl);
 }
 
@@ -93,6 +98,14 @@ table { border-collapse: collapse; width: 100%; }
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }
 }
+@keyframes r20-slide-in-left {
+  from { transform: translateX(-16px); opacity: 0.6; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@keyframes r20-fade-up {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 
 /* 弹层过渡类 */
 .pop-enter-active, .pop-leave-active {
@@ -104,3 +117,8 @@ table { border-collapse: collapse; width: 100%; }
 }
 .fade-enter-active, .fade-leave-active { transition: opacity var(--dur-base) ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
+/* 侧滑（抽屉）过渡：右滑入 / 左滑出，配 .drawer-* 类名 */
+.slide-enter-active, .slide-leave-active {
+  transition: transform var(--dur-slow) var(--ease-out), opacity var(--dur-slow) var(--ease-out);
+}
+.slide-enter-from, .slide-leave-to { transform: translateX(28px); opacity: 0.4; }

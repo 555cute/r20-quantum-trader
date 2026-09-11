@@ -2,8 +2,9 @@
 /**
  * 右侧滑出抽屉 —— 详情透视专用：列表上下文不丢，看完即关。
  * 规则：任何"看详情"一律 Drawer，禁止全屏跳转或嵌套弹窗。
+ * 视觉：浮层最高台阶 surface-4 + 左侧品牌光边 + 遮罩毛玻璃，头部吸顶。
  */
-import { nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { X } from 'lucide-vue-next';
 import { useI18n } from '../../composables/useI18n';
 
@@ -15,10 +16,14 @@ const props = withDefaults(
     title?: string;
     subtitle?: string;
     width?: string;
+    size?: 'sm' | 'md' | 'lg' | 'xl';
     closeOnScrim?: boolean;
   }>(),
-  { closeOnScrim: true, width: '580px' },
+  { closeOnScrim: true, size: 'md' },
 );
+
+const SIZE_W: Record<string, string> = { sm: '420px', md: '580px', lg: '760px', xl: '980px' };
+const resolvedWidth = computed(() => props.width || SIZE_W[props.size || 'md']);
 
 const emit = defineEmits<{ (e: 'close'): void }>();
 
@@ -57,7 +62,11 @@ onBeforeUnmount(() => {
   <Teleport to="body">
     <Transition name="fade">
       <div v-if="open" class="fixed inset-0" style="z-index: var(--z-drawer)">
-        <div class="absolute inset-0" style="background-color: var(--overlay-scrim)" @mousedown="closeOnScrim && emit('close')" />
+        <div
+          class="absolute inset-0"
+          style="background-color: var(--overlay-scrim); backdrop-filter: blur(4px) saturate(120%)"
+          @mousedown="closeOnScrim && emit('close')"
+        />
         <Transition name="drawer" appear>
           <aside
             v-if="open"
@@ -65,18 +74,10 @@ onBeforeUnmount(() => {
             tabindex="-1"
             role="dialog"
             aria-modal="true"
-            class="absolute inset-y-0 right-0 flex flex-col outline-none"
-            :style="{
-              width: `min(${width}, 96vw)`,
-              backgroundColor: 'var(--surface-2)',
-              borderLeft: '1px solid var(--line-2)',
-              boxShadow: 'var(--shadow-dialog)',
-            }"
+            class="drawer-panel absolute inset-y-0 right-0 flex flex-col outline-none"
+            :style="{ width: `min(${resolvedWidth}, 96vw)` }"
           >
-            <header
-              class="flex items-start justify-between gap-4 px-5 py-4 shrink-0"
-              style="border-bottom: 1px solid var(--line-1)"
-            >
+            <header class="drawer-head flex shrink-0 items-start justify-between gap-4 px-5 py-3.5">
               <div class="min-w-0">
                 <h3 class="truncate text-md font-semibold" style="color: var(--ink-strong)">
                   <slot name="title">{{ title }}</slot>
@@ -85,7 +86,7 @@ onBeforeUnmount(() => {
                   <slot name="subtitle">{{ subtitle }}</slot>
                 </p>
               </div>
-              <div class="flex items-center gap-1 shrink-0">
+              <div class="flex shrink-0 items-center gap-1">
                 <slot name="actions" />
                 <button class="btn btn-quiet btn-icon" :aria-label="t('common.close')" @click="emit('close')"><X /></button>
               </div>
@@ -95,8 +96,7 @@ onBeforeUnmount(() => {
             </div>
             <footer
               v-if="$slots.footer"
-              class="flex items-center justify-end gap-2 px-5 py-3.5 shrink-0"
-              style="border-top: 1px solid var(--line-1)"
+              class="drawer-foot flex shrink-0 items-center justify-end gap-2 px-5 py-3.5"
             >
               <slot name="footer" />
             </footer>
@@ -108,6 +108,27 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.drawer-panel {
+  background-color: var(--surface-4);
+  border-left: 1px solid var(--line-2);
+  box-shadow: var(--shadow-dialog), inset 1px 0 0 var(--line-hair-strong);
+}
+/* 左侧品牌光边：让抽屉与画布之间有一条可感知的光缝 */
+.drawer-panel::before {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 1px;
+  background: linear-gradient(180deg, var(--accent-line), transparent 55%);
+  pointer-events: none;
+}
+.drawer-head {
+  border-bottom: 1px solid var(--line-1);
+  background-image: linear-gradient(180deg, color-mix(in srgb, var(--surface-3) 60%, transparent), transparent);
+}
+.drawer-foot { border-top: 1px solid var(--line-1); background-color: var(--surface-3); }
+
 .drawer-enter-active,
 .drawer-leave-active {
   transition: transform var(--dur-slow) var(--ease-out), opacity var(--dur-slow) var(--ease-out);
