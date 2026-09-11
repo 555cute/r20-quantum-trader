@@ -3,8 +3,9 @@ export const enAbout = {
   desc: 'Open-source institutional AI quant terminal — Code is Law',
   arch: {
     title: 'Architecture',
-    stack: 'FastAPI + Vue 3 static SPA',
+    stack: 'FastAPI + Vue 3 static SPA · Tri-Venue Parity',
     points: [
+      'Tri-Venue Equal Parity Architecture across OKX, Binance, and Gate',
       'LLM holds full decision authority; a Python base hard-blocks violations',
       '100% exchange-side cloud OCO stops, Fail-Closed by design',
       'Multi-model council debate + heuristic self-evolving memory loop',

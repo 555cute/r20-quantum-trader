@@ -1,11 +1,17 @@
 /** ⌘K 命令面板 */
 export const zhCmdk = {
-  placeholder: '搜索页面、操作或标的…',
+  placeholder: '搜索页面、交易所中枢、操作或标的…',
   groups: {
-    views: '页面',
+    views: '视图面板',
+    venues: '交易所中枢',
     admin: '控制台',
-    actions: '操作',
+    actions: '全局操作',
     symbols: '标的直达',
+  },
+  venues: {
+    okx: 'OKX 交易账户与标的池',
+    binance: 'Binance 交易账户与标的池',
+    gate: 'Gate.io 交易账户与标的池',
   },
   actions: {
     toggleTheme: '切换深浅主题',

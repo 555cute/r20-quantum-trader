@@ -4,11 +4,12 @@ export const zhAbout = {
   desc: '开源机构级 AI 量化终端，代码即法律（Code is Law）',
   arch: {
     title: '系统架构',
-    stack: 'FastAPI + Vue 3 纯静态 SPA',
+    stack: 'FastAPI + Vue 3 纯静态 SPA · 三所平权架构',
     points: [
+      'OKX / Binance / Gate 三所对等执行架构，消除单所特权偏置',
       '大模型全权裁决开平仓，Python 底座物理风控硬拦截',
-      '100% 交易所云端 OCO 止损，Fail-Closed 设计',
-      '多模型委员会辩论 + 启发式自进化记忆闭环',
+      '100% 交易所云端 OCO 止损，Fail-Closed 安全设计',
+      '多模型委员会辩论 + 启发式自进化认知记忆闭环',
     ],
   },
   repo: { title: '开源仓库', visit: '访问仓库', starHint: '欢迎 Star 与 Issue' },

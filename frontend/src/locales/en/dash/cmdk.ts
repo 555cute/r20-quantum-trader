@@ -1,6 +1,17 @@
 export const enCmdk = {
-  placeholder: 'Search pages, actions or symbols…',
-  groups: { views: 'Views', admin: 'Console', actions: 'Actions', symbols: 'Jump to symbol' },
+  placeholder: 'Search views, venues, actions or symbols…',
+  groups: {
+    views: 'Views',
+    venues: 'Venues',
+    admin: 'Console',
+    actions: 'Global Actions',
+    symbols: 'Jump to Symbol',
+  },
+  venues: {
+    okx: 'OKX Account & Symbol Pool',
+    binance: 'Binance Account & Symbol Pool',
+    gate: 'Gate.io Account & Symbol Pool',
+  },
   actions: {
     toggleTheme: 'Toggle dark / light',
     toggleLang: 'Switch language (中/EN)',

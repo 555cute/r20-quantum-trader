@@ -6,6 +6,8 @@
 import { computed, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useDashboardStore } from '../stores/dashboard';
+import { useVenueAccountsStore } from '../stores/venueAccounts';
+import { useListingStatusStore } from '../stores/listingStatus';
 import { useI18n } from '../composables/useI18n';
 import { APP_NAME, APP_VERSION } from '../config/version';
 import { OFFICIAL_REPO } from '../config/version';
@@ -22,6 +24,8 @@ import AboutModal from '../components/dashboard/AboutModal.vue';
 
 const route = useRoute();
 const store = useDashboardStore();
+const venueAccounts = useVenueAccountsStore();
+const listingStatus = useListingStatusStore();
 const { t } = useI18n();
 const { aboutOpen, cmdkOpen } = useUi();
 
@@ -32,21 +36,25 @@ useHotkeys({
 
 const activeTab = computed(() => (route.meta?.tab as string) || 'trading');
 
-// 保持 store.activeTab 同步（旧组件迁移完成后可移除）
+// 保持 store.activeTab 同步
 watch(activeTab, (v) => (store.activeTab = v as any), { immediate: true });
 
 onMounted(() => {
   store.startPolling(3000);
+  void venueAccounts.refresh();
+  void listingStatus.refresh(venueAccounts.environment);
 });
 onUnmounted(() => store.stopPolling());
 </script>
 
 <template>
-  <div class="min-h-screen" style="background-color: var(--surface-0); color: var(--ink-1)">
+  <div class="min-h-screen flex flex-col" style="background-color: var(--surface-0); color: var(--ink-1)">
+    <!-- 磨砂顶栏 -->
     <TopBar />
     <div class="h-12 shrink-0" />
 
-    <main class="mx-auto w-full max-w-[2048px] space-y-3 px-3 pb-20 pt-3 sm:px-5 md:pb-6">
+    <!-- 主体视图容器：各视图平滑展开 -->
+    <main class="mx-auto w-full max-w-[2048px] flex-1 space-y-3.5 px-3 pb-20 pt-3.5 sm:px-5 lg:pb-8">
       <KeepAlive :max="5">
         <MatrixView v-if="activeTab === 'trading'" key="trading" />
         <RadarView v-else-if="activeTab === 'factors'" key="factors" />
@@ -56,25 +64,45 @@ onUnmounted(() => store.stopPolling());
       </KeepAlive>
     </main>
 
-    <!-- 页脚（桌面） -->
+    <!-- 页脚（桌面端）：对等三所架构提示 + 牌照开源说明 -->
     <footer
-      class="hidden border-t py-4 text-center text-xs md:block"
-      style="border-color: var(--line-1); color: var(--ink-3)"
+      class="hidden border-t py-4 text-center text-xs backdrop-blur-sm lg:block"
+      style="border-color: var(--line-1); background-color: var(--surface-1); color: var(--ink-3)"
     >
-      <div class="flex items-center justify-center gap-2.5">
-        <button class="cursor-pointer transition-colors hover:text-[var(--accent)]" @click="aboutOpen = true">
-          {{ APP_NAME }} {{ APP_VERSION }}
-        </button>
-        <span>·</span>
-        <span>{{ t('brand.license') }}</span>
-        <span>·</span>
-        <a :href="OFFICIAL_REPO" target="_blank" rel="noopener noreferrer" class="transition-colors hover:text-[var(--accent)]">
-          GitHub
-        </a>
+      <div class="mx-auto flex max-w-[2048px] items-center justify-between px-5">
+        <div class="flex items-center gap-2">
+          <span class="h-1.5 w-1.5 rounded-full bg-[var(--up)] shadow-[0_0_6px_var(--up)]" />
+          <span class="tracking-tight text-[11px] text-[var(--ink-2)]">
+            OKX · Binance · Gate 三所对等执行架构 · Fail-Closed 物理风控
+          </span>
+        </div>
+
+        <div class="flex items-center gap-3">
+          <button
+            type="button"
+            class="cursor-pointer transition-colors hover:text-[var(--accent)]"
+            @click="aboutOpen = true"
+          >
+            {{ APP_NAME }} {{ APP_VERSION }}
+          </button>
+          <span>·</span>
+          <span>{{ t('brand.license') }}</span>
+          <span>·</span>
+          <a
+            :href="OFFICIAL_REPO"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition-colors hover:text-[var(--accent)]"
+          >
+            GitHub
+          </a>
+        </div>
       </div>
     </footer>
 
+    <!-- 移动端底栏 -->
     <MobileTabBar />
+    <!-- 关于与架构弹窗 -->
     <AboutModal />
   </div>
 </template>
