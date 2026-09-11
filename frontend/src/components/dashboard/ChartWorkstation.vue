@@ -267,6 +267,58 @@ const activeOrder = computed(() => {
 // 真实最新价格 (纯从当前已加载的实时蜡烛最后一根获取，与K线和最新Tick 100% 同源)
 const currentPrice = ref<number>(0)
 
+// 行情源切换（三所对等行情源）
+type PriceFeed = 'benchmark' | 'okx' | 'binance' | 'gate'
+const activeFeed = ref<PriceFeed>('benchmark')
+const feedMenu = ref(false)
+
+const feedOptions = computed(() => [
+  { key: 'benchmark' as PriceFeed, label: t('dash.matrix.chart.feed.benchmark'), color: 'var(--accent)' },
+  { key: 'okx' as PriceFeed, label: t('dash.matrix.chart.feed.okx'), color: 'var(--venue-okx, #3880ff)' },
+  { key: 'binance' as PriceFeed, label: t('dash.matrix.chart.feed.binance'), color: 'var(--venue-binance, #f3ba2f)' },
+  { key: 'gate' as PriceFeed, label: t('dash.matrix.chart.feed.gate'), color: 'var(--venue-gate, #00be98)' },
+])
+
+const feedBrandColor = computed(() => {
+  if (activeFeed.value === 'okx') return 'var(--venue-okx, #3880ff)'
+  if (activeFeed.value === 'binance') return 'var(--venue-binance, #f3ba2f)'
+  if (activeFeed.value === 'gate') return 'var(--venue-gate, #00be98)'
+  return 'var(--accent)'
+})
+
+const feedLabel = computed(() => {
+  const opt = feedOptions.value.find((f) => f.key === activeFeed.value)
+  return opt ? opt.label : t('dash.matrix.chart.feed.benchmark')
+})
+
+const crossRow = computed(() => store.crossVenueRow(currentSymbol.value))
+
+const displayPrice = computed(() => {
+  if (activeFeed.value === 'okx' && crossRow.value?.okxLast) return crossRow.value.okxLast
+  if (activeFeed.value === 'binance' && crossRow.value?.binanceLast) return crossRow.value.binanceLast
+  if (activeFeed.value === 'gate' && crossRow.value?.gateLast) return crossRow.value.gateLast
+  return currentPrice.value
+})
+
+const okxPrice = computed(() => crossRow.value?.okxLast ?? (currentPrice.value > 0 ? currentPrice.value : null))
+const binancePrice = computed(() => crossRow.value?.binanceLast ?? null)
+const gatePrice = computed(() => crossRow.value?.gateLast ?? null)
+
+const binanceBasisPct = computed(() => crossRow.value?.binanceBasisPct ?? null)
+const gateBasisPct = computed(() => crossRow.value?.gateBasisPct ?? null)
+
+const binanceFunding = computed(() => crossRow.value?.binanceFundingPct ?? null)
+const gateFunding = computed(() => crossRow.value?.gateFundingPct ?? null)
+const okxFunding = computed(() => {
+  const it: any = factorItem.value
+  const f = it?.funding_rate ?? it?.fundingRate ?? null
+  return f !== null && f !== undefined && f !== '' && Number.isFinite(Number(f)) ? Number(f) : null
+})
+
+function isValidFunding(v: any): boolean {
+  return v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v))
+}
+
 // 真实开仓成本与方向
 const liveEntry = computed(() => {
   if (activePosition.value) return Number(activePosition.value.avgPx || currentPrice.value)
@@ -1026,13 +1078,26 @@ function handleClickOutside(e: MouseEvent) {
   if (!target.closest('.indicator-dropdown-container')) {
     showIndicatorMenu.value = false
     symbolMenu.value = false
+    feedMenu.value = false
   }
+}
+
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && isFullscreen.value) {
+    isFullscreen.value = false
+  }
+}
+
+function onResize() {
+  klineChart?.resize()
 }
 
 onMounted(() => {
   const initSym = props.initialSymbol || props.symbol
   if (initSym) currentSymbol.value = initSym.toUpperCase()
   document.addEventListener('click', handleClickOutside)
+  window.addEventListener('keydown', onKeydown)
+  window.addEventListener('resize', onResize)
   nextTick(() => {
     initChart()
     // 3s 静默拉取最新数据，保证准确对齐与跳动
@@ -1045,6 +1110,8 @@ onMounted(() => {
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
+  window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('resize', onResize)
   if (timer) clearInterval(timer)
   if (countdownTimer) clearInterval(countdownTimer)
   if (chartContainer.value) {
@@ -1096,10 +1163,49 @@ onUnmounted(() => {
         </Transition>
       </div>
 
+      <!-- 行情源切换下拉 -->
+      <div class="indicator-dropdown-container relative">
+        <button
+          type="button"
+          class="flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border px-2 text-2xs transition-colors"
+          style="border-color: var(--line-1); background-color: var(--surface-2)"
+          :title="t('dash.matrix.chart.feed.label')"
+          @click="feedMenu = !feedMenu"
+        >
+          <span class="h-1.5 w-1.5 rounded-full" :style="{ backgroundColor: feedBrandColor }" />
+          <span class="font-medium" style="color: var(--ink-1)">{{ feedLabel }}</span>
+          <ChevronDown class="h-3 w-3" style="color: var(--ink-3)" />
+        </button>
+        <Transition name="pop">
+          <div
+            v-if="feedMenu"
+            class="float-panel absolute left-0 top-9 z-50 w-36 p-1 shadow-xl"
+            style="background-color: var(--surface-header); border-color: var(--line-2)"
+          >
+            <button
+              v-for="f in feedOptions"
+              :key="f.key"
+              type="button"
+              class="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-2xs transition-colors hover:bg-[var(--surface-2)]"
+              :style="activeFeed === f.key ? { color: 'var(--accent)', fontWeight: 'bold' } : { color: 'var(--ink-2)' }"
+              @click="activeFeed = f.key; feedMenu = false"
+            >
+              <span class="h-1.5 w-1.5 rounded-full" :style="{ backgroundColor: f.color }" />
+              <span>{{ f.label }}</span>
+            </button>
+          </div>
+        </Transition>
+      </div>
+
       <!-- 现价 / 涨跌 / ATR -->
-      <span class="num text-md font-bold" style="color: var(--ink-strong)">
-        {{ currentPrice >= 100 ? currentPrice.toFixed(1) : currentPrice.toFixed(4) }}
-      </span>
+      <div class="flex items-center gap-1.5">
+        <span class="num text-md font-bold" style="color: var(--ink-strong)">
+          {{ displayPrice >= 100 ? displayPrice.toFixed(1) : displayPrice.toFixed(4) }}
+        </span>
+        <span v-if="activeFeed !== 'benchmark'" class="badge text-3xs" :style="{ color: feedBrandColor }">
+          {{ activeFeed.toUpperCase() }}
+        </span>
+      </div>
       <span class="num text-xs font-semibold" :class="liveChangePct >= 0 ? 'up' : 'down'">
         {{ liveChangePct >= 0 ? '+' : '' }}{{ liveChangePct.toFixed(2) }}%
       </span>
@@ -1199,6 +1305,59 @@ onUnmounted(() => {
           <Minimize v-if="isFullscreen" />
           <Maximize v-else />
         </button>
+      </div>
+    </div>
+
+    <!-- 跨所基差与资金费率微型看板 -->
+    <div
+      class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 border-b px-3 py-1.5 text-2xs"
+      style="border-color: var(--line-1); background-color: var(--surface-0)"
+    >
+      <div class="flex items-center gap-1.5">
+        <span class="font-bold text-[11px]" style="color: var(--ink-strong)">
+          {{ t('dash.matrix.chart.crossVenue.title') }}
+        </span>
+        <span class="badge text-3xs" style="background: var(--surface-3); color: var(--ink-3)">
+          {{ t('dash.matrix.chart.crossVenue.syncTime') }}
+        </span>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-x-4 gap-y-1 num">
+        <!-- OKX -->
+        <div class="flex items-center gap-1">
+          <span class="h-1.5 w-1.5 rounded-full" style="background-color: var(--venue-okx, #3880ff)" />
+          <span class="font-bold" style="color: var(--venue-okx, #3880ff)">OKX</span>
+          <span style="color: var(--ink-1)">{{ okxPrice ? (okxPrice >= 100 ? okxPrice.toFixed(1) : okxPrice.toFixed(4)) : '--' }}</span>
+          <span v-if="isValidFunding(okxFunding)" class="t-faint text-[10px] pl-0.5">
+            {{ Number(okxFunding) >= 0 ? '+' : '' }}{{ (Number(okxFunding) * 100).toFixed(4) }}%
+          </span>
+        </div>
+
+        <!-- Binance -->
+        <div class="flex items-center gap-1">
+          <span class="h-1.5 w-1.5 rounded-full" style="background-color: var(--venue-binance, #f3ba2f)" />
+          <span class="font-bold" style="color: var(--venue-binance, #f3ba2f)">Binance</span>
+          <span style="color: var(--ink-1)">{{ binancePrice ? (binancePrice >= 100 ? binancePrice.toFixed(1) : binancePrice.toFixed(4)) : '--' }}</span>
+          <span v-if="binanceBasisPct !== null" :class="binanceBasisPct >= 0 ? 'up' : 'down'" class="text-[10px] pl-0.5 font-semibold">
+            {{ binanceBasisPct >= 0 ? '+' : '' }}{{ (binanceBasisPct * 100).toFixed(2) }}%
+          </span>
+          <span v-if="isValidFunding(binanceFunding)" class="t-faint text-[10px] pl-0.5">
+            {{ Number(binanceFunding) >= 0 ? '+' : '' }}{{ (Number(binanceFunding) * 100).toFixed(4) }}%
+          </span>
+        </div>
+
+        <!-- Gate -->
+        <div class="flex items-center gap-1">
+          <span class="h-1.5 w-1.5 rounded-full" style="background-color: var(--venue-gate, #00be98)" />
+          <span class="font-bold" style="color: var(--venue-gate, #00be98)">Gate</span>
+          <span style="color: var(--ink-1)">{{ gatePrice ? (gatePrice >= 100 ? gatePrice.toFixed(1) : gatePrice.toFixed(4)) : '--' }}</span>
+          <span v-if="gateBasisPct !== null" :class="gateBasisPct >= 0 ? 'up' : 'down'" class="text-[10px] pl-0.5 font-semibold">
+            {{ gateBasisPct >= 0 ? '+' : '' }}{{ (gateBasisPct * 100).toFixed(2) }}%
+          </span>
+          <span v-if="isValidFunding(gateFunding)" class="t-faint text-[10px] pl-0.5">
+            {{ Number(gateFunding) >= 0 ? '+' : '' }}{{ (Number(gateFunding) * 100).toFixed(4) }}%
+          </span>
+        </div>
       </div>
     </div>
 

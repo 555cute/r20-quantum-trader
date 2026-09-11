@@ -96,6 +96,22 @@ export const enMatrix = {
     kdj: 'KDJ',
     superTrend: 'SuperTrend',
     indicatorHint: 'Click to toggle, up to 4 groups',
+    feed: {
+      label: 'Price Feed',
+      benchmark: 'Benchmark',
+      okx: 'OKX Live',
+      binance: 'Binance Live',
+      gate: 'Gate.io Live',
+    },
+    crossVenue: {
+      title: 'Tri-Venue Basis & Funding Matrix',
+      spread: 'Cross-Venue Basis',
+      funding: 'Funding Rate',
+      basisBps: 'Basis {bps} bps',
+      estFunding: 'Live Funding',
+      syncTime: 'Synced',
+      diff: 'Spread',
+    },
     sim: {
       simulate: 'Sim',
       enter: 'R:R simulator',

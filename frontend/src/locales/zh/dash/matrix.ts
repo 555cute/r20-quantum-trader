@@ -101,6 +101,22 @@ export const zhMatrix = {
     kdj: 'KDJ',
     superTrend: '超级趋势',
     indicatorHint: '点击切换显示，最多同时 4 组',
+    feed: {
+      label: '行情源',
+      benchmark: '综合基准',
+      okx: 'OKX 现价',
+      binance: 'Binance 现价',
+      gate: 'Gate.io 现价',
+    },
+    crossVenue: {
+      title: '三所基差与费率对齐矩阵',
+      spread: '跨所基差',
+      funding: '资金费率',
+      basisBps: '基差 {bps} bps',
+      estFunding: '实时费率',
+      syncTime: '毫秒级同步',
+      diff: '价差',
+    },
     sim: {
       simulate: '试算',
       enter: '进入 R:R 试算',
