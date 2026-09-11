@@ -18,6 +18,27 @@ from r20_backend.exchanges import (
     registry,
 )
 
+_AMBIENT: dict = {}
+
+
+def setUpModule():
+    """封闭三律：排除宿主 .env 注入的 ambient 执行旗标——
+    R20_BINANCE/GATE_EXECUTION=1 会把 fail-closed 契约用例带偏（US-005 后
+    binance 旗标已进 .env，整文件并跑时曾炸出顺序红）。旗标只由用例自设。"""
+    import os
+    global _AMBIENT
+    _AMBIENT = {k: os.environ.pop(k, None) for k in list(os.environ)
+                if k.startswith("R20_") and ("EXECUTION" in k or "TESTNET" in k)}
+
+
+def tearDownModule():
+    import os
+    for k, v in _AMBIENT.items():
+        if v is not None:
+            os.environ[k] = v
+        else:
+            os.environ.pop(k, None)
+
 
 class TestSymbolMapping(unittest.TestCase):
     def setUp(self):
@@ -100,15 +121,27 @@ class TestCapabilityTable(unittest.TestCase):
 
 class TestFailClosedPrivateFacets(unittest.TestCase):
     def test_orders_rejected_on_readonly_adapters(self):
-        for adapter in (BinanceAdapter(),):
+        # US-005 后只读私有面的仅剩 OKX 适配器（执行居遗留直签链）；
+        # Binance/Gate 私有面已实装——契约改由「无凭证 fail-closed」用例守护
+        from r20_backend.exchanges import OKXPublicAdapter
+        okx = OKXPublicAdapter()
+        for call in (lambda: okx.place_order("BTC", "buy", 1),
+                     lambda: okx.attach_protective_orders("BTC", "long"),
+                     lambda: okx.cancel_order("BTC", "1"),
+                     lambda: okx.account_snapshot(),
+                     lambda: okx.positions()):
             with self.assertRaises(ExchangeCapabilityError):
-                adapter.place_order()
+                call()
+
+    def test_binance_private_requires_credentials_fail_closed(self):
+        # 与 Gate 同款契约：实装 ≠ 放行——无凭证一律显式拒绝，绝不静默出网
+        import r20_gateway.secrets as gw_secrets
+        with patch.object(gw_secrets, "load_secrets", lambda: {}):
+            bn = BinanceAdapter()
             with self.assertRaises(ExchangeCapabilityError):
-                adapter.attach_protective_orders()
+                bn.account_snapshot()
             with self.assertRaises(ExchangeCapabilityError):
-                adapter.account_snapshot()
-            with self.assertRaises(ExchangeCapabilityError):
-                adapter.positions()
+                bn.place_order("BTC", "buy", 0.01, price=78000)
 
     def test_gate_private_requires_credentials_fail_closed(self):
         # Gate 私有面已实装但仍 fail-closed：无凭证 → 显式拒绝，绝不静默
@@ -121,12 +154,16 @@ class TestFailClosedPrivateFacets(unittest.TestCase):
                 gt.place_order("BTC", "long", 5, price=78000)
 
     def test_registry_execution_gate(self):
-        with self.assertRaises(ExchangeCapabilityError):
+        # 契约=「默认未开闸一律拒」：ambient 旗标已在 setUpModule 清空；
+        # US-005 后 binance/gate 均声明开闸路径，拒绝文案必须指路各自的闸
+        with self.assertRaises(ExchangeCapabilityError) as cm:
             registry.require_execution("binance")
-        with self.assertRaises(ExchangeCapabilityError):
+        self.assertIn("R20_BINANCE_EXECUTION", str(cm.exception))
+        with self.assertRaises(ExchangeCapabilityError) as cm2:
             registry.require_execution("gate")
+        self.assertIn("R20_GATE_EXECUTION", str(cm2.exception))
         with self.assertRaises(ExchangeCapabilityError):
-            registry.require_execution("okx")   # OKX 执行在遗留链路，适配器路由未开闸
+            registry.require_execution("okx")   # OKX 执行在遗留链路，适配器路由结构性恒关
         with self.assertRaises(ExchangeCapabilityError):
             registry.get_adapter("hyperliquid")
         self.assertEqual(registry.registered_venues(), ["binance", "gate", "okx"])

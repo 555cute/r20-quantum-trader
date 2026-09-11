@@ -25,6 +25,26 @@ from r20_backend.exchanges import (
     get_adapter,
 )
 
+_AMBIENT: dict = {}
+
+
+def setUpModule():
+    """隔离宿主 .env 的执行/档位旗标（r20_backend.config 导入期会把它们载入
+    os.environ）——执行路由用例的开闸语义只由本模块夹具决定。"""
+    import os
+    global _AMBIENT
+    _AMBIENT = {k: os.environ.pop(k, None) for k in list(os.environ)
+                if k.startswith("R20_") and ("EXECUTION" in k or "TESTNET" in k)}
+
+
+def tearDownModule():
+    import os
+    for k, v in _AMBIENT.items():
+        if v is not None:
+            os.environ[k] = v
+        else:
+            os.environ.pop(k, None)
+
 
 class _FakeResp:
     def __init__(self, data: bytes):

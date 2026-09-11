@@ -5,7 +5,8 @@
    position_modes / conditional_family / protection_semantics；
 2. 请求契约：Binance Algo 双轨字段与互斥校验、Gate 原生 amend 与 amount 双许可、
    Gate id_string 字符串归一、OKX attachAlgo failCode 三态核验；
-3. 门禁不回归：Binance 私有发送恒显式未实装（supports_orders=False 语义不动）。
+3. 门禁不回归：Binance 私有发送实装（US-005）但凭证缺失仍显式拒绝
+   （fail-closed），执行开闸独立于实装状态。
 """
 from __future__ import annotations
 
@@ -22,6 +23,25 @@ from r20_backend.exchanges.gate import (AUTO_SIZE_CLOSE_LONG, AUTO_SIZE_CLOSE_SH
                                         GateAPIError, GateAdapter)
 from r20_backend.exchanges.okx import OKXPublicAdapter
 from r20_backend import okx_trade_service as ots
+
+_AMBIENT: dict = {}
+
+
+def setUpModule():
+    """隔离宿主 .env 的执行/档位旗标——本文件的契约断言不依赖 ambient 开关。"""
+    import os
+    global _AMBIENT
+    _AMBIENT = {k: os.environ.pop(k, None) for k in list(os.environ)
+                if k.startswith("R20_") and ("EXECUTION" in k or "TESTNET" in k)}
+
+
+def tearDownModule():
+    import os
+    for k, v in _AMBIENT.items():
+        if v is not None:
+            os.environ[k] = v
+        else:
+            os.environ.pop(k, None)
 
 
 class _Resp:
@@ -87,7 +107,9 @@ class TestCapabilityDeclarations(unittest.TestCase):
         self.assertEqual(cap.order_id_type, "int64_precision_risk")
         self.assertFalse(cap.native_amend)           # 未核验原生改单，不宣称
         self.assertIn("openOrders", cap.protection_semantics)  # 普通挂单≠保护全集
-        self.assertFalse(cap.supports_orders)        # 门禁不变
+        # US-005 契约演进：下单面已实装，门禁职责移交 env 开闸旗标（registry 单源）
+        self.assertTrue(cap.supports_orders)
+        self.assertEqual(cap.adapter_execution_flag, "R20_BINANCE_EXECUTION")
 
     def test_okx_attach_failcode_declared(self):
         cap = OKXPublicAdapter.capabilities
@@ -163,13 +185,17 @@ class TestBinanceAlgoContract(unittest.TestCase):
                 trigger_price="78000", working_type="MARK_PRICE",
                 quantity="0.1", reduce_only=True, position_side="LONG")
 
-    def test_private_algo_sends_are_fail_closed(self):
+    def test_private_algo_sends_require_credentials_fail_closed(self):
+        # US-005 实装后契约升级：不再「恒不支持」，而是「凭证缺失显式拒」——
+        # 实装 ≠ 放行，load_secrets 为空的封闭环境里绝不静默出网
+        import r20_gateway.secrets as gw_secrets
         for call in (lambda: self.ad.query_algo_order(algo_id="1"),
                      lambda: self.ad.current_all_algo_open_orders(symbol="BTCUSDT"),
                      lambda: self.ad.cancel_algo_order(algo_id="1"),
                      lambda: self.ad.cancel_all_algo_open_orders(symbol="BTCUSDT")):
-            with self.assertRaises(ExchangeCapabilityError):
-                call()
+            with patch.object(gw_secrets, "load_secrets", lambda: {}):
+                with self.assertRaises(ExchangeCapabilityError):
+                    call()
 
     def test_merged_protection_view_is_dual_source(self):
         view = self.ad.merged_protection_view(
