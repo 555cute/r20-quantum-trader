@@ -19,7 +19,7 @@ import math
 from typing import Any, Dict, Optional
 
 from .exchanges import (ExchangeCapabilityError, canonical_base, execution_open,
-                        get_adapter, require_execution)
+                        get_adapter, is_sandbox_environment, require_execution)
 
 try:  # 单一事实源：几何 + R:R 底线（与执行层遗留链路同一把尺）
     from scripts.order_risk import validate_quote_geometry_and_rr
@@ -53,6 +53,8 @@ def open_protected_position(decision: Dict[str, Any], *,
     """
     env_name = str(environment or decision.get("environment") or "").strip().lower() or None
     venue = str(decision.get("venue") or getattr(getattr(adapter, "capabilities", None), "venue", "gate") or "gate").strip().lower()
+    if env_name and is_sandbox_environment(env_name) and venue == "gate" and env_name != "sandbox":
+        env_name = "sandbox"
     ad = adapter or get_adapter(venue, environment=env_name)
     asset = canonical_base(str(decision.get("asset") or decision.get("name") or ""))
     action = str(decision.get("action") or "").upper()
@@ -160,7 +162,8 @@ def open_protected_position(decision: Dict[str, Any], *,
     # 云端 TP/SL 双腿 + 回读验证；任何缺口撤入场单回滚
     try:
         legs = ad.attach_protective_orders(asset, side, tp_px=tp, sl_px=sl,
-                                           expiration=trigger_expiration)
+                                           expiration=trigger_expiration,
+                                           contracts=contracts)
         open_orders = ad.list_protective_orders(asset)
         open_ids = {str(o.get("id") or o.get("algo_id")) for o in open_orders if isinstance(o, dict)}
         if str(legs.get("tp")) not in open_ids or str(legs.get("sl")) not in open_ids:
@@ -188,6 +191,8 @@ def close_position(symbol: str, *, venue: str = "gate", adapter: Any = None,
                    environment: Optional[str] = None) -> RouteResult:
     """市价全平（close=true + ioc），依赖同前：开闸 + 凭证。"""
     v = str(venue or getattr(getattr(adapter, "capabilities", None), "venue", "gate") or "gate").lower()
+    if environment and is_sandbox_environment(environment) and v == "gate" and environment != "sandbox":
+        environment = "sandbox"
     ad = adapter or get_adapter(v, environment=environment)
     require_execution(v, environment=str(getattr(ad, "environment", "live") or "live"))
     asset = canonical_base(symbol)

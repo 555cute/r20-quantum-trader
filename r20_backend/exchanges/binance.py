@@ -242,6 +242,7 @@ class BinanceAdapter(BaseExchangeAdapter):
             raise ValueError("triggerPrice 必须为正")
         body: Dict[str, Any] = {
             "symbol": str(symbol).upper(), "side": str(side).upper(), "type": t,
+            "algoType": "CONDITIONAL",
             "triggerPrice": str(tp),
             "workingType": cls._require_working_type(working_type),
         }
@@ -294,11 +295,11 @@ class BinanceAdapter(BaseExchangeAdapter):
 
     @classmethod
     def build_algo_open_orders_request(cls, *, symbol: Optional[str] = None) -> Dict[str, Any]:
-        """current_all_algo_open_orders：当前 algo 挂单（普通 openOrders 不含此族）。"""
-        params: Dict[str, Any] = {"status": "open"}
+        """current_all_algo_open_orders：当前 algo 挂单（/fapi/v1/openAlgoOrders）。"""
+        params: Dict[str, Any] = {}
         if symbol:
             params["symbol"] = str(symbol).upper()
-        return {"method": "GET", "path": cls.ALGO_ORDER_PATH, "params": params}
+        return {"method": "GET", "path": "/fapi/v1/openAlgoOrders", "params": params}
 
     @classmethod
     def build_algo_cancel_request(cls, *, algo_id=None, client_algo_id=None) -> Dict[str, Any]:
@@ -560,42 +561,66 @@ class BinanceAdapter(BaseExchangeAdapter):
                                  sl_px: Optional[float] = None,
                                  working_type: str = "CONTRACT_PRICE",
                                  position_side: Optional[str] = None,
-                                 expiration: Optional[int] = None) -> Dict[str, str]:
+                                 expiration: Optional[int] = None,
+                                 contracts: Optional[float] = None,
+                                 **kwargs: Any) -> Dict[str, str]:
         """挂云端条件止盈止损单（/fapi/v1/algoOrder）（US-005）。
         - 显式 workingType（默认 CONTRACT_PRICE）；
         - 多头（long）-> 平仓反向 SELL；空头（short）-> 平仓反向 BUY；
-        - closePosition=True 全平。
+        - 未成交挂单阶段带 contracts/quantity 走 reduceOnly；已有仓位兜底 closePosition。
         """
         inst = self.native_symbol(symbol)
         opp_side = "SELL" if str(side).lower() in ("long", "buy") else "BUY"
         wt = self._require_working_type(working_type)
 
+        qty_val = float(contracts or kwargs.get("size") or 0.0)
+        spec = self.fetch_instrument_spec(symbol)
+        step = Decimal(str(spec.step_size if spec else 1e-6))
+        qty_str = None
+        if qty_val > 0:
+            qty_dec = (Decimal(str(qty_val)) / step).to_integral_value(rounding=ROUND_DOWN) * step
+            qty_str = format(qty_dec, "f").rstrip("0").rstrip(".") if "." in format(qty_dec, "f") else format(qty_dec, "f")
+
         res = {"tp": "", "sl": ""}
 
         if tp_px is not None and float(tp_px) > 0:
-            req = self.build_algo_order_request(
-                symbol=inst,
-                side=opp_side,
-                type_="TAKE_PROFIT_MARKET",
-                trigger_price=tp_px,
-                working_type=wt,
-                close_position=True,
-                position_side=position_side,
-            )
+            req_kwargs: Dict[str, Any] = {
+                "symbol": inst,
+                "side": opp_side,
+                "type_": "TAKE_PROFIT_MARKET",
+                "trigger_price": tp_px,
+                "working_type": wt,
+                "position_side": position_side,
+            }
+            if qty_str:
+                req_kwargs["quantity"] = qty_str
+                req_kwargs["reduce_only"] = True
+                req_kwargs["close_position"] = False
+            else:
+                req_kwargs["close_position"] = True
+
+            req = self.build_algo_order_request(**req_kwargs)
             tp_data = self._private_algo_send(req)
             if isinstance(tp_data, dict):
                 res["tp"] = str(tp_data.get("algoId") or tp_data.get("orderId") or "")
 
         if sl_px is not None and float(sl_px) > 0:
-            req = self.build_algo_order_request(
-                symbol=inst,
-                side=opp_side,
-                type_="STOP_MARKET",
-                trigger_price=sl_px,
-                working_type=wt,
-                close_position=True,
-                position_side=position_side,
-            )
+            req_kwargs = {
+                "symbol": inst,
+                "side": opp_side,
+                "type_": "STOP_MARKET",
+                "trigger_price": sl_px,
+                "working_type": wt,
+                "position_side": position_side,
+            }
+            if qty_str:
+                req_kwargs["quantity"] = qty_str
+                req_kwargs["reduce_only"] = True
+                req_kwargs["close_position"] = False
+            else:
+                req_kwargs["close_position"] = True
+
+            req = self.build_algo_order_request(**req_kwargs)
             sl_data = self._private_algo_send(req)
             if isinstance(sl_data, dict):
                 res["sl"] = str(sl_data.get("algoId") or sl_data.get("orderId") or "")
@@ -653,7 +678,18 @@ class BinanceAdapter(BaseExchangeAdapter):
             algo_id=algo_id, client_algo_id=client_algo_id))
 
     def cancel_all_algo_open_orders(self, *, symbol: str) -> Any:
-        return self._private_algo_send(self.build_algo_cancel_all_request(symbol=symbol))
+        inst = self.native_symbol(symbol) if symbol else ""
+        open_algos = self.list_protective_orders(symbol=inst)
+        results = []
+        for o in open_algos:
+            aid = o.get("algo_id") or o.get("id")
+            if aid:
+                try:
+                    res = self.cancel_algo_order(algo_id=aid)
+                    results.append(res)
+                except Exception:
+                    pass
+        return {"code": "200", "msg": "success", "canceled": results}
 
     @staticmethod
     def merged_protection_view(normal_open: List[Dict[str, Any]],
