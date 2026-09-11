@@ -76,14 +76,11 @@ export const useVenueAccountsStore = defineStore('venueAccounts', () => {
     }
   }
 
-  /** 环境切换：立即换轴并重新拉取；旧环境数据先行清空，防串显。 */
+  /** 环境切换：平滑换挡并重新拉取；不强制清空旧数据，杜绝页面闪烁塌陷。 */
   function setEnvironment(env: VenueEnv): void {
     if (environment.value === env) return
     environment.value = env
     localStorage.setItem(ENV_KEY, env)
-    venues.value = null
-    portfolioSummary.value = null
-    capturedAt.value = null
     void refresh()
   }
 

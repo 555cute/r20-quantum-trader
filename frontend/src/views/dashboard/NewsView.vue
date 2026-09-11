@@ -107,7 +107,7 @@ function impCls(i: string): string {
   return i === 'high' ? 'badge-down' : i === 'mid' ? 'badge-warn' : 'badge-mono';
 }
 function impTxt(i: string): string {
-  return i === 'high' ? '重大' : i === 'mid' ? '中等' : '普通';
+  return i === 'high' ? '重大' : i === 'mid' ? '关注' : '快讯';
 }
 
 async function refreshNews() {

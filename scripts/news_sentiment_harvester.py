@@ -86,10 +86,68 @@ def is_circuit_breaker_active():
             pass
     return False, {}
 
+def _classify_importance(title: str, summary: str) -> str:
+    """根据快讯内容科学评定影响等级（high=重大/高危, mid=中等关注, low=普通快讯）。
+    绝不盲目全标 high，避免狼来了式恐慌。"""
+    text = f"{title} {summary}".lower()
+
+    # 高危关键词：系统性风险、崩盘、黑客、脱锚、破产清算、司法调查等
+    high_keywords = [
+        "脱锚", "depeg", "破产", "倒闭", "挤兑", "停止提现", "暂停提币",
+        "51%攻击", "系统瘫痪", "暴跌", "崩盘", "黑客", "被盗", "黑天鹅",
+        "起诉", "立案调查", "全面封杀", "严厉打击", "清算危机", "清退",
+        "bankruptcy", "insolvent", "halt withdrawals", "freeze withdrawals",
+        "exploit", "hacked", "plunge", "crash", "subpoena", "fraud", "scam"
+    ]
+    for kw in high_keywords:
+        if kw in text:
+            return "high"
+
+    # 中等关注关键词：宏观决议、ETF、大额投融资、主网升级、重要合作、大额流入
+    mid_keywords = [
+        "etf", "sec", "美联储", "降息", "加息", "鲍威尔", "cpi", "非农",
+        "融资", "主网", "升级", "硬分叉", "战略合作", "巨鲸", "大额增持",
+        "上市", "上线", "首发", "创历史新高", "暴涨", "突破",
+        "fed", "rate cut", "inflation", "funding", "mainnet", "upgrade",
+        "partnership", "whale", "inflow", "ath", "all-time high", "breakout"
+    ]
+    for kw in mid_keywords:
+        if kw in text:
+            return "mid"
+
+    return "low"
+
+
+def _extract_coins(title: str, summary: str, target_coins: list) -> list:
+    """从新闻文本中识别涉及的加密资产代码。"""
+    text = f" {title} {summary} ".upper()
+    found = []
+    coin_aliases = {
+        "BTC": ["BTC", "BITCOIN", "比特币"],
+        "ETH": ["ETH", "ETHEREUM", "以太坊", "以太币"],
+        "SOL": ["SOL", "SOLANA"],
+        "DOGE": ["DOGE", "DOGECOIN", "狗狗币"],
+        "LINK": ["LINK", "CHAINLINK"],
+        "AVAX": ["AVAX", "AVALANCHE", "雪崩"],
+        "SUI": ["SUI"],
+        "ADA": ["ADA", "CARDANO"],
+        "XRP": ["XRP", "RIPPLE", "瑞波"],
+    }
+    for c, aliases in coin_aliases.items():
+        if any(re.search(rf"\b{re.escape(a)}\b", text) if a.isascii() else (a in text) for a in aliases):
+            found.append(c)
+    for tc in (target_coins or []):
+        if tc not in found:
+            if re.search(rf"\b{re.escape(tc.upper())}\b", text):
+                found.append(tc.upper())
+    return found[:4]
+
+
 def _fetch_rss_feeds():
-    """US-002: 多源公开 RSS 快讯抓取（CoinDesk + Cointelegraph）。
+    """多源公开快讯抓取（GoogleNews中文 + CoinDesk + Cointelegraph）。
     每个源独立 fail-soft：单条源挂掉不会清空整个情报层。"""
     feeds = [
+        ("GoogleNews中文", "https://news.google.com/rss/search?q=%E6%AF%94%E7%89%B9%E5%B8%81+%E4%BB%A5%E5%A4%AA%E5%9D%8A+%E5%8A%A0%E5%AF%86%E8%B4%A7%E5%B8%81&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"),
         ("CoinDesk", "https://feeds.feedburner.com/CoinDesk"),
         ("Cointelegraph", "https://cointelegraph.com/rss"),
     ]
@@ -124,7 +182,8 @@ def _fetch_rss_feeds():
                     "time": time_str,
                     "cTime": str(ts_ms),
                     "url": link,
-                    "platforms": [name]
+                    "platforms": [name],
+                    "importance": _classify_importance(title, summary),
                 })
         except Exception as e:
             print(f"Warning fetching {name}: {e}")
@@ -170,14 +229,17 @@ def fetch_and_analyze_news_sentiment():
                     triggered_threat = (title, threat_name)
                     break
 
+        coins = item.get("ccyList") or item.get("coins") or _extract_coins(title, summary, TARGET_COINS)
+        importance = item.get("importance") or _classify_importance(title, summary)
+
         parsed_news.append({
             "id": item.get("id"),
             "time": dt_str,
             "title": title,
             "summary": summary,
-            "coins": item.get("ccyList", []),
+            "coins": coins,
             "platforms": item.get("platformList") or item.get("platforms", []),
-            "importance": item.get("importance", "high"),
+            "importance": importance,
             "url": item.get("sourceUrl") or item.get("url", "")
         })
 

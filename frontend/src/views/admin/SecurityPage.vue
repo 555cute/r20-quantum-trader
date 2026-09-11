@@ -386,7 +386,7 @@ const gateEnvText = computed(() => envTextOf('gate', 'SANDBOX 沙盒'))
 
 const TABS: Array<{ key: TabKey; label: string }> = [
   { key: 'venues', label: '交易所与路由对等' },
-  { key: 'pool', label: '标的池与初始本金' },
+  { key: 'pool', label: '交易标的池' },
   { key: 'emergency', label: '应急风控与持仓' },
 ]
 
@@ -457,12 +457,12 @@ onMounted(() => { loadAll(); loadMx() })
 
         <div class="card card-pad flex flex-col justify-between" style="background-color: var(--surface-1);">
           <div class="flex items-center justify-between text-[11px]" style="color: var(--ink-3);">
-            <span>标的池 & 本金</span>
+            <span>活跃交易标的池</span>
             <Layers class="h-3 w-3" style="color: var(--accent);" />
           </div>
           <div class="mt-1 flex items-baseline justify-between">
             <b class="num text-xs font-bold" style="color: var(--ink-1);">{{ instruments.length }}/{{ instLimits.maximum }} 标的</b>
-            <span class="num text-[10px] font-bold" style="color: var(--up);">{{ config.editable.initial_capital }} U</span>
+            <span class="text-[10px] font-medium" style="color: var(--ink-2);">USDT 永续</span>
           </div>
         </div>
       </div>
@@ -687,21 +687,6 @@ onMounted(() => { loadAll(); loadMx() })
             <div v-else class="py-8 text-center text-xs" style="color: var(--ink-3);">标的池为空——至少保留保底标的 BTC-USDT-SWAP。</div>
           </div>
           <p class="pt-3 text-[11px]" style="color: var(--ink-3);">BTC 为系统保底标的不可删除；有在途追踪器的标的禁止移除；最多 {{ instLimits.maximum }} 个；仅支持 USDT 永续。</p>
-        </SettingsSection>
-
-        <SettingsSection title="初始本金基准" description="累计盈亏、收益率与权益走势的起算基准。修改本金会重置累计 ROI 起算点，不影响历史成交记录。">
-          <div class="grid grid-cols-1 sm:grid-cols-[200px_1fr_auto] gap-3 items-end">
-            <div>
-              <label class="block text-[11px] mb-1" style="color: var(--ink-2);">新初始本金 (USDT)</label>
-              <input v-model="newCapital" type="number" step="0.01" class="input w-full num" />
-            </div>
-            <div>
-              <label class="block text-[11px] mb-1" style="color: var(--ink-2);">确认短语（UPDATE CAPITAL）</label>
-              <input v-model="capitalConfirm" placeholder="输入 UPDATE CAPITAL" class="input w-full" />
-            </div>
-            <button class="btn btn-primary" :disabled="savingCapital" @click="saveCapital"><Wallet class="h-3.5 w-3.5" /> {{ savingCapital ? '更新中…' : '更新基准本金' }}</button>
-          </div>
-          <p class="pt-3 text-[11px]" style="color: var(--ink-3);">历史起算时间 {{ config.editable.initial_capital_reset_time }}；仅超级管理员可修改。</p>
         </SettingsSection>
       </div>
 

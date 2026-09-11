@@ -1370,7 +1370,8 @@ def update_cache_cycle():
             "cum_net_pnl": round(total_cum_net_pnl, 2),
             "cum_roi_pct": cum_roi_pct,
             "cum_total_fees": round(cum_total_fees, 2),
-            "margin_usage_pct": round(((total_eq - avail_eq) / total_eq * 100) if total_eq > 0 else 0, 1)
+            "total_pos_margin": round(sum(float(p.get("margin_usdt") or 0.0) for p in positions), 2),
+            "margin_usage_pct": round(((sum(float(p.get("margin_usdt") or 0.0) for p in positions)) / total_eq * 100) if total_eq > 0 else 0, 1)
         },
         "today_stats": {
             "realized_gross": round(today_realized_gross, 2),

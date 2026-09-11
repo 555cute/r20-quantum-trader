@@ -78,29 +78,36 @@ function refreshAll(): void {
     <div class="flex flex-wrap items-center justify-between gap-2">
       <div class="min-w-0">
         <h2 class="text-sm font-bold" style="color: var(--ink-strong)">{{ t('dash.venueAccounts.title') }}</h2>
-        <p class="t-faint text-xs">{{ t('dash.venueAccounts.desc') }}</p>
+        <p class="t-faint text-xs">
+          {{ t('dash.venueAccounts.desc') }} ·
+          <span class="font-medium" :style="{ color: isDemo ? 'var(--warn)' : 'var(--up)' }">
+            当前视角：{{ isDemo ? '模拟盘 (Demo)' : '实盘 (Live)' }}
+          </span>
+        </p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
-        <!-- 环境优先切换：文字标签 + 图标，颜色仅作辅助 -->
+        <!-- 账户环境透视切换药丸：平滑过渡，无缝换挡 -->
         <div
-          class="flex items-center gap-1 rounded-lg p-1"
-          style="background: var(--surface-3); border: 1px solid var(--line-1)"
+          class="flex items-center gap-0.5 rounded-md p-0.5"
+          style="background: var(--surface-2); border: 1px solid var(--line-1)"
           role="group"
           :aria-label="t('dash.venueAccounts.envLabel')"
           data-test="env-switch"
         >
           <button
-            class="btn btn-sm" :class="isDemo ? 'btn-filled' : 'btn-ghost'"
+            class="px-2.5 py-1 rounded text-2xs transition-all duration-200 flex items-center gap-1.5"
+            :style="isDemo ? { backgroundColor: 'var(--surface-3)', color: 'var(--ink-strong)', fontWeight: 'bold', boxShadow: '0 1px 2px rgba(0,0,0,0.15)' } : { color: 'var(--ink-3)' }"
             :aria-pressed="isDemo" data-test="env-demo" @click="switchEnvironment('demo')"
           >
-            <FlaskConical class="h-3.5 w-3.5" />
+            <FlaskConical class="h-3 w-3" :style="{ color: isDemo ? 'var(--warn)' : 'currentColor' }" />
             {{ t('dash.venueAccounts.envDemo') }}
           </button>
           <button
-            class="btn btn-sm" :class="!isDemo ? 'btn-filled' : 'btn-ghost'"
+            class="px-2.5 py-1 rounded text-2xs transition-all duration-200 flex items-center gap-1.5"
+            :style="!isDemo ? { backgroundColor: 'var(--surface-3)', color: 'var(--ink-strong)', fontWeight: 'bold', boxShadow: '0 1px 2px rgba(0,0,0,0.15)' } : { color: 'var(--ink-3)' }"
             :aria-pressed="!isDemo" data-test="env-live" @click="switchEnvironment('live')"
           >
-            <ShieldCheck class="h-3.5 w-3.5" />
+            <ShieldCheck class="h-3 w-3" :style="{ color: !isDemo ? 'var(--up)' : 'currentColor' }" />
             {{ t('dash.venueAccounts.envLive') }}
           </button>
         </div>

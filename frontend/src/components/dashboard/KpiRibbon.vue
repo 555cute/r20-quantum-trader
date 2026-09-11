@@ -19,16 +19,26 @@ const today = computed(() => (store.data as any)?.today_stats || {});
 
 const equity = computed(() => fmtNum(Number(account.value.total_eq || 0), 2));
 
-/** US-007 · 多所组合总权益与资产分配条 */
+/** US-007 / 问题1修复 · 多所组合总权益与保证金占用严密对账 */
+const isLiveEnv = computed(() => venueStore.environment === 'live');
+const envBadgeText = computed(() => (isLiveEnv.value ? '实盘' : '模拟'));
+
 const portfolioSummary = computed(() => venueStore.portfolioSummary || (store.data as any)?.multi_venue_portfolio || null);
 const hasMultiVenue = computed(() => {
   const sum = portfolioSummary.value;
   return !!sum && Number(sum.total_equity || 0) > 0;
 });
-const totalAggregatedEquity = computed(() => {
+
+const totalEquityNum = computed(() => {
   const sum = portfolioSummary.value;
-  return sum && Number(sum.total_equity || 0) > 0 ? fmtNum(Number(sum.total_equity), 2) : equity.value;
+  if (sum && Number(sum.total_equity || 0) > 0) return Number(sum.total_equity);
+  return Number(account.value.total_eq || 0);
 });
+
+const totalAggregatedEquity = computed(() => {
+  return fmtNum(totalEquityNum.value, 2);
+});
+
 const distOkx = computed(() => Number(portfolioSummary.value?.asset_distribution?.okx?.share_pct || 0));
 const distBinance = computed(() => Number(portfolioSummary.value?.asset_distribution?.binance?.share_pct || 0));
 const distGate = computed(() => Number(portfolioSummary.value?.asset_distribution?.gate?.share_pct || 0));
@@ -52,7 +62,20 @@ const floatRoi = computed(() =>
 const longCount = computed(() => store.positions.filter((p) => p.side === 'long').length);
 const shortCount = computed(() => store.positions.filter((p) => p.side === 'short').length);
 
-const marginUsage = computed(() => Number(account.value.margin_usage_pct || 0));
+/** 真实保证金占用：严格按实际持仓已占用保证金计算，绝不误用未划转资金差额 */
+const actualMarginUsed = computed(() => {
+  if (posMargin.value > 0) return posMargin.value;
+  const sum = portfolioSummary.value;
+  if (sum && typeof sum.margin_used === 'number') return Number(sum.margin_used);
+  return Number(account.value.total_pos_margin || 0);
+});
+
+const marginUsage = computed(() => {
+  if (totalEquityNum.value > 0) {
+    return Math.round((actualMarginUsed.value / totalEquityNum.value) * 1000) / 10;
+  }
+  return 0;
+});
 
 const ocoCoverage = computed(() => {
   const total = store.positions.length;
@@ -117,9 +140,9 @@ onMounted(async () => {
 
     <div class="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6 xl:gap-0">
     <BaseStat
-      :label="hasMultiVenue ? '组合总权益 (U)' : t('dash.matrix.kpi.equity')"
+      :label="hasMultiVenue ? `[${envBadgeText}] 组合总权益 (U)` : `[${envBadgeText}] ${t('dash.matrix.kpi.equity')}`"
       :value="totalAggregatedEquity"
-      :hint="t('dash.matrix.kpi.equityTip')"
+      :hint="hasMultiVenue ? `${envBadgeText}多所聚合权益` : t('dash.matrix.kpi.equityTip')"
     >
       <template #extra>
         <span class="num text-xs font-semibold" :class="todayNet >= 0 ? 'up' : 'down'">
@@ -157,8 +180,8 @@ onMounted(async () => {
     <BaseStat
       :label="t('dash.matrix.kpi.margin')"
       :value="`${fmtNum(marginUsage, 1)}%`"
-      :delta="posMargin > 0 ? `${fmtNum(posMargin, 0)} U` : undefined"
-      delta-tone="muted"
+      :delta="actualMarginUsed > 0 ? `${fmtNum(actualMarginUsed, 2)} U` : '0.00 U'"
+      :delta-tone="marginUsage > 70 ? 'down' : marginUsage > 30 ? 'warn' : 'muted'"
       :hint="t('dash.matrix.kpi.marginTip')"
      
     />
