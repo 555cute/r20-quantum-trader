@@ -16,8 +16,35 @@ const { t } = useI18n();
 
 const tab = ref<'positions' | 'orders'>('positions');
 
+type VenueFilter = 'all' | 'okx' | 'binance' | 'gate';
+const selectedVenue = ref<VenueFilter>('all');
+
 const positions = computed(() => store.positions);
 const orders = computed(() => store.pendingOrders);
+
+function getVenueOf(item: any): string {
+  const v = String(item?.venue || item?.exchange || '').toLowerCase();
+  if (v.includes('binance')) return 'binance';
+  if (v.includes('gate')) return 'gate';
+  return 'okx';
+}
+
+function getModeOf(item: any): 'LIVE' | 'DEMO' {
+  if (item?.account_mode) return item.account_mode.toUpperCase() === 'LIVE' ? 'LIVE' : 'DEMO';
+  if (item?.environment) return item.environment.toLowerCase() === 'live' ? 'LIVE' : 'DEMO';
+  if (item?.is_simulated !== undefined) return item.is_simulated ? 'DEMO' : 'LIVE';
+  return 'LIVE';
+}
+
+const filteredPositions = computed(() => {
+  if (selectedVenue.value === 'all') return positions.value;
+  return positions.value.filter((p) => getVenueOf(p) === selectedVenue.value);
+});
+
+const filteredOrders = computed(() => {
+  if (selectedVenue.value === 'all') return orders.value;
+  return orders.value.filter((o) => getVenueOf(o) === selectedVenue.value);
+});
 
 function posPnl(p: any): number {
   return Number(p.upl ?? 0);
@@ -38,23 +65,43 @@ function symOf(x: { instId?: string; name?: string }): string {
 
 <template>
   <div class="card flex h-full flex-col overflow-hidden">
-    <!-- 面板头：分段 + 计数 -->
-    <div class="flex items-center gap-2 border-b px-3 py-2.5" style="border-color: var(--line-1)">
-      <BaseSegmented
-        v-model="tab"
-        :options="[
-          { value: 'positions', label: `${t('dash.matrix.positions.tab')} ${positions.length}` },
-          { value: 'orders', label: `${t('dash.matrix.orders.tab')} ${orders.length}` },
-        ]"
-      />
-      <span v-if="tab === 'positions' && !positions.length" class="t-faint ms-auto hidden text-xs sm:block">
-        {{ t('dash.matrix.positions.aiManaged') }}
-      </span>
+    <!-- 面板头：分段 + 药丸筛选 + 计数 -->
+    <div class="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2.5" style="border-color: var(--line-1)">
+      <div class="flex items-center gap-2">
+        <BaseSegmented
+          v-model="tab"
+          :options="[
+            { value: 'positions', label: `${t('dash.matrix.positions.tab')} ${filteredPositions.length}` },
+            { value: 'orders', label: `${t('dash.matrix.orders.tab')} ${filteredOrders.length}` },
+          ]"
+        />
+        <span v-if="tab === 'positions' && !filteredPositions.length" class="t-faint hidden text-xs sm:block">
+          {{ t('dash.matrix.positions.aiManaged') }}
+        </span>
+      </div>
+
+      <!-- US-007 · 交易所筛选药丸 (Venue Filter Pills) -->
+      <div class="flex items-center gap-1 rounded-md p-0.5" style="background-color: var(--surface-2); border: 1px solid var(--line-1)">
+        <button
+          v-for="v in [
+            { key: 'all', label: '全部' },
+            { key: 'okx', label: 'OKX' },
+            { key: 'binance', label: 'Binance' },
+            { key: 'gate', label: 'Gate' },
+          ]"
+          :key="v.key"
+          class="px-2 py-0.5 rounded text-2xs transition-colors"
+          :style="selectedVenue === v.key ? { backgroundColor: 'var(--surface-3)', color: 'var(--ink-strong)', fontWeight: 'bold' } : { color: 'var(--ink-3)' }"
+          @click="selectedVenue = v.key as any"
+        >
+          {{ v.label }}
+        </button>
+      </div>
     </div>
 
     <!-- 持仓表 -->
     <div v-if="tab === 'positions'" class="scroll-y flex-1 overflow-x-auto">
-      <BaseEmpty v-if="!positions.length" :text="t('dash.matrix.positions.empty')" />
+      <BaseEmpty v-if="!filteredPositions.length" :text="t('dash.matrix.positions.empty')" />
       <table v-else class="table">
         <thead>
           <tr>
@@ -69,16 +116,29 @@ function symOf(x: { instId?: string; name?: string }): string {
         </thead>
         <tbody>
           <tr
-            v-for="p in positions"
+            v-for="p in filteredPositions"
             :key="p.instId + p.side"
             class="clickable"
             :title="t('dash.matrix.chart.pickHint')"
             @click="emit('pick-symbol', p.instId)"
           >
             <td>
-              <div class="flex items-center gap-2">
+              <div class="flex items-center gap-1.5 flex-wrap">
                 <span class="num font-semibold" style="color: var(--ink-strong)">{{ symOf(p) }}</span>
                 <DirTag :dir="p.side" />
+                <!-- US-007 · 交易所与环境模式标签 -->
+                <span
+                  class="badge text-3xs font-bold px-1 py-0.2 rounded"
+                  :style="getVenueOf(p) === 'binance' ? { color: '#f3ba2f', borderColor: '#f3ba2f33', backgroundColor: '#f3ba2f15' } : getVenueOf(p) === 'gate' ? { color: '#00be98', borderColor: '#00be9833', backgroundColor: '#00be9815' } : { color: '#3880ff', borderColor: '#3880ff33', backgroundColor: '#3880ff15' }"
+                >
+                  {{ getVenueOf(p).toUpperCase() }}
+                </span>
+                <span
+                  class="badge text-3xs px-1 py-0.2 rounded"
+                  :class="getModeOf(p) === 'LIVE' ? 'badge-up' : 'badge-warn'"
+                >
+                  {{ getModeOf(p) }}
+                </span>
               </div>
               <p v-if="p.stageDesc" class="t-faint text-2xs leading-tight">{{ p.stageDesc }}</p>
             </td>
@@ -110,7 +170,7 @@ function symOf(x: { instId?: string; name?: string }): string {
 
     <!-- 挂单表 -->
     <div v-else class="scroll-y flex-1 overflow-x-auto">
-      <BaseEmpty v-if="!orders.length" :text="t('dash.matrix.orders.empty')" />
+      <BaseEmpty v-if="!filteredOrders.length" :text="t('dash.matrix.orders.empty')" />
       <table v-else class="table">
         <thead>
           <tr>
@@ -124,16 +184,29 @@ function symOf(x: { instId?: string; name?: string }): string {
         </thead>
         <tbody>
           <tr
-            v-for="o in orders"
+            v-for="o in filteredOrders"
             :key="o.ordId"
             class="clickable"
             :title="t('dash.matrix.chart.pickHint')"
             @click="emit('pick-symbol', o.instId)"
           >
             <td>
-              <div class="flex items-center gap-2">
+              <div class="flex items-center gap-1.5 flex-wrap">
                 <span class="num font-semibold" style="color: var(--ink-strong)">{{ symOf(o) }}</span>
                 <DirTag :dir="orderDir(o)" />
+                <!-- US-007 · 交易所与环境模式标签 -->
+                <span
+                  class="badge text-3xs font-bold px-1 py-0.2 rounded"
+                  :style="getVenueOf(o) === 'binance' ? { color: '#f3ba2f', borderColor: '#f3ba2f33', backgroundColor: '#f3ba2f15' } : getVenueOf(o) === 'gate' ? { color: '#00be98', borderColor: '#00be9833', backgroundColor: '#00be9815' } : { color: '#3880ff', borderColor: '#3880ff33', backgroundColor: '#3880ff15' }"
+                >
+                  {{ getVenueOf(o).toUpperCase() }}
+                </span>
+                <span
+                  class="badge text-3xs px-1 py-0.2 rounded"
+                  :class="getModeOf(o) === 'LIVE' ? 'badge-up' : 'badge-warn'"
+                >
+                  {{ getModeOf(o) }}
+                </span>
               </div>
             </td>
             <td class="col-num">{{ fmtPrice(o.px) }}</td>
@@ -148,7 +221,7 @@ function symOf(x: { instId?: string; name?: string }): string {
           </tr>
         </tbody>
       </table>
-      <p v-if="orders.length" class="t-faint border-t px-3.5 py-2 text-xs" style="border-color: var(--line-1)">
+      <p v-if="filteredOrders.length" class="t-faint border-t px-3.5 py-2 text-xs" style="border-color: var(--line-1)">
         {{ t('dash.matrix.orders.aiManaged') }}
       </p>
     </div>

@@ -46,6 +46,9 @@ export interface PositionItem {
   tpTriggerPx?: number | string
   stageDesc?: string
   strategyTag?: string
+  venue?: string
+  environment?: string
+  account_mode?: string
 }
 
 export interface PendingOrderItem {
@@ -65,6 +68,9 @@ export interface PendingOrderItem {
   tp_px?: number
   tpTriggerPx?: string
   slTriggerPx?: string
+  venue?: string
+  environment?: string
+  account_mode?: string
 }
 
 export interface InstrumentFactor {

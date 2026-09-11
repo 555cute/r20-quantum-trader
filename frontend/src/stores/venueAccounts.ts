@@ -9,6 +9,20 @@ export type VenueEnv = 'demo' | 'live'
 export type VenueStatus = 'ready' | 'unavailable' | 'not_implemented' | 'degraded'
 export type VenueKey = 'okx' | 'gate' | 'binance'
 
+export interface PortfolioSummary {
+  environment: VenueEnv
+  total_equity: number
+  total_available: number
+  margin_used: number
+  utilization_pct: number
+  risk_level: string
+  positions_count: number
+  open_orders_count: number
+  active_venues_count: number
+  reporting_venues: string[]
+  asset_distribution: Record<VenueKey, { equity: number; share_pct: number }>
+}
+
 export interface VenueAccount {
   status: VenueStatus
   /** 未知一律 null（后端铁律：绝不填 0 冒充）；渲染层显「—」 */
@@ -25,6 +39,7 @@ const ENV_KEY = 'r20.venueAccounts.environment'
 export const useVenueAccountsStore = defineStore('venueAccounts', () => {
   const environment = ref<VenueEnv>(localStorage.getItem(ENV_KEY) === 'live' ? 'live' : 'demo')
   const venues = ref<Partial<Record<VenueKey, VenueAccount>> | null>(null)
+  const portfolioSummary = ref<PortfolioSummary | null>(null)
   const capturedAt = ref<number | null>(null)
   const loading = ref(false)
   const error = ref<string | null>(null)
@@ -42,14 +57,17 @@ export const useVenueAccountsStore = defineStore('venueAccounts', () => {
       const d = await api<{
         environment: VenueEnv
         venues: Partial<Record<VenueKey, VenueAccount>>
+        portfolio_summary?: PortfolioSummary
         captured_at_ms: number
       }>(`/api/v1/venue_accounts?environment=${environment.value}`)
       venues.value = d.venues
+      portfolioSummary.value = d.portfolio_summary || null
       capturedAt.value = d.captured_at_ms
       needsAuth.value = false
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       venues.value = null
+      portfolioSummary.value = null
       capturedAt.value = null
       needsAuth.value = /\(401\)|401|会话|登录/.test(msg)
       error.value = msg
@@ -64,9 +82,10 @@ export const useVenueAccountsStore = defineStore('venueAccounts', () => {
     environment.value = env
     localStorage.setItem(ENV_KEY, env)
     venues.value = null
+    portfolioSummary.value = null
     capturedAt.value = null
     void refresh()
   }
 
-  return { environment, venues, capturedAt, loading, error, needsAuth, refresh, setEnvironment }
+  return { environment, venues, portfolioSummary, capturedAt, loading, error, needsAuth, refresh, setEnvironment }
 })
