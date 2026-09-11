@@ -425,7 +425,8 @@ class GateAdapter(BaseExchangeAdapter):
                                  tp_px: Optional[float] = None,
                                  sl_px: Optional[float] = None,
                                  expiration: int = 604800,
-                                 price_type: int = 0) -> Dict[str, Any]:
+                                 price_type: int = 0,
+                                 **kwargs: Any) -> Dict[str, Any]:
         """挂 TP/SL 双腿 reduce_only 全平触发单；任一半途失败自动回滚已挂腿。"""
         inst = self.native_symbol(symbol)
         placed: Dict[str, Any] = {}
@@ -438,18 +439,30 @@ class GateAdapter(BaseExchangeAdapter):
             raise ExchangeCapabilityError("TP/SL 至少给一条")
         try:
             for kind, px, rule in legs:
+                initial: Dict[str, Any] = {
+                    "contract": inst, "size": 0, "price": "0",
+                    "close": True, "tif": "ioc", "reduce_only": True,
+                    "text": f"t-r20{kind}{int(time.time() * 1000) % 100000000}",
+                }
                 payload = {
-                    "initial": {
-                        "contract": inst, "size": 0, "price": "0",
-                        "close": True, "tif": "ioc", "reduce_only": True,
-                        "text": f"t-r20{kind}{int(time.time() * 1000) % 100000000}",
-                    },
+                    "initial": initial,
                     "trigger": {"strategy_type": 0, "price_type": price_type,
                                 "price": str(px), "rule": rule,
                                 "expiration": int(expiration)},
                 }
-                data = self.signed_request("POST", "/api/v4/futures/usdt/price_orders",
-                                           body=payload)
+                try:
+                    data = self.signed_request("POST", "/api/v4/futures/usdt/price_orders",
+                                               body=payload)
+                except GateAPIError as gerr:
+                    # 兼容双向持仓模式（dual mode）：close=true 会被拒，改用 auto_size 平仓
+                    if "AUTO_INVALID_PARAM_CLOSE" in gerr.label or "dual mode" in str(gerr):
+                        initial.pop("close", None)
+                        initial.pop("size", None)
+                        initial["auto_size"] = AUTO_SIZE_CLOSE_LONG if str(pos_side).lower() in ("long", "buy") else AUTO_SIZE_CLOSE_SHORT
+                        data = self.signed_request("POST", "/api/v4/futures/usdt/price_orders",
+                                                   body=payload)
+                    else:
+                        raise
                 oid = (data or {}).get("id") if isinstance(data, dict) else None
                 if not oid:
                     raise GateAPIError("bad_response", f"{kind} 触发单回执缺 id: {str(data)[:120]}")

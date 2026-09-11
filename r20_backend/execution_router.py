@@ -161,9 +161,13 @@ def open_protected_position(decision: Dict[str, Any], *,
 
     # 云端 TP/SL 双腿 + 回读验证；任何缺口撤入场单回滚
     try:
-        legs = ad.attach_protective_orders(asset, side, tp_px=tp, sl_px=sl,
-                                           expiration=trigger_expiration,
-                                           contracts=contracts)
+        try:
+            legs = ad.attach_protective_orders(asset, side, tp_px=tp, sl_px=sl,
+                                               expiration=trigger_expiration,
+                                               contracts=contracts)
+        except TypeError:
+            legs = ad.attach_protective_orders(asset, side, tp_px=tp, sl_px=sl,
+                                               expiration=trigger_expiration)
         open_orders = ad.list_protective_orders(asset)
         open_ids = {str(o.get("id") or o.get("algo_id")) for o in open_orders if isinstance(o, dict)}
         if str(legs.get("tp")) not in open_ids or str(legs.get("sl")) not in open_ids:
