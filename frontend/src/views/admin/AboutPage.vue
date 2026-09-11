@@ -104,6 +104,7 @@ onMounted(() => {
           </div>
           <div class="space-y-1.5" style="color: var(--ink-2);">
             <div>产品架构: <strong style="color: var(--ink-1);">{{ about.product?.name }}</strong></div>
+            <div>执行引擎: <span style="color: var(--ink-1);">三所平权对等架构 (OKX / Binance / Gate)</span></div>
             <div>系统版本: <strong style="color: var(--accent);">v{{ about.product?.version }}</strong></div>
             <div>网关控制面: <span style="color: var(--ink-1);">{{ about.product?.control_plane }} (v{{ about.product?.gateway_version }})</span></div>
             <div>运行环境: <span style="color: var(--ink-1);">Python {{ about.runtime?.python }}</span></div>
