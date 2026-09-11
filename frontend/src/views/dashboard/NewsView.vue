@@ -1,9 +1,7 @@
 <script setup lang="ts">
 /**
- * US-008 · 舆情快讯与重大黑天鹅情报看板：
- * 1. 置顶突发情报/黑天鹅熔断预警高亮卡 (Warning Glow)
- * 2. 币种情绪极性矩阵 (Coin Sentiment Polarity Matrix) 与点击联动筛选 (Click-to-filter)
- * 3. 多源公开快讯抓取 (CoinDesk / Cointelegraph / Binance CMS) 与新鲜度刷新指示
+ * 舆情情报看板（News & Macro Intelligence Terminal）
+ * 建立 OKX / Binance / Gate 三所对等公告、加密快讯与宏观情报的多源聚合与黑天鹅预警系统。
  */
 import { computed, ref } from 'vue';
 import {
@@ -17,6 +15,8 @@ import {
   Flame,
   TrendingUp,
   TrendingDown,
+  Search,
+  Layers,
 } from 'lucide-vue-next';
 import { useDashboardStore } from '../../stores/dashboard';
 import { useI18n } from '../../composables/useI18n';
@@ -31,14 +31,16 @@ const { t } = useI18n();
 
 // 选中的币种过滤状态（null 为不过滤展示全部）
 const selectedCoin = ref<string | null>(null);
-// 选中的来源过滤状态（all 为全部，支持 '加密快讯' | 'OKX官方' | '金十数据' | '全球宏观'）
+// 选中的来源过滤状态（对等三所 + 宏观 + 加密快讯）
 const selectedSource = ref<string>('all');
+// 关键词搜索
+const searchQuery = ref<string>('');
 
 const ni = computed<any>(() => (store.data as any)?.news_intelligence || {});
 const macro = computed(() => ni.value.macro_sentiment || '偏多震荡');
 const rawNews = computed<any[]>(() => ni.value.latest_news || []);
 const freshAt = computed(() => ni.value.news_fresh_at || ni.value.timestamp || '');
-const sourceReason = computed(() => ni.value.source_reason || '加密货币快讯 + 金十数据宏观快讯');
+const sourceReason = computed(() => ni.value.source_reason || '三所官方公告 + 加密快讯 + 全球宏观');
 const isSourceActive = computed(() => ni.value.source_available !== false);
 
 // 黑天鹅熔断状态
@@ -73,26 +75,74 @@ const coins = computed(() => {
 // 置顶快讯（首条高危或重要快讯）
 const pinnedNews = computed(() => {
   if (!rawNews.value.length) return null;
-  // 优先取 importance === 'high' 的第一条，否则取最新第一条
   const high = rawNews.value.find((n) => n.importance === 'high');
   return high || rawNews.value[0];
 });
 
-// 按选中币种与来源过滤后的快讯流
+// 对等分类筛选配置
+const sourceTabs = computed(() => [
+  { key: 'all', label: '全部', color: 'var(--ink-1)' },
+  { key: 'crypto', label: '加密快讯', color: '#10b981' },
+  { key: 'okx', label: 'OKX 公告', color: 'var(--venue-okx, #3880ff)' },
+  { key: 'binance', label: 'Binance', color: 'var(--venue-binance, #f3ba2f)' },
+  { key: 'gate', label: 'Gate.io', color: 'var(--venue-gate, #00be98)' },
+  { key: 'macro', label: '宏观数据', color: '#e02424' },
+]);
+
+// 过滤后的快讯列表
 const filteredNews = computed(() => {
   let list = rawNews.value;
+
+  // 1. 来源过滤
   if (selectedSource.value !== 'all') {
-    list = list.filter((item) => (item.platforms || []).some((p: string) => p.includes(selectedSource.value)));
+    const sKey = selectedSource.value.toLowerCase();
+    list = list.filter((item) => {
+      const plats = (item.platforms || []).map((p: string) => p.toLowerCase());
+      const title = String(item.title || '').toLowerCase();
+      const summary = String(item.summary || '').toLowerCase();
+
+      if (sKey === 'okx') {
+        return plats.some((p: string) => p.includes('okx')) || title.includes('okx') || title.includes('欧易');
+      }
+      if (sKey === 'binance') {
+        return plats.some((p: string) => p.includes('binance') || p.includes('币安')) || title.includes('binance') || title.includes('币安');
+      }
+      if (sKey === 'gate') {
+        return plats.some((p: string) => p.includes('gate') || p.includes('芝麻')) || title.includes('gate');
+      }
+      if (sKey === 'macro') {
+        return plats.some((p: string) => p.includes('金十') || p.includes('宏观')) || title.includes('cpi') || title.includes('非农') || title.includes('美联储');
+      }
+      if (sKey === 'crypto') {
+        return plats.some((p: string) => p.includes('加密') || p.includes('coindesk') || p.includes('cointelegraph')) || (!plats.some((p: string) => p.includes('okx') || p.includes('binance') || p.includes('gate') || p.includes('金十')));
+      }
+      return plats.some((p: string) => p.includes(selectedSource.value));
+    });
   }
-  if (!selectedCoin.value) return list;
-  const target = selectedCoin.value.toUpperCase();
-  return list.filter((item) => {
-    const coinList = (item.coins || []).map((c: string) => String(c).toUpperCase());
-    if (coinList.includes(target)) return true;
-    const title = String(item.title || '').toUpperCase();
-    const summary = String(item.summary || '').toUpperCase();
-    return title.includes(target) || summary.includes(target);
-  });
+
+  // 2. 搜索关键词过滤
+  if (searchQuery.value.trim()) {
+    const q = searchQuery.value.trim().toLowerCase();
+    list = list.filter((item) => {
+      const title = String(item.title || '').toLowerCase();
+      const summary = String(item.summary || '').toLowerCase();
+      return title.includes(q) || summary.includes(q);
+    });
+  }
+
+  // 3. 币种过滤
+  if (selectedCoin.value) {
+    const target = selectedCoin.value.toUpperCase();
+    list = list.filter((item) => {
+      const coinList = (item.coins || []).map((c: string) => String(c).toUpperCase());
+      if (coinList.includes(target)) return true;
+      const title = String(item.title || '').toUpperCase();
+      const summary = String(item.summary || '').toUpperCase();
+      return title.includes(target) || summary.includes(target);
+    });
+  }
+
+  return list;
 });
 
 function toggleCoinFilter(sym: string) {
@@ -103,26 +153,45 @@ function toggleCoinFilter(sym: string) {
   }
 }
 
-// 来源筛选按钮激活态：「加密快讯」用专属翡翠绿高亮，与金十红形成区隔
-function sourceBtnStyle(key: string): Record<string, string> {
-  if (selectedSource.value !== key) return { color: 'var(--ink-3)' };
-  if (key === '加密快讯') {
-    return { backgroundColor: '#10b98128', color: '#10b981', fontWeight: 'bold' };
-  }
-  return { backgroundColor: 'var(--surface-3)', color: 'var(--ink-strong)', fontWeight: 'bold' };
-}
-
 function labelCls(l: string): string {
   return l === 'bullish' ? 'up' : l === 'bearish' ? 'down' : '';
 }
 function labelTxt(l: string): string {
-  return l === 'bullish' ? '偏多' : l === 'bearish' ? '偏空' : '震荡';
+  return l === 'bullish' ? '偏多' : l === 'bearish' ? '偏空' : '中性';
 }
 function impCls(i: string): string {
   return i === 'high' ? 'badge-down' : i === 'mid' ? 'badge-warn' : 'badge-mono';
 }
 function impTxt(i: string): string {
   return i === 'high' ? '重大' : i === 'mid' ? '关注' : '快讯';
+}
+
+function getPlatformBadge(plat: string) {
+  const p = plat.toLowerCase();
+  if (p.includes('okx')) {
+    return { label: 'OKX', color: 'var(--venue-okx, #3880ff)', bg: 'rgba(56, 128, 255, 0.12)', border: 'rgba(56, 128, 255, 0.3)' };
+  }
+  if (p.includes('binance') || p.includes('币安')) {
+    return { label: 'Binance', color: 'var(--venue-binance, #f3ba2f)', bg: 'rgba(243, 186, 47, 0.12)', border: 'rgba(243, 186, 47, 0.3)' };
+  }
+  if (p.includes('gate')) {
+    return { label: 'Gate', color: 'var(--venue-gate, #00be98)', bg: 'rgba(0, 190, 152, 0.12)', border: 'rgba(0, 190, 152, 0.3)' };
+  }
+  if (p.includes('金十') || p.includes('宏观')) {
+    return { label: '宏观', color: '#e02424', bg: 'rgba(224, 36, 36, 0.12)', border: 'rgba(224, 36, 36, 0.3)' };
+  }
+  return { label: plat, color: '#10b981', bg: 'rgba(16, 185, 129, 0.12)', border: 'rgba(16, 185, 129, 0.3)' };
+}
+
+function itemSentiment(item: any): { label: string; tone: string } {
+  const s = String(item.sentiment || item.polarity || '').toLowerCase();
+  if (s.includes('bull') || s.includes('多') || s.includes('positive')) {
+    return { label: '偏多', tone: 'up' };
+  }
+  if (s.includes('bear') || s.includes('空') || s.includes('negative')) {
+    return { label: '偏空', tone: 'down' };
+  }
+  return { label: '中性', tone: 'muted' };
 }
 
 async function refreshNews() {
@@ -136,7 +205,7 @@ async function refreshNews() {
     <div class="flex flex-wrap items-center justify-between gap-2.5">
       <PageHead :title="t('dash.news.title')" :desc="t('dash.news.desc')" />
 
-      <!-- 数据源与刷新指示器 (Auto-refresh & Freshness Indicators) -->
+      <!-- 数据源与刷新指示器 -->
       <div class="flex items-center gap-2 text-2xs" style="color: var(--ink-3)">
         <div class="flex items-center gap-1.5 rounded-full px-2.5 py-1 border" style="background-color: var(--surface-1); border-color: var(--line-1)">
           <span class="relative flex h-2 w-2">
@@ -149,7 +218,8 @@ async function refreshNews() {
         </div>
 
         <button
-          class="btn btn-quiet btn-icon btn-sm"
+          type="button"
+          class="btn btn-quiet btn-icon btn-sm cursor-pointer"
           :disabled="store.isRefreshing"
           title="立即刷新舆情数据"
           @click="refreshNews"
@@ -159,7 +229,7 @@ async function refreshNews() {
       </div>
     </div>
 
-    <!-- 1. 置顶突发重大情报 / 黑天鹅预警卡片 (Warning Glow Highlight Card) -->
+    <!-- 1. 置顶突发重大情报 / 黑天鹅预警卡片 -->
     <div
       class="card relative overflow-hidden p-3.5 transition-all duration-300 border"
       :style="isCbActive
@@ -201,7 +271,7 @@ async function refreshNews() {
         </div>
       </div>
 
-      <!-- 常态置顶突发情报态 (Breaking Macro Intelligence) -->
+      <!-- 常态置顶突发情报态 -->
       <div v-else-if="pinnedNews" class="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
         <div class="flex items-start gap-3 min-w-0">
           <div class="p-2 rounded-lg shrink-0" style="background-color: rgba(56, 128, 255, 0.1)">
@@ -210,9 +280,20 @@ async function refreshNews() {
           <div class="min-w-0">
             <div class="flex items-center gap-2 flex-wrap">
               <span class="badge badge-accent font-bold text-2xs">🔥 置顶突发 BREAKING</span>
-              <span class="badge badge-mono text-2xs" v-for="p in (pinnedNews.platforms || []).slice(0, 2)" :key="p">{{ p }}</span>
+              <span
+                v-for="p in (pinnedNews.platforms || []).slice(0, 2)"
+                :key="p"
+                class="badge text-2xs font-semibold"
+                :style="{
+                  color: getPlatformBadge(p).color,
+                  backgroundColor: getPlatformBadge(p).bg,
+                  borderColor: getPlatformBadge(p).border,
+                }"
+              >
+                {{ getPlatformBadge(p).label }}
+              </span>
               <span class="t-faint text-2xs num">{{ fmtHM(pinnedNews.time) }} · <TimeAgo :time="pinnedNews.time" /></span>
-              <span class="badge badge-accent text-2xs">宏观：{{ macro }}</span>
+              <span class="badge badge-quiet text-2xs">宏观：{{ macro }}</span>
             </div>
             <a
               :href="pinnedNews.url || '#'"
@@ -230,7 +311,7 @@ async function refreshNews() {
           </div>
         </div>
         <div class="shrink-0 flex items-center gap-2">
-          <div class="flex items-center gap-1.5 text-2xs font-semibold px-2 py-1 rounded border" style="background-color: var(--up-bg); border-color: var(--up-line); color: var(--up)">
+          <div class="flex items-center gap-1.5 text-2xs font-semibold px-2.5 py-1 rounded border" style="background-color: var(--up-bg); border-color: var(--up-line); color: var(--up)">
             <ShieldCheck class="h-3.5 w-3.5" />
             黑天鹅哨兵 7×24H 防御中
           </div>
@@ -240,7 +321,7 @@ async function refreshNews() {
 
     <!-- 2. 主体分栏：左·币种情绪极性矩阵，右·快讯流 -->
     <div class="grid grid-cols-1 gap-3.5 xl:grid-cols-12">
-      <!-- 左：币种情绪极性矩阵 (Coin Sentiment Polarity Matrix) -->
+      <!-- 左：币种情绪极性矩阵 -->
       <div class="card overflow-hidden xl:col-span-4 flex flex-col">
         <div class="flex items-center justify-between border-b px-3.5 py-2.5" style="border-color: var(--line-1)">
           <div>
@@ -282,7 +363,7 @@ async function refreshNews() {
               <span class="num text-xs font-bold" style="color: var(--ink-strong)">{{ c.sym }}</span>
             </span>
 
-            <!-- 双极性多空能量槽 (Polarity Energy Bar) -->
+            <!-- 双极性多空能量槽 -->
             <div class="min-w-0 flex-1">
               <div class="flex h-2 overflow-hidden rounded-full" style="background-color: var(--surface-1)">
                 <div :style="{ width: c.bull + '%', backgroundColor: 'var(--up)' }" :title="`多头占比: ${c.bull}%`" />
@@ -313,22 +394,25 @@ async function refreshNews() {
 
       <!-- 右：快讯流 (Intelligence Feed) -->
       <div class="card overflow-hidden xl:col-span-8 flex flex-col">
-        <div class="flex items-center justify-between border-b px-3.5 py-2.5 flex-wrap gap-2" style="border-color: var(--line-1)">
-          <div class="flex items-center gap-2 flex-wrap">
-            <h2 class="text-sm font-bold" style="color: var(--ink-strong)">{{ t('dash.news.feed.title') }}</h2>
-            <!-- 来源分类筛选按钮 -->
-            <div class="flex items-center gap-0.5 p-0.5 rounded-md text-2xs" style="background-color: var(--surface-2); border: 1px solid var(--line-1);">
+        <!-- 工具栏：分类筛选 + 实时搜索 -->
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between border-b px-3.5 py-2.5 gap-2.5" style="border-color: var(--line-1)">
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <h2 class="text-sm font-bold mr-1" style="color: var(--ink-strong)">{{ t('dash.news.feed.title') }}</h2>
+            <!-- 对等分类筛选器 -->
+            <div class="flex items-center gap-0.5 p-0.5 rounded-lg text-2xs" style="background-color: var(--surface-2); border: 1px solid var(--line-1);">
               <button
-                v-for="s in [
-                  { key: 'all', label: '全部' },
-                  { key: '加密快讯', label: '加密快讯' },
-                  { key: '金十数据', label: '金十数据' },
-                  { key: '全球宏观', label: '宏观快讯' },
-                  { key: 'OKX官方', label: 'OKX风控' },
-                ]"
+                v-for="s in sourceTabs"
                 :key="s.key"
-                class="px-2 py-0.5 rounded transition-colors"
-                :style="sourceBtnStyle(s.key)"
+                type="button"
+                class="px-2 py-0.5 rounded transition-all cursor-pointer"
+                :style="selectedSource === s.key
+                  ? {
+                      backgroundColor: 'var(--surface-3)',
+                      color: s.color,
+                      fontWeight: 'bold',
+                      boxShadow: '0 1px 2px rgba(0,0,0,0.15)',
+                    }
+                  : { color: 'var(--ink-3)' }"
                 @click="selectedSource = s.key"
               >
                 {{ s.label }}
@@ -338,18 +422,31 @@ async function refreshNews() {
               <Filter class="h-2.5 w-2.5" /> {{ selectedCoin }} 过滤
             </span>
           </div>
+
+          <!-- 搜索与重置 -->
           <div class="flex items-center gap-2">
-            <span class="t-faint text-2xs">共 {{ filteredNews.length }} 条快讯</span>
+            <div class="relative flex items-center">
+              <Search class="h-3 w-3 absolute left-2 text-[var(--ink-3)]" />
+              <input
+                v-model="searchQuery"
+                type="text"
+                placeholder="搜索快讯关键词…"
+                class="h-7 w-32 sm:w-44 pl-6 pr-2 rounded-md border text-2xs bg-transparent outline-none transition-all focus:w-48"
+                style="border-color: var(--line-1); color: var(--ink-1)"
+              />
+            </div>
             <button
-              v-if="selectedCoin || selectedSource !== 'all'"
-              class="btn btn-ghost btn-sm text-2xs"
-              @click="selectedCoin = null; selectedSource = 'all'"
+              v-if="selectedCoin || selectedSource !== 'all' || searchQuery"
+              type="button"
+              class="btn btn-ghost btn-sm text-2xs cursor-pointer"
+              @click="selectedCoin = null; selectedSource = 'all'; searchQuery = ''"
             >
-              重置筛选
+              重置
             </button>
           </div>
         </div>
 
+        <!-- 快讯内容流 -->
         <BaseEmpty v-if="!filteredNews.length" :text="selectedCoin ? `暂无与 ${selectedCoin} 相关的快讯` : t('dash.news.feed.empty')" />
         <div v-else class="flex-1 max-h-[640px] divide-y overflow-y-auto" style="--tw-divide-y-reverse:0">
           <a
@@ -361,23 +458,33 @@ async function refreshNews() {
             class="group block px-3.5 py-3 transition-colors hover:bg-[var(--surface-3)]"
             style="border-color: var(--line-1)"
           >
-            <!-- 顶栏：影响度 + 来源平台 + 币种标签 + 时间 -->
+            <!-- 顶栏：影响度 + 来源平台 + 情绪药丸 + 币种标签 + 时间 -->
             <div class="flex items-center gap-2 flex-wrap">
               <span class="badge font-bold" :class="impCls(item.importance)">{{ impTxt(item.importance) }}</span>
+
+              <!-- 交易所/平台品牌徽章 -->
               <span
                 v-for="plat in (item.platforms || [])"
                 :key="plat"
-                class="badge text-3xs font-bold"
-                :style="plat === '加密快讯'
-                  ? { backgroundColor: '#10b98118', borderColor: '#10b98138', color: '#10b981' }
-                  : plat === 'OKX官方'
-                  ? { backgroundColor: '#3880ff15', borderColor: '#3880ff33', color: '#3880ff' }
-                  : plat === '金十数据'
-                  ? { backgroundColor: '#e0242415', borderColor: '#e0242433', color: '#e02424' }
-                  : { backgroundColor: 'var(--surface-3)', borderColor: 'var(--line-1)', color: 'var(--ink-2)' }"
+                class="badge text-3xs font-bold border"
+                :style="{
+                  color: getPlatformBadge(plat).color,
+                  backgroundColor: getPlatformBadge(plat).bg,
+                  borderColor: getPlatformBadge(plat).border,
+                }"
               >
-                {{ plat }}
+                {{ getPlatformBadge(plat).label }}
               </span>
+
+              <!-- 情绪药丸 -->
+              <span
+                class="badge text-3xs"
+                :class="itemSentiment(item).tone === 'up' ? 'badge-up' : itemSentiment(item).tone === 'down' ? 'badge-down' : 'badge-quiet'"
+              >
+                {{ itemSentiment(item).label }}
+              </span>
+
+              <!-- 关联标的标签 -->
               <span
                 v-for="cc in (item.coins || []).slice(0, 3)"
                 :key="cc"
@@ -386,6 +493,7 @@ async function refreshNews() {
               >
                 {{ cc }}
               </span>
+
               <span class="t-faint ms-auto text-2xs num">{{ fmtHM(item.time) }} · <TimeAgo :time="item.time" /></span>
             </div>
 
