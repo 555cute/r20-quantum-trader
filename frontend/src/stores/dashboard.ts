@@ -1,6 +1,72 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { DashboardResponse, InstrumentFactor, PositionItem, PendingOrderItem } from '../types/dashboard'
+import { VENUE_KEYS, normalizeEnv, normalizeVenue, venueOfRecord, type VenueEnv, type VenueKey } from '../utils/venueMeta'
+import { venueOfSymbol } from '../utils/instId'
+
+/**
+ * US-002 · 大屏聚合 store：**场所对等**的数据视图。
+ *
+ * 平权改造要点（旧版把「无 venue 字段」的记录一律默认成 OKX，是单所偏置根因）：
+ *   - `venueKey` 一律经 `venueOfRecord`（显式 venue/exchange 优先，其次合约码
+ *     格式反推）得出，真未知 → null，**绝不默认任何所**；
+ *   - 逐所统计恒定遍历 `VENUE_KEYS`，另设 `unknown` 桶如实暴露归属不明；
+ *   - 轮询失败按指数退避重试并在 `error` 中说明，页面隐藏时自动暂停，
+ *     三所数据始终来自同一次 `/api/all` 聚合快照（不存在新旧错配）。
+ */
+
+/** 带场所归属的记录视图（原字段全量保留，只增不改） */
+export type VenueTagged<T> = T & {
+  venueKey: VenueKey | null
+  /** 归一后的资金环境档；后端未标 → null（渲染层显「—」） */
+  envKey: VenueEnv | null
+}
+
+/** 逐所计数（三所恒定 + unknown 桶） */
+export type VenueCounts = Record<VenueKey | 'unknown', number>
+
+/** 跨所健康行（/api/all cross_venue.venues 归一） */
+export interface CrossVenueHealthRow {
+  key: VenueKey
+  okCount: number
+  failCount: number
+  avgMs: number | null
+  testnet: boolean
+  present: boolean
+}
+
+/** 跨所逐币对照行（by_asset 优先，symbols 作旧快照兼容回退） */
+export interface CrossVenueAssetRow {
+  base: string
+  okxLast: number | null
+  binanceLast: number | null
+  gateLast: number | null
+  binanceBasisPct: number | null
+  gateBasisPct: number | null
+  binanceLs: number | null
+  gateLs: number | null
+  binanceFundingPct: number | null
+  gateFundingPct: number | null
+}
+
+function finiteOrNull(v: unknown): number | null {
+  if (v === null || v === undefined || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) ? n : null
+}
+
+function tagRecord(item: any): { venueKey: VenueKey | null; envKey: VenueEnv | null } {
+  return {
+    venueKey: venueOfRecord(item, venueOfSymbol),
+    envKey: item?.environment || item?.account_mode || item?.is_simulated !== undefined
+      ? normalizeEnv(item.environment ?? item.account_mode ?? (item.is_simulated ? 'demo' : 'live'))
+      : null,
+  }
+}
+
+function emptyCounts(): VenueCounts {
+  return { okx: 0, binance: 0, gate: 0, unknown: 0 }
+}
 
 export const useDashboardStore = defineStore('dashboard', () => {
   const activeTab = ref<'trading' | 'factors' | 'news' | 'lab' | 'history'>('trading')
@@ -12,11 +78,32 @@ export const useDashboardStore = defineStore('dashboard', () => {
   const isConnected = ref<boolean>(true)
   const pollingTimer = ref<any>(null)
   const showAboutModal = ref<boolean>(false)
+  /** 连续失败次数（指数退避依据）与当前轮询节拍 */
+  const consecutiveFailures = ref<number>(0)
+  const baseIntervalMs = ref<number>(3000)
+  const pollingPaused = ref<boolean>(false)
 
   // Getters
   const account = computed(() => data.value?.account || null)
   const positions = computed<PositionItem[]>(() => data.value?.positions_summary?.items || [])
   const pendingOrders = computed<PendingOrderItem[]>(() => data.value?.pending_orders || [])
+
+  /** 持仓（带场所归属）：三所同构，未知归属显式 null。 */
+  const positionsView = computed<VenueTagged<PositionItem>[]>(() =>
+    positions.value.map((p: any) => ({ ...p, ...tagRecord(p) })))
+  /** 挂单（带场所归属）。 */
+  const ordersView = computed<VenueTagged<PendingOrderItem>[]>(() =>
+    pendingOrders.value.map((o: any) => ({ ...o, ...tagRecord(o) })))
+
+  /** 逐所持仓/挂单计数（恒定 3 所 + unknown 桶，供筛选器计数徽章共用）。 */
+  const venueBreakdown = computed(() => {
+    const pos = emptyCounts()
+    const ord = emptyCounts()
+    for (const p of positionsView.value) pos[p.venueKey ?? 'unknown'] += 1
+    for (const o of ordersView.value) ord[o.venueKey ?? 'unknown'] += 1
+    return { positions: pos, orders: ord }
+  })
+
   const factors = computed<InstrumentFactor[]>(() => {
     const rawFactors = data.value?.factors || []
     const libInstruments: any[] = (data.value as any)?.factor_library?.instruments || (data.value as any)?.factor_library_snapshot?.instruments || []
@@ -74,11 +161,67 @@ export const useDashboardStore = defineStore('dashboard', () => {
   const logs = computed(() => [...(data.value?.logs || [])].reverse())
   const isStale = computed(() => data.value?.is_stale ?? false)
 
+  /* ———— 跨所协调快照（/api/all cross_venue，三所对等消费面） ———— */
+
+  const crossVenue = computed<any>(() => (data.value as any)?.cross_venue || null)
+
+  /** 三所取数健康（恒定 3 行，顺序 = VENUE_KEYS）。 */
+  const crossVenueHealth = computed<CrossVenueHealthRow[]>(() => {
+    const v = crossVenue.value?.venues || {}
+    return VENUE_KEYS.map((key) => {
+      const x = v[key]
+      if (!x || typeof x !== 'object') {
+        return { key, okCount: 0, failCount: 0, avgMs: null, testnet: false, present: false }
+      }
+      return {
+        key,
+        okCount: Array.isArray(x.ok) ? x.ok.length : 0,
+        failCount: x.failed && typeof x.failed === 'object' ? Object.keys(x.failed).length : 0,
+        avgMs: finiteOrNull(x.avg_ms),
+        testnet: !!x.testnet,
+        present: true,
+      }
+    })
+  })
+
+  /** 逐币三所对照（by_asset 优先，symbols 兼容旧快照）。 */
+  const crossVenueAssets = computed<Record<string, CrossVenueAssetRow>>(() => {
+    const cv = crossVenue.value || {}
+    const src = { ...(cv.symbols || {}), ...(cv.by_asset || {}) }
+    const out: Record<string, CrossVenueAssetRow> = {}
+    for (const [raw, row] of Object.entries<any>(src)) {
+      const base = normalizeVenue(raw) ? '' : String(raw || '').toUpperCase().replace(/[-_]/g, '')
+      if (!base || !row || typeof row !== 'object') continue
+      out[base] = {
+        base,
+        okxLast: finiteOrNull(row.okx_last ?? row.okx),
+        binanceLast: finiteOrNull(row.bin_last),
+        gateLast: finiteOrNull(row.gate_last),
+        binanceBasisPct: finiteOrNull(row.bin_basis_pct),
+        gateBasisPct: finiteOrNull(row.gate_basis_pct),
+        binanceLs: finiteOrNull(row.bin_ls),
+        gateLs: finiteOrNull(row.gate_ls),
+        binanceFundingPct: finiteOrNull(row.bin_funding_pct),
+        gateFundingPct: finiteOrNull(row.gate_funding_pct),
+      }
+    }
+    return out
+  })
+
+  function crossVenueRow(symbol: unknown): CrossVenueAssetRow | null {
+    const key = String(symbol ?? '').toUpperCase().replace(/[-_]/g, '').replace(/USDT$/, '')
+    return crossVenueAssets.value[key] || null
+  }
+
+  /** 组合风险占用（portfolio_risk，三所合并口径） */
+  const portfolioRisk = computed<any>(() => (data.value as any)?.portfolio_risk || null)
+
   // Actions
   async function fetchDashboard(silent = false) {
     if (!silent) {
       isRefreshing.value = true
     }
+    loading.value = true
     try {
       const resp = await fetch(`/api/all?_t=${Date.now()}`, {
         headers: {
@@ -93,10 +236,14 @@ export const useDashboardStore = defineStore('dashboard', () => {
       lastUpdated.value = new Date()
       isConnected.value = true
       error.value = null
+      consecutiveFailures.value = 0
     } catch (err: any) {
       console.error('[DashboardStore] fetch failed:', err)
       error.value = err.message || '获取数据失败'
       isConnected.value = false
+      consecutiveFailures.value += 1
+      // 失败后自动降频（最长 30s），避免持续故障时把网关打满
+      if (pollingTimer.value) restartTimer()
     } finally {
       loading.value = false
       if (!silent) {
@@ -107,18 +254,47 @@ export const useDashboardStore = defineStore('dashboard', () => {
     }
   }
 
+  /** 当前节拍：无故障 = 基准间隔；连续失败按 2 的幂退避，封顶 30s。 */
+  function currentIntervalMs(): number {
+    const base = baseIntervalMs.value || 3000
+    const n = consecutiveFailures.value
+    if (n <= 0) return base
+    return Math.min(base * 2 ** Math.min(n, 4), 30_000)
+  }
+
+  function restartTimer() {
+    if (pollingTimer.value) clearInterval(pollingTimer.value)
+    pollingTimer.value = setInterval(() => {
+      if (pollingPaused.value) return
+      fetchDashboard(true)
+    }, currentIntervalMs())
+  }
+
+  /** 页面不可见时暂停轮询（三所数据同等「冻结」，回到前台立即补一次）。 */
+  function onVisibilityChange() {
+    const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden'
+    pollingPaused.value = hidden
+    if (!hidden && pollingTimer.value) void fetchDashboard(true)
+  }
+
   function startPolling(intervalMs = 3000) {
     stopPolling()
+    baseIntervalMs.value = intervalMs
     fetchDashboard(false)
-    pollingTimer.value = setInterval(() => {
-      fetchDashboard(true)
-    }, intervalMs)
+    restartTimer()
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVisibilityChange)
+      pollingPaused.value = document.visibilityState === 'hidden'
+    }
   }
 
   function stopPolling() {
     if (pollingTimer.value) {
       clearInterval(pollingTimer.value)
       pollingTimer.value = null
+    }
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', onVisibilityChange)
     }
   }
 
@@ -133,11 +309,21 @@ export const useDashboardStore = defineStore('dashboard', () => {
     account,
     positions,
     pendingOrders,
+    positionsView,
+    ordersView,
+    venueBreakdown,
     factors,
     macroAssessment,
     llmRuntime,
     logs,
     isStale,
+    crossVenue,
+    crossVenueHealth,
+    crossVenueAssets,
+    crossVenueRow,
+    portfolioRisk,
+    consecutiveFailures,
+    pollingPaused,
     showAboutModal,
     fetchDashboard,
     startPolling,
