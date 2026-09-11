@@ -109,6 +109,9 @@ def _read_raw_routing() -> Dict[str, Any]:
 #: 手动选所合法值 = 注册表已登记场所 + auto（不硬编码场所名单，新所登记即生效）
 VALID_PREFERRED_VENUES = tuple(sorted(set(registered_venues()) | {"auto"}))
 
+#: 选所路由模式（架构 A/B/C 三档；split 执行面接线前仅在证据中给出拆单方案）
+VALID_ROUTING_MODES = ("auto", "balanced", "split")
+
 
 def load_preferred_venue(raw: Dict[str, Any] = None) -> str:
     """US-003 手动选所优先项：顶层 preferred_venue ∈ {okx,binance,gate,auto}。
@@ -131,10 +134,46 @@ def load_preferred_venue(raw: Dict[str, Any] = None) -> str:
 
 
 def load_routing_mode(raw: Dict[str, Any] = None) -> str:
-    """选所路由模式：'auto'(纯成本最优) | 'balanced'(多所均衡轮动开单)。"""
+    """选所路由模式：'auto'(最优执行B) | 'balanced'(均衡轮换A) | 'split'(资金拆分C)。
+
+    非法值/缺失回退 'balanced'（三所平权改造后的系统基线）并 warn——
+    与 preferred_venue 同族 fail-safe：配置写错绝不阻断交易链，也绝不猜。
+    """
     data = _read_raw_routing() if raw is None else raw
-    mode = str(data.get("routing_mode", "auto")).strip().lower()
-    return mode if mode in ("auto", "balanced", "split") else "auto"
+    key = str(data.get("routing_mode") or "").strip().lower()
+    if key in VALID_ROUTING_MODES:
+        return key
+    if key:
+        print(f"[venue_routing] warn: routing_mode 非法值 {data.get('routing_mode')!r}"
+              f"（允许 {list(VALID_ROUTING_MODES)}），回退 balanced")
+    else:
+        print("[venue_routing] warn: 配置缺 routing_mode 字段，回退 balanced（均衡轮动基线）")
+    return "balanced"
+
+
+def save_routing_mode(mode: str) -> bool:
+    """写顶层 routing_mode（读-改-写原子替换，其余键原样保留）。"""
+    key = str(mode or "").strip().lower()
+    if key not in VALID_ROUTING_MODES:
+        print(f"[venue_routing] 拒绝写入非法 routing_mode: {mode!r}")
+        return False
+    data = _read_raw_routing()
+    data["routing_mode"] = key
+    tmp = ROUTING_FILE.with_suffix(".json.tmp")
+    try:
+        ROUTING_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n",
+                       encoding="utf-8")
+        os.replace(tmp, ROUTING_FILE)
+        return True
+    except Exception as exc:
+        print(f"[venue_routing] 写盘失败（不改动原配置）: {exc}")
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except Exception:
+            pass
+        return False
 
 
 def save_preferred_venue(venue: str) -> bool:

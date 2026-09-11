@@ -101,7 +101,7 @@ class _WiringSandbox(unittest.TestCase):
     def _submit(self, inst_id="BTC-USDT-SWAP", side="buy", pos_side="long",
                 size=10.0, price=100.0, tp=115.0, sl=95.0, notional=300.0,
                 margin=60.0, intent="BTC:i1", limit=None, preferred="auto",
-                executable=None, env=None, health=None):
+                executable=None, env=None, health=None, mode="auto"):
         """跑一次真实 submit_protected_limit_order；返回 (ok, ref)。"""
         if limit:
             # 总上限的单一事实源是 env（trader 读它建 manager）
@@ -119,6 +119,7 @@ class _WiringSandbox(unittest.TestCase):
             patch.object(trader, "VENUE_HEALTH_FILE", health_file),
             patch.object(trader, "OPEN_INTENT_FILE", os.path.join(self.tmp, "intents.json")),
             patch.object(trader, "load_preferred_venue", lambda: preferred),
+            patch.object(trader, "load_routing_mode", lambda: mode),
             patch.object(trader, "current_environment", lambda values=None: live_env),
             patch.object(trader, "selected_environment", lambda values=None: live_env),
             patch.object(trader, "reservation_manager", lambda: mgr),
@@ -433,6 +434,23 @@ class TestPreferredVenueConfigCompatibility(unittest.TestCase):
                          set(routing_policy.registered_venues()) | {"auto"},
                          "合法值来自注册表，不硬编码场所名单")
 
+    def test_routing_mode_roundtrip_missing_illegal_and_sibling_preserved(self):
+        self.file.write_text(json.dumps({"preferred_venue": "auto",
+                                         "gate": {"assets": ["BTC"]}}), encoding="utf-8")
+        buf = io.StringIO()
+        with patch.object(routing_policy, "ROUTING_FILE", self.file), redirect_stdout(buf):
+            self.assertEqual(routing_policy.load_routing_mode(), "balanced",
+                             "缺字段回退三所平权基线 balanced")
+            self.assertIn("缺 routing_mode", buf.getvalue())
+            self.assertFalse(routing_policy.save_routing_mode("nope"), "非法值拒写")
+            self.assertTrue(routing_policy.save_routing_mode("auto"))
+            self.assertEqual(routing_policy.load_routing_mode(), "auto")
+            self.assertFalse(routing_policy.save_routing_mode("split; rm -rf"))
+        raw = json.loads(self.file.read_text(encoding="utf-8"))
+        self.assertEqual(raw["preferred_venue"], "auto", "兄弟键不被抹掉")
+        self.assertEqual(raw["gate"]["assets"], ["BTC"], "gate 子树形状不变")
+        self.assertEqual(raw["routing_mode"], "auto")
+
 
 class TestCrossVenueCap(_WiringSandbox):
     """跨所封顶：开闸所持仓纳入配额；读取失败 fail-closed；未开闸所跳过。"""
@@ -503,6 +521,55 @@ class TestCrossVenueCap(_WiringSandbox):
             ready={"gate": True})
         self.assertTrue(ok, err)
         self.assertEqual(snap["gate"][0]["side"], "short")
+
+
+class TestRoutingModesWiring(_WiringSandbox):
+    """A/B/C 三模式接线：balanced 轮动证据 / split 拆单证据 / auto 基线不变。"""
+
+    _ALL3 = _health_with("okx", "binance", "gate")
+
+    def test_balanced_mode_rotates_and_records_evidence(self):
+        self._write_cache(["BTC-USDT-SWAP"])
+        from r20_backend import execution_router as er_mod
+        winners = set()
+        fake = er_mod.RouteResult(ok=True, venue="mock", stage="done", order_id="MOCK-1")
+        for inst in ("BTC-USDT-SWAP", "ETH-USDT-SWAP", "SOL-USDT-SWAP"):
+            if inst != "BTC-USDT-SWAP":
+                self._write_cache([inst])
+            # 轮动可能命中 gate/binance：双闸真实存在（路由 fake 开闸 ≠ 执行层放行），
+            # 故整段分发器 mock——本用例钉的是「选所证据」不是执行链
+            with patch.object(er_mod, "open_protected_position", return_value=fake):
+                ok, ref = self._submit(inst_id=inst, preferred="auto", mode="balanced",
+                                       executable={"okx": True, "binance": True, "gate": True},
+                                       health=self._ALL3, intent=f"{inst}:i1")
+            self.assertTrue(ok, f"{inst}: {ref} | {self.out}")
+            vd = self._venue_decision(inst)
+            self.assertEqual(vd["reason_code"], "OK_BALANCED", vd["reasons"])
+            winners.add(vd["venue"])
+        self.assertGreaterEqual(len(winners), 1)
+
+    def test_split_mode_persists_allocation_evidence(self):
+        self._write_cache(["BTC-USDT-SWAP"])
+        ok, ref = self._submit(preferred="auto", mode="split", notional=900.0,
+                               executable={"okx": True, "binance": True, "gate": True},
+                               health=self._ALL3)
+        self.assertTrue(ok, ref)
+        vd = self._venue_decision()
+        alloc = vd.get("allocation")
+        self.assertTrue(alloc and len(alloc) >= 2, f"split 模式应给出多所拆单方案: {alloc}")
+        self.assertTrue(all({"venue", "amount_usdt"} <= set(s) for s in alloc), alloc)
+
+    def test_auto_mode_unchanged_by_default(self):
+        self._write_cache(["BTC-USDT-SWAP"])
+        ok, ref = self._submit(preferred="auto", mode="auto",
+                               executable={"okx": True, "binance": True, "gate": True},
+                               health=self._ALL3)
+        self.assertTrue(ok, ref)
+        vd = self._venue_decision()
+        self.assertNotEqual(vd["reason_code"], "OK_BALANCED")
+        self.assertIsNone(vd["allocation"], "auto/split_enabled 关：不得给出拆单方案")
+        # 三所全开闸时现任所 OKX 凭 bonus+滞回胜出（最优执行语义）
+        self.assertEqual(vd["venue"], "okx")
 
 
 if __name__ == "__main__":

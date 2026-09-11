@@ -407,10 +407,16 @@ class BinanceExecutionAndProtectionTests(unittest.TestCase):
     def test_execution_router_integration_with_binance(self):
         import os
         from r20_backend import execution_router as er
+        from r20_backend.exchanges import InstrumentSpec
 
         ad = self.adapter
-        # Mock 适配器关键动作
+        # Mock 适配器关键动作（封闭三律：fetch_instrument_spec 必须钉死——
+        # 不 mock 会真连 urlopen，离线套件下被 socket 守卫拦成 stage=specs 红）
         ad._keys = lambda: ("ak", "sk")
+        ad.fetch_instrument_spec = Mock(return_value=InstrumentSpec(
+            venue="binance", inst_id="BTCUSDT", base="BTC", tick_size=0.1,
+            step_size=0.001, ct_val=1.0, min_size=0.001, max_leverage=20))
+        ad.quote_qty_to_native = Mock(return_value=0.01)
         ad.fetch_ticker = lambda s: {"last": 60000.0, "mark_price": 60000.0}
         ad.set_leverage = Mock(return_value={"leverage": 5})
         ad.place_order = Mock(return_value={"order_id": "112233", "id": "112233", "status": "NEW"})
@@ -429,7 +435,11 @@ class BinanceExecutionAndProtectionTests(unittest.TestCase):
             "stop_loss_price": 58500.0,
         }
 
-        with patch.dict(os.environ, {"R20_BINANCE_EXECUTION": "1", "R20_BINANCE_DEMO_EXECUTION": "1"}):
+        from r20_backend.exchanges import listing as listing_mod
+        _okl = listing_mod.ListingCheck(ok=True, reason=None,
+                                        checked_at="2026-09-11T00:00:00Z", source="cache")
+        with patch.dict(os.environ, {"R20_BINANCE_EXECUTION": "1", "R20_BINANCE_DEMO_EXECUTION": "1"}), \
+                patch.object(listing_mod, "ensure_contract_listed", lambda v, e, c: _okl):
             res = er.open_protected_position(decision, adapter=ad)
 
         self.assertTrue(res["ok"])
@@ -447,6 +457,12 @@ class BinanceExecutionAndProtectionTests(unittest.TestCase):
 
         ad = self.adapter
         ad._keys = lambda: ("ak", "sk")
+        # 同族封闭钉：规格 + listing 对账两处分发前动作必须 mock（离线套件纪律）
+        from r20_backend.exchanges import InstrumentSpec as _Spec
+        ad.fetch_instrument_spec = Mock(return_value=_Spec(
+            venue="binance", inst_id="BTCUSDT", base="BTC", tick_size=0.1,
+            step_size=0.001, ct_val=1.0, min_size=0.001, max_leverage=20))
+        ad.quote_qty_to_native = Mock(return_value=0.01)
         ad.fetch_ticker = lambda s: {"last": 60000.0, "mark_price": 60000.0}
         ad.set_leverage = Mock(return_value={})
         ad.place_order = Mock(return_value={"order_id": "9999", "id": "9999"})
@@ -467,7 +483,11 @@ class BinanceExecutionAndProtectionTests(unittest.TestCase):
             "stop_loss_price": 59000.0,
         }
 
-        with patch.dict(os.environ, {"R20_BINANCE_EXECUTION": "1", "R20_BINANCE_DEMO_EXECUTION": "1"}):
+        from r20_backend.exchanges import listing as listing_mod
+        _okl = listing_mod.ListingCheck(ok=True, reason=None,
+                                        checked_at="2026-09-11T00:00:00Z", source="cache")
+        with patch.dict(os.environ, {"R20_BINANCE_EXECUTION": "1", "R20_BINANCE_DEMO_EXECUTION": "1"}), \
+                patch.object(listing_mod, "ensure_contract_listed", lambda v, e, c: _okl):
             res = er.open_protected_position(decision, adapter=ad)
 
         self.assertFalse(res["ok"])

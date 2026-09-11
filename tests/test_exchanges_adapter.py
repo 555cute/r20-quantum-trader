@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from r20_backend.exchanges import (
     BinanceAdapter,
@@ -135,9 +135,12 @@ class TestFailClosedPrivateFacets(unittest.TestCase):
 
     def test_binance_private_requires_credentials_fail_closed(self):
         # 与 Gate 同款契约：实装 ≠ 放行——无凭证一律显式拒绝，绝不静默出网
+        # 注：place_order 先 fetch_instrument_spec（出网）再 signed_request 查凭证，
+        # 故 mock 掉规格拉取（None 走代码内 step/tick 兜底），让用例直达凭证闸
         import r20_gateway.secrets as gw_secrets
         with patch.object(gw_secrets, "load_secrets", lambda: {}):
             bn = BinanceAdapter()
+            bn.fetch_instrument_spec = Mock(return_value=None)
             with self.assertRaises(ExchangeCapabilityError):
                 bn.account_snapshot()
             with self.assertRaises(ExchangeCapabilityError):

@@ -180,6 +180,7 @@ class MultiExchangeUpdate(BaseModel):
     gate_execution: bool | None = None   # R20_GATE_EXECUTION 总开关（Gate 执行路由准入）
     binance_execution: bool | None = None  # R20_BINANCE_EXECUTION 总开关（Binance 执行路由准入）
     preferred_venue: str | None = None  # 全局路由首选：okx|binance|gate|auto
+    routing_mode: str | None = None     # 选所路由模式：auto|balanced|split（A/B/C 三档）
     confirmation: str = ""               # 变更执行开关必须精确确认短语
 
 
@@ -1168,7 +1169,9 @@ def admin_multi_exchange_status(x_r20_admin_token: str | None = Header(default=N
 
     from r20_backend.exchanges import routing_policy
     pref = routing_policy.load_preferred_venue()
-    return {"venues": venues, "health": health, "preferred_venue": pref, "accounts_status": accounts_status}
+    return {"venues": venues, "health": health, "preferred_venue": pref,
+            "routing_mode": routing_policy.load_routing_mode(),
+            "accounts_status": accounts_status}
 
 
 @app.put("/api/v1/admin/multi-exchange")
@@ -1220,6 +1223,12 @@ def admin_multi_exchange_update(payload: MultiExchangeUpdate,
     if payload.preferred_venue is not None:
         from r20_backend.exchanges import routing_policy
         routing_policy.save_preferred_venue(payload.preferred_venue)
+    if payload.routing_mode is not None:
+        from r20_backend.exchanges import routing_policy
+        if not routing_policy.save_routing_mode(payload.routing_mode):
+            raise HTTPException(
+                status_code=400,
+                detail=f"非法 routing_mode，允许 {list(routing_policy.VALID_ROUTING_MODES)}")
     try:
         from r20_backend.exchanges import clear_instances
         clear_instances()
@@ -1230,6 +1239,7 @@ def admin_multi_exchange_update(payload: MultiExchangeUpdate,
         "secret_keys_saved": sorted(secret_values.keys()),
         "env_updated": sorted(env_values.keys()),
         "preferred_venue": payload.preferred_venue,
+        "routing_mode": payload.routing_mode,
     })
     refresh_settings()
     return {"ok": True, "saved_secret_keys": sorted(secret_values.keys())}

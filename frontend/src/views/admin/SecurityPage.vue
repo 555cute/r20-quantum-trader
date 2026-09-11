@@ -52,11 +52,12 @@ const closeModal = ref<{ show: boolean; pos: any } | null>(null)
 const closePhraseInput = ref('')
 const closing = ref(false)
 
-// ---- 多交易所凭证与档位（Binance / Gate 各自独立，互不牵连保存） ----
+// ---- 多所凭证与档位（Binance / Gate 独立保存） ----
 const mx = ref<any>(null)
 const mxForm = ref({ binance_api_key: '', binance_secret_key: '', gate_api_key: '', gate_secret_key: '' })
 const mxTestnet = ref({ binance: false, gate: false })
 const preferredVenue = ref('auto')
+const routingMode = ref('auto')
 const gateExec = ref(false)
 const gateExecPhrase = ref('')
 const savingMx = ref(false)
@@ -234,6 +235,9 @@ async function loadMx() {
     if (mx.value?.preferred_venue) {
       preferredVenue.value = mx.value.preferred_venue
     }
+    if (mx.value?.routing_mode) {
+      routingMode.value = mx.value.routing_mode
+    }
   } catch { mx.value = null }
 }
 
@@ -291,15 +295,15 @@ async function probeVenue(venue: 'binance' | 'gate' | 'okx') {
   }
 }
 
-/** 保存撮合路由首选（只写 preferred_venue，不牵连任何凭证字段）。 */
+/** 保存撮合路由首选与模式（只写路由两键，不牵连任何凭证字段）。 */
 async function saveRouting() {
   savingMx.value = true
   try {
     await api('/api/v1/admin/multi-exchange', {
       method: 'PUT',
-      body: JSON.stringify({ preferred_venue: preferredVenue.value }),
+      body: JSON.stringify({ preferred_venue: preferredVenue.value, routing_mode: routingMode.value }),
     })
-    toast.ok(`撮合路由首选已保存：${preferredVenue.value.toUpperCase()}`)
+    toast.ok(`撮合路由已保存：${preferredVenue.value.toUpperCase()} · ${routingMode.value.toUpperCase()}`)
     await loadMx()
   } catch (e: any) {
     toast.err(`保存失败：${e.message}`)
@@ -399,10 +403,13 @@ onMounted(() => { loadAll(); loadMx() })
 
 <template>
   <div class="space-y-4 text-xs">
-    <PageHeader :title="t('nav.admin.security')" description="OKX、Binance、Gate 三交易所凭证、撮合路由策略与标的池对称管理">
+    <PageHeader :title="t('nav.admin.security')" description="三所凭证、撮合路由与标的池配置">
       <template #actions>
         <span class="chip flex items-center gap-1.5">
-          <span>选所模式</span>
+          <span>路由</span>
+          <b class="num" style="color: var(--accent);">{{ routingMode.toUpperCase() }}</b>
+          <span class="text-[10px] opacity-70">·</span>
+          <span>首选</span>
           <b class="num" style="color: var(--accent);">{{ preferredVenue.toUpperCase() }}</b>
           <span class="text-[10px] opacity-70">·</span>
           <span>环境</span>
@@ -480,50 +487,76 @@ onMounted(() => { loadAll(); loadMx() })
       <!-- ============ 页签 1：交易所与路由对等（三平台对称平权配置） ============ -->
       <div v-if="activeTab === 'venues'" class="space-y-4">
         <!-- 路由主策略 -->
-        <SettingsSection title="撮合路由首选（三所对等）" description="配置 AI 信号的默认撮合交易所。可指定某所优先，或由智能评分路由按流动性、费率优势自动比选（支持 5% 滞回防抖）。">
+        <SettingsSection title="撮合路由策略（三所平权）" description="路由模式决定信号如何分发到 OKX / Binance / Gate；手选优先只让指定所参与评估。">
           <template #actions>
             <button class="btn btn-primary" :disabled="savingMx" @click="saveRouting"><Save class="h-3.5 w-3.5" /> {{ savingMx ? '保存中…' : '保存路由策略' }}</button>
           </template>
           <div class="space-y-3 rounded-lg border p-3.5" style="background-color: var(--surface-1); border-color: var(--line-1);">
+            <div class="text-[10px] font-semibold" style="color: var(--ink-2);">路由模式（A/B/C 三档）</div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <label class="flex items-center gap-2 p-2.5 rounded-md border cursor-pointer transition-colors" :style="routingMode === 'balanced' ? { borderColor: 'var(--accent)', backgroundColor: 'var(--surface-2)' } : { borderColor: 'var(--line-1)' }">
+                <input v-model="routingMode" type="radio" value="balanced" class="accent-[var(--accent)]" />
+                <div>
+                  <div class="text-xs font-bold" style="color: var(--ink-1);">A · 均衡轮换</div>
+                  <div class="text-[10px]" style="color: var(--ink-3);">成本带内多所哈希轮动，避免单所扎堆（基线）</div>
+                </div>
+              </label>
+              <label class="flex items-center gap-2 p-2.5 rounded-md border cursor-pointer transition-colors" :style="routingMode === 'auto' ? { borderColor: 'var(--accent)', backgroundColor: 'var(--surface-2)' } : { borderColor: 'var(--line-1)' }">
+                <input v-model="routingMode" type="radio" value="auto" class="accent-[var(--accent)]" />
+                <div>
+                  <div class="text-xs font-bold" style="color: var(--ink-1);">B · 最优执行</div>
+                  <div class="text-[10px]" style="color: var(--ink-3);">纯评分 + 滞回：比深度、双腿费率与返佣</div>
+                </div>
+              </label>
+              <label class="flex items-center gap-2 p-2.5 rounded-md border cursor-pointer transition-colors" :style="routingMode === 'split' ? { borderColor: 'var(--accent)', backgroundColor: 'var(--surface-2)' } : { borderColor: 'var(--line-1)' }">
+                <input v-model="routingMode" type="radio" value="split" class="accent-[var(--accent)]" />
+                <div>
+                  <div class="text-xs font-bold" style="color: var(--ink-1);">C · 资金拆分</div>
+                  <div class="text-[10px]" style="color: var(--ink-3);">跨所拆单方案随决策证据落盘；逐片执行待名义额口径统一</div>
+                </div>
+              </label>
+            </div>
+            <div class="text-[10px] font-semibold pt-1" style="color: var(--ink-2);">手选优先（覆盖路由模式，仅指定所参与）</div>
             <div class="grid grid-cols-1 sm:grid-cols-4 gap-2">
               <label class="flex items-center gap-2 p-2.5 rounded-md border cursor-pointer transition-colors" :style="preferredVenue === 'auto' ? { borderColor: 'var(--accent)', backgroundColor: 'var(--surface-2)' } : { borderColor: 'var(--line-1)' }">
                 <input v-model="preferredVenue" type="radio" value="auto" class="accent-[var(--accent)]" />
                 <div>
-                  <div class="text-xs font-bold" style="color: var(--ink-1);">Auto (智能路由)</div>
-                  <div class="text-[10px]" style="color: var(--ink-3);">三所评分 + 滞回防抖</div>
+                  <div class="text-xs font-bold" style="color: var(--ink-1);">不手选</div>
+                  <div class="text-[10px]" style="color: var(--ink-3);">按上方路由模式自动分发</div>
                 </div>
               </label>
               <label class="flex items-center gap-2 p-2.5 rounded-md border cursor-pointer transition-colors" :style="preferredVenue === 'okx' ? { borderColor: 'var(--accent)', backgroundColor: 'var(--surface-2)' } : { borderColor: 'var(--line-1)' }">
                 <input v-model="preferredVenue" type="radio" value="okx" class="accent-[var(--accent)]" />
                 <div>
-                  <div class="text-xs font-bold" style="color: var(--ink-1);">优先 OKX</div>
-                  <div class="text-[10px]" style="color: var(--ink-3);">首选 OKX 执行链路</div>
+                  <div class="text-xs font-bold" style="color: var(--ink-1);">锁定 OKX</div>
+                  <div class="text-[10px]" style="color: var(--ink-3);">仅 OKX 参与评估</div>
                 </div>
               </label>
               <label class="flex items-center gap-2 p-2.5 rounded-md border cursor-pointer transition-colors" :style="preferredVenue === 'binance' ? { borderColor: 'var(--accent)', backgroundColor: 'var(--surface-2)' } : { borderColor: 'var(--line-1)' }">
                 <input v-model="preferredVenue" type="radio" value="binance" class="accent-[var(--accent)]" />
                 <div>
-                  <div class="text-xs font-bold" style="color: var(--ink-1);">优先 Binance</div>
-                  <div class="text-[10px]" style="color: var(--ink-3);">首选币安 USDT-M</div>
+                  <div class="text-xs font-bold" style="color: var(--ink-1);">锁定 Binance</div>
+                  <div class="text-[10px]" style="color: var(--ink-3);">仅币安 USDT-M 参与评估</div>
                 </div>
               </label>
               <label class="flex items-center gap-2 p-2.5 rounded-md border cursor-pointer transition-colors" :style="preferredVenue === 'gate' ? { borderColor: 'var(--accent)', backgroundColor: 'var(--surface-2)' } : { borderColor: 'var(--line-1)' }">
                 <input v-model="preferredVenue" type="radio" value="gate" class="accent-[var(--accent)]" />
                 <div>
-                  <div class="text-xs font-bold" style="color: var(--ink-1);">优先 Gate</div>
-                  <div class="text-[10px]" style="color: var(--ink-3);">首选 Gate USDT 永续</div>
+                  <div class="text-xs font-bold" style="color: var(--ink-1);">锁定 Gate</div>
+                  <div class="text-[10px]" style="color: var(--ink-3);">仅 Gate USDT 永续参与评估</div>
                 </div>
               </label>
             </div>
             <p class="text-[11px] leading-relaxed" style="color: var(--ink-3);">
-              当前生效：<b class="num" style="color: var(--accent);">{{ preferredVenue.toUpperCase() }}</b>。
-              系统实行严密准入护栏：若所选交易所未配置密钥、未开闸或标的未上市，将自动平滑回退，并在决策日志留存证据。
+              当前生效：<b class="num" style="color: var(--accent);">{{ routingMode.toUpperCase() }}</b>
+              <template v-if="preferredVenue !== 'auto'"> + 手选 <b class="num" style="color: var(--accent);">{{ preferredVenue.toUpperCase() }}</b></template>。
+              未配置或未开闸的所自动退出候选；跨所持仓统一计入总仓/同向封顶。
             </p>
           </div>
         </SettingsSection>
 
         <!-- 三所对称凭证卡（同一外壳、同一槽位次序：环境 → 凭证 → 附加 → 检测/保存） -->
-        <SettingsSection title="三所接入凭证与资金档位（对称配置）" description="OKX / Binance / Gate 凭证彼此独立保存，互不牵连；密钥仅在本机 Fernet 加密落盘，留空即不修改原有配置。">
+        <SettingsSection title="三所接入凭证与资金档位（对称配置）" description="三所独立凭证加密存储与测试网档位配置。">
           <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
             <!-- 1. OKX -->
             <VenueCredentialCard

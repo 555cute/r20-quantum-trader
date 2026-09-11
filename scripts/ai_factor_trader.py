@@ -632,6 +632,15 @@ def load_preferred_venue() -> str:
     return routing_policy.load_preferred_venue()
 
 
+def load_routing_mode() -> str:
+    """选所路由模式（auto=最优执行B | balanced=均衡轮换A | split=资金拆分C）。
+
+    模块绑定转发（同 load_preferred_venue 钉法）：测试 patch 本函数即可完全
+    封闭，绝不在用读真实 data/venue_routing.json 的情况下跑路由断言。
+    """
+    return routing_policy.load_routing_mode()
+
+
 def venue_execution_ready(venue: str, environment: str) -> bool:
     """该所在该资金环境下能否真实下单——一律读 registry/能力表，不写死场所名单。
 
@@ -899,8 +908,12 @@ def route_and_reserve_signal(inst_id: str, side: str, size: float, price: float,
     # 预算硬筛**不在路由层重复执行**：路由只负责选所，预算占用由 risk_reservation
     # 的原子 reserve 单点裁决（口径=保证金，与 notional 混用会双重误杀）。路由层的
     # budget_view 预筛等 US-004 名义额口径统一后再启用，这里显式传 None。
-    r_mode = routing_policy.load_routing_mode()
-    cfg = venue_router.RouterConfig(routing_mode=r_mode)
+    r_mode = load_routing_mode()
+    cfg = venue_router.RouterConfig(
+        routing_mode=r_mode,
+        # 模式 C：生成跨所拆单方案进决策证据；执行面按现任中选所单笔落地，
+        # 逐片真实分发等 US-004 名义额口径统一（allocation 已随证据落盘）
+        split_enabled=(r_mode == "split"))
     decision = venue_router.route_signal(signal, candidates, budget_view=None, config=cfg)
     payload = _decision_payload(decision, preferred)
 
