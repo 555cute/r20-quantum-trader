@@ -131,6 +131,24 @@ def diagnose_venue_connection(
         }
 
 
+def _resolve_for_diagnostics(venue: str, env: str, caller: Callable) -> str:
+    """诊断专用 base_url 解析：探测走**注入的 caller**（生产即 urlopen，行为不变；
+    测试 mock caller 即零出网），且不落钉文件（persist=False，预检不该污染生产择优）。
+
+    仅沙盒多候选档（gate sandbox）会触发探测；单候选/已钉死时 resolve 直接返回。
+    """
+    def _probe(url: str):
+        t0 = time.monotonic()
+        try:
+            status, _data, _hdr = caller(url + env_profiles.PROBE_PATH,
+                                         method="GET", timeout=4.0)
+            return max(1, round((time.monotonic() - t0) * 1000)) if status == 200 else None
+        except Exception:
+            return None
+
+    return env_profiles.resolve_base_url(venue, env, probe_fn=_probe, persist=False)
+
+
 def _diagnose_public_ping(venue: str, env: str, caller: Callable, timeout: float) -> Dict[str, Any]:
     t0 = time.monotonic()
     try:
@@ -138,10 +156,10 @@ def _diagnose_public_ping(venue: str, env: str, caller: Callable, timeout: float
             base_url = "https://www.okx.com"
             path = "/api/v5/public/time"
         elif venue == "binance":
-            base_url = env_profiles.resolve_base_url("binance", env)
+            base_url = _resolve_for_diagnostics("binance", env, caller)
             path = "/fapi/v1/time"
         else:  # gate
-            base_url = env_profiles.resolve_base_url("gate", env)
+            base_url = _resolve_for_diagnostics("gate", env, caller)
             path = "/api/v4/futures/usdt/contracts"
 
         status, data, _ = caller(f"{base_url}{path}", method="GET", timeout=timeout)
@@ -269,7 +287,7 @@ def _diagnose_binance(env: str, is_sandbox: bool, ak: str, sk: str,
 
 def _diagnose_gate(env: str, is_sandbox: bool, ak: str, sk: str,
                     caller: Callable, timeout: float, t0: float) -> Dict[str, Any]:
-    base_url = env_profiles.resolve_base_url("gate", env)
+    base_url = _resolve_for_diagnostics("gate", env, caller)
     path = "/api/v4/futures/usdt/accounts"
     ts = str(int(time.time()))
     body_hash = hashlib.sha512("".encode("utf-8")).hexdigest()

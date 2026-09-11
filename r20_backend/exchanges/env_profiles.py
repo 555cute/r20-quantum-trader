@@ -162,10 +162,12 @@ def pinned_base_url(venue: str, environment: str) -> Optional[str]:
 
 
 def resolve_base_url(venue: str, environment: str,
-                     probe_fn=None) -> str:
+                     probe_fn=None, persist: bool = True) -> str:
     """(venue, environment) → 唯一 base_url。多候选 = 择优 + 持久化钉死。
 
     probe_fn(url)->ms|None 仅供测试注入；生产默认 _probe_candidate。
+    persist=False：诊断/预检等只读通道用完即弃，不写钉文件（避免测试写
+    data/**，也避免半可信探测结果污染生产选择）。
     """
     prof = get_profile(venue, environment)
     if not prof.needs_probe:
@@ -182,7 +184,8 @@ def resolve_base_url(venue: str, environment: str,
             f"{venue} {environment} 档全部候选域不可达（fail-closed，禁止回退 live）："
             f"{evidence}。请检查网络或改用 live 档。")
     chosen = reachable[0][1]
-    _persist(prof.venue, prof.environment, chosen, evidence)
+    if persist:
+        _persist(prof.venue, prof.environment, chosen, evidence)
     return chosen
 
 

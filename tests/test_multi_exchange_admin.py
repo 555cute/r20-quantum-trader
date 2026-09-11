@@ -314,6 +314,32 @@ class SixAccountCredentialsAndDiagnosticsTests(MultiExchangeApiTests):
             self.assertEqual(res["mode"], "public_fallback")
             self.assertIn("公共网络连通正常", res["message"])
 
+    def test_diagnostics_sandbox_resolve_uses_injected_channel_no_net_no_write(self):
+        """封闭契约（2026-09-11 worktree 门禁红固化）：无钉文件时，gate sandbox
+        诊断的域名探测必须走注入 http_client（零真实 DNS），且不落钉文件——
+        生产 caller=urlopen 行为不变；预检通道绝不污染持久化择优。"""
+        from r20_backend.exchanges import diagnostics
+        import tempfile
+        from pathlib import Path
+        from r20_backend.exchanges import env_profiles
+
+        probed: list = []
+        def spy_call(url, **k):
+            probed.append(str(url))
+            if url.endswith(env_profiles.PROBE_PATH):
+                return (200, [{"name": "BTC_USDT"}], {})
+            return (200, {"currency": "USDT", "total": "2000"}, {})
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.object(env_profiles, "PROFILE_FILE", Path(tmp) / "profile.json"):
+            res = diagnostics.diagnose_venue_connection(
+                venue="gate", environment="sandbox", api_key="k", secret_key="s",
+                http_client=spy_call)
+            self.assertTrue(res["ok"], res)
+            self.assertTrue(res["authenticated"], res)
+            self.assertTrue(probed, "探测必须发生且经由注入通道")
+            self.assertFalse((Path(tmp) / "profile.json").exists(),
+                             "诊断预检不得写钉文件（persist=False）")
+
     def test_diagnostics_verify_credentials_before_saving_success(self):
         from r20_backend.exchanges import diagnostics
 
