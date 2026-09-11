@@ -9,6 +9,8 @@ import { Download, ScrollText } from 'lucide-vue-next';
 import { useDashboardStore } from '../../stores/dashboard';
 import { useI18n } from '../../composables/useI18n';
 import { fmtNum, fmtSigned, fmtPct, fmtPrice, arrow, dirClass, cleanReason } from '../../utils/format';
+import { VENUE_KEYS, venueLabel, venueShortLabel, venueOfRecord } from '../../utils/venueMeta';
+import { venueOfSymbol } from '../../utils/instId';
 import BaseStat from '../../components/base/BaseStat.vue';
 import BaseEmpty from '../../components/base/BaseEmpty.vue';
 import BaseSegmented from '../../components/base/BaseSegmented.vue';
@@ -34,6 +36,17 @@ const fSide = ref<'all' | 'long' | 'short'>('all');
 const fResult = ref<'all' | 'win' | 'loss'>('all');
 const fInst = ref('all');
 
+function getVenueOfTrade(x: any): string {
+  const v = venueOfRecord(x, venueOfSymbol);
+  return v || String(x.venue || '').toLowerCase() || 'okx';
+}
+
+const brandStyleMap: Record<string, { color: string; borderColor: string; backgroundColor: string }> = {
+  okx: { color: 'var(--venue-okx, #3880ff)', borderColor: 'rgba(56, 128, 255, 0.25)', backgroundColor: 'rgba(56, 128, 255, 0.08)' },
+  binance: { color: 'var(--venue-binance, #f3ba2f)', borderColor: 'rgba(243, 186, 47, 0.25)', backgroundColor: 'rgba(243, 186, 47, 0.08)' },
+  gate: { color: 'var(--venue-gate, #00be98)', borderColor: 'rgba(0, 190, 152, 0.25)', backgroundColor: 'rgba(0, 190, 152, 0.08)' },
+};
+
 const venueOptions = [
   { value: 'all', label: '全部场所' },
   { value: 'okx', label: 'OKX' },
@@ -55,7 +68,7 @@ const instOptions = computed(() => {
 const filtered = computed(() =>
   all.value.filter((x) => {
     if (fVenue.value !== 'all') {
-      const v = String(x.venue || 'okx').toLowerCase();
+      const v = getVenueOfTrade(x);
       if (v !== fVenue.value) return false;
     }
     if (fMode.value !== 'all') {
@@ -213,13 +226,12 @@ function venueLabel(v: unknown): string {
                     <span class="num font-semibold" style="color: var(--ink-strong)">{{ x.inst }}</span>
                     <DirTag :dir="dirOf(x.side)" />
                     <span class="badge badge-mono hidden xl:inline-flex">{{ x.lever }}</span>
-                    <!-- US-009: 交易所与账户环境徽章 -->
+                    <!-- 交易所与账户环境徽章 -->
                     <span
-                      v-if="x.venue"
-                      class="badge text-3xs font-bold px-1 py-0.2 rounded"
-                      :style="String(x.venue).toLowerCase() === 'binance' ? { color: '#f3ba2f', borderColor: '#f3ba2f33', backgroundColor: '#f3ba2f15' } : String(x.venue).toLowerCase() === 'gate' ? { color: '#00be98', borderColor: '#00be9833', backgroundColor: '#00be9815' } : { color: '#3880ff', borderColor: '#3880ff33', backgroundColor: '#3880ff15' }"
+                      class="badge text-3xs font-bold px-1.5 py-0.5 rounded border"
+                      :style="brandStyleMap[getVenueOfTrade(x)] || brandStyleMap.okx"
                     >
-                      {{ venueLabel(x.venue) }}
+                      {{ venueShortLabel(getVenueOfTrade(x)) }}
                     </span>
                     <span
                       class="badge text-3xs px-1 py-0.2 rounded"
