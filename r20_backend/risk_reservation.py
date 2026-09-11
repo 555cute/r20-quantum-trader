@@ -245,6 +245,23 @@ class RiskReservationManager:
         finally:
             conn.close()
 
+    def list_unreleased(self, environment: str) -> list:
+        """未释放预留明细（含时间戳，供周期对账释放器判 TTL；只读零副作用）。"""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM risk_reservations WHERE released = 0 "
+                "AND environment = ? ORDER BY id", (str(environment),)).fetchall()
+            out = []
+            for r in rows:
+                snap = self._snapshot(r)
+                snap["created_at"] = str(r["created_at"] or "")
+                snap["updated_at"] = str(r["updated_at"] or "")
+                out.append(snap)
+            return out
+        finally:
+            conn.close()
+
     @staticmethod
     def _snapshot(row) -> dict:
         return {

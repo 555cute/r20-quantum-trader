@@ -506,26 +506,49 @@ def get_cache_lock():
     return CACHE_LOCK
 
 def _load_portfolio_risk_data() -> dict:
-    """透传组合风险预留层状态给前台三所面板（零网络，纯本地只读）。"""
+    """透传组合风险预留层状态给前台三所面板（零网络，纯本地只读）。
+
+    契约对齐（2026-09-11 修复面板恒显「—」）：
+    - 字段名对齐前端 PortfolioRiskRow：total_budget_usdt / reserved_usdt /
+      available_usdt / environment / updated_utc；
+    - 资金环境轴与 _load_multi_venue_portfolio 同源（OKX_IS_SIMULATED），
+      修旧式 `not os.environ.get(...) == "1"` 的优先级坑（恒判 live）；
+    - 总预算单源 R20_PORTFOLIO_RISK_BUDGET_USDT（与 trader 同口径）；未配置
+      = 无上限模式 → 诚实 None（前端显「—」），绝不编 10000 假预算；
+    - 读层异常不再裸吞成 {}：返回 status=unavailable + 空值结构，error 留痕。
+    """
     try:
+        budget_raw = str(os.environ.get("R20_PORTFOLIO_RISK_BUDGET_USDT") or "").strip()
+        try:
+            budget_val = float(budget_raw) if budget_raw else 0.0
+        except ValueError:
+            budget_val = 0.0
+        total_budget = budget_val if budget_val > 0 else None
+        env = "demo" if os.environ.get("OKX_IS_SIMULATED", "1") == "1" else "live"
         from r20_backend.risk_reservation import get_manager
         mgr = get_manager()
-        env = "live" if not os.environ.get("R20_SIMULATED") == "1" else "demo"
-        exposure = mgr.gross_exposure(env)
-        total_limit = getattr(mgr, "total_limit_usdt", None) or 10000.0
-        reserved = float(exposure.get("total_reserved_usdt", 0.0) or 0.0)
-        avail = max(0.0, total_limit - reserved)
-        utilization = round((reserved / total_limit) * 100, 1) if total_limit > 0 else 0.0
+        reserved = float(mgr.gross_exposure(env) or 0.0)
+        by_venue = mgr.total_reserved_by_venue(env)
+        avail = round(max(0.0, total_budget - reserved), 4) if total_budget is not None else None
+        utilization = round((reserved / total_budget) * 100.0, 1) if total_budget else None
         return {
-            "total_limit_usdt": total_limit,
-            "total_reserved_usdt": reserved,
+            "environment": env,
+            "status": "ok",
+            "total_budget_usdt": round(total_budget, 4) if total_budget is not None else None,
+            "reserved_usdt": round(reserved, 4),
             "available_usdt": avail,
             "utilization_pct": utilization,
-            "environment": env,
-            "by_venue": exposure.get("by_venue", {}),
+            "by_venue": {str(k): round(float(v), 4) for k, v in by_venue.items()},
+            "updated_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
-    except Exception:
-        return {}
+    except Exception as exc:
+        return {
+            "environment": "demo" if os.environ.get("OKX_IS_SIMULATED", "1") == "1" else "live",
+            "status": "unavailable",
+            "total_budget_usdt": None, "reserved_usdt": None,
+            "available_usdt": None, "utilization_pct": None, "by_venue": {},
+            "error": str(exc)[:160],
+        }
 
 
 def _load_multi_venue_portfolio(total_eq: float, avail_eq: float, positions: list, orders: list) -> dict:
