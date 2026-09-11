@@ -2705,6 +2705,7 @@ def execute_portfolio():
                 if not position:
                     continue
                 position_payload = dict(position)
+                position_payload.setdefault("venue", "okx")
                 tracker = trackers.get(f"{f['instId']}_{position.get('side', '')}", {})
                 position_payload["trailingStopPx"] = tracker.get("trailingStopPx")
                 position_payload["highWaterMark"] = tracker.get("highWaterMark")
@@ -2713,6 +2714,32 @@ def execute_portfolio():
                 position_payload["stage_desc"] = tracker.get("stage_desc", "")
                 position_payload["atr"] = f.get("atr", 0.0)
                 active_pos_list.append(position_payload)
+
+            # 汇入多所（Binance / Gate）在管持仓，形成三所平权持仓全景
+            try:
+                _xv_ok, _xv_snap, _ = fetch_other_venue_positions(str(current_environment().mode))
+                if _xv_ok and _xv_snap:
+                    for v_name, v_rows in _xv_snap.items():
+                        for p in v_rows:
+                            base = str(p.get("base") or "").upper()
+                            inst = str(p.get("inst_id") or base)
+                            side = str(p.get("side") or "net").lower()
+                            match_f = next((x for x in all_factors if x.get("name") == base), {})
+                            active_pos_list.append({
+                                "venue": v_name,
+                                "instId": f"{v_name.upper()}:{inst}",
+                                "name": base,
+                                "side": side,
+                                "pos": abs(float(p.get("size_signed") or 0)),
+                                "avgPx": float(p.get("entry_price") or 0),
+                                "markPx": float(p.get("mark_price") or 0),
+                                "margin": float(p.get("margin") or 0),
+                                "upl": float(p.get("unrealized_pnl") or 0),
+                                "atr": match_f.get("atr", 0.0),
+                                "leverage": float(p.get("leverage") or 0),
+                            })
+            except Exception as _xv_e:
+                print(f"[三所持仓全景] 外所持仓汇入异常: {_xv_e}")
             brain_cache = execute_batch_ai_brain_cycle(pos_desc, active_pos_list, usdt_available=usdt_available) or {}
             if brain_cache:
                 refreshed_ok, refreshed_positions, refreshed_error = query_positions()

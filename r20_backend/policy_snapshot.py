@@ -563,6 +563,20 @@ def capture_full_strategy_package(root_dir: Optional[Path] = None) -> Dict[str, 
         logger.warning("Failed to capture council config: %s", e)
         council_full = {}
 
+    try:
+        from r20_backend import risk_config
+        risk_full = risk_config.current_values()
+    except Exception as e:
+        logger.warning("Failed to capture risk config: %s", e)
+        risk_full = {}
+
+    try:
+        from r20_backend.exchanges.routing_policy import _read_raw_routing
+        routing_full = _read_raw_routing()
+    except Exception as e:
+        logger.warning("Failed to capture routing config: %s", e)
+        routing_full = {}
+
     finally:
         if sys_path_added and scripts_dir in sys.path:
             try:
@@ -584,6 +598,8 @@ def capture_full_strategy_package(root_dir: Optional[Path] = None) -> Dict[str, 
             "evolution_memory": memory_full,
             "interceptor_config": interceptor_full,
             "council_config": council_full,
+            "risk_config": risk_full,
+            "venue_routing": routing_full,
         },
     }
 
@@ -735,6 +751,32 @@ def restore_archived_policy(
             ):
                 from r20_backend.council_manager import save_council_config
                 save_council_config(payload["council_config"])
+
+            # 5. Restore Risk Config
+            if (
+                "risk_config" in payload
+                and isinstance(payload["risk_config"], dict)
+                and payload["risk_config"]
+            ):
+                try:
+                    from r20_backend import risk_config
+                    from r20_backend.config import save_env
+                    env_updates = risk_config.normalize(payload["risk_config"])
+                    save_env(env_updates)
+                except Exception as e:
+                    logger.warning("Failed to restore risk config: %s", e)
+
+            # 6. Restore Venue Routing
+            if (
+                "venue_routing" in payload
+                and isinstance(payload["venue_routing"], dict)
+                and payload["venue_routing"]
+            ):
+                try:
+                    from r20_backend.exchanges.routing_policy import ROUTING_FILE
+                    _atomic_write_json(ROUTING_FILE, payload["venue_routing"])
+                except Exception as e:
+                    logger.warning("Failed to restore venue routing: %s", e)
         finally:
             if sys_path_added and scripts_dir in sys.path:
                 try:

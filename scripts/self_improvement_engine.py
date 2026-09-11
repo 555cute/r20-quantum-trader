@@ -402,6 +402,12 @@ def compose_evolution_prompts(closed_trades: List[Dict[str, Any]], existing_memo
     snapshot_audit = audit_snapshot_observability(closed_trades)
     observability_brief = render_observability_brief(snapshot_audit)
 
+    v_counts: Dict[str, int] = {}
+    for t in closed_trades:
+        v = str(t.get("venue") or "okx").upper()
+        v_counts[v] = v_counts.get(v, 0) + 1
+    v_summary = ", ".join(f"{v}: {c}笔" for v, c in sorted(v_counts.items())) if v_counts else "无"
+
     memory_context = f"""======================= 【当前系统已有的历史长期记忆库】 =======================
 {existing_memory_md.strip()}
 """ if existing_memory_md.strip() else "当前长期记忆库为空 (系统初始冷启动状态)"
@@ -414,6 +420,7 @@ def compose_evolution_prompts(closed_trades: List[Dict[str, Any]], existing_memo
 ======================= 【R20 加密量化实盘战绩与历史交易台账】 =======================
 【统计汇总】:
 - 总平仓笔数: {total} 笔 (胜 {len(wins)} / 负 {len(losses)} | 胜率: {win_rate}%)
+- 跨交易所分布: {v_summary}
 - 累计净盈亏: {total_net:+.2f} USDT | 累计手续费消耗: {total_fees:.2f} USDT
 - 当前聚焦标的池: {TARGET_INSTRUMENTS}
 
