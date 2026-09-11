@@ -1533,6 +1533,7 @@ def update_cache_cycle():
             "avg_loss": avg_loss,
             "leaderboard": inst_leaderboard
         },
+        "positions": positions,
         "positions_summary": {
             "total": len(positions),
             "active_count": len(positions),

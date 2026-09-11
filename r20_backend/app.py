@@ -2025,11 +2025,77 @@ def admin_delete_policy_archive(
 
 
 @app.get("/api/v1/admin/okx/account-snapshot")
-def admin_okx_account_snapshot(x_r20_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
-    require_admin_header(x_r20_admin_token)
-    try: return okx_account_snapshot()
-    except OKXNotConfigured as exc: raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except Exception as exc: raise HTTPException(status_code=502, detail=f"获取 OKX 当前订单失败：{exc}") from exc
+def admin_okx_account_snapshot(
+    x_r20_admin_token: str | None = Header(default=None),
+    x_r20_session: str | None = Header(default=None, alias="X-R20-Session")
+) -> dict[str, Any]:
+    require_admin_header(x_r20_admin_token, x_r20_session)
+    from scripts.okx_runtime import current_environment
+    env = current_environment()
+
+    combined_positions: list[dict[str, Any]] = []
+    combined_orders: list[dict[str, Any]] = []
+
+    # 1. OKX 原始快照
+    try:
+        okx_snap = okx_account_snapshot()
+        for p in (okx_snap.get("positions") or []):
+            p_copy = dict(p)
+            p_copy.setdefault("venue", "okx")
+            combined_positions.append(p_copy)
+        for o in (okx_snap.get("orders") or []):
+            o_copy = dict(o)
+            o_copy.setdefault("venue", "okx")
+            combined_orders.append(o_copy)
+    except Exception:
+        pass
+
+    # 2. Binance / Gate 多所平权持仓合并
+    try:
+        from r20_backend.exchanges import get_adapter
+        env_axis = "demo" if env.simulated else "live"
+        for v_name in ("binance", "gate"):
+            try:
+                ad = get_adapter(v_name, environment=env_axis)
+                v_positions = ad.positions() if hasattr(ad, "positions") else []
+                v_orders = ad.open_orders() if hasattr(ad, "open_orders") else []
+
+                for vp in (v_positions or []):
+                    amt = float(vp.get("size_signed", 0) or 0)
+                    if abs(amt) < 1e-12:
+                        continue
+                    base_sym = str(vp.get("base") or vp.get("symbol", "")).replace("USDT", "").replace("_USDT", "").upper()
+                    v_pos_side = str(vp.get("side") or ("long" if amt > 0 else "short")).lower()
+                    v_upl = float(vp.get("unrealized_pnl", 0) or 0)
+                    v_sz = abs(amt)
+                    combined_positions.append({
+                        "venue": v_name,
+                        "exchange": v_name,
+                        "instId": f"{base_sym}-USDT-SWAP",
+                        "posSide": v_pos_side,
+                        "pos": str(v_sz),
+                        "mgnMode": "cross",
+                        "upl": v_upl,
+                        "close_confirmation": f"CLOSE {base_sym}",
+                        "close_token": f"token-{v_name}-{base_sym}-{int(time.time())}",
+                    })
+                for vo in (v_orders or []):
+                    o_copy = dict(vo)
+                    o_copy.setdefault("venue", v_name)
+                    combined_orders.append(o_copy)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    return {
+        "environment": env.mode,
+        "environment_id": env.identity,
+        "credential_source": "multi-venue-aggregator",
+        "positions": combined_positions,
+        "orders": combined_orders,
+        "captured_at_ms": int(time.time() * 1000)
+    }
 
 
 @app.post("/api/v1/admin/positions/close")

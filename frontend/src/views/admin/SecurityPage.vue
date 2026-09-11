@@ -761,6 +761,9 @@ onMounted(() => { loadAll(); loadMx() })
                 <tr v-for="p in snapshot.positions" :key="p.instId + p.posSide" class="border-b last:border-b-0 transition-colors hover:bg-[var(--surface-3)]" style="border-color: var(--line-1);">
                   <td class="py-2 pl-0 pr-4">
                     <b class="num" style="color: var(--ink-1);">{{ p.instId }}</b>
+                    <span v-if="p.venue" class="ml-1 px-1 py-0.5 rounded text-[10px] font-bold uppercase border" :style="p.venue === 'binance' ? { color: '#f3ba2f', borderColor: '#f3ba2f33' } : p.venue === 'gate' ? { color: '#00be98', borderColor: '#00be9833' } : { color: '#3880ff', borderColor: '#3880ff33' }">
+                      {{ p.venue }}
+                    </span>
                     <span class="ml-1.5 px-1.5 py-0.5 rounded text-[11px] font-bold border" :style="p.posSide === 'long' ? { backgroundColor: 'var(--up-bg)', borderColor: 'var(--up-line)', color: 'var(--up)' } : { backgroundColor: 'var(--down-bg)', borderColor: 'var(--down-line)', color: 'var(--down)' }">
                       {{ (p.posSide || 'net').toUpperCase() }}
                     </span>
