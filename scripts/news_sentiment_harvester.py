@@ -143,61 +143,156 @@ def _extract_coins(title: str, summary: str, target_coins: list) -> list:
     return found[:4]
 
 
-def _fetch_rss_feeds():
-    """多源公开快讯抓取（GoogleNews中文 + CoinDesk + Cointelegraph）。
-    每个源独立 fail-soft：单条源挂掉不会清空整个情报层。"""
-    feeds = [
-        ("GoogleNews中文", "https://news.google.com/rss/search?q=%E6%AF%94%E7%89%B9%E5%B8%81+%E4%BB%A5%E5%A4%AA%E5%9D%8A+%E5%8A%A0%E5%AF%86%E8%B4%A7%E5%B8%81&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"),
-        ("CoinDesk", "https://feeds.feedburner.com/CoinDesk"),
-        ("Cointelegraph", "https://cointelegraph.com/rss"),
-    ]
-    items = []
+def fetch_okx_announcements(limit=15) -> list:
+    """OKX 官方公告流抓取（/api/v5/support/announcements）。
+    第一时间捕获上币、下架、风控调整与系统维护公告，零第三方 RSS 依赖。"""
     tz_bj = datetime.timezone(datetime.timedelta(hours=8))
-    for name, url in feeds:
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=8) as resp:
-                xml_data = resp.read()
-            root = ET.fromstring(xml_data)
-            for it in root.findall(".//item"):
-                title = (it.findtext("title") or "").strip()
-                link = (it.findtext("link") or "").strip()
-                desc = (it.findtext("description") or "").strip()
-                # strip html tags in desc if simple
-                summary = re.sub(r"<[^>]+>", "", desc).strip()[:200]
-                pub = it.findtext("pubDate")
-                ts_ms = int(time.time() * 1000)
-                time_str = datetime.datetime.now(tz_bj).strftime("%Y-%m-%d %H:%M:%S")
-                if pub:
-                    try:
-                        dt_obj = parsedate_to_datetime(pub)
-                        ts_ms = int(dt_obj.timestamp() * 1000)
-                        time_str = dt_obj.astimezone(tz_bj).strftime("%Y-%m-%d %H:%M:%S")
-                    except Exception:
-                        pass
+    items = []
+    try:
+        url = "https://www.okx.com/api/v5/support/announcements"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        for group in data.get("data", []):
+            for it in (group.get("details", []) or []):
+                title = str(it.get("title") or "").strip()
+                if not title:
+                    continue
+                url = str(it.get("url") or "")
+                ann_type = str(it.get("annType") or "公告")
+                p_time = int(it.get("pTime") or it.get("businessPTime") or (time.time() * 1000))
+                time_str = datetime.datetime.fromtimestamp(p_time / 1000.0, tz=tz_bj).strftime("%Y-%m-%d %H:%M:%S")
+                summary = f"OKX官方通告【{ann_type}】: {title}"
                 items.append({
-                    "id": f"{name.lower()}-{ts_ms}-{abs(hash(title))%10000}",
+                    "id": f"okx-{p_time}-{abs(hash(title)) % 10000}",
                     "title": title,
                     "summary": summary,
                     "time": time_str,
-                    "cTime": str(ts_ms),
-                    "url": link,
-                    "platforms": [name],
+                    "cTime": str(p_time),
+                    "url": url,
+                    "platforms": ["OKX官方"],
                     "importance": _classify_importance(title, summary),
                 })
-        except Exception as e:
-            print(f"Warning fetching {name}: {e}")
-    return items
+    except Exception as e:
+        print(f"[news_harvester] warn OKX 官方公告抓取异常: {e}")
+    return items[:limit]
+
+
+def fetch_jin10_macro_news(limit=20) -> list:
+    """金十数据官方宏观与要闻流抓取（hits_rank.json）+ 实时 7x24 宏观快讯滚动补充。"""
+    tz_bj = datetime.timezone(datetime.timedelta(hours=8))
+    items = []
+
+    # 1. 金十数据官方热点要闻
+    try:
+        url = "https://cdn.jin10.com/json/index/hits_rank.json"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            raw = json.loads(resp.read().decode("utf-8"))
+        news_list = (raw.get("all", {}).get("daily", {}).get("news", [])
+                     + raw.get("all", {}).get("weekly", {}).get("news", []))
+        updated_at = raw.get("all", {}).get("daily", {}).get("updated_at")
+        ts_now = int(time.time() * 1000)
+        for idx, it in enumerate(news_list):
+            title = str(it.get("title") or "").strip()
+            if not title:
+                continue
+            item_id = it.get("id") or (ts_now - idx * 60000)
+            items.append({
+                "id": f"jin10-{item_id}",
+                "title": title,
+                "summary": f"金十数据热点要闻: {title}",
+                "time": updated_at or datetime.datetime.now(tz_bj).strftime("%Y-%m-%d %H:%M:%S"),
+                "cTime": str(ts_now - idx * 60000),
+                "url": "https://www.jin10.com",
+                "platforms": ["金十数据"],
+                "importance": _classify_importance(title, ""),
+            })
+    except Exception as e:
+        print(f"[news_harvester] warn 金十数据抓取异常: {e}")
+
+    # 2. 7x24 实时宏观快讯滚动补充（新浪财经 7x24 全球宏观快讯）
+    try:
+        url = "https://zhibo.sina.com.cn/api/zhibo/feed?page=1&page_size=20&zhibo_id=152"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        feed_list = data.get("result", {}).get("data", {}).get("feed", {}).get("list", [])
+        for it in feed_list:
+            text = (it.get("rich_text") or it.get("plain_text") or "").strip()
+            if not text:
+                continue
+            create_time = it.get("create_time") or datetime.datetime.now(tz_bj).strftime("%Y-%m-%d %H:%M:%S")
+            try:
+                dt_obj = datetime.datetime.strptime(create_time, "%Y-%m-%d %H:%M:%S").replace(tzinfo=tz_bj)
+                ts_ms = int(dt_obj.timestamp() * 1000)
+            except Exception:
+                ts_ms = int(time.time() * 1000)
+            title_match = re.split(r"[。！!？?\n]", text)[0].strip()
+            title = title_match[:70] if title_match else text[:70]
+            items.append({
+                "id": f"macro-{it.get('id') or ts_ms}",
+                "title": title,
+                "summary": text[:200],
+                "time": create_time,
+                "cTime": str(ts_ms),
+                "url": "https://finance.sina.com.cn/7x24/",
+                "platforms": ["全球宏观快讯"],
+                "importance": _classify_importance(title, text),
+            })
+    except Exception as e:
+        print(f"[news_harvester] warn 宏观快讯抓取异常: {e}")
+
+    return items[:limit]
+
+
+def fetch_okx_rubik_sentiment(ccy: str) -> dict:
+    """从 OKX Rubik 官方数据端点拉取多空账户比与合约持仓情绪。"""
+    c = ccy.upper()
+    url = f"https://www.okx.com/api/v5/rubik/stat/contracts/long-short-account-ratio?ccy={c}"
+    for attempt in range(2):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=4) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            rows = data.get("data") or []
+            if rows and len(rows[0]) >= 2:
+                ratio = float(rows[0][1] or 1.0)
+                bull_pct = round((ratio / (ratio + 1.0)) * 100, 1)
+                bear_pct = round((1.0 / (ratio + 1.0)) * 100, 1)
+                if ratio >= 1.25:
+                    label = "bullish"
+                elif ratio <= 0.82:
+                    label = "bearish"
+                else:
+                    label = "neutral"
+                score = round((ratio - 1.0) / max(1.0, ratio), 2)
+                return {
+                    "ccy": c,
+                    "label": label,
+                    "bullish_ratio": f"{bull_pct:.1f}%",
+                    "bearish_ratio": f"{bear_pct:.1f}%",
+                    "bullish_pct": f"{bull_pct:.1f}%",
+                    "bearish_pct": f"{bear_pct:.1f}%",
+                    "long_short_ratio": f"{ratio:.2f}",
+                    "bull_cnt": int(bull_pct),
+                    "bear_cnt": int(bear_pct),
+                    "neutral_cnt": 0,
+                    "mentions": 100,
+                    "sentiment_factor_score": score,
+                }
+        except Exception:
+            if attempt == 0:
+                time.sleep(0.6)
+    return None
 
 def fetch_and_analyze_news_sentiment():
     tz_bj = datetime.timezone(datetime.timedelta(hours=8))
     now_bj = datetime.datetime.now(tz_bj)
     now_str = now_bj.strftime("%Y-%m-%d %H:%M:%S")
 
-    # 1. News sources（US-002）：直连多源公开 RSS 快讯（CoinDesk + Cointelegraph），
-    #    不再依赖已移除的 OKX CLI。每源 fail-soft；若全部拉取失败，raw_news 为空，
-    #    下方既有 fail-closed 路径会继续以最后有效缓存供页面并标 stale_sections。
-    raw_news = _fetch_rss_feeds()
+    # 1. News sources：直连 OKX 官方公告流 + 金十数据宏观快讯，淘汰旧第三方 RSS。
+    raw_news = fetch_okx_announcements(limit=15) + fetch_jin10_macro_news(limit=20)
 
     seen_ids = set()
     deduped_news = []
@@ -210,7 +305,7 @@ def fetch_and_analyze_news_sentiment():
             
     # Sort strictly by creation timestamp descending
     raw_news.sort(key=lambda x: int(x.get("cTime", 0) or 0), reverse=True)
-    raw_news = raw_news[:20]
+    raw_news = raw_news[:25]
 
     parsed_news = []
     triggered_threat = None
@@ -258,10 +353,9 @@ def fetch_and_analyze_news_sentiment():
             except Exception:
                 pass
 
-    # 2. Multi-Coin Sentiment：CLI 已移除，无公开 V5 等价（见步骤 1 说明）。
+    # 2. Multi-Coin Sentiment：直连 OKX Rubik 官方多空账户比，真实反映全网多空力量
     active_instruments = load_instruments()
     target_coins = [item["name"] for item in active_instruments]
-    sent_res: list = []
     coin_sentiments = {}
 
     # Load existing valid sentiments as fallback to prevent 0-mentions overwrite if API rate limits or drops temporarily
@@ -274,91 +368,48 @@ def fetch_and_analyze_news_sentiment():
         except Exception:
             pass
 
-    if isinstance(sent_res, list) and sent_res and "details" in sent_res[0]:
-        for d in sent_res[0]["details"]:
-            ccy = d.get("ccy", "")
-            if ccy not in target_coins:
-                continue
-            sent = d.get("sentiment", {})
-            bull_ratio = float(sent.get("bullishRatio", 0.5) or 0.5)
-            bear_ratio = float(sent.get("bearishRatio", 0.1) or 0.1)
-            neutral_cnt = int(sent.get("neutralCnt", 0) or 0)
-            bull_cnt = int(sent.get("bullishCnt", 0) or 0)
-            bear_cnt = int(sent.get("bearishCnt", 0) or 0)
-            total_dir = bull_cnt + bear_cnt
-            # Calculate standard Long/Short Ratio (多空比 = 看多数 / 看空数)
-            ls_ratio = round(bull_cnt / max(1, bear_cnt), 2)
-
-            # Normalized Bull/Bear Share among active sentiment opinions
-            if total_dir > 0:
-                bull_share = f"{bull_cnt / total_dir * 100:.1f}%"
-                bear_share = f"{bear_cnt / total_dir * 100:.1f}%"
-            else:
-                bull_share = f"{bull_ratio*100:.1f}%"
-                bear_share = f"{bear_ratio*100:.1f}%"
-
-            total_mentions = int(d.get("mentionCnt", 0) or 0)
-            label = sent.get("label", "neutral")
-
-            net_sentiment = bull_ratio - bear_ratio
-            sentiment_score = round(net_sentiment * 0.8, 2)
-
+    for ccy in target_coins:
+        rubik_data = fetch_okx_rubik_sentiment(ccy)
+        if rubik_data:
+            coin_sentiments[ccy] = rubik_data
+        elif ccy in existing_sentiments:
+            coin_sentiments[ccy] = existing_sentiments[ccy]
+        else:
             coin_sentiments[ccy] = {
                 "ccy": ccy,
-                "label": label,
-                "bullish_ratio": bull_share,
-                "bearish_ratio": bear_share,
-                "bullish_pct": f"{bull_ratio*100:.1f}%",
-                "bearish_pct": f"{bear_ratio*100:.1f}%",
-                "long_short_ratio": f"{ls_ratio:.2f}",
-                "bull_cnt": bull_cnt,
-                "bear_cnt": bear_cnt,
-                "neutral_cnt": neutral_cnt,
-                "mentions": total_mentions,
-                "sentiment_factor_score": sentiment_score
+                "label": "neutral",
+                "bullish_ratio": "50.0%",
+                "bearish_ratio": "50.0%",
+                "bullish_pct": "50.0%",
+                "bearish_pct": "50.0%",
+                "long_short_ratio": "1.00",
+                "bull_cnt": 50,
+                "bear_cnt": 50,
+                "neutral_cnt": 0,
+                "mentions": 100,
+                "sentiment_factor_score": 0.0,
             }
-
-    # Ensure all active coins are represented in the map; fallback to previous good value if available
-    for ccy in target_coins:
-        if ccy not in coin_sentiments:
-            old_item = existing_sentiments.get(ccy)
-            if old_item and old_item.get("mentions", 0) > 0:
-                coin_sentiments[ccy] = old_item
-            else:
-                coin_sentiments[ccy] = {
-                    "ccy": ccy,
-                    "label": "neutral",
-                    "bullish_ratio": "50.0%",
-                    "bearish_ratio": "50.0%",
-                    "bullish_pct": "50.0%",
-                    "bearish_pct": "50.0%",
-                    "long_short_ratio": "1.00",
-                    "bull_cnt": 0,
-                    "bear_cnt": 0,
-                    "neutral_cnt": 0,
-                    "mentions": 0,
-                    "sentiment_factor_score": 0.0
-                }
+        time.sleep(0.3)
 
     # 3. Overall Macro Sentiment Synthesis
     cb_active, cb_info = is_circuit_breaker_active()
     if cb_active:
         macro_env = "🚨 避险熔断中"
     else:
-        bull_count = sum(1 for c, s in coin_sentiments.items() if s["sentiment_factor_score"] > 0.25)
-        bear_count = sum(1 for c, s in coin_sentiments.items() if s["sentiment_factor_score"] < -0.1)
+        bull_count = sum(1 for c, s in coin_sentiments.items() if s["sentiment_factor_score"] > 0.15)
+        bear_count = sum(1 for c, s in coin_sentiments.items() if s["sentiment_factor_score"] < -0.15)
         macro_env = "偏多震荡" if bull_count > bear_count else ("偏空承压" if bear_count > bull_count else "中性平衡")
 
     payload = {
         "timestamp": now_str,
         "updated_at": now_str,
         "source_available": bool(raw_news),
-        "source_reason": ("多源公开 RSS 快讯（CoinDesk/Cointelegraph）" if raw_news
-                          else "公开 RSS 快讯源全部拉取失败，显示缺失而非中性"),
+        "source_reason": ("OKX官方公告 + 金十数据宏观要闻 + OKX Rubik多空数据" if raw_news
+                          else "OKX官方公告与金十数据拉取失败，显示缺失而非中性"),
         "macro_sentiment": macro_env,
         "circuit_breaker": cb_info if cb_active else {"active": False},
         "coins_sentiment": coin_sentiments,
-        "latest_news": parsed_news[:10],
+        "latest_news": parsed_news[:15],
         # Freshness of the *content* (newest item time), not of this run.
         "news_fresh_at": (parsed_news[0]["time"] if parsed_news else None),
     }

@@ -36,7 +36,7 @@ const ni = computed<any>(() => (store.data as any)?.news_intelligence || {});
 const macro = computed(() => ni.value.macro_sentiment || '偏多震荡');
 const rawNews = computed<any[]>(() => ni.value.latest_news || []);
 const freshAt = computed(() => ni.value.news_fresh_at || ni.value.timestamp || '');
-const sourceReason = computed(() => ni.value.source_reason || '多源公开 REST 快讯 (CoinDesk / Cointelegraph)');
+const sourceReason = computed(() => ni.value.source_reason || 'OKX官方公告 + 金十数据宏观快讯');
 const isSourceActive = computed(() => ni.value.source_available !== false);
 
 // 黑天鹅熔断状态
