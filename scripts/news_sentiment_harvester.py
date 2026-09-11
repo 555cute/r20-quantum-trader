@@ -162,18 +162,28 @@ OKX_SAFELIST_ANN_TYPES = {
     "announcements-regulation",           # 监管合规与地区清退
 }
 
-# 标题级中文噪音关键词（即便栏目未知也一律剔除）
+# 标题级中文泛化噪音关键词（仅作用于非白名单栏目，且不得压过安全词）
 OKX_NOISE_TITLE_KEYWORDS = [
-    "正式上线", "上线", "首发", "新增上线", "代币化股票", "X-合约", "X-Perp",
-    "赚币", "理财", "借贷", "充值", "提现通道开通", "活动", "交易赛", "邀请",
-    "空投", "推广", "上新",
+    "上线", "新增上线", "赚币", "理财", "借贷", "充值", "提现通道开通",
+    "活动", "交易赛", "邀请", "空投", "推广", "上新",
+]
+
+# 明确的"发新币/新合约上线"指示词：即便栏目在白名单也据此剔除（规则a）
+OKX_NEW_LISTING_TITLE_KEYWORDS = [
+    "正式上线", "首发", "代币化股票", "X-合约", "X-Perp",
 ]
 
 # 标题级中文安全关键词（关乎持仓与出入金安全的运维/风控通告）
+# 与 BLACK_SWAN_PATTERNS / _classify_importance 高危词对齐：出入金暂停、
+# 挤兑破产、强平脱锚、被盗立案等一律优先保留，供熔断器检测。
 OKX_SAFETY_TITLE_KEYWORDS = [
     "维护", "停机", "升级", "下线", "下架", "摘牌", "清退",
-    "风控", "保证金", "强平", "限仓", "杠杆调整", "暂停提现", "暂停充值",
-    "停止提现", "合约调整", "价格区间", "做市", "清算",
+    "风控", "保证金", "强平", "限仓", "杠杆调整", "合约调整", "价格区间",
+    "做市", "清算",
+    "暂停全部提现", "停止提币", "暂停提币", "停止提现", "暂停充值",
+    "停止充值", "暂停提现", "提币", "充提", "借币",
+    "挤兑", "破产", "黑天鹅", "脱锚", "51%攻击", "系统瘫痪", "崩盘",
+    "暴跌", "被盗", "立案调查",
 ]
 
 # 英文标题兜底（Accept-Language 失效时的英文公告）；\b 边界保证 list/listing 不误伤 delist/delisting
@@ -187,25 +197,70 @@ _OKX_SAFETY_EN_RE = re.compile(
     r"liquidation|liquidations|margin|withdrawal|withdrawals|"
     r"position\s*limits?|reduce\s*only|delisting)\b", re.IGNORECASE)
 
+# 中文出入金暂停强安全词：暂停/停止 与 充值/提现/提币/充提 之间允许夹币种名
+# （如"关于暂停 BTC 充值的公告"），避免被泛化噪音词"充值"误杀。
+_OKX_SAFETY_CN_RE = re.compile(
+    r"(暂停|停止|紧急|临时).{0,10}(充值|提现|提币|充提|出入金)")
+
+# 英文"发新币/新合约上线"指示词（\b 边界不误伤 delist/delisting）
+_OKX_NEW_LISTING_EN_RE = re.compile(
+    r"\b(list|lists|listed|listing|listings|launch|launches|launched|"
+    r"launching|tokenized)\b", re.IGNORECASE)
+
+# 黑天鹅正则预编译：命中任意一条即强制保留，确保熔断器可检测到
+_BLACK_SWAN_RES = [re.compile(p) for p, _ in BLACK_SWAN_PATTERNS]
+
+
+def _okx_safety_hit(title: str) -> bool:
+    """命中出入金/风控/黑天鹅等强安全词（中英双通道）。"""
+    return (any(kw in title for kw in OKX_SAFETY_TITLE_KEYWORDS)
+            or bool(_OKX_SAFETY_CN_RE.search(title))
+            or bool(_OKX_SAFETY_EN_RE.search(title)))
+
+
+def _okx_new_listing_hit(title: str) -> bool:
+    """明确指示发新币/新合约上线（中英双通道）。"""
+    return (any(kw in title for kw in OKX_NEW_LISTING_TITLE_KEYWORDS)
+            or bool(_OKX_NEW_LISTING_EN_RE.search(title)))
+
 
 def _okx_ann_is_actionable(title: str, ann_type: str) -> bool:
     """US-001 降噪判定：仅当公告属于真正关乎交易安全的运维/风控通告才返回 True。
 
-    剔除上币/新合约/理财推广/营销活动类公告；保留下架摘牌、系统维护停机、
-    风控参数（保证金/强平/限仓）调整与安全清退类通报。"""
+    优先级（verifier 反馈修正）：
+    ① 命中 BLACK_SWAN_PATTERNS 黑天鹅正则 → 一律保留（熔断器必须可见）；
+    ② 营销栏目黑名单 → 剔除，除非命中强安全词；
+    ③ 明确发新币/新合约上线指示词（正式上线/首发/X-合约/代币化股票等）→ 剔除，
+       即便栏目在白名单（规则a），除非同时命中强安全词；
+    ④ 栏目白名单 → 保留，泛化噪音词（充值/借贷/活动/上线等）不得误杀（规则a）；
+    ⑤ 栏目未知 → 强安全词优先于泛化噪音词（规则b），两者皆无则剔除。"""
     atype = str(ann_type or "").strip().lower()
+
+    # ① 黑天鹅/系统性风险：任何栏目一律保留
+    if any(rx.search(title) for rx in _BLACK_SWAN_RES):
+        return True
+
+    safety = _okx_safety_hit(title)
+
+    # ② 营销栏目黑名单：仅强安全词可豁免
     if atype in OKX_NOISE_ANN_TYPES:
+        return bool(safety)
+
+    # ③ 明确发新币/新合约上线：白名单栏目也剔除，除非命中强安全词
+    if _okx_new_listing_hit(title) and not safety:
         return False
+
+    # ④ 栏目白名单：泛化噪音词不得误杀
+    if atype in OKX_SAFELIST_ANN_TYPES:
+        return True
+
+    # ⑤ 栏目未知：安全词优先，其后泛化噪音词（中英）剔除
+    if safety:
+        return True
     if any(kw in title for kw in OKX_NOISE_TITLE_KEYWORDS):
         return False
     if _OKX_NOISE_EN_RE.search(title):
         return False
-    if atype in OKX_SAFELIST_ANN_TYPES:
-        return True
-    if any(kw in title for kw in OKX_SAFETY_TITLE_KEYWORDS):
-        return True
-    if _OKX_SAFETY_EN_RE.search(title):
-        return True
     return False
 
 

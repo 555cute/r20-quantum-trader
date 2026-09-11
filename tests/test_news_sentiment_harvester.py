@@ -106,6 +106,29 @@ class TestNewsSentimentHarvester(unittest.TestCase):
         self.assertTrue(harvester._okx_ann_is_actionable("Notice on Adjustment of Margin and Position Limits", "公告"))
         self.assertFalse(harvester._okx_ann_is_actionable("欧易上线全新理财产品赚币活动", "公告"))
 
+    def test_okx_ann_is_actionable_verifier_cases(self):
+        """verifier 反馈用例：白名单栏目泛化噪音词不得误杀（规则a）、
+        出入金暂停强安全词优先于噪音词（规则b）、明确发新币上线指示词剔除。"""
+        # 规则a：栏目在白名单内，标题含"充值/借贷/上线"等泛化噪音词也必须保留
+        self.assertTrue(harvester._okx_ann_is_actionable(
+            "关于暂停 BTC 充值的公告", "announcements-system-maintenance"))
+        self.assertTrue(harvester._okx_ann_is_actionable(
+            "关于借贷业务风控参数调整的公告", "announcements-risk"))
+        self.assertTrue(harvester._okx_ann_is_actionable(
+            "关于下架部分上线时间较短合约的公告", "announcements-delistings"))
+
+        # 规则b：栏目未知时，出入金暂停强安全词优先于泛化噪音词（提币黑天鹅安全词）
+        self.assertTrue(harvester._okx_ann_is_actionable(
+            "欧易关于暂停全部提现的公告", "公告"))
+        self.assertTrue(harvester._okx_ann_is_actionable(
+            "欧易关于停止提币与充值的公告", "公告"))
+
+        # 明确的发新币/新合约上线指示词：无论栏目未知还是营销栏目，一律剔除
+        self.assertFalse(harvester._okx_ann_is_actionable(
+            "欧易关于 ORCLUSD X-合约（X-Perp）正式上线的公告", "公告"))
+        self.assertFalse(harvester._okx_ann_is_actionable(
+            "欧易关于 ORCLUSD X-合约（X-Perp）正式上线的公告", "announcements-new-listings"))
+
     def test_fetch_jin10_macro_news_parsing(self):
         fake_jin10 = {
             "all": {
