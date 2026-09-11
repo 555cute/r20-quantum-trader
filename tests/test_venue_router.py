@@ -252,8 +252,10 @@ class TestAllocation(unittest.TestCase):
         # 两所评分悬殊 + min_slice 高 → 小切片被丢 → 退回单所（None）
         cfg = _cfg(split_enabled=True, min_slice_usdt=9000.0)
         cands = [_cand("okx", spread_bps=1.0), _cand("binance", spread_bps=50.0)]
-        alloc = split_allocation(_signal(size_usdt=10000.0), cands,
-                                 _Budget(10000.0), cfg)
+        # pre_alive=None 时 split_allocation 内部会重跑硬筛 → listing 必须钉（封闭律）
+        with patch.object(listing_mod, "ensure_contract_listed", _ok_listing):
+            alloc = split_allocation(_signal(size_usdt=10000.0), cands,
+                                     _Budget(10000.0), cfg)
         self.assertIsNone(alloc)
 
 

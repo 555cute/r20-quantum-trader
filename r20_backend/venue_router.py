@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from .exchanges import listing
+from .exchanges.base import canonical_base as _canonical_base
 
 #: listing fail-open 语义的注记关键词（与 listing.py 的 reason 措辞对齐）
 _LISTING_FAILOPEN_MARK = "跳过对账"
@@ -102,15 +103,15 @@ def _hard_filters(signal: Dict[str, Any], cand: Dict[str, Any],
         fails.append("执行开闸关：executable=False")
 
     # 原生合约代码对齐（防跨所 inst_id 格式错位导致误杀）
+    # 纯元数据翻译（native_symbol_pure）：绝不实例化适配器——实例化会触发
+    # 沙盒档域名探测出网，破坏本模块「零真实网络」的封闭铁律
     raw_sym = str(signal.get("symbol_canonical") or signal.get("inst_id") or "")
     native_contract = raw_sym
     try:
-        from .exchanges.base import canonical_base
-        from .exchanges import get_adapter
-        base_sym = canonical_base(raw_sym)
+        from .exchanges.registry import native_symbol_pure
+        base_sym = _canonical_base(raw_sym)
         if base_sym:
-            ad = get_adapter(venue)
-            native_contract = ad.native_symbol(base_sym)
+            native_contract = native_symbol_pure(base_sym, venue)
     except Exception:
         pass
 

@@ -247,3 +247,17 @@ def require_execution(venue: str, environment: Optional[str] = None) -> None:
 def resolve_symbol(symbol: str, venue: str) -> str:
     """canonical/任意写法 → 指定场所原生 instId。"""
     return get_adapter(venue).native_symbol(symbol)
+
+
+def native_symbol_pure(symbol: str, venue: str) -> str:
+    """符号翻译的**纯元数据**版本：直接读适配器类的 symbol_template 拼接，
+    绝不实例化（实例化会触发沙盒档域名探测 → 出网）。
+
+    用途：选所硬筛等只需「把 canonical 币名转成本所合约码再去 listing 目录对账」，
+    不需要任何连接态。未知场所回退 canonical（不抛、不猜所）。
+    """
+    cls = _ADAPTERS.get(str(venue or "").strip().lower())
+    template = getattr(getattr(cls, "capabilities", None), "symbol_template", "")
+    if not template:
+        return canonical_base(symbol)
+    return template.format(base=canonical_base(symbol))
