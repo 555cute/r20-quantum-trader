@@ -65,9 +65,9 @@ function symOf(x: { instId?: string; name?: string }): string {
 
 <template>
   <div class="card flex h-full flex-col overflow-hidden">
-    <!-- 面板头：分段 + 药丸筛选 + 计数 -->
-    <div class="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2.5" style="border-color: var(--line-1)">
-      <div class="flex items-center gap-2">
+    <!-- 面板头：分段 + 药丸筛选 (移动端响应式双行自适应) -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b px-2.5 sm:px-3 py-2 sm:py-2.5" style="border-color: var(--line-1)">
+      <div class="flex items-center justify-between sm:justify-start gap-2">
         <BaseSegmented
           v-model="tab"
           :options="[
@@ -75,13 +75,13 @@ function symOf(x: { instId?: string; name?: string }): string {
             { value: 'orders', label: `${t('dash.matrix.orders.tab')} ${filteredOrders.length}` },
           ]"
         />
-        <span v-if="tab === 'positions' && !filteredPositions.length" class="t-faint hidden text-xs sm:block">
+        <span v-if="tab === 'positions' && !filteredPositions.length" class="t-faint hidden sm:block text-xs">
           {{ t('dash.matrix.positions.aiManaged') }}
         </span>
       </div>
 
-      <!-- US-007 · 交易所筛选药丸 (Venue Filter Pills) -->
-      <div class="flex items-center gap-1 rounded-md p-0.5" style="background-color: var(--surface-2); border: 1px solid var(--line-1)">
+      <!-- US-007 · 交易所筛选药丸 (移动端全宽平铺，桌面端靠右) -->
+      <div class="flex items-center justify-between sm:justify-end gap-1 rounded-md p-0.5 w-full sm:w-auto" style="background-color: var(--surface-2); border: 1px solid var(--line-1)">
         <button
           v-for="v in [
             { key: 'all', label: '全部' },
@@ -90,7 +90,7 @@ function symOf(x: { instId?: string; name?: string }): string {
             { key: 'gate', label: 'Gate' },
           ]"
           :key="v.key"
-          class="px-2 py-0.5 rounded text-2xs transition-colors"
+          class="flex-1 sm:flex-initial text-center px-2 py-0.5 rounded text-2xs transition-colors"
           :style="selectedVenue === v.key ? { backgroundColor: 'var(--surface-3)', color: 'var(--ink-strong)', fontWeight: 'bold' } : { color: 'var(--ink-3)' }"
           @click="selectedVenue = v.key as any"
         >
@@ -106,9 +106,9 @@ function symOf(x: { instId?: string; name?: string }): string {
         <thead>
           <tr>
             <th>{{ t('dash.matrix.positions.col.symbol') }}</th>
-            <th class="col-num">{{ t('dash.matrix.positions.col.entry') }}</th>
+            <th class="col-num hidden sm:table-cell">{{ t('dash.matrix.positions.col.entry') }}</th>
             <th class="col-num">{{ t('dash.matrix.positions.col.mark') }}</th>
-            <th class="col-num">{{ t('dash.matrix.positions.col.lev') }}</th>
+            <th class="col-num hidden md:table-cell">{{ t('dash.matrix.positions.col.lev') }}</th>
             <th class="col-num">{{ t('dash.matrix.positions.col.pnl') }}</th>
             <th class="col-num hidden 2xl:table-cell">{{ t('dash.matrix.positions.col.sl') }} / {{ t('dash.matrix.positions.col.tp') }}</th>
             <th class="text-center">{{ t('dash.matrix.positions.col.oco') }}</th>
@@ -124,7 +124,7 @@ function symOf(x: { instId?: string; name?: string }): string {
           >
             <td>
               <div class="flex items-center gap-1.5 flex-wrap">
-                <span class="num font-semibold" style="color: var(--ink-strong)">{{ symOf(p) }}</span>
+                <span class="num font-semibold text-xs sm:text-sm" style="color: var(--ink-strong)">{{ symOf(p) }}</span>
                 <DirTag :dir="p.side" />
                 <!-- US-007 · 交易所与环境模式标签 -->
                 <span
@@ -140,11 +140,11 @@ function symOf(x: { instId?: string; name?: string }): string {
                   {{ getModeOf(p) }}
                 </span>
               </div>
-              <p v-if="p.stageDesc" class="t-faint text-2xs leading-tight">{{ p.stageDesc }}</p>
+              <p v-if="p.stageDesc" class="t-faint text-2xs leading-tight mt-0.5">{{ p.stageDesc }}</p>
             </td>
-            <td class="col-num">{{ fmtPrice(p.avgPx) }}</td>
+            <td class="col-num hidden sm:table-cell">{{ fmtPrice(p.avgPx) }}</td>
             <td class="col-num">{{ fmtPrice(p.markPx ?? p.last) }}</td>
-            <td class="col-num">{{ p.lever }}x</td>
+            <td class="col-num hidden md:table-cell">{{ p.lever }}x</td>
             <td class="col-num" :class="posPnl(p) >= 0 ? 'up' : 'down'">
               {{ arrow(posPnl(p)) }} {{ fmtSigned(posPnl(p)) }}
               <span class="t-faint block text-2xs">{{ fmtPct(posRoi(p)) }}</span>
@@ -177,8 +177,8 @@ function symOf(x: { instId?: string; name?: string }): string {
             <th>{{ t('dash.matrix.orders.col.symbol') }}</th>
             <th class="col-num">{{ t('dash.matrix.orders.col.price') }}</th>
             <th class="col-num">{{ t('dash.matrix.orders.col.qty') }}</th>
-            <th class="col-num">{{ t('dash.matrix.orders.col.sl') }} / {{ t('dash.matrix.orders.col.tp') }}</th>
-            <th>{{ t('dash.matrix.orders.col.placed') }}</th>
+            <th class="col-num hidden sm:table-cell">{{ t('dash.matrix.orders.col.sl') }} / {{ t('dash.matrix.orders.col.tp') }}</th>
+            <th class="hidden md:table-cell">{{ t('dash.matrix.orders.col.placed') }}</th>
             <th class="text-center">{{ t('dash.matrix.orders.col.state') }}</th>
           </tr>
         </thead>
@@ -211,12 +211,12 @@ function symOf(x: { instId?: string; name?: string }): string {
             </td>
             <td class="col-num">{{ fmtPrice(o.px) }}</td>
             <td class="col-num">{{ fmtNum(Number(o.sz), 0) }}</td>
-            <td class="col-num t-faint">
+            <td class="col-num t-faint hidden sm:table-cell">
               <span class="down">{{ o.slTriggerPx ? fmtPrice(o.slTriggerPx) : '--' }}</span>
               <span class="mx-1">/</span>
               <span class="up">{{ o.tpTriggerPx ? fmtPrice(o.tpTriggerPx) : '--' }}</span>
             </td>
-            <td><TimeAgo :time="Number(o.cTime) || o.cTime" /></td>
+            <td class="hidden md:table-cell"><TimeAgo :time="Number(o.cTime) || o.cTime" /></td>
             <td class="text-center"><span class="badge">{{ o.state === 'live' ? t('status.waiting') : o.state }}</span></td>
           </tr>
         </tbody>

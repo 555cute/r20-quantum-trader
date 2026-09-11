@@ -41,7 +41,7 @@ watch(focusSymbol, (v) => {
 </script>
 
 <template>
-  <div class="space-y-3">
+  <div class="space-y-2.5 sm:space-y-3">
     <PageHead :title="t('dash.matrix.title')" :desc="t('dash.matrix.desc')" />
 
     <KpiRibbon />

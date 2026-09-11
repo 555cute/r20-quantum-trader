@@ -4,7 +4,7 @@
  * 铁律：两环境数据绝不加总（后端无合计字段，前端也不求和展示）；
  * 未知显「—」+文字状态徽章（颜色不作唯一识别）；身份必须有文字。
  */
-import { computed, onMounted } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { FlaskConical, RefreshCw, ShieldCheck } from 'lucide-vue-next';
 import { useI18n } from '../../composables/useI18n';
 import { fmtNum, utcStrToBj } from '../../utils/format';
@@ -21,6 +21,7 @@ const { t } = useI18n();
 
 const VENUES: VenueKey[] = ['okx', 'gate', 'binance'];
 const isDemo = computed(() => store.environment === 'demo');
+const isMobileExpanded = ref(false);
 
 /** US-004 · 组合风险占用行（/api/all portfolio_risk，US-001 预留层口径）。
  *  铁律同账户卡：null/缺字段 = 未知显「—」，绝不以 0 冒充；两环境绝不加总。 */
@@ -125,7 +126,36 @@ function refreshAll(): void {
       {{ t('dash.venueAccounts.needsAuth') }}
     </div>
 
-    <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
+    <!-- 移动端紧凑三所资产条 (桌面端隐藏，手机端大幅降低竖向屏高) -->
+    <div class="block md:hidden rounded-lg p-2 border" style="background: var(--surface-2); border-color: var(--line-1)">
+      <div class="flex items-center justify-between text-2xs mb-1.5">
+        <span class="font-bold" style="color: var(--ink-1)">三所资产一览</span>
+        <button
+          class="text-3xs font-medium px-2 py-0.5 rounded cursor-pointer transition-colors"
+          style="background: var(--surface-3); color: var(--ink-2)"
+          @click="isMobileExpanded = !isMobileExpanded"
+        >
+          {{ isMobileExpanded ? '收起明细 ▲' : '展开三所卡片 ▼' }}
+        </button>
+      </div>
+      <div class="grid grid-cols-3 gap-1.5 text-center">
+        <div class="p-1.5 rounded" style="background: var(--surface-1)">
+          <span class="block text-3xs font-bold" style="color: #3880ff">OKX</span>
+          <span class="num font-bold text-xs" style="color: var(--ink-strong)">{{ pMoney(store.venues?.okx?.equity) }}</span>
+        </div>
+        <div class="p-1.5 rounded" style="background: var(--surface-1)">
+          <span class="block text-3xs font-bold" style="color: #f3ba2f">Binance</span>
+          <span class="num font-bold text-xs" style="color: var(--ink-strong)">{{ pMoney(store.venues?.binance?.equity) }}</span>
+        </div>
+        <div class="p-1.5 rounded" style="background: var(--surface-1)">
+          <span class="block text-3xs font-bold" style="color: #00be98">Gate</span>
+          <span class="num font-bold text-xs" style="color: var(--ink-strong)">{{ pMoney(store.venues?.gate?.equity) }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 三所同构大卡片 (移动端折叠控制，桌面端 md:grid 平铺) -->
+    <div :class="['gap-3 md:grid md:grid-cols-3', isMobileExpanded ? 'grid grid-cols-1' : 'hidden md:grid']">
       <VenueAccountCard
         v-for="v in VENUES"
         :key="`${store.environment}-${v}`"
