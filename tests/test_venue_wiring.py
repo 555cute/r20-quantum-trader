@@ -101,7 +101,8 @@ class _WiringSandbox(unittest.TestCase):
     def _submit(self, inst_id="BTC-USDT-SWAP", side="buy", pos_side="long",
                 size=10.0, price=100.0, tp=115.0, sl=95.0, notional=300.0,
                 margin=60.0, intent="BTC:i1", limit=None, preferred="auto",
-                executable=None, env=None, health=None, mode="auto"):
+                executable=None, env=None, health=None, mode="auto",
+                listing_check=None):
         """跑一次真实 submit_protected_limit_order；返回 (ok, ref)。"""
         if limit:
             # 总上限的单一事实源是 env（trader 读它建 manager）
@@ -123,7 +124,7 @@ class _WiringSandbox(unittest.TestCase):
             patch.object(trader, "current_environment", lambda values=None: live_env),
             patch.object(trader, "selected_environment", lambda values=None: live_env),
             patch.object(trader, "reservation_manager", lambda: mgr),
-            patch.object(listing_mod, "ensure_contract_listed", _ok_listing),
+            patch.object(listing_mod, "ensure_contract_listed", listing_check or _ok_listing),
             patch.object(trader.okx_rest, "place_order", self._on_place),
         ]
         if executable is not None:
@@ -207,6 +208,41 @@ class TestManualPreferredVenue(_WiringSandbox):
             self.assertEqual(called_decision["venue"], "gate")
             self.assertEqual(called_decision["asset"], "BTC")
             self.assertEqual(called_decision["action"], "BUY_LONG")
+            self.assertEqual(called_decision["environment"], "live")
+
+    def test_manual_preferred_venue_with_binance_dispatches_execution_router(self):
+        self._write_cache(["BTC-USDT-SWAP"])
+        fake_res = {"ok": True, "order_id": "BINANCE-ORDER-999", "detail": "binance success"}
+        with patch("r20_backend.execution_router.open_protected_position", return_value=fake_res) as mock_open:
+            ok, ref = self._submit(preferred="binance", executable={"binance": True})
+            self.assertTrue(ok, ref)
+            self.assertEqual(ref, "BINANCE-ORDER-999")
+            self.assertEqual(self.calls, [], "Binance 下单不得打到 OKX 端点")
+            mock_open.assert_called_once()
+            called_decision = mock_open.call_args[0][0]
+            self.assertEqual(called_decision["venue"], "binance")
+            self.assertEqual(called_decision["asset"], "BTC")
+            self.assertEqual(called_decision["action"], "BUY_LONG")
+            self.assertEqual(called_decision["environment"], "live")
+
+    def test_listing_gate_native_symbol_parity(self):
+        """三所原生合约代码转换对账验证：OKX/Binance/Gate 均应查到原生合约码。"""
+        listing_calls = []
+
+        def capture_listing(venue, environment, contract):
+            listing_calls.append((venue, contract))
+            return listing_mod.ListingCheck(ok=True, reason=None,
+                                            checked_at="2026-09-11T12:00:00Z", source="cache")
+
+        self._write_cache(["BTC-USDT-SWAP"])
+        fake_res = {"ok": True, "order_id": "BN-1", "detail": "ok"}
+        with patch("r20_backend.execution_router.open_protected_position", return_value=fake_res):
+            ok, ref = self._submit(preferred="binance", executable={"binance": True},
+                                   listing_check=capture_listing)
+            self.assertTrue(ok, ref)
+            # 验证向 listing gate 传入的是 Binance 原生合约码 BTCUSDT，而不是 OKX 格式 BTC-USDT-SWAP
+            self.assertIn(("binance", "BTCUSDT"), listing_calls)
+            self.assertNotIn(("binance", "BTC-USDT-SWAP"), listing_calls)
 
     def test_manual_preferred_venue_not_executable_rejected_with_evidence(self):
         self._write_cache(["BTC-USDT-SWAP"])
@@ -308,6 +344,7 @@ class TestBudgetReservation(_WiringSandbox):
         with patch.object(trader, "AI_DECISION_CACHE_FILE", self.cache_file), \
                 patch.object(trader, "VENUE_HEALTH_FILE", os.path.join(self.tmp, "none.json")), \
                 patch.object(trader, "OPEN_INTENT_FILE", os.path.join(self.tmp, "intents.json")), \
+                patch.object(trader, "load_preferred_venue", lambda: "okx"), \
                 patch.object(trader, "current_environment", lambda values=None: _FakeEnv()), \
                 patch.object(trader, "selected_environment", lambda values=None: _FakeEnv()), \
                 patch.object(trader, "reservation_manager", lambda: mgr), \

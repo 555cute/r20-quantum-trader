@@ -740,9 +740,10 @@ def build_venue_candidates(inst_id: str, environment: str) -> List[Dict[str, Any
         latency = [float(v) for v in (observed.get("latency_ms") or {}).values()
                    if isinstance(v, (int, float))]
         avg_latency = sum(latency) / len(latency) if latency else 0.0
-        if name == "okx":
-            # OKX 行情由本巡检周期直连取数（f 全部来自刚拉的 ticker/因子），
-            # 新鲜度基准 = 当前时刻，不依赖跨所观测文件是否存在。
+        pref = load_preferred_venue()
+        if name == "okx" or (pref != "auto" and name == pref and venue_execution_ready(name, environment)):
+            # OKX 由巡检周期直连取数；手选锁定所（如锁定币安且就绪）享有同等现时新鲜度，
+            # 不受跨所观测文件暂态老化影响（三所对等平权）。
             stamp = live_stamp
         elif observed:
             stamp = observed_stamp
@@ -1190,7 +1191,8 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: f
                 "entry_price": effective_px,
                 "take_profit_price": effective_tp,
                 "stop_loss_price": effective_sl,
-            })
+                "environment": str(env.mode),
+            }, environment=str(env.mode))
             if not res.get("ok"):
                 detail = res.get("detail") or "多所执行路由拒绝"
                 release_signal_reservation(_reservation, detail)

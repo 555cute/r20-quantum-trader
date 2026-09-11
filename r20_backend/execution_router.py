@@ -42,15 +42,18 @@ def open_protected_position(decision: Dict[str, Any], *,
                             trigger_expiration: int = 604800,
                             adapter: Any = None,
                             own_position: Optional[Dict[str, Any]] = None,
-                            margin_mode: Optional[str] = None) -> RouteResult:
+                            margin_mode: Optional[str] = None,
+                            environment: Optional[str] = None) -> RouteResult:
     """标准决策 → Gate/Binance 受保护开仓（US-005 多所对等）。全程 fail-closed：任何缺口先撤后抛。
 
     own_position：调用方（lab/trader）在该合约上的在管仓位记录（含 size_signed/side）；
     交易所既有仓与之一致视为己仓放行，否则视为外部连坐风险拒开（stage=precheck）。
     margin_mode：由账户实况推导传入（cross/isolated）；缺省维持历史行为 cross。
+    environment：显式资金环境（demo/live），优先使用；缺省读 decision.get('environment')。
     """
+    env_name = str(environment or decision.get("environment") or "").strip().lower() or None
     venue = str(decision.get("venue") or getattr(getattr(adapter, "capabilities", None), "venue", "gate") or "gate").strip().lower()
-    ad = adapter or get_adapter(venue)
+    ad = adapter or get_adapter(venue, environment=env_name)
     asset = canonical_base(str(decision.get("asset") or decision.get("name") or ""))
     action = str(decision.get("action") or "").upper()
     if not asset:
@@ -181,10 +184,11 @@ def open_protected_position(decision: Dict[str, Any], *,
                        detail=f"{venue.upper()} 入场限价挂单 + TP/SL 双腿云端触发单已回读验证")
 
 
-def close_position(symbol: str, *, venue: str = "gate", adapter: Any = None) -> RouteResult:
+def close_position(symbol: str, *, venue: str = "gate", adapter: Any = None,
+                   environment: Optional[str] = None) -> RouteResult:
     """市价全平（close=true + ioc），依赖同前：开闸 + 凭证。"""
     v = str(venue or getattr(getattr(adapter, "capabilities", None), "venue", "gate") or "gate").lower()
-    ad = adapter or get_adapter(v)
+    ad = adapter or get_adapter(v, environment=environment)
     require_execution(v, environment=str(getattr(ad, "environment", "live") or "live"))
     asset = canonical_base(symbol)
     try:
