@@ -12,14 +12,12 @@ import { useRouter } from 'vue-router';
 import { Wallet, TrendingUp, Zap, ShieldCheck } from 'lucide-vue-next';
 import { useDashboardStore } from '../../stores/dashboard';
 import { useVenueAccountsStore } from '../../stores/venueAccounts';
-import { useI18n } from '../../composables/useI18n';
 import { fmtNum } from '../../utils/format';
 import { APP_VERSION } from '../../config/version';
 
 const router = useRouter();
 const store = useDashboardStore();
 const venueStore = useVenueAccountsStore();
-const { t } = useI18n();
 
 const account = computed(() => store.data?.account || ({} as any));
 const today = computed(() => (store.data as any)?.today_stats || {});
@@ -262,8 +260,8 @@ const ocoOk = computed(() => {
 <template>
   <div class="space-y-2">
     <!-- 顶部状态小标 -->
-    <div class="flex items-center justify-between text-2xs px-1 text-[var(--ink-3)]">
-      <div class="flex items-center gap-1.5 font-medium">
+    <div class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-2xs px-1 text-[var(--ink-3)]">
+      <div class="flex flex-wrap items-center gap-1.5 font-medium">
         <span class="h-2 w-2 rounded-full bg-[var(--up)] shadow-[0_0_6px_var(--up)] animate-pulse" />
         <span class="text-[var(--ink-2)] font-semibold">多所平权量化实盘监控</span>
         <span>·</span>
@@ -276,20 +274,20 @@ const ocoOk = computed(() => {
       </div>
     </div>
 
-    <!-- 4 单元独立 Bento 资产控制舱（移动端 2x2 对称紧凑网格，桌面端 4 列横排） -->
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-2.5 xl:gap-3">
+    <!-- 4 单元独立 Bento 资产控制舱（移动端单列堆叠全宽、平板 2 列、桌面 4 列横排） -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-2.5 xl:gap-3">
       <!-- 单元 1：多所组合总权益 (OKX + Binance + Gate) -->
       <div
         class="card rounded-2xl border p-3 sm:p-3.5 flex flex-col justify-between transition-all"
         style="background-color: var(--surface-1); border-color: var(--line-1)"
       >
-        <div class="flex items-center justify-between pb-1">
-          <div class="flex items-center gap-1.5 text-2xs sm:text-xs font-bold" style="color: var(--ink-1)">
+        <div class="flex items-center justify-between gap-1 pb-1">
+          <div class="flex min-w-0 items-center gap-1.5 text-2xs sm:text-xs font-bold" style="color: var(--ink-1)">
             <Wallet class="h-3.5 w-3.5 text-indigo-400 shrink-0" />
             <span class="truncate">多所组合总权益</span>
           </div>
           <span
-            class="badge badge-mono text-3xs font-bold px-1.5 py-0.2 rounded"
+            class="badge badge-mono text-3xs font-bold px-1.5 py-0.2 rounded shrink-0"
             style="background-color: var(--surface-3); color: var(--ink-2); border-color: var(--line-2)"
           >
             {{ prodBadge }}
@@ -297,20 +295,20 @@ const ocoOk = computed(() => {
         </div>
 
         <div class="py-1">
-          <div class="num font-black tracking-tight text-xl sm:text-2xl text-[var(--ink-strong)] truncate">
+          <div class="num font-black tracking-tight text-lg sm:text-xl lg:text-2xl text-[var(--ink-strong)]">
             {{ totalEqStr !== '--' ? '$' + totalEqStr : '--' }}
           </div>
         </div>
 
-        <div class="grid grid-cols-2 gap-0.5 text-[10px] sm:text-[11px] num t-faint pb-1">
-          <div class="truncate">总可用 <b class="text-[var(--ink-1)]">{{ availEqStr !== '--' ? '$' + availEqStr : '--' }}</b></div>
-          <div class="truncate text-right">总本金 <b class="text-[var(--ink-1)]">{{ initialCapStr !== '--' ? '$' + initialCapStr : '--' }}</b></div>
+        <div class="grid grid-cols-2 gap-x-1.5 gap-y-0.5 text-[10px] sm:text-[11px] num t-faint pb-1">
+          <div class="min-w-0 whitespace-nowrap">总可用 <b class="text-[var(--ink-1)]">{{ availEqStr !== '--' ? '$' + availEqStr : '--' }}</b></div>
+          <div class="min-w-0 whitespace-nowrap text-right">总本金 <b class="text-[var(--ink-1)]">{{ initialCapStr !== '--' ? '$' + initialCapStr : '--' }}</b></div>
         </div>
 
         <!-- 保证金占用进度条 -->
         <div class="pt-1 border-t" style="border-color: var(--line-1)">
-          <div class="flex items-center justify-between text-[11px] mb-1">
-            <span class="t-faint">综合保证金占用率</span>
+          <div class="flex items-center justify-between gap-1.5 text-[11px] mb-1">
+            <span class="t-faint whitespace-nowrap">综合保证金占用率</span>
             <span class="num font-bold text-[var(--up)]">{{ marginUsagePct }}%</span>
           </div>
           <div class="w-full h-1.5 rounded-full overflow-hidden" style="background-color: var(--surface-3)">
@@ -327,48 +325,48 @@ const ocoOk = computed(() => {
         class="card rounded-2xl border p-3 sm:p-3.5 flex flex-col justify-between transition-all"
         style="background-color: var(--surface-1); border-color: var(--line-1)"
       >
-        <div class="flex items-center justify-between pb-1">
-          <div class="flex items-center gap-1.5 text-2xs sm:text-xs font-bold" style="color: var(--ink-1)">
+        <div class="flex items-center justify-between gap-1 pb-1">
+          <div class="flex min-w-0 items-center gap-1.5 text-2xs sm:text-xs font-bold" style="color: var(--ink-1)">
             <TrendingUp class="h-3.5 w-3.5 text-[var(--up)] shrink-0" />
             <span class="truncate">基准累计收益</span>
           </div>
           <span
             v-if="cumRoiNum !== null"
-            class="badge text-3xs font-bold px-1.5 py-0.2 rounded"
+            class="badge text-3xs font-bold px-1.5 py-0.2 rounded shrink-0"
             :class="cumRoiNum >= 0 ? 'badge-up' : 'badge-down'"
           >
             {{ cumRoiNum >= 0 ? '+' : '' }}{{ cumRoiNum.toFixed(2) }}%
           </span>
-          <span v-else class="badge badge-quiet text-3xs">--</span>
+          <span v-else class="badge badge-quiet text-3xs shrink-0">--</span>
         </div>
 
         <div class="py-1">
           <div
             v-if="cumPnlNum !== null"
-            class="num font-black tracking-tight text-xl sm:text-2xl truncate"
+            class="num font-black tracking-tight text-lg sm:text-xl lg:text-2xl"
             :class="cumPnlNum >= 0 ? 'up' : 'down'"
           >
             {{ cumPnlNum >= 0 ? '+' : '' }}{{ cumPnlNum.toFixed(2) }}
           </div>
-          <div v-else class="num font-black tracking-tight text-xl sm:text-2xl t-faint">
+          <div v-else class="num font-black tracking-tight text-lg sm:text-xl lg:text-2xl t-faint">
             --
           </div>
         </div>
 
-        <div class="grid grid-cols-2 gap-0.5 text-[10px] sm:text-[11px] num t-faint pb-1">
-          <div class="truncate">
+        <div class="grid grid-cols-2 gap-x-1.5 gap-y-0.5 text-[10px] sm:text-[11px] num t-faint pb-1">
+          <div class="min-w-0 whitespace-nowrap">
             净收益率
             <b v-if="cumRoiNum !== null" :class="cumRoiNum >= 0 ? 'up' : 'down'">
               {{ cumRoiNum >= 0 ? '+' : '' }}{{ cumRoiNum.toFixed(2) }}%
             </b>
             <b v-else class="t-faint">--</b>
           </div>
-          <div class="truncate text-right">夏普锚定 <b class="text-[var(--up)]">{{ sharpeRatio }}</b></div>
+          <div class="min-w-0 whitespace-nowrap text-right">夏普锚定 <b class="text-[var(--up)]">{{ sharpeRatio }}</b></div>
         </div>
 
         <!-- 策略版本与全量台账穿透核验入口 -->
-        <div class="pt-1 border-t flex items-center justify-between text-[11px]" style="border-color: var(--line-1)">
-          <span class="t-faint">策略版本 {{ APP_VERSION }}</span>
+        <div class="pt-1 border-t flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-[11px]" style="border-color: var(--line-1)">
+          <span class="t-faint whitespace-nowrap">策略版本 {{ APP_VERSION }}</span>
           <button
             type="button"
             class="font-bold text-[var(--up)] flex items-center gap-0.5 cursor-pointer hover:underline"
@@ -386,28 +384,28 @@ const ocoOk = computed(() => {
         class="card rounded-2xl border p-3 sm:p-3.5 flex flex-col justify-between transition-all"
         style="background-color: var(--surface-1); border-color: var(--line-1)"
       >
-        <div class="flex items-center justify-between pb-1">
-          <div class="flex items-center gap-1.5 text-2xs sm:text-xs font-bold" style="color: var(--ink-1)">
+        <div class="flex items-center justify-between gap-1 pb-1">
+          <div class="flex min-w-0 items-center gap-1.5 text-2xs sm:text-xs font-bold" style="color: var(--ink-1)">
             <Zap class="h-3.5 w-3.5 text-amber-400 shrink-0" />
             <span class="truncate">今日已结盈亏</span>
           </div>
-          <span class="badge text-3xs font-bold px-1.5 py-0.2 rounded" :class="todayWinRateStr.includes('胜率') ? 'badge-up' : 'badge-quiet'">
+          <span class="badge text-3xs font-bold px-1.5 py-0.2 rounded shrink-0 whitespace-nowrap" :class="todayWinRateStr.includes('胜率') ? 'badge-up' : 'badge-quiet'">
             {{ todayWinRateStr }}
           </span>
         </div>
 
         <div class="py-1">
           <div
-            class="num font-black tracking-tight text-xl sm:text-2xl truncate"
+            class="num font-black tracking-tight text-lg sm:text-xl lg:text-2xl"
             :class="todayNetNum >= 0 ? 'up' : 'down'"
           >
             {{ todayNetNum >= 0 ? '+' : '' }}{{ todayNetNum.toFixed(2) }}
           </div>
         </div>
 
-        <div class="grid grid-cols-2 gap-0.5 text-[10px] sm:text-[11px] num t-faint pb-1">
-          <div class="truncate">资金费 <b :class="fundingFeeStr.startsWith('+') ? 'up' : fundingFeeStr.startsWith('-') ? 'down' : ''">{{ fundingFeeStr }}</b></div>
-          <div class="truncate text-right">手续费 <b :class="tradingFeeStr.startsWith('-') ? 'down' : ''">{{ tradingFeeStr }}</b></div>
+        <div class="grid grid-cols-2 gap-x-1.5 gap-y-0.5 text-[10px] sm:text-[11px] num t-faint pb-1">
+          <div class="min-w-0 whitespace-nowrap">资金费 <b :class="fundingFeeStr.startsWith('+') ? 'up' : fundingFeeStr.startsWith('-') ? 'down' : ''">{{ fundingFeeStr }}</b></div>
+          <div class="min-w-0 whitespace-nowrap text-right">手续费 <b :class="tradingFeeStr.startsWith('-') ? 'down' : ''">{{ tradingFeeStr }}</b></div>
         </div>
 
         <!-- 双色成交胜负比进度条 -->
@@ -416,9 +414,9 @@ const ocoOk = computed(() => {
             <div class="bg-[var(--up)] h-full transition-all" :style="{ width: `${winBarPct}%` }" />
             <div class="bg-[var(--down)] h-full flex-1" />
           </div>
-          <div class="flex items-center justify-between text-[11px] num">
-            <span class="t-faint">{{ tradesSummaryText }}</span>
-            <span class="t-faint">盈亏比：<b class="text-[var(--up)]">{{ profitFactor }}</b></span>
+          <div class="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-[11px] num">
+            <span class="t-faint whitespace-nowrap">{{ tradesSummaryText }}</span>
+            <span class="t-faint whitespace-nowrap">盈亏比：<b class="text-[var(--up)]">{{ profitFactor }}</b></span>
           </div>
         </div>
       </div>
@@ -428,38 +426,38 @@ const ocoOk = computed(() => {
         class="card rounded-2xl border p-3 sm:p-3.5 flex flex-col justify-between transition-all"
         style="background-color: var(--surface-1); border-color: var(--line-1)"
       >
-        <div class="flex items-center justify-between pb-1">
-          <div class="flex items-center gap-1.5 text-2xs sm:text-xs font-bold" style="color: var(--ink-1)">
+        <div class="flex items-center justify-between gap-1 pb-1">
+          <div class="flex min-w-0 items-center gap-1.5 text-2xs sm:text-xs font-bold" style="color: var(--ink-1)">
             <ShieldCheck class="h-3.5 w-3.5 text-blue-400 shrink-0" />
             <span class="truncate">当前持仓浮盈</span>
           </div>
           <span
             v-if="posRoiNum !== null"
-            class="badge text-3xs font-bold px-1.5 py-0.2 rounded"
+            class="badge text-3xs font-bold px-1.5 py-0.2 rounded shrink-0 whitespace-nowrap"
             :class="posRoiNum >= 0 ? 'badge-up' : 'badge-down'"
           >
             ROI {{ posRoiNum >= 0 ? '+' : '' }}{{ posRoiNum.toFixed(2) }}%
           </span>
-          <span v-else class="badge badge-quiet text-3xs">--</span>
+          <span v-else class="badge badge-quiet text-3xs shrink-0">--</span>
         </div>
 
         <div class="py-1">
           <div
-            class="num font-black tracking-tight text-xl sm:text-2xl truncate"
+            class="num font-black tracking-tight text-lg sm:text-xl lg:text-2xl"
             :class="posUplNum >= 0 ? 'up' : 'down'"
           >
             {{ posUplNum >= 0 ? '+' : '' }}{{ posUplNum.toFixed(2) }}
           </div>
         </div>
 
-        <div class="grid grid-cols-2 gap-0.5 text-[10px] sm:text-[11px] num t-faint pb-1">
-          <div class="truncate">持仓本金 <b class="text-[var(--ink-1)]">{{ actualPosMargin > 0 ? '$' + fmtNum(actualPosMargin, 2) : '$0.00' }}</b></div>
-          <div class="truncate text-right">名义敞口 <b class="text-[var(--ink-1)]">${{ notionalExposureStr }}</b></div>
+        <div class="grid grid-cols-2 gap-x-1.5 gap-y-0.5 text-[10px] sm:text-[11px] num t-faint pb-1">
+          <div class="min-w-0 whitespace-nowrap">持仓本金 <b class="text-[var(--ink-1)]">{{ actualPosMargin > 0 ? '$' + fmtNum(actualPosMargin, 2) : '$0.00' }}</b></div>
+          <div class="min-w-0 whitespace-nowrap text-right">名义敞口 <b class="text-[var(--ink-1)]">${{ notionalExposureStr }}</b></div>
         </div>
 
         <!-- 多空比与 OCO 防线 -->
-        <div class="pt-1 border-t flex items-center justify-between text-[11px] num" style="border-color: var(--line-1)">
-          <span class="t-faint">多: <b class="up">{{ longCount }}</b> 空: <b class="down">{{ shortCount }}</b> (共{{ totalPos }}笔)</span>
+        <div class="pt-1 border-t flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-[11px] num" style="border-color: var(--line-1)">
+          <span class="t-faint whitespace-nowrap">多: <b class="up">{{ longCount }}</b> 空: <b class="down">{{ shortCount }}</b> (共{{ totalPos }}笔)</span>
           <span class="font-bold text-[var(--up)] flex items-center gap-0.5">
             OCO: {{ ocoOk }}%
           </span>
