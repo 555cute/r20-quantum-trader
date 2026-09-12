@@ -216,6 +216,9 @@ export const useDashboardStore = defineStore('dashboard', () => {
   /** 组合风险占用（portfolio_risk，三所合并口径） */
   const portfolioRisk = computed<any>(() => (data.value as any)?.portfolio_risk || null)
 
+  /** 多所组合总资产快照（/api/all multi_venue_portfolio，三所对等聚合口径） */
+  const multiVenuePortfolio = computed<any>(() => (data.value as any)?.multi_venue_portfolio || null)
+
   // Actions
   async function fetchDashboard(silent = false) {
     if (!silent) {
@@ -322,6 +325,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
     crossVenueAssets,
     crossVenueRow,
     portfolioRisk,
+    multiVenuePortfolio,
     consecutiveFailures,
     pollingPaused,
     showAboutModal,
