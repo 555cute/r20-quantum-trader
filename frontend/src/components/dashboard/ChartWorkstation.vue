@@ -23,8 +23,13 @@ import {
   ChevronDown,
   Maximize,
   Minimize,
+  LineChart,
 } from 'lucide-vue-next'
+import { useUi } from '../../composables/useUi'
 import BaseSegmented from '../base/BaseSegmented.vue'
+
+const { peekOpen } = useUi()
+const chartCollapsed = ref(false)
 
 // ==========================================
 // 0. 注册原生 VWAP 指标 (基于成交量加权平均价)
@@ -1124,9 +1129,41 @@ onUnmounted(() => {
 
 <template>
   <div
-    class="card overflow-hidden select-none"
+    class="card overflow-hidden select-none relative"
     :class="isFullscreen ? 'fixed inset-0 z-[var(--z-float)] rounded-none' : ''"
   >
+    <!-- 币种快捷横滑胶囊条 (100% 对齐用户操盘实机截图) -->
+    <div
+      class="flex items-center gap-1.5 overflow-x-auto px-3 py-1.5 border-b select-none no-scrollbar"
+      style="border-color: var(--line-1); background-color: var(--surface-0)"
+    >
+      <button
+        v-for="sym in availableSymbols"
+        :key="sym"
+        type="button"
+        class="flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold transition-all cursor-pointer"
+        :style="sym === currentSymbol
+          ? {
+              backgroundColor: 'var(--surface-3)',
+              color: 'var(--ink-strong)',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+              border: '1px solid var(--line-2)',
+            }
+          : {
+              backgroundColor: 'transparent',
+              color: 'var(--ink-2)',
+              border: '1px solid transparent',
+            }"
+        @click="selectSymbol(sym)"
+      >
+        <span
+          class="h-1.5 w-1.5 rounded-full"
+          :class="holdingSet.has(sym) ? 'bg-[var(--up)] shadow-[0_0_6px_var(--up)]' : sym === currentSymbol ? 'bg-[var(--accent)]' : 'bg-[var(--ink-3)]'"
+        />
+        <span>{{ sym }}</span>
+      </button>
+    </div>
+
     <!-- 工具条：行情信息 + 工作站工具 -->
     <div
       class="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-3 py-2 sm:px-4"
@@ -1294,6 +1331,17 @@ onUnmounted(() => {
           <span class="hidden sm:inline">{{ simMode ? t('dash.matrix.chart.sim.exit') : t('dash.matrix.chart.simulate') }}</span>
         </button>
 
+        <!-- 收起/展开图表 -->
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm flex items-center gap-1 text-2xs cursor-pointer"
+          :title="chartCollapsed ? '展开图表' : '收起图表'"
+          @click="chartCollapsed = !chartCollapsed"
+        >
+          <LineChart class="h-3.5 w-3.5" />
+          <span class="hidden sm:inline">{{ chartCollapsed ? '展开图表' : '收起图表' }}</span>
+        </button>
+
         <button class="btn btn-ghost btn-icon btn-sm" :title="t('common.refresh')" @click="loadCandles(false, true)">
           <RefreshCw :class="isLoading && 'animate-spin'" />
         </button>
@@ -1310,10 +1358,24 @@ onUnmounted(() => {
 
     <!-- 图表画布 -->
     <div
+      v-show="!chartCollapsed"
       ref="chartContainer"
       class="relative w-full"
-      :style="{ height: isFullscreen ? 'calc(100vh - 108px)' : '560px' }"
-    ></div>
+      :style="{ height: isFullscreen ? 'calc(100vh - 108px)' : '520px' }"
+    >
+      <!-- 悬浮实时提示词大胶囊 (完全对齐用户操盘实机截图) -->
+      <button
+        type="button"
+        class="absolute bottom-4 right-4 z-20 flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-xs font-bold shadow-2xl backdrop-blur-xl transition-all hover:scale-105 cursor-pointer"
+        style="background-color: rgba(12, 16, 21, 0.85); border-color: var(--line-2); color: var(--ink-strong)"
+        title="查看本周期 AI 实发实时提示词"
+        @click="peekOpen = true"
+      >
+        <span class="font-mono text-sm text-[var(--accent)] font-extrabold">&gt;_</span>
+        <span>实时提示词</span>
+        <span class="h-2 w-2 rounded-full bg-[var(--up)] shadow-[0_0_6px_var(--up)] animate-pulse" />
+      </button>
+    </div>
 
     <!-- 试算控制台 -->
     <div

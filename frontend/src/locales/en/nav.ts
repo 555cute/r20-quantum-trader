@@ -1,10 +1,10 @@
 export const enNav = {
   tabs: {
-    matrix: 'Matrix',
-    radar: 'AI Radar',
-    news: 'Sentiment',
-    evolution: 'Evolution',
-    ledger: 'Ledger',
+    matrix: 'Trading Desk',
+    radar: 'Decision Core',
+    news: 'Market Intel',
+    evolution: 'Quantum Lab',
+    ledger: 'Audit Ledger',
   },
   actions: {
     console: 'Console',

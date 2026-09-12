@@ -1,11 +1,11 @@
 /** 导航与页面标题文案（中文）—— 前台 5 tab + 后台 5 组 18 页，与路由一一对应 */
 export const zhNav = {
   tabs: {
-    matrix: '实盘矩阵',
-    radar: 'AI 推演',
-    news: '舆情情报',
-    evolution: '自进化',
-    ledger: '交易台账',
+    matrix: '综合操盘',
+    radar: '决策中枢',
+    news: '市场全息',
+    evolution: '量子实验室',
+    ledger: '审计台账',
   },
   actions: {
     console: '管理控制台',

@@ -4,10 +4,10 @@
  */
 import type { Component } from 'vue';
 import {
-  LayoutDashboard,
-  BrainCircuit,
+  Terminal,
+  Cpu,
   Newspaper,
-  Dna,
+  Sparkles,
   ReceiptText,
   Gauge,
   ScrollText,
@@ -18,7 +18,6 @@ import {
   Crosshair,
   Puzzle,
   KeyRound,
-  Cpu,
   BellRing,
   Bot,
   DatabaseBackup,
@@ -26,6 +25,7 @@ import {
   UserCog,
   Info,
   BookOpen,
+  Dna,
 } from 'lucide-vue-next';
 
 export interface NavItem {
@@ -39,11 +39,11 @@ export interface NavItem {
 }
 
 export const publicTabs: NavItem[] = [
-  { key: 'trading', labelKey: 'nav.tabs.matrix', path: '/', icon: LayoutDashboard, alias: 'matrix trading 实盘' },
-  { key: 'factors', labelKey: 'nav.tabs.radar', path: '/factors', icon: BrainCircuit, alias: 'radar factors ai 推演' },
-  { key: 'news', labelKey: 'nav.tabs.news', path: '/news', icon: Newspaper, alias: 'news sentiment 舆情' },
-  { key: 'lab', labelKey: 'nav.tabs.evolution', path: '/lab', icon: Dna, alias: 'lab evolution 进化' },
-  { key: 'history', labelKey: 'nav.tabs.ledger', path: '/history', icon: ReceiptText, alias: 'ledger history 台账' },
+  { key: 'trading', labelKey: 'nav.tabs.matrix', path: '/', icon: Terminal, alias: 'matrix trading 操盘 综合操盘' },
+  { key: 'factors', labelKey: 'nav.tabs.radar', path: '/factors', icon: Cpu, alias: 'radar factors ai 决策 决策中枢' },
+  { key: 'news', labelKey: 'nav.tabs.news', path: '/news', icon: Newspaper, alias: 'news sentiment 舆情 市场全息' },
+  { key: 'lab', labelKey: 'nav.tabs.evolution', path: '/lab', icon: Sparkles, alias: 'lab evolution 进化 量子实验室' },
+  { key: 'history', labelKey: 'nav.tabs.ledger', path: '/history', icon: ReceiptText, alias: 'ledger history 台账 审计台账' },
 ];
 
 export const adminGroups: { key: string; labelKey: string; items: NavItem[] }[] = [

@@ -2,7 +2,7 @@
 /** 前台顶栏：品牌 / 三所通信中枢 / 5 tab / 决策透视 / ⌘K / 主题 / 偏好弹层 */
 import { computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { Moon, Sun, Eye, BookOpen, LayoutDashboard } from 'lucide-vue-next';
+import { Moon, Sun, Eye, BookOpen, LayoutDashboard, Globe } from 'lucide-vue-next';
 import { publicTabs } from '../../config/nav';
 import { useI18n } from '../../composables/useI18n';
 import { useTheme } from '../../composables/useTheme';
@@ -13,7 +13,7 @@ import SettingsPopover from './SettingsPopover.vue';
 
 const route = useRoute();
 const router = useRouter();
-const { t } = useI18n();
+const { t, currentLocale, toggleLocale } = useI18n();
 const { theme, toggleTheme } = useTheme();
 const { peekOpen, aboutOpen } = useUi();
 
@@ -43,26 +43,28 @@ function go(path: string) {
           @click="go('/')"
         >
           <img src="/favicon.svg" alt="R20" class="h-6 w-6 shrink-0 rounded-md shadow-sm sm:h-7 sm:w-7" />
-          <span class="truncate text-sm font-bold tracking-tight hidden sm:inline" style="color: var(--ink-strong)">
+          <span class="truncate text-xs sm:text-sm font-bold tracking-tight text-[var(--ink-strong)]">
             {{ APP_NAME }}
-          </span>
-          <span class="text-xs font-bold tracking-tight sm:hidden" style="color: var(--ink-strong)">
-            R20
           </span>
         </button>
 
-        <button
-          type="button"
-          class="badge badge-accent badge-mono hidden shrink-0 cursor-pointer transition-all hover:brightness-110 sm:inline-flex"
-          :title="t('dash.about.title')"
-          @click="aboutOpen = true"
-        >
-          {{ APP_VERSION }}
-        </button>
+        <!-- 版本标签与在线绿点 -->
+        <div class="flex items-center gap-1.5">
+          <button
+            type="button"
+            class="badge badge-mono text-3xs font-semibold px-1.5 py-0.2 rounded border cursor-pointer hover:border-[var(--accent)]"
+            style="background-color: var(--surface-2); border-color: var(--line-1); color: var(--ink-2)"
+            :title="t('dash.about.title')"
+            @click="aboutOpen = true"
+          >
+            {{ APP_VERSION }}
+          </button>
+          <span class="h-1.5 w-1.5 rounded-full bg-[var(--up)] shadow-[0_0_6px_var(--up)] animate-pulse" />
+        </div>
       </div>
 
       <!-- 中央导航（桌面端）：活动项带精致微光底衬与高光 -->
-      <nav class="absolute left-1/2 hidden -translate-x-1/2 items-center gap-1 lg:flex" aria-label="primary">
+      <nav class="absolute left-1/2 hidden -translate-x-1/2 items-center gap-1 xl:flex" aria-label="primary">
         <button
           v-for="tab in publicTabs"
           :key="tab.key"
@@ -94,8 +96,22 @@ function go(path: string) {
 
       <!-- 右侧动作区 -->
       <div class="ms-auto flex items-center gap-1 sm:gap-1.5">
-        <!-- 时钟（宽屏常驻） -->
-        <BeijingClock class="mx-1 hidden xl:block" />
+        <!-- 语言快捷切换 (中 / EN) -->
+        <button
+          type="button"
+          class="flex h-7 items-center gap-1 rounded-lg border px-2 text-2xs font-bold transition-colors cursor-pointer shrink-0"
+          style="background-color: var(--surface-2); border-color: var(--line-1); color: var(--ink-1)"
+          :title="t('dash.shell.settings.language')"
+          @click="toggleLocale"
+        >
+          <Globe class="h-3 w-3 text-blue-400" />
+          <span>{{ currentLocale === 'zh-CN' ? '中/EN' : 'EN/中' }}</span>
+        </button>
+
+        <!-- 时钟（超宽屏常驻） -->
+        <div class="hidden 2xl:block mx-1">
+          <BeijingClock />
+        </div>
 
         <span class="mx-1 hidden h-4 w-px xl:block" style="background-color: var(--line-1)" />
 
