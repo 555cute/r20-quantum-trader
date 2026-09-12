@@ -119,52 +119,91 @@ const sharpeRatio = computed(() => {
 });
 
 // ==========================================
-// Card 3: 今日已结盈亏
+// Card 3: 今日已结盈亏与实战胜率
 // ==========================================
-const todayNetNum = computed<number | null>(() => {
-  const net = today.value.net_realized ?? today.value.total_pnl;
-  if (net != null && net !== '') {
-    const val = Number(net);
-    return Number.isFinite(val) ? val : null;
+const perf = computed(() => (store.data as any)?.performance || {});
+
+const todayNetNum = computed<number>(() => {
+  if (today.value.net_realized != null && Number(today.value.net_realized) !== 0) {
+    return Number(today.value.net_realized);
   }
-  return 0;
+  if (today.value.total_pnl != null && Number(today.value.total_pnl) !== 0) {
+    return Number(today.value.total_pnl);
+  }
+  return Number(today.value.net_realized ?? 0);
 });
 
 const winTrades = computed(() => Number(today.value.win_trades ?? 0));
 const lossTrades = computed(() => Number(today.value.loss_trades ?? 0));
-const totalTrades = computed(() => winTrades.value + lossTrades.value);
+const todayTrades = computed(() => winTrades.value + lossTrades.value);
+
+// 累计交易表现 (performance 兜底)
+const allTrades = computed(() => Number(perf.value.all_trades ?? (store.data as any)?.review?.total_trades ?? 0));
+const allWins = computed(() => Number(perf.value.win_trades ?? 0));
+const allLosses = computed(() => Number(perf.value.loss_trades ?? 0));
+const allWinRate = computed(() => Number(perf.value.win_rate ?? (store.data as any)?.review?.win_rate ?? 0));
+const allPf = computed(() => perf.value.profit_factor ?? (store.data as any)?.review?.profit_factor ?? null);
 
 const todayWinRateStr = computed(() => {
-  if (today.value.win_rate != null) return `${Number(today.value.win_rate).toFixed(1)}%`;
-  if (totalTrades.value > 0) {
-    return `${((winTrades.value / totalTrades.value) * 100).toFixed(1)}%`;
+  if (todayTrades.value > 0) {
+    const r = (winTrades.value / todayTrades.value) * 100;
+    return `胜率 ${r.toFixed(1)}%`;
+  }
+  if (allTrades.value > 0) {
+    return `累计胜率 ${allWinRate.value.toFixed(1)}%`;
+  }
+  return '今日无平仓';
+});
+
+const tradesSummaryText = computed(() => {
+  if (todayTrades.value > 0) {
+    return `成交：${todayTrades.value} 笔 (${winTrades.value}胜/${lossTrades.value}负)`;
+  }
+  if (allTrades.value > 0) {
+    return `累计：${allTrades.value} 笔 (${allWins.value}胜/${allLosses.value}负)`;
+  }
+  return '成交：0 笔 (待触发)';
+});
+
+const winBarPct = computed(() => {
+  if (todayTrades.value > 0) {
+    return (winTrades.value / todayTrades.value) * 100;
+  }
+  if (allTrades.value > 0) {
+    return allWinRate.value;
+  }
+  return 50;
+});
+
+const profitFactor = computed(() => {
+  if (today.value.profit_factor != null && String(today.value.profit_factor) !== '') {
+    return String(today.value.profit_factor);
+  }
+  if (allPf.value != null) {
+    return Number(allPf.value).toFixed(2);
   }
   return '--';
 });
 
 const fundingFeeStr = computed(() => {
-  if (today.value.funding_fee != null) {
-    const f = Number(today.value.funding_fee);
-    return Number.isFinite(f) ? `${f >= 0 ? '+' : ''}${f.toFixed(2)} U` : '--';
+  const f = today.value.funding_paid ?? today.value.funding_fee;
+  if (f != null && Number.isFinite(Number(f))) {
+    const val = Number(f);
+    return `${val >= 0 ? '+' : ''}${val.toFixed(2)} U`;
   }
-  return '--';
+  return '0.00 U';
 });
 
 const tradingFeeStr = computed(() => {
-  if (today.value.trading_fee != null) {
-    const f = Number(today.value.trading_fee);
-    return Number.isFinite(f) ? `${f.toFixed(2)} U` : '--';
+  const f = today.value.fees_paid ?? today.value.trading_fee;
+  if (f != null && Number.isFinite(Number(f))) {
+    const val = Number(f);
+    return `${val.toFixed(2)} U`;
   }
-  return '--';
-});
-
-const profitFactor = computed(() => {
-  const pf = today.value.profit_factor;
-  if (pf != null && pf !== '') {
-    const val = Number(pf);
-    return Number.isFinite(val) ? val.toFixed(2) : String(pf);
+  if (account.value.cum_total_fees != null && Number.isFinite(Number(account.value.cum_total_fees))) {
+    return `${Number(account.value.cum_total_fees).toFixed(2)} U`;
   }
-  return '--';
+  return '0.00 U';
 });
 
 // ==========================================
@@ -343,37 +382,33 @@ const ocoOk = computed(() => {
             <Zap class="h-3.5 w-3.5 text-amber-400 shrink-0" />
             <span class="truncate">今日已结盈亏</span>
           </div>
-          <span class="badge text-3xs font-bold px-1.5 py-0.2 rounded" :class="todayWinRateStr !== '--' ? 'badge-up' : 'badge-quiet'">
-            胜率 {{ todayWinRateStr }}
+          <span class="badge text-3xs font-bold px-1.5 py-0.2 rounded" :class="todayWinRateStr.includes('胜率') ? 'badge-up' : 'badge-quiet'">
+            {{ todayWinRateStr }}
           </span>
         </div>
 
         <div class="py-1">
           <div
-            v-if="todayNetNum !== null"
             class="num font-black tracking-tight text-xl sm:text-2xl truncate"
             :class="todayNetNum >= 0 ? 'up' : 'down'"
           >
             {{ todayNetNum >= 0 ? '+' : '' }}{{ todayNetNum.toFixed(2) }}
           </div>
-          <div v-else class="num font-black tracking-tight text-xl sm:text-2xl t-faint">
-            0.00
-          </div>
         </div>
 
         <div class="grid grid-cols-2 gap-0.5 text-[10px] sm:text-[11px] num t-faint pb-1">
           <div class="truncate">资金费 <b :class="fundingFeeStr.startsWith('+') ? 'up' : fundingFeeStr.startsWith('-') ? 'down' : ''">{{ fundingFeeStr }}</b></div>
-          <div class="truncate text-right">手续费 <b class="down">{{ tradingFeeStr }}</b></div>
+          <div class="truncate text-right">手续费 <b :class="tradingFeeStr.startsWith('-') ? 'down' : ''">{{ tradingFeeStr }}</b></div>
         </div>
 
         <!-- 双色成交胜负比进度条 -->
         <div class="pt-1 border-t" style="border-color: var(--line-1)">
           <div class="w-full h-1.5 rounded-full overflow-hidden flex mb-1" style="background-color: var(--surface-3)">
-            <div class="bg-[var(--up)] h-full transition-all" :style="{ width: `${totalTrades > 0 ? (winTrades / totalTrades) * 100 : 50}%` }" />
+            <div class="bg-[var(--up)] h-full transition-all" :style="{ width: `${winBarPct}%` }" />
             <div class="bg-[var(--down)] h-full flex-1" />
           </div>
           <div class="flex items-center justify-between text-[11px] num">
-            <span class="t-faint">成交：{{ totalTrades }} 笔 ({{ winTrades }}胜/{{ lossTrades }}负)</span>
+            <span class="t-faint">{{ tradesSummaryText }}</span>
             <span class="t-faint">盈亏比：<b class="text-[var(--up)]">{{ profitFactor }}</b></span>
           </div>
         </div>
