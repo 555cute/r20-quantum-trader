@@ -8,12 +8,15 @@
  * 4. 当前持仓浮盈（多所持仓占用本金、名义敞口、多空分布、OCO防线）
  */
 import { computed } from 'vue';
+import { useRouter } from 'vue-router';
 import { Wallet, TrendingUp, Zap, ShieldCheck } from 'lucide-vue-next';
 import { useDashboardStore } from '../../stores/dashboard';
 import { useVenueAccountsStore } from '../../stores/venueAccounts';
 import { useI18n } from '../../composables/useI18n';
 import { fmtNum } from '../../utils/format';
+import { APP_VERSION } from '../../config/version';
 
+const router = useRouter();
 const store = useDashboardStore();
 const venueStore = useVenueAccountsStore();
 const { t } = useI18n();
@@ -363,12 +366,18 @@ const ocoOk = computed(() => {
           <div class="truncate text-right">夏普锚定 <b class="text-[var(--up)]">{{ sharpeRatio }}</b></div>
         </div>
 
-        <!-- 策略基线与全网实盘验证 -->
+        <!-- 策略版本与全量台账穿透核验入口 -->
         <div class="pt-1 border-t flex items-center justify-between text-[11px]" style="border-color: var(--line-1)">
-          <span class="t-faint">策略基线 2026-03</span>
-          <span class="font-bold text-[var(--up)] flex items-center gap-0.5 cursor-pointer">
-            全网实盘验证
-          </span>
+          <span class="t-faint">策略版本 {{ APP_VERSION }}</span>
+          <button
+            type="button"
+            class="font-bold text-[var(--up)] flex items-center gap-0.5 cursor-pointer hover:underline"
+            title="查看全量历史成交与生命周期台账"
+            @click="router.push('/history')"
+          >
+            <span>穿透全量台账</span>
+            <span class="text-[10px]">→</span>
+          </button>
         </div>
       </div>
 
