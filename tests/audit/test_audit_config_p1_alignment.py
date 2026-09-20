@@ -324,11 +324,22 @@ class PortfolioBudgetHonestyTests(_SandboxBase):
 
     @classmethod
     def setUpClass(cls):
-        # 同 test_venue_accounts_endpoint：r20_backend.dashboard_cache 导入即点火 2s 后台线程（真调 OKX）→ 永久钉死
+        # 同 test_venue_accounts_endpoint：r20_backend.dashboard_cache 导入即点火 2s 后台线程（真调 OKX）
+        # → 本类期间钉死循环体。
+        # ⚠️ 第一百二十五刀：**必须还原**。此前不还原 ⇒ 整个测试进程里
+        # `dashboard_cache.update_cache_cycle` 都是 no-op，任何真调它的用例
+        # （如 `tests/ui/test_protection_gap_reaches_data_health.py`）只会拿到空
+        # `CACHE_DATA`（整包跑 KeyError('data_health')、单跑通过 —— 实测踩到）。
         import r20_backend.dashboard_cache as dashboard_app
         dashboard_app.stop_dashboard_background_worker()
+        cls._orig_update_cache_cycle = dashboard_app.update_cache_cycle
         dashboard_app.update_cache_cycle = lambda *a, **k: None
         cls.dashboard = dashboard_app
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.dashboard.update_cache_cycle = cls._orig_update_cache_cycle
+        cls.dashboard.stop_dashboard_background_worker()
 
     def setUp(self):
         super().setUp()
