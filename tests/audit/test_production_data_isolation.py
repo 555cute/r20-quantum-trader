@@ -50,6 +50,7 @@ import hashlib
 import json
 import os
 import sys
+import re
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -468,6 +469,83 @@ class ProductionDbConnectBlockedTest(unittest.TestCase):
                                  "默认参数仍在定义期绑定 ⇒ 沙箱重定向对 dependencies 无效")
             self.assertTrue(tmp.exists(), "构造 store 应在（临时）路径上建表")
 
+
+
+class ProductionReservationDbPollutionTest(unittest.TestCase):
+    """生产预留库不得再被测试污染（第一百四十三刀）。
+
+    ## 背景
+
+    本会话早些时候实测：一次全量 `pytest tests` 会在生产 `data/risk_reservation.db`
+    留下一行 `environment=<MagicMock name=\'current_environment().mode\'>` 的垃圾预留
+    （id=225）。随后补上了 sqlite 连接闸 + 会话级默认重定向（见本文件上一类）。
+    上面那类钉的是**机制**（"不许连生产库"）；本类钉的是**残留判据**：
+
+    > 生产库里除**显式登记**的历史那一行外，不得再出现"非真实环境名"的环境值。
+
+    价值：即便将来出现一条**没被闸拦到**的写入路径（新库/新连接方式/子进程），
+    只要它写进了生产预留库，本门就会翻红 —— 这是"机制门 + 数据门"的双保险。
+
+    ## 为什么用子进程读
+
+    本会话的 sqlite 闸会拦下**任何**指向生产目录的连接（`mode=ro` 也拦），
+    故只能在测试进程之外读；子进程读**只读**，不产生任何写入。
+    """
+
+    #: 已知历史污染（待人工删除）。删除后请把这里清空 —— 本门对"不存在"是宽容的。
+    _KNOWN_POLLUTION = {(225, "BTC-USDT-SWAP:buy:1789880343")}
+
+    #: 真实环境名形如 `demo` / `live`（小写短词）。测试夹具的 MagicMock repr 必然不符。
+    _REAL_ENV = re.compile(r"[a-z_]{2,16}")
+
+    @classmethod
+    def _polluted_rows(cls, db_path) -> list:
+        """返回生产库里的"污染行"：环境名不是真实环境名的行（只读子进程查询）。"""
+        import json as _json
+        import subprocess
+        code = (
+            "import sqlite3,json,sys\n"
+            "p=sys.argv[1]\n"
+            "con=sqlite3.connect('file:'+p+'?mode=ro',uri=True)\n"
+            "rows=con.execute('SELECT id,intent_id,environment FROM risk_reservations').fetchall()\n"
+            "print(json.dumps(rows))\n"
+        )
+        out = subprocess.run([sys.executable, "-c", code, str(db_path)],
+                             capture_output=True, text=True, timeout=60, check=True)
+        rows = _json.loads(out.stdout)
+        return [(r[0], r[1], r[2]) for r in rows
+                if not cls._REAL_ENV.fullmatch(str(r[2] or ""))]
+
+    def test_detector_flags_a_mock_environment(self):
+        """自检 + 负例：夹具写法（MagicMock repr）必须被判为污染。"""
+        import sqlite3
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "res.db"
+            with sqlite3.connect(str(db)) as con:
+                con.execute("CREATE TABLE risk_reservations "
+                            "(id INTEGER PRIMARY KEY, intent_id TEXT, environment TEXT)")
+                # 参数化插入：避免在 SQL 里转义引号（模拟的正是测试夹具的写法）
+                mock_env = "<MagicMock name='" + "current_environment().mode" + "'>"
+                con.execute("INSERT INTO risk_reservations VALUES (?,?,?)",
+                            (1, "A:buy:1", "demo"))
+                con.execute("INSERT INTO risk_reservations VALUES (?,?,?)",
+                            (2, "B:buy:2", mock_env))
+            flagged = self._polluted_rows(db)
+        self.assertEqual([(r[0], r[1]) for r in flagged], [(2, "B:buy:2")],
+                         "检测器没抓到夹具污染（或误报真实环境名）")
+
+    def test_production_db_has_no_unregistered_pollution(self):
+        db = ROOT / "data" / "risk_reservation.db"
+        if not db.exists():
+            self.skipTest("生产预留库不存在（全新环境）")
+        flagged = self._polluted_rows(db)
+        unknown = [r for r in flagged
+                   if (r[0], r[1]) not in self._KNOWN_POLLUTION]
+        self.assertEqual(
+            unknown, [],
+            f"生产预留库出现**未经登记**的测试污染行 {unknown} ⇒ 有写入路径绕过了 sqlite 闸/"
+            "重定向（请修隔离，勿只删数据）")
 
 if __name__ == "__main__":
     unittest.main()
