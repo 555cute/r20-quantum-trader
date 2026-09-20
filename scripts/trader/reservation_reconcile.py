@@ -83,7 +83,10 @@ def reconcile_reservation_ledger(
     真实额度把合法开仓挡死。recovery() 的纪律是孤儿「标记不清算」，本函数
     就是那个「对账确认后的显式释放」：
 
-    - 意图标的在当前真实持仓（同所同环境）或仍在挂 → **保留**（无论多旧）；
+    - 意图标的在当前真实持仓（同所同环境）或仍在挂 → **保留**（无论多旧）。
+      挂单判据**跨所**：`pending_inst_ids` 混装 OKX/币安/Gate 三种拼写，
+      按**基名**归一后匹配（币安 `XRPUSDT`、Gate `DOGE_USDT` 与 OKX
+      `XRP-USDT-SWAP` 等价）；不要求方向一致——保留是保守方向，释放不可逆；
     - 现货两清（无仓无挂）且 updated_at 超 TTL → release(state=closed) 回笼；
     - 时间戳不可解析 / 环境不匹配 / account_key 异常 → 保守保留；
     - 单条释放失败不影响其余（下周期重试，幂等 UNIQUE 键）。
@@ -122,6 +125,17 @@ def reconcile_reservation_ledger(
             base = str(_p.get("base") or str(_p.get("inst_id", "")).split("_")[0]).upper()
             live_by_venue.setdefault(v, set()).add(f"{base}:{_p.get('side', 'net')}")
     pending = {str(x) for x in (pending_inst_ids or set())}
+    # 第一百一十五刀：挂单基名集合（**各所拼写归一**）——见下面 `still_live` 的说明。
+    # `pending_inst_ids` 混装三种拼写：OKX `XRP-USDT-SWAP`、币安 `XRPUSDT`、
+    # Gate `DOGE_USDT` ⇒ 必须归一到基名才能与意图里的 `inst_id` 对齐。
+    pending_bases = set()
+    for _p_inst in pending:
+        _p_base = str(_p_inst).split("-")[0].split("_")[0].upper()
+        for _p_quote in ("USDT", "USDC", "USD"):
+            if _p_base.endswith(_p_quote) and len(_p_base) > len(_p_quote):
+                _p_base = _p_base[: -len(_p_quote)]
+        if _p_base:
+            pending_bases.add(_p_base)
     released_n = 0
     for row in rows:
         try:
@@ -132,8 +146,16 @@ def reconcile_reservation_ledger(
                         else "short" if "SHORT" in intent.upper() else "net")
             base = inst_id.split("-")[0].upper()
             venue = str(row.get("venue") or "").lower()
+            # ⚠️ 挂单保留判据必须**跨所**（第一百一十五刀修）：原判据
+            # `venue == "okx" and inst_id in pending` 只看 OKX，且用的是意图里的
+            # OKX 拼写（`XRP-USDT-SWAP`）与 `pending_inst_ids` 里的各所拼写混比。
+            # 后果：派往 gate/binance 的**未成交挂单**，其预留一过 TTL(2h) 就被释放
+            # ——而单还挂在场内，成交后这笔占用已经不在台账上（预算/敞口少算）。
+            # 方向纪律：**保留是保守的**（多占只压缩可用额度），释放是不可逆的
+            # （活单失去登记）⇒ 按基名匹配、不要求方向一致（宁多留不漏放）。
             still_live = (f"{base}:{pos_side}" in live_by_venue.get(venue, set())
-                          or (venue == "okx" and inst_id in pending))
+                          or (venue == "okx" and inst_id in pending)
+                          or base in pending_bases)
             if still_live:
                 continue
             if utc_age_seconds(row.get("updated_at"), now_utc) < ttl:

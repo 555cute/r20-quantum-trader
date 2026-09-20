@@ -252,6 +252,34 @@ class BehaviourPreservedTest(unittest.TestCase):
         ("risk_reservation.STATE_CLOSED", "state_closed"),
     ]
 
+    #: ⚠️ **文档化差异**（第一百一十五刀，2026-09-20）：本函数体除"搬迁改名"外，
+    #: 只允许下面这一处**有意的行为修复**——挂单保留判据补上"各所拼写归一的挂单基名"。
+    #:
+    #: 原判据 `(venue == "okx" and inst_id in pending)` 只看 OKX，而且拿意图里的
+    #: OKX 拼写（`XRP-USDT-SWAP`）去比 `pending_inst_ids` 里混装的各所拼写
+    #: （币安 `XRPUSDT`、Gate `DOGE_USDT`）。后果：派往 gate/binance 的**未成交挂单**，
+    #: 其预留一过 TTL(2h) 就被释放，而单还挂在场内 —— 成交后这笔占用不在台账上
+    #: （预算/敞口少算）。方向纪律：**保留是保守的**（多占只压缩额度），
+    #: 释放不可逆（活单失去登记）⇒ 按基名匹配、不要求方向一致。
+    #:
+    #: 本表写成"旧体 + 这两处编辑 == 新体"，于是**任何其他改动都会让断言失败**；
+    #: 行为面由 `tests/core/test_reservation_reconcile.py` 的
+    #: `CrossVenuePendingKeepTest` 正向钉住。
+    DELTA_EDITS = [
+        ("pending = {str(x) for x in pending_inst_ids or set()}",
+         "pending = {str(x) for x in pending_inst_ids or set()}\n"
+         "pending_bases = set()\n"
+         "for _p_inst in pending:\n"
+         "    _p_base = str(_p_inst).split('-')[0].split('_')[0].upper()\n"
+         "    for _p_quote in ('USDT', 'USDC', 'USD'):\n"
+         "        if _p_base.endswith(_p_quote) and len(_p_base) > len(_p_quote):\n"
+         "            _p_base = _p_base[:-len(_p_quote)]\n"
+         "    if _p_base:\n"
+         "        pending_bases.add(_p_base)"),
+        ("or (venue == 'okx' and inst_id in pending)",
+         "or (venue == 'okx' and inst_id in pending) or base in pending_bases"),
+    ]
+
     def _body(self, src: str, name: str) -> str:
         """函数体的可执行骨架（剥 docstring）。
 
@@ -286,7 +314,21 @@ class BehaviourPreservedTest(unittest.TestCase):
                 a = a.replace(src_tok, dst_tok)
             # 注入形参在 AST 里表现为 Name(id='reservation_manager')，
             # 而原文是函数调用 Name(id='reservation_manager') —— 名字相同，故无需改。
+            # 第一百一十五刀：把**文档化差异**应用到旧体上，要求"旧体 + 差异 == 新体"，
+            # 于是允许表之外的任何改动都会在此翻红。
+            a_before_delta = a
+            for src_tok, dst_tok in self.DELTA_EDITS:
+                a = a.replace(src_tok, dst_tok)
+            self.assertEqual(
+                a.count("pending_bases"), b.count("pending_bases"),
+                "文档化差异未按预期生效（旧体里没找到锚点？）——差异必须是唯一改动")
             self.assertEqual(a, b, f"{old_name} 的函数体在搬移中被改写了")
+            # 钉住"差异之外逐字未动"：把差异从**新体**里撤掉后应与旧体完全相同
+            b_stripped = b
+            for _src_tok, dst_tok in self.DELTA_EDITS:
+                b_stripped = b_stripped.replace(dst_tok, _src_tok)
+            self.assertEqual(b_stripped, a_before_delta,
+                             "除文档化差异外，函数体还有别的改动")
 
 
 if __name__ == "__main__":

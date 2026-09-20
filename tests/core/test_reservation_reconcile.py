@@ -147,3 +147,86 @@ class ReservationReconcileTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class CrossVenuePendingKeepTest(unittest.TestCase):
+    """第一百一十五刀：**外所未成交挂单**的预留不得在 TTL 后被释放。
+
+    ## 缺陷（读代码 + 受控 A/B 实证）
+
+    `still_live` 原判据是 `(venue == "okx" and inst_id in pending)`：
+    ① 只看 OKX；② 拿意图里的 OKX 拼写（`XRP-USDT-SWAP`）去比 `pending_inst_ids`
+    里混装的各所拼写（币安 `XRPUSDT`、Gate `DOGE_USDT`）。
+
+    同一输入（币安 XRP 空单意图、age=5h、无仓位、`pending={"XRPUSDT"}`）的 A/B：
+    旧判据 → **释放**（单还挂在场内，成交后这笔占用已不在台账上 ⇒ 预算/敞口少算）；
+    新判据 → **保留**。
+
+    方向纪律：**保留是保守的**（多占只压缩可用额度），释放不可逆（活单失去登记）
+    ⇒ 按基名匹配、不要求方向一致（宁多留不漏放）。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="us010-xv-")
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.db = os.path.join(self.tmp, "res.db")
+        self.mgr = risk_reservation.get_manager(db_path=self.db)
+
+    def _reserve(self, venue, intent, amount, age_s):
+        self.mgr.reserve((venue, "demo", "fp-xv"), intent, amount, state="confirmed")
+        con = sqlite3.connect(self.db)
+        con.execute("UPDATE risk_reservations SET updated_at = ?, created_at = ? "
+                    "WHERE intent_id = ?", (_utc_stamp(age_s), _utc_stamp(age_s), intent))
+        con.commit(); con.close()
+
+    def _run(self, pending, snapshot):
+        with patch.object(trader, "reservation_manager", lambda: self.mgr), \
+                patch.object(trader, "fetch_other_venue_positions",
+                             lambda e: (True, snapshot, "")):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                return trader.reconcile_reservation_ledger(
+                    {}, pending, "demo", venue_snapshot=snapshot)
+
+    def _unreleased(self):
+        return {r["intent_id"] for r in self.mgr.list_unreleased("demo")}
+
+    def test_binance_pending_order_keeps_its_reservation(self):
+        """币安拼写 `XRPUSDT`（无分隔符）必须能归一到意图的 `XRP-USDT-SWAP`。"""
+        intent = "XRP-USDT-SWAP:SELL_SHORT:1"
+        self._reserve("binance", intent, 189.0, age_s=9999)
+        n = self._run({"XRPUSDT"}, {"binance": [], "gate": []})
+        self.assertEqual(n, 0, "挂单还在 ⇒ 不得释放")
+        self.assertIn(intent, self._unreleased())
+
+    def test_gate_pending_order_keeps_its_reservation(self):
+        intent = "DOGE-USDT-SWAP:SELL_SHORT:2"
+        self._reserve("gate", intent, 189.0, age_s=9999)
+        n = self._run({"DOGE_USDT"}, {"gate": []})
+        self.assertEqual(n, 0, "Gate 拼写 `DOGE_USDT` 同样必须归一")
+        self.assertIn(intent, self._unreleased())
+
+    def test_okx_spelling_still_matched(self):
+        intent = "BTC-USDT-SWAP:BUY_LONG:3"
+        self._reserve("okx", intent, 200.0, age_s=9999)
+        self.assertEqual(self._run({"BTC-USDT-SWAP"}, {"okx": []}), 0)
+
+    def test_truly_dead_intent_is_still_released(self):
+        """关键反向断言：修复不得把"该释放的"也留下（漏放=额度被永久挤占）。"""
+        intent = "ETH-USDT-SWAP:SELL_SHORT:4"
+        self._reserve("binance", intent, 100.0, age_s=9999)
+        n = self._run({"XRPUSDT"}, {"binance": []})     # 挂单是别的币
+        self.assertEqual(n, 1, "不同币的挂单不能当挡箭牌")
+        self.assertNotIn(intent, self._unreleased())
+
+    def test_different_quote_spellings_normalize(self):
+        """`ADAUSDC` / `ADA-USDC-SWAP` / `ADA_USDC` 都必须归一到 `ADA`。"""
+        intent = "ADA-USDT-SWAP:SELL_SHORT:5"
+        for pending_inst in ("ADAUSDC", "ADA-USDC-SWAP", "ADA_USDC"):
+            with self.subTest(pending=pending_inst):
+                db = os.path.join(self.tmp, f"res-{pending_inst}.db")
+                self.mgr = risk_reservation.get_manager(db_path=db)
+                self._reserve("binance", intent, 50.0, age_s=9999)
+                self.assertEqual(self._run({pending_inst}, {"binance": []}), 0,
+                                 f"{pending_inst} 未归一 ⇒ 预留被误释放")
+
