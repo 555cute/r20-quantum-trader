@@ -241,9 +241,33 @@ class ImplementationMovedTest(unittest.TestCase):
 class ParityTest(unittest.TestCase):
     """搬走前实现 vs 搬后子模块 —— 假交易所下逐条对拍。"""
 
+    #: ⚠️ **文档化差异**（第一百一十七刀，2026-09-20）：本执行器只允许下面这一处
+    #: 有意的改动 —— 当 AI 指令的 `instId` **不在** `real_pos_dict`（该字典由
+    #: `cycle_stages.fetch_positions_and_reconcile` 用 **OKX 直签链**构建）且动作
+    #: 非 HOLD 时，旧实现**静默 continue**，新实现**如实留痕**。
+    #:
+    #: 实测可达性（2026-09-20）：AI 指令文件里唯一一条是 `UNI-USDT-SWAP`（HOLD），
+    #: 而它正是 **binance** 的 UNI 空仓 ⇒ 只要 AI 改成 CLOSE_MARKET/UPDATE_SL，
+    #: 旧实现就"什么都没做、一个字也不说"。本刀只改**可见性**，不动交易行为
+    #: （能力补齐属改变实盘行为的改动，须单独决策）。
+    #:
+    #: 差异用"从 got 里剥掉这些留痕后必须与 legacy 逐字一致"来表达：
+    #: 于是**除留痕之外**的任何行为分叉仍会翻红。
+    @staticmethod
+    def _delta_lines(harness):
+        out = []
+        for ins in _read_instr(harness.path):
+            inst = str(ins.get("instId") or "")
+            act = str(ins.get("action") or "HOLD").upper()
+            if inst and inst not in harness.positions and act != "HOLD":
+                nm = inst.replace("-USDT-SWAP", "") or inst
+                out.append(f"[{nm}] AI{act}指令未执行：{inst} 不在本路径持仓字典"
+                           f"（该字典仅 OKX 直签链；外所持仓由云端保护腿链路管理）")
+        return out
+
     def _both(self, harness):
         self.addCleanup(harness.cleanup)
-        got = harness.run(position_mgmt.execute_ai_position_management)
+        got_raw = harness.run(position_mgmt.execute_ai_position_management)
         got_env = ([list(a) for a in harness.close_calls], list(harness.okx.amend_calls),
                    dict(harness.trackers))
 
@@ -251,6 +275,17 @@ class ParityTest(unittest.TestCase):
         exp = h2.run(_legacy)
         exp_env = ([list(a) for a in h2.close_calls], list(h2.okx.amend_calls), dict(h2.trackers))
         h2.cleanup()
+
+        # 剥掉文档化差异后，必须与搬走前实现**逐字一致**
+        delta = self._delta_lines(harness)
+        remaining = list(delta)
+        got = []
+        for line in got_raw:
+            if line in remaining:
+                remaining.remove(line)      # 每条差异只抵扣一次
+            else:
+                got.append(line)
+        self.assertEqual(remaining, [], "新实现缺少文档化差异留痕（或文案不一致）")
         return got, exp, got_env, exp_env
 
     def _clone(self, h):
@@ -290,14 +325,50 @@ class ParityTest(unittest.TestCase):
             if conf < 85:
                 self.assertIn("拒绝执行", got[0], "低于阈值必须拒绝")
 
-    def test_unknown_position_and_hold_are_ignored(self):
+    def test_unknown_position_is_reported_and_hold_is_silent(self):
+        """第一百一十七刀改判：**非 HOLD** 的未知持仓指令必须留痕（旧实现静默）。
+
+        实测的正是这个形状：AI 对 **binance** 的 `UNI-USDT-SWAP` 发文，而
+        `real_pos_dict` 仅 OKX 直签链 ⇒ 旧实现一个字都不说，看起来像"无事可做"。
+        HOLD 仍然静默（没要求动作，无需留痕）。
+        """
         h = _Harness({"instructions": [
             {"instId": "NOPE-USDT-SWAP", "action": "CLOSE_MARKET", "confidence": 99, "reason": "x"},
             {"instId": "BTC-USDT-SWAP", "action": "HOLD", "confidence": 99, "reason": "x"},
         ]}, {"BTC-USDT-SWAP": {"posSide": "long", "pos": 1, "markPx": 100}})
-        got, exp, _, _ = self._both(h)
-        self.assertEqual(got, exp)
+        got, exp, g_env, _ = self._both(h)
+        self.assertEqual(got, exp, "除留痕外必须与搬走前实现逐字一致")
+        # 差异就是那一条留痕（已在 _both 里抵扣），故这里 got 为空
         self.assertEqual(got, [])
+        # 且**真的**留痕了（原始输出里含它）
+        raw = self._delta_lines(h)
+        self.assertEqual(len(raw), 1)
+        self.assertIn("不在本路径持仓字典", raw[0])
+        self.assertIn("仅 OKX 直签链", raw[0])
+        self.assertEqual(g_env[0], [], "未知持仓绝不得触发平仓")
+
+    def test_binance_position_instruction_is_reported_not_silent(self):
+        """真机形状：`real_pos_dict` 只有 OKX 仓，AI 却对 binance 仓发 CLOSE_MARKET。"""
+        h = _Harness({"instructions": [
+            {"instId": "UNI-USDT-SWAP", "action": "CLOSE_MARKET", "confidence": 99, "reason": "x"}],
+        }, {})          # OKX 字典为空 = 与真机"持仓 OKX 0/9｜跨所 1 笔"同形
+        got_raw = h.run(position_mgmt.execute_ai_position_management)
+        self.addCleanup(h.cleanup)
+        self.assertEqual(len(got_raw), 1, "必须留痕，不得静默")
+        self.assertIn("UNI", got_raw[0])
+        self.assertIn("CLOSE_MARKET", got_raw[0])
+        self.assertEqual(h.close_calls, [], "外所仓不得被本路径平掉（能力未接线）")
+
+    def test_unknown_position_update_sl_is_reported_not_silent(self):
+        """UPDATE_SL 同样（且更危险：AI 以为收紧了止损，实际什么都没发生）。"""
+        h = _Harness({"instructions": [
+            {"instId": "DOGE-USDT-SWAP", "action": "UPDATE_SL", "confidence": 99,
+             "suggested_sl_price": 1.0, "reason": "x"}], }, {})
+        raw = h.run(position_mgmt.execute_ai_position_management)
+        self.addCleanup(h.cleanup)
+        self.assertEqual(len(raw), 1)
+        self.assertIn("UPDATE_SL", raw[0])
+        self.assertEqual(h.okx.amend_calls, [], "不得改单")
 
     def test_update_sl_rejected_when_not_tightening(self):
         """放松止损 / 空间不足 → 拒绝，且**不得触达交易所**。"""

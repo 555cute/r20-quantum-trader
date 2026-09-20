@@ -59,7 +59,26 @@ def execute_ai_position_management(real_pos_dict, trackers, timestamp_full, exec
         confidence = float(instruction.get("confidence", 0) or 0)
         reason = str(instruction.get("reason", "AI持仓管理"))[:120]
         position = real_pos_dict.get(inst_id)
-        if not position or action == "HOLD":
+        if not position:
+            # ⚠️ 第一百一十七刀：旧实现在这里**静默** `continue` —— AI 明明对一笔
+            # **外所**持仓写了 CLOSE_MARKET / UPDATE_SL，面板与日志里毫无痕迹，
+            # 看起来像"本轮无事可做"（假阴性）。
+            #
+            # 实测（2026-09-20）：AI 指令文件里唯一一条就是 `UNI-USDT-SWAP`（HOLD），
+            # 而它正是 **binance** 的 UNI 空仓；`real_pos_dict` 由
+            # `cycle_stages.fetch_positions_and_reconcile` 用 **OKX 直签链**的
+            # `query_positions()` 构建 ⇒ 外所持仓**永远不在**这个字典里，
+            # 这条缺口**实际可达**（只要 AI 把 HOLD 换成 CLOSE_MARKET/UPDATE_SL）。
+            #
+            # 本刀只**如实留痕**、不改任何交易行为：真正的执行能力（把外所持仓并入
+            # 本路径管理）属改变实盘行为的改动，须单独决策。
+            if action != "HOLD":
+                _nm = inst_id.replace("-USDT-SWAP", "") or inst_id
+                executed_actions.append(
+                    f"[{_nm}] AI{action}指令未执行：{inst_id} 不在本路径持仓字典"
+                    f"（该字典仅 OKX 直签链；外所持仓由云端保护腿链路管理）")
+            continue
+        if action == "HOLD":
             continue
 
         pos_side = str(position.get("posSide", "net")).lower()
