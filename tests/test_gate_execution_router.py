@@ -164,7 +164,8 @@ class _StubAdapter(GateAdapter):
 
 def _decision(**over):
     # entry 79000 / tp 85000 / sl 77000 → R:R = 3.0（高于任何已配置底线）
-    # 450U 名义 @79000、每张面值 0.0001 → 56.96 → 57 张
+    # 450U 名义 @79000、每张面值 0.0001 → 56.96 张 → **56**（向下取整，第一百五十三刀用户拍板）
+    # 原为四舍五入→57：那会最坏向上多买半张（每张 300U/目标 450U 时 +33%）
     d = {"asset": "BTC", "action": "BUY_LONG", "margin_usdt": 150.0, "leverage": 3,
          "entry_price": 79000.0, "take_profit_price": 85000.0, "stop_loss_price": 77000.0}
     d.update(over)
@@ -187,7 +188,7 @@ class TestRouter(unittest.TestCase):
         self.assertTrue(r["ok"], r.get("detail"))
         self.assertEqual([c[0] for c in ad.calls],
                          ["positions", "leverage", "place", "attach", "verify"])
-        self.assertEqual(ad.calls[2], ("place", "BTC", "long", 57, 79000.0))
+        self.assertEqual(ad.calls[2], ("place", "BTC", "long", 56, 79000.0))
         self.assertEqual(ad.calls[1][3], "cross")   # 缺省保持历史行为
         self.assertEqual(r["tp_id"], "tp1")
         self.assertEqual(r["sl_id"], "sl1")
@@ -201,7 +202,7 @@ class TestRouter(unittest.TestCase):
                           stop_loss_price=80500.0),
                 adapter=ad, price_ref=79000.0)
         self.assertTrue(r["ok"], r.get("detail"))
-        self.assertEqual(r["size_signed"], -57)
+        self.assertEqual(r["size_signed"], -56)   # 向下取整（同 test_gate_contracts_floor）
         self.assertEqual(ad.calls[2][2], "short")   # 序列: positions, leverage, place...
 
     def test_geometry_rejected_before_any_execution(self):

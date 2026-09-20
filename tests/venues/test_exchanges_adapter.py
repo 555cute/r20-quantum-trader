@@ -75,14 +75,21 @@ class TestQuantitySemantics(unittest.TestCase):
         qty = bn.quote_qty_to_native(450.0, 79650.0, spec)
         self.assertAlmostEqual(qty, 0.005, places=10)
 
-    def test_gate_contracts_round(self):
+    def test_gate_contracts_floor(self):
+        """契约变更（2026-09-20，第一百五十三刀，**用户拍板**）：张数向下取整。
+
+        原用例名 `test_gate_contracts_round`、断言 `assertIn(qty, (56.0, 57.0))`
+        （容忍四舍五入的两种结果）。改为 floor 的理由：四舍五入最坏**向上多买半张**，
+        每张 300U、目标 450U 时是 **+33%**，直接顶破按笔保证金上限；而**实盘路径**
+        `execution.sizing.quantize_size` 早已是 floor ⇒ 本函数原是不一致的那一侧。
+        """
         gt = GateAdapter()
         spec = InstrumentSpec(venue="gate", inst_id="BTC_USDT", base="BTC",
                               tick_size=0.1, step_size=0.0001, ct_val=0.0001,
                               min_size=1)
-        # 450U @79650，每张名义 7.965U → 56.5 张 → round → 56 or 57
+        # 450U @79650，每张名义 7.965U → 56.5 张 → floor → 56
         qty = gt.quote_qty_to_native(450.0, 79650.0, spec)
-        self.assertIn(qty, (56.0, 57.0))
+        self.assertEqual(qty, 56.0)
         self.assertEqual(qty % 1, 0)
 
     def test_below_minimum_rejected(self):
@@ -303,15 +310,12 @@ class TestReadOnlyMarketData(unittest.TestCase):
 
 
 class ContractsRoundingBoundTest(unittest.TestCase):
-    """张数换算的**方向与界**：四舍五入 ⇒ 最坏向上多买半张（第一百五十三刀）。
+    """张数换算的**方向与界**（第一百五十三刀：按用户拍板改为**向下取整**）。
 
-    为什么值得钉：代码注释与模块文档此前写"含精度截断"，读起来像"绝不超买"，
-    而张数分支其实是**四舍五入**（币数分支才是 `ROUND_DOWN`）。方向搞错的影响是
-    下单名义**超出**目标 —— 幅度取决于每张面值：每张 7.965U 时约 +0.9%，不明显；
-    每张 300U、目标 450U 时 **+33%**，直接顶破按笔保证金上限。
-
-    本门钉三件事：①张数分支的上界（≤ 目标 + 半张）；②**大面值标的下超买幅度确实很大**
-    （用具体数字把风险摆在测试里，而不是只写在散文里）；③币数分支**永不超出**（对照）。
+    历史：此处原先四舍五入（`int(round(...))`），最坏向上多买半张，而注释写"含精度截断"
+    —— 说法与实现不一致，且方向与**实盘路径**的 `execution.sizing.quantize_size`（floor）
+    相反。用户拍板统一为 floor 后，本门钉两件事：①**两条分支都永不超出目标**；
+    ②向下取整的代价（可能落到最小张数以下而被拒）也如实钉住。
     """
 
     @staticmethod
@@ -322,28 +326,30 @@ class ContractsRoundingBoundTest(unittest.TestCase):
                                             tick_size=0.01, step_size=0.0001,
                                             ct_val=ct_val, min_size=1)
 
-    def test_contracts_never_exceed_target_by_more_than_half_a_contract(self):
+    def test_contracts_never_exceed_the_target_notional(self):
         for per_contract in (7.965, 50.0, 300.0, 1234.5):
-            notional = per_contract * 3.5      # 3.5 张 ⇒ 四舍五入到 4 张
+            notional = per_contract * 3.5      # 3.5 张 ⇒ floor 到 3 张
             ad, spec = self._gate(per_contract / 100.0)   # price=100 ⇒ 每张 = 100*ct_val
             qty = ad.quote_qty_to_native(notional, 100.0, spec)
             with self.subTest(per_contract=per_contract):
-                actual = qty * per_contract
-                self.assertLessEqual(actual, notional + per_contract / 2 + 1e-9,
-                                     "四舍五入的上界被打破（方向被改成向上取整？）")
-                self.assertEqual(qty % 1, 0, "张数必须是整数")
+                self.assertEqual(qty, 3.0, "3.5 张必须 floor 到 3 张（不超买）")
+                self.assertLessEqual(qty * per_contract, notional + 1e-9,
+                                     "换算名义超出了目标（取整方向被改回四舍五入？）")
 
-    def test_large_face_value_instrument_overshoots_a_lot(self):
-        """把幅度钉死：每张 300U、目标 450U ⇒ 1.5 张 ⇒ **2 张 = 600U（+33%）**。"""
+    def test_large_face_value_instrument_undershoots_instead_of_overshooting(self):
+        """把幅度钉死：每张 300U、目标 450U ⇒ 1.5 张 ⇒ **1 张 = 300U（−33%，绝不超买）**。"""
         ad, spec = self._gate(3.0)             # price=100 ⇒ 每张 300U
         qty = ad.quote_qty_to_native(450.0, 100.0, spec)
-        self.assertEqual(qty, 2.0)
-        overshoot = qty * 300.0 / 450.0 - 1.0
-        self.assertGreater(overshoot, 0.3,
-                           "大面值标的超买幅度应当显著（若改为向下取整，本断言要**有意识地**改）")
+        self.assertEqual(qty, 1.0, "四舍五入会给出 2 张（600U，+33%）——这正是被拍板改掉的")
+        self.assertLessEqual(qty * 300.0, 450.0)
+
+    def test_exact_division_is_not_lost_to_float_noise(self):
+        """浮点噪声护栏：600/300 可能算成 1.9999999，`+1e-9` 必须保住 2 张。"""
+        ad, spec = self._gate(3.0)
+        self.assertEqual(ad.quote_qty_to_native(600.0, 100.0, spec), 2.0)
 
     def test_base_asset_branch_never_exceeds_target(self):
-        """对照：币数分支向下截断 ⇒ 换算名义 ≤ 目标（两个分支方向不同，勿混为一谈）。"""
+        """对照：币数分支同样向下截断（两条分支方向**一致**，都是一律不超买）。"""
         from r20_backend.exchanges.binance import BinanceAdapter
         from r20_backend.exchanges.base import InstrumentSpec
         ad = BinanceAdapter()
@@ -352,6 +358,3 @@ class ContractsRoundingBoundTest(unittest.TestCase):
         qty = ad.quote_qty_to_native(450.0, 100.0, spec)   # 4.5 → 截断 4.0
         self.assertEqual(qty, 4.0)
         self.assertLessEqual(qty * 100.0, 450.0 + 1e-9)
-
-if __name__ == "__main__":
-    unittest.main()

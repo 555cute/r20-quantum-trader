@@ -7,9 +7,10 @@
 2. **显式不支持，永不静默模拟**：未实装的私有切面（下单/账户/保护单）一律抛
    ``ExchangeCapabilityError`` fail-closed——绝不返回假数据骗过上层。
 3. **对外统一币本位，进 venue 前换算**：上层决策契约只谈「保证金 USDT / 杠杆 /
-   现价」，``quote_qty_to_native()`` 按场所规格折算：**币数语义向下截断**到 step，
-   **张数语义四舍五入** —— 后者最坏会**向上多买半张**（名义超出目标，幅度取决于每张面值），
-   方向与界见该函数 docstring（勿再用"一律截断"描述它：那样说会让人以为绝不超买）。
+   现价」，``quote_qty_to_native()`` 按场所规格折算，且**两条分支都向下取整**：
+   币数语义截断到 step、张数语义 `floor` —— 换算出的名义**永不超出**目标
+   （张数分支曾用四舍五入，最坏向上多买半张即 +33%，第一百五十三刀按用户拍板改为 floor；
+   与实盘路径 `execution.sizing.quantize_size` 方向一致）。
 4. **行情与执行分离**（nautilus 模式）：本阶段 Binance/Gate 仅实装公共只读行情；
    执行路由留到 Phase 3（单所 ≥100 笔样本门槛前不接第二所实盘）。
 
@@ -18,6 +19,7 @@
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from decimal import ROUND_DOWN, Decimal
 from typing import Any, Dict, Optional
@@ -229,7 +231,7 @@ class BaseExchangeAdapter:
         raise NotImplementedError
 
     # ------------------------------------------------------------------
-    # 切面 4：数量语义换算层（对外币本位 → 原生单位：**币数向下截断**、**张数四舍五入**）
+    # 切面 4：数量语义换算层（对外币本位 → 原生单位：**币数与张数一律向下取整**）
     # ------------------------------------------------------------------
     def quote_qty_to_native(self, notional_usdt: float, price: float,
                             spec: InstrumentSpec) -> float:
@@ -238,13 +240,14 @@ class BaseExchangeAdapter:
         - base_asset 语义（Binance）：币数，向下截断到 step_size；
         - contracts 语义（OKX/Gate）：整数张，**四舍五入**后校验最小张数。
 
-        ⚠️ 两条分支的**方向不同**，且药品级差异会体现在下单量上（第一百五十三刀把话说准）：
+        ⚠️ **两条分支一律向下取整**，故换算出的名义**永不超出**目标（第一百五十三刀）：
 
-        - 币数分支：`ROUND_DOWN` 截断到 step ⇒ 换算结果的名义**永不超出**目标；
-        - 张数分支：四舍五入 ⇒ 最坏**向上多买半张**，即实际名义 ≤ 目标 + 每张面值/2。
-          幅度取决于每张面值：每张 7.965U 时约 +0.9%；每张 300U、目标 450U 时 **+33%**。
-          本函数**不**在这里夹回目标（调用方按自己的风控上限决定是否接受），
-          故上层若要求"绝不超出"，必须自己按此界复核或改走 Gate 的十进制 amount 通道。
+        - 币数分支：`ROUND_DOWN` 截断到 step；
+        - 张数分支：`floor`（曾为四舍五入 —— 那会最坏向上多买半张：每张 300U、目标 450U 时
+          1.5 张 ⇒ 2 张 = 600U，**+33%**，直接顶破按笔保证金上限；用户拍板改为 floor）。
+
+        代价方向相反且可接受：向下取整可能让单子更常低于最小张数而被拒（少下单，不超买）。
+        需要更细粒度时，Gate 等支持十进制 amount 的场所可走 Decimal 通道。
 
         换算失败/低于最小名义价值 → 0.0（调用方据此拒单，fail-closed）。
 
@@ -268,7 +271,12 @@ class BaseExchangeAdapter:
         per_contract = price * (spec.ct_val or 1.0)
         if per_contract <= 0:
             return 0.0
-        contracts = int(round(notional_usdt / per_contract))
+        # 向下取整（用户拍板，第一百五十三刀）：张数分支原先四舍五入，最坏**向上多买半张**
+        # （每张 300U、目标 450U 时 1.5 张 ⇒ 2 张 = 600U，+33%，直接顶破按笔保证金上限）。
+        # 现改为 floor ⇒ 换算名义**永不超出**目标；与**实盘路径**已有的
+        # `r20_backend.execution.sizing.quantize_size`（同为 floor）方向一致。
+        # `+ 1e-9` 是浮点噪声护栏（如 600/300 可能算成 1.9999999）：沿用实盘量化器的同一纪律。
+        contracts = int(math.floor(notional_usdt / per_contract + 1e-9))
         if contracts < int(spec.min_size or 1) or contracts < 1:
             return 0.0
         return float(contracts)
