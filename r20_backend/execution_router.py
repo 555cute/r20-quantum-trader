@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import math
 import os
+import time
 from typing import Any, Dict, List, Optional
 
 from .execution import own_records as own_position_records
@@ -48,6 +49,15 @@ except ImportError:  # pragma: no cover - scripts/ 在 sys.path 时走上面分�
         # 常量不可得时不臆造区间：夹取退化为 no-op（下面靠 `or leverage` 短路），
         # 绝不因为读不到配置就凭空放大或缩小杠杆。
         MAX_LEVERAGE = MIN_LEVERAGE = None  # type: ignore[assignment]
+
+
+#: 平仓后是否撤销**已证明属于本系统**的该合约保护腿（治本：遗留腿的产生源头）。
+#: 只有"核验归零 + 归属可证明"两个条件同时满足才会撤；撤单失败不改判平仓结果，
+#: 只把残留如实写进 detail（平仓本身确实成功了，谎报失败会让上层重试平仓）。
+CANCEL_STALE_PROTECTION_ON_CLOSE: bool = True
+#: 归零核验的轮询节奏（平仓是低频操作，多读几次换"确实归零"的确定性划算）
+CLOSE_FLAT_POLL_TRIES: int = 5
+CLOSE_FLAT_POLL_SLEEP: float = 0.6
 
 
 def _exposure_venues(venue: str, environment: Optional[str]):
@@ -538,6 +548,117 @@ def open_protected_position(decision: Dict[str, Any], *,
                        detail=f"{venue.upper()} 入场限价挂单 + TP/SL 双腿云端触发单已回读验证")
 
 
+def _verify_symbol_flat(ad: Any, base: str) -> tuple:
+    """轮询核验该合约**整体归零**（任何方向都没有仓）→ `(flat, 剩余量)`。
+
+    整体归零而非"本方向归零"：双向持仓下平掉空头时，多头的保护腿仍在保护多头，
+    按合约撤腿会误伤（实测 Gate 账户 `position_mode=dual`）。
+    读失败一律当作**未归零**（宁可不撤，也不误撤）。
+    """
+    want = str(base or "").upper()
+    remaining = 0.0        # ⚠️ 必须先初始化：全部读失败时若未赋值，
+    #                       下面 `return False, remaining` 会抛 UnboundLocalError
+    #                       （本刀实测被专测 `test_read_failure_counts_as_not_flat` 抓出）
+    for _ in range(max(1, int(CLOSE_FLAT_POLL_TRIES))):
+        try:
+            rows = ad.positions() or []
+        except Exception:
+            time.sleep(CLOSE_FLAT_POLL_SLEEP)
+            continue
+        remaining = 0.0
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            if str(r.get("base") or "").upper() != want:
+                continue
+            try:
+                remaining = max(remaining, abs(float(r.get("size_signed") or 0)))
+            except (TypeError, ValueError):
+                remaining = max(remaining, 1.0)      # 读不出量 ⇒ 当作仍有仓（保守）
+        if remaining <= 1e-9:
+            return True, 0.0
+        time.sleep(CLOSE_FLAT_POLL_SLEEP)
+    return False, remaining
+
+
+def _read_symbol_position(ad: Any, base: str, pos_side: Optional[str] = None) -> Dict[str, Any]:
+    """平仓前抓该合约的仓位事实 → `{"base", "side", "size_signed"}`（读不到则退化为只有 base/side）。
+
+    退化不是失败：Gate 腿带 `t-r20` 标签，靠标签即可归因；Binance 腿没标签，
+    退化后就只能"归属不可判定"⇒ **不撤**（保守，符合"不撤用户手单"的铁律）。
+    """
+    want = str(base or "").upper()
+    out: Dict[str, Any] = {"base": want}
+    if pos_side:
+        out["side"] = str(pos_side).strip().lower()
+    try:
+        for r in (ad.positions() or []):
+            if not isinstance(r, dict):
+                continue
+            if str(r.get("base") or "").upper() != want:
+                continue
+            out["size_signed"] = r.get("size_signed")
+            if r.get("side"):
+                out["side"] = str(r.get("side")).lower()
+            if str(out.get("side") or "").lower() == str(pos_side or "").lower() or not pos_side:
+                break
+    except Exception:
+        pass
+    return out
+
+
+def _cancel_proven_own_legs(ad: Any, base: str,
+                            before_position: Optional[Dict[str, Any]] = None) -> str:
+    """撤掉该合约上**可证明属于本系统**的保护腿；返回给 detail 追加的人读说明。
+
+    只撤两类：① `matched`（保护的就是刚平掉的那笔）；② 孤儿但带本系统标签
+    （Gate `t-r20sl/t-r20tp`）。其余（旧向/旧量腿、归属不可判定的腿）**一律不碰**，
+    只把数量如实报出，交由归属审计与人工决定。
+    """
+    from .execution import own_records as _own
+    try:
+        from scripts.trader.venue_protection import select_legs_to_cancel_after_close
+    except ImportError:
+        from trader.venue_protection import select_legs_to_cancel_after_close
+    try:
+        legs = ad.list_protective_orders(None) or []
+    except Exception:
+        legs = []
+    symbol_legs = [l for l in legs if _own.canonical_inst(
+        (l.get("symbol") if isinstance(l, dict) else "") or "") == _own.canonical_inst(base)]
+    # 用**平仓前**抓到的事实做归属（平完再读只剩空仓，判不出 matched）
+    own_position = dict(before_position or {"base": base})
+    ledger = None
+    try:
+        ledger = _own.read_ledger_rows(_own.load_ledger(OWN_POSITION_LEDGER_FILE or None))
+    except Exception:
+        ledger = None
+    sel = select_legs_to_cancel_after_close(own_position, symbol_legs, ledger)
+    done, failed = [], []
+    for item in sel["to_cancel"]:
+        oid = str(item.get("id") or "")
+        if not oid:
+            continue
+        try:
+            if hasattr(ad, "cancel_price_order"):
+                ad.cancel_price_order(oid)
+            elif hasattr(ad, "cancel_algo_order"):
+                ad.cancel_algo_order(algo_id=oid)
+            else:
+                failed.append(oid)
+                continue
+            done.append(oid)
+        except Exception:
+            failed.append(oid)
+    left = sel["counts"]["not_touched"]
+    note = f"；保护腿已撤 {len(done)} 张"
+    if failed:
+        note += f"、撤单失败 {len(failed)} 张（需人工核对）"
+    if left:
+        note += f"；另有 {left} 张**未撤**（旧向/旧量或归属不可判定，交归属审计）"
+    return note
+
+
 def close_position(symbol: str, *, venue: str = "gate", adapter: Any = None,
                    environment: Optional[str] = None, pos_side: Optional[str] = None) -> RouteResult:
     """市价全平（close=true + ioc），依赖同前：开闸 + 凭证。"""
@@ -547,6 +668,9 @@ def close_position(symbol: str, *, venue: str = "gate", adapter: Any = None,
     ad = adapter or get_adapter(v, environment=environment)
     require_execution(v, environment=str(getattr(ad, "environment", "live") or "live"))
     asset = canonical_base(symbol)
+    # 平仓**前**抓一份待平仓的事实：归属判定要用它的量/方向，而平完就读不到了
+    # （本刀实测踩到：平完再读只剩空仓 ⇒ matched 判不出来 ⇒ 一张腿都没撤）。
+    _before_position = _read_symbol_position(ad, asset, pos_side)
     try:
         kwargs: Dict[str, Any] = {}
         try:
@@ -564,5 +688,30 @@ def close_position(symbol: str, *, venue: str = "gate", adapter: Any = None,
     # 换算成功——旧实现只查异常，把 {"closed": False} 也报成 ok=True。
     if isinstance(data, dict) and data.get("closed") is False:
         return _fail("close", f"{v.upper()} 平仓未受理: {data.get('reason') or data}", venue=v, asset=asset)
+
+    # ── 平仓后收尾：核验归零 → 撤掉**可证明属于本系统**的该合约保护腿 ──────────
+    # 为什么放在这里：遗留腿的产生源头就是"平仓路径从不撤腿"（实测 `close_position`
+    # 只提交市价全平，`cancel_protective_orders` 仓库里仅 `scale_out` 用过）⇒
+    # 实测 Binance 13 张腿里只有 2 张对得上活动仓，其余是历史遗留（reduceOnly 有量条件单，
+    # 同币再开仓时会被旧触发价减仓；也会让覆盖判定**虚假满足**）。
+    #
+    # ⚠️ 三条铁律（顺序不能变）：
+    #   1. **先核验归零**：未确认归零绝不撤腿 —— 撤早了会把还在保护中的腿撤掉；
+    #   2. **该合约必须整体归零**（任何方向都没有仓）：双向持仓下平掉空头时多头的
+    #      保护腿仍在保护它，按合约撤会误伤；
+    #   3. **只撤可证明属于本系统的腿**（matched / Gate `t-r20` 标签）：
+    #      归属不可判定的腿可能是**用户手单**，撤错不可逆。
+    note = ""
+    try:
+        if CANCEL_STALE_PROTECTION_ON_CLOSE and v != "okx":
+            flat, remaining_any = _verify_symbol_flat(ad, asset)
+            if not flat:
+                note = ("；未核验归零（同合约仍有 %.6g），保护腿保持不动" % remaining_any
+                        if remaining_any
+                        else "；未核验归零（持仓读不到），保护腿保持不动")
+            else:
+                note = _cancel_proven_own_legs(ad, asset, _before_position)
+    except Exception as exc:      # 收尾失败绝不影响平仓结论
+        note = f"；保护腿收尾异常（{type(exc).__name__}: {str(exc)[:80]}），需人工核对"
     return RouteResult(ok=True, venue=v, stage="done", asset=asset,
-                       detail=f"{v.upper()} 市价全平已提交: {str(data)[:120]}")
+                       detail=f"{v.upper()} 市价全平已提交: {str(data)[:120]}{note}")

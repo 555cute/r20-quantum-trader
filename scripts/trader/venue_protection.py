@@ -39,6 +39,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 __all__ = [
     "DEFAULT_RENEW_WITHIN_S",
     "attribute_protective_orders",
+    "select_legs_to_cancel_after_close",
     "audit_cross_venue_protection",
     "ensure_venue_protection",
     "scan_protective_orders",
@@ -631,6 +632,60 @@ def attribute_protective_orders(positions: Optional[Sequence[Dict[str, Any]]],
         "needs_human": buckets["orphan_unattributed"] + buckets["unparsed"],
         "legs_total": sum(len(v) for v in buckets.values()),
         "orphan_total": len(buckets["orphan_attributed"]) + len(buckets["orphan_unattributed"]),
+    }
+
+
+def select_legs_to_cancel_after_close(closed_position: Optional[Dict[str, Any]],
+                                      legs: Optional[Sequence[Dict[str, Any]]],
+                                      ledger_rows: Optional[Sequence[Dict[str, Any]]] = None,
+                                      *, tolerance_ratio: float = DEFAULT_TOLERANCE_RATIO
+                                      ) -> Dict[str, Any]:
+    """**平仓已核验归零之后**，挑出该撤的腿（纯选择，不发单）。
+
+    为什么是"平仓后"而不是"清理任务"：遗留腿的产生源头就是**平仓路径从不撤腿**
+    （实测 `close_position` 只提交市价全平，`cancel_protective_orders` 仅 `scale_out` 用过）。
+    在源头补上，才不会一边清理一边继续产生。
+
+    ## 只撤"能证明是这一笔的"，其余一律不碰
+
+    - `matched`：腿保护的就是刚平掉的那个仓（张数相符，或 `auto_size` 整仓平）⇒ 撤；
+    - `orphan_attributed` 且证据 `tag`（Gate `t-r20sl/t-r20tp`）⇒ **可证明是我们的** ⇒ 撤；
+    - `size_mismatch` / `side_mismatch`：**同一合约上属于别的仓**的历史腿 ——
+      平掉 A 仓不等于 B 仓的腿该撤，故**只报告不撤**（留给归属审计）；
+    - `orphan_unattributed` / `unparsed` / `foreign`：**绝不撤**（可能是用户手单）。
+
+    ⚠️ 前提由调用方保证：**已经核验该合约没有剩余仓位**。本函数不做该核验，
+    因为它不发单、也不读交易所 —— 调用方若在未归零时调用，会把还在保护中的腿撤掉。
+    """
+    r = attribute_protective_orders([closed_position] if closed_position else [],
+                                   legs, ledger_rows,
+                                   tolerance_ratio=tolerance_ratio)
+    out: List[Dict[str, Any]] = []
+    for leg in r["matched"]:
+        out.append({"id": leg.get("id"), "symbol": leg.get("symbol"), "kind": leg.get("kind"),
+                    "reason": "matched"})
+    for leg in r["orphan_attributed"]:
+        if str(leg.get("evidence")) == "tag":
+            out.append({"id": leg.get("id"), "symbol": leg.get("symbol"), "kind": leg.get("kind"),
+                        "reason": "tag"})
+    ids = [x["id"] for x in out if x.get("id")]
+    return {
+        "to_cancel": out,
+        "ids": ids,
+        "not_touched": {
+            "size_mismatch": r["size_mismatch"],
+            "side_mismatch": r["side_mismatch"],
+            "orphan_unattributed": r["orphan_unattributed"],
+            "unparsed": r["unparsed"],
+            "foreign": r["foreign"],
+        },
+        "counts": {
+            "to_cancel": len(out),
+            "not_touched": sum(len(r[k]) for k in
+                               ("size_mismatch", "side_mismatch", "orphan_unattributed",
+                                "unparsed", "foreign")),
+        },
+        "attribution": r,
     }
 
 
