@@ -33,12 +33,14 @@
 """
 from __future__ import annotations
 
+import time
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 __all__ = [
     "DEFAULT_RENEW_WITHIN_S",
-    "scan_protective_orders",
+    "audit_cross_venue_protection",
     "ensure_venue_protection",
+    "scan_protective_orders",
 ]
 
 #: 默认提前续期窗口（24h；roadmap G8 的验收口径）
@@ -95,31 +97,39 @@ def _is_live(row: Dict[str, Any]) -> bool:
 
 
 def _leg_size(row: Dict[str, Any]) -> Optional[float]:
-    """该腿覆盖的数量；`None` = 不可判定。"""
-    for key in ("left", "size_remaining", "remaining"):
-        num = _as_float(row.get(key))
-        if num is not None and num > 0:
-            return num
+    """该腿覆盖的数量；`None` = 不可判定。
+
+    ⚠️ 各所字段位置不同（**本机实跑真单核对过**）：
+    - Gate `price_orders`：`initial.size` / 顶层 `size`（`size=0 + close=true` 走整仓平分支）；
+    - Binance `algoOrder`：数量在 **`raw.quantity`**（顶层没有 `size`），`actualQty` 是
+      已成交量、**不能**当覆盖量用。
+    漏读 Binance 这一层会让每个币安仓位的覆盖都变成"不可判定"，巡检永远不敢动手。
+    """
+    raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
     initial = row.get("initial") if isinstance(row.get("initial"), dict) else {}
-    for key in ("size", "amount", "qty", "quantity"):
-        num = _as_float(row.get(key))
-        if num is not None and num > 0:
-            return num
-    for key in ("size", "amount", "qty", "quantity"):
-        num = _as_float(initial.get(key))
-        if num is not None and num > 0:
-            return num
+    # 剩余量优先（Gate `left` / 部分成交后的余量），其次下单量本身
+    for container in (row, raw, initial):
+        for key in ("left", "size_remaining", "remaining"):
+            num = _as_float(container.get(key))
+            if num is not None and num > 0:
+                return num
+    for container in (row, raw, initial):
+        for key in ("size", "quantity", "origQty", "qty", "amount"):
+            num = _as_float(container.get(key))
+            if num is not None and num > 0:
+                return num
     return None
 
 
 def _is_full_close(row: Dict[str, Any]) -> bool:
-    """该腿语义是"平掉全部仓位"（Gate `close=true` / `auto_size`）。
+    """该腿语义是"平掉全部仓位"（Gate `close=true`/`auto_size`、Binance `closePosition`）。
 
     Gate 挂单用 `initial.size=0 + close=true` 表示"整仓平"，此时 `size` 字段
     给不出覆盖张数 —— 但覆盖范围其实是**全部**，不能当成"不可判定"。
     """
     initial = row.get("initial") if isinstance(row.get("initial"), dict) else {}
-    for container in (row, initial):
+    raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
+    for container in (row, initial, raw):
         for key in ("close", "is_close", "close_position", "closePosition"):
             val = container.get(key)
             if val is True or str(val).lower() in {"true", "1", "yes"}:
@@ -143,6 +153,20 @@ def _row_close_side(row: Dict[str, Any]) -> Optional[str]:
     return val if val in {"buy", "sell"} else None
 
 
+def _trigger_price(row: Dict[str, Any]) -> Optional[float]:
+    """该腿的触发价（续期时**复用**它，绝不重新定价）。
+
+    Gate 在 `trigger.price`，Binance 在 `trigger_price`/`triggerPrice`。
+    """
+    trigger = row.get("trigger") if isinstance(row.get("trigger"), dict) else {}
+    for candidate in (row.get("trigger_price"), row.get("triggerPrice"),
+                      trigger.get("price"), row.get("price")):
+        num = _as_float(candidate)
+        if num is not None and num > 0:
+            return num
+    return None
+
+
 def _to_seconds(value: Optional[float]) -> Optional[float]:
     """把可能是**毫秒**的时间戳归一成秒。
 
@@ -159,31 +183,44 @@ def _to_seconds(value: Optional[float]) -> Optional[float]:
 def _expiry(row: Dict[str, Any]) -> tuple:
     """→ `(expires_at_s | None, state)`；state ∈ {"absolute","relative","never","unknown"}。
 
-    Gate：`trigger.expiration` 是**相对创建时间**的秒数（0 = 永不过期）；
-    另兼容绝对时间戳（秒或毫秒）。缺 `create_time` 时无法换算 → unknown。
+    三种真实形态（本机实跑核对过）：
+    - **Gate**：`trigger.expiration` 是**相对创建时间**的秒数（0 = 永不过期）；
+    - **Binance**：`raw.goodTillDate` 是 GTD 绝对时间戳（0 = 无）；`timeInForce=GTC`
+      是**明确语义**"撤销前一直有效"，故它等价于永不过期 —— 不能当成"不可判定"，
+      否则每个币安仓位每周期都会被标记待复验（噪音会淹没真信号）；
+    - 两者都读不到 ⇒ unknown（不可判定，交给上层复验，绝不假设安全）。
     """
     trigger = row.get("trigger") if isinstance(row.get("trigger"), dict) else {}
     raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
+
+    gtd = _as_float(raw.get("goodTillDate") or row.get("goodTillDate"))
+    if gtd is not None and gtd > 0:
+        return _to_seconds(gtd), "absolute"
+
     raw_exp = row.get("expiration")
     if raw_exp in (None, ""):
         raw_exp = trigger.get("expiration")
     if raw_exp in (None, ""):
         raw_exp = raw.get("expiration")
     exp = _as_float(raw_exp)
-    if exp is None:
-        return None, "unknown"
-    if exp <= 0:
+    if exp is not None:
+        if exp <= 0:
+            return None, "never"
+        if exp >= 1e11:                # 绝对时间戳（毫秒）
+            return exp / 1000.0, "absolute"
+        if exp > 1e9:                  # 绝对时间戳（秒）
+            return exp, "absolute"
+        created = _to_seconds(_as_float(
+            row.get("create_time") or row.get("createTime") or row.get("cTime")
+            or raw.get("create_time") or raw.get("createTime") or raw.get("time")))
+        if created is None:
+            return None, "unknown"
+        return created + exp, "relative"
+
+    tif = str(row.get("timeInForce") or raw.get("timeInForce") or "").upper()
+    if tif == "GTC":
         return None, "never"
-    if exp >= 1e11:                    # 绝对时间戳（毫秒）
-        return exp / 1000.0, "absolute"
-    if exp > 1e9:                      # 绝对时间戳（秒）
-        return exp, "absolute"
-    created = _to_seconds(_as_float(
-        row.get("create_time") or row.get("createTime") or row.get("cTime")
-        or raw.get("create_time") or raw.get("createTime") or raw.get("time")))
-    if created is None:
-        return None, "unknown"
-    return created + exp, "relative"
+    return None, "unknown"
 
 
 def scan_protective_orders(rows: Optional[Sequence[Dict[str, Any]]], *,
@@ -236,6 +273,7 @@ def scan_protective_orders(rows: Optional[Sequence[Dict[str, Any]]], *,
             "id": str(row.get("id") or row.get("algo_id") or row.get("algoId")
                       or row.get("order_id") or row.get("ordId") or ""),
             "kind": kind,
+            "trigger_price": _trigger_price(row),
         }
         expires_at, exp_state = _expiry(row)
         leg["expires_at"] = expires_at
@@ -293,13 +331,18 @@ def scan_protective_orders(rows: Optional[Sequence[Dict[str, Any]]], *,
 
 
 def ensure_venue_protection(ad: Any, *, symbol: str, pos_side: str, position_size: float,
-                            tp_px: Optional[float], sl_px: float,
+                            sl_px: Optional[float] = None,
+                            tp_px: Optional[float] = None,
                             now_s: float,
                             expiration_s: int = 604800,
                             renew_within_s: float = DEFAULT_RENEW_WITHIN_S,
                             tolerance_ratio: float = DEFAULT_TOLERANCE_RATIO,
                             log: Any = print) -> Dict[str, Any]:
     """按判定结果**安全**修复缺口 / 续期临期腿（先挂新、后撤旧）。
+
+    `sl_px` / `tp_px` 可省略：省略时**复用现有腿的触发价**（续期的常见场景 ——
+    保护价位是既定策略，续期只该延长时间，不该重新定价）。若既没传、现有腿上
+    也拿不到价格，**绝不去猜一个价位**，直接返回 `stage="no_price"`。
 
     返回 `{ok, protected_now, stage, detail, placed, cancelled, kept_old, scan}`：
 
@@ -333,12 +376,29 @@ def ensure_venue_protection(ad: Any, *, symbol: str, pos_side: str, position_siz
                           detail="覆盖/到期不可判定，需人工或后续复验（不擅自写单）")
         return result
 
+    # 价格：入参优先；否则复用现有腿的触发价（续期=只延时间、不改价位）。
+    resolved_sl = sl_px
+    if resolved_sl is None:
+        resolved_sl = next((leg["trigger_price"] for leg in scan["ours"]
+                            if leg["kind"] == "sl" and leg["trigger_price"]), None)
+    resolved_tp = tp_px
+    if resolved_tp is None:
+        resolved_tp = next((leg["trigger_price"] for leg in scan["ours"]
+                            if leg["kind"] == "tp" and leg["trigger_price"]), None)
+    if resolved_sl is None:
+        result.update(ok=False, stage="no_price",
+                      detail="既未传入止损价、现有腿上也没有触发价 —— 不猜价位，"
+                             "留给上层（需人工或用既定策略价位重挂）",
+                      protected_now=protected_now)
+        return result
+
     # ① 先挂新（repair 时补缺口；renew 时用新腿替换临期腿）
     contracts = scan["missing_size"]
     if contracts is None or contracts <= 0:
         contracts = position_size
     try:
-        placed = ad.attach_protective_orders(symbol, pos_side, tp_px=tp_px, sl_px=float(sl_px),
+        placed = ad.attach_protective_orders(symbol, pos_side, tp_px=resolved_tp,
+                                             sl_px=float(resolved_sl),
                                              expiration=int(expiration_s),
                                              contracts=float(contracts)) or {}
     except Exception as exc:
@@ -382,3 +442,79 @@ def ensure_venue_protection(ad: Any, *, symbol: str, pos_side: str, position_siz
         detail += f"，{len(kept_old)} 条旧腿未撤（新腿已生效，宁可双不可裸）"
     result["detail"] = detail
     return result
+
+
+def audit_cross_venue_protection(xv_positions_by_venue: Optional[Dict[str, Any]], *,
+                                 venue_registry: Any,
+                                 environment: str,
+                                 now_s: Optional[float] = None,
+                                 venues: Sequence[str] = ("gate", "binance"),
+                                 renew_within_s: float = DEFAULT_RENEW_WITHIN_S,
+                                 expiration_s: int = 604800,
+                                 log: Any = print) -> Dict[str, Any]:
+    """对**已冻结的**跨所持仓快照做一遍保护巡检（每周期调用一次）。
+
+    返回 `{venues, actions, critical, errors, skipped}`：
+
+    - `actions`：本次真的动了单的仓位（续期/补挂），供 `executed_actions` 展示；
+    - `critical`：**完全没有止损腿**的仓位 —— 这是必须吼出来的（本函数**不**替它
+      定价补挂，因为那种价位是策略决定，不该由巡检层臆造）；
+    - `errors`：逐所隔离的失败（一个所挂了不影响另一个所）；
+    - `skipped`：所不可用/行缺字段等未处理项（如实登记，不装作巡检过）。
+
+    读的是**调用方传入的快照**（`fetch_other_venue_positions` 的返回值），
+    故本函数不额外出网取持仓；每仓一次 `list_protective_orders` 是必要的核验成本。
+    """
+    now = float(now_s if now_s is not None else time.time())
+    report: Dict[str, Any] = {"venues": {}, "actions": [], "critical": [],
+                              "errors": [], "skipped": []}
+    snapshot = xv_positions_by_venue or {}
+    for venue in venues:
+        rows = snapshot.get(venue)
+        if rows is None:
+            report["skipped"].append({"venue": venue, "why": "本周期快照无该所（未开闸或取数失败）"})
+            continue
+        try:
+            ad = venue_registry.get_adapter(venue, environment=environment)
+        except Exception as exc:
+            report["errors"].append({"venue": venue, "stage": "adapter",
+                                     "detail": f"{type(exc).__name__}: {exc}"})
+            continue
+        venue_stat = {"checked": 0, "renewed": 0, "repaired": 0, "missing": 0, "errors": 0}
+        for row in (rows or []):
+            if not isinstance(row, dict):
+                continue
+            symbol = str(row.get("inst_id") or row.get("base") or "")
+            pos_side = str(row.get("side") or "").lower()
+            size = abs(_as_float(row.get("size_signed")) or 0.0)
+            if not symbol or pos_side not in {"long", "short"} or size <= 0:
+                report["skipped"].append({"venue": venue, "why": f"行字段不足: {row!r}"[:160]})
+                continue
+            venue_stat["checked"] += 1
+            try:
+                res = ensure_venue_protection(ad, symbol=symbol, pos_side=pos_side,
+                                              position_size=size, now_s=now,
+                                              renew_within_s=renew_within_s,
+                                              expiration_s=expiration_s, log=log)
+            except Exception as exc:      # 巡检自身异常绝不上抛（它只是加固层）
+                venue_stat["errors"] += 1
+                report["errors"].append({"venue": venue, "inst": symbol, "stage": "ensure",
+                                         "detail": f"{type(exc).__name__}: {exc}"})
+                continue
+            item = {"venue": venue, "inst": symbol, "side": pos_side,
+                    "stage": res.get("stage"), "detail": res.get("detail")}
+            if res.get("scan") and res["scan"].get("needs_repair") and not res["scan"].get("has_live_sl"):
+                venue_stat["missing"] += 1
+                report["critical"].append(item)
+            elif res.get("ok"):
+                if res.get("stage") == "placed":
+                    if res.get("scan", {}).get("needs_renew"):
+                        venue_stat["renewed"] += 1
+                    else:
+                        venue_stat["repaired"] += 1
+                    report["actions"].append(item)
+            else:
+                venue_stat["errors"] += 1
+                report["errors"].append(item)
+        report["venues"][venue] = venue_stat
+    return report

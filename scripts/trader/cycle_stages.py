@@ -369,3 +369,61 @@ def scan_risk_gates_and_ai_brain(*,
         print(f"[交易池闸门] {_pool_warn}")
         executed_actions.append(_pool_warn)
     return (ASSET_MARGIN_CAP, brain_cache, cb_active, cb_reason)
+
+
+def venue_protection_watchdog_stage(*,
+        xv_positions_by_venue,
+        executed_actions,
+        venue_registry,
+        current_environment,
+        R20_VENUE_PROTECTION_WATCHDOG,
+        audit_cross_venue_protection):
+    """跨所云端保护单巡检（roadmap G8 的周期接线；**默认关闭**）。
+
+    ## 为什么单独一格、且默认关闭
+
+    外所（Gate/Binance）的触发单带 `expiration`（Gate 默认 7 天，相对创建时间），
+    到期后离开交易所 open 列表 ⇒ 仓位裸奔；而主链的 OKX 保护核验**够不到**跨所仓位
+    （跨所持仓 instId 是合成 id `GATE:BTC_USDT`，与因子快照的 OKX 形态匹配不上）。
+    本格把 `scripts/trader/venue_protection.py` 的判定/动作接到每周期快照上。
+
+    **接线不等于开闸**：`R20_VENUE_PROTECTION_WATCHDOG` 未置 1 时本函数直接返回，
+    **零网络、零写单**（线上行为与本刀之前逐字一致）。开闸是运营决定，需人拍板。
+
+    ## 边界（刻意的保守选择）
+
+    - **fail-soft**：本格任何异常只打印告警、绝不中断周期 —— 它是在既有 OKX 硬核验
+      之上的**加固层**，不该成为新的单点；后续若要收紧成 fail-closed，是独立的一刀；
+    - 只读**已冻结的本周期快照**（不额外拉持仓）；每仓一次保护单列表核验是必要成本；
+    - 完全没有止损腿的仓位只报 CRITICAL（**不替它定价补挂** —— 价位是策略决定，
+      巡检层臆造价位等于偷偷改策略）。
+    """
+    if not R20_VENUE_PROTECTION_WATCHDOG:
+        return None
+    try:
+        env_mode = str(current_environment().mode)
+    except Exception as exc:
+        print(f"[跨所保护巡检] warn 环境轴不可得（{exc}），本轮跳过")
+        return None
+    try:
+        report = audit_cross_venue_protection(
+            xv_positions_by_venue,
+            venue_registry=venue_registry,
+            environment=env_mode,
+        )
+    except Exception as exc:
+        print(f"[跨所保护巡检] warn 巡检异常（不影响本周期）: {exc}")
+        return None
+
+    for item in report.get("actions") or []:
+        executed_actions.append(
+            f"[跨所保护] {item['venue'].upper()} {item['inst']} {item['detail']}")
+    for item in report.get("critical") or []:
+        _line = (f"🔴 [跨所保护] {item['venue'].upper()} {item['inst']} {item['side']} "
+                 f"无止损腿（{item.get('detail')}）——需人工或用既定策略价位重挂")
+        print(_line)
+        executed_actions.append(_line)
+    for item in report.get("errors") or []:
+        print(f"[跨所保护巡检] warn {item.get('venue')} {item.get('inst') or ''} "
+              f"{item.get('stage')}: {item.get('detail')}")
+    return report

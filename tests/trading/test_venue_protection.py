@@ -13,6 +13,7 @@ from unittest.mock import MagicMock
 
 from scripts.trader.venue_protection import (
     DEFAULT_RENEW_WITHIN_S,
+    audit_cross_venue_protection,
     ensure_venue_protection,
     scan_protective_orders,
 )
@@ -21,22 +22,35 @@ NOW = 1_789_000_000.0          # 固定"现在"，避免用例依赖时钟
 
 
 def gate_sl_row(oid="sl1", *, size=0, close=True, created=None, expiration=604800,
-                text="t-r20sl12345", contract="BTC_USDT", status="open"):
+                text="t-r20sl12345", contract="BTC_USDT", status="open", trigger="78000"):
     """Gate `price_orders` 形状：标签在 initial.text，到期在 trigger.expiration。"""
     return {
         "id": oid, "status": status, "contract": contract,
         "initial": {"contract": contract, "size": size, "close": close, "text": text},
-        "trigger": {"price": "78000", "rule": 2, "expiration": expiration},
+        "trigger": {"price": trigger, "rule": 2, "expiration": expiration},
         "create_time": NOW - 100 if created is None else created,
     }
 
 
-def binance_leg_row(oid="b1", *, kind="STOP_MARKET", size=3, trigger=78000, side="SELL"):
+def binance_leg_row(oid="b1", *, kind="STOP_MARKET", size=3, trigger=78000, side="SELL",
+                    time_in_force="GTC", good_till_date=0, close_position=False):
+    """Binance `algoOrder` 形状 —— **照适配器真实回包写**（本机实跑核对）：
+
+    ⚠️ 顶层**没有** `size`：数量在 `raw.quantity`（`actualQty` 是已成交量，不能用）；
+    到期语义在 `raw.timeInForce`（GTC = 撤销前一直有效）/ `raw.goodTillDate`（GTD 时间戳）。
+    第一版夹具偷懒把 size 放在顶层，于是漏掉了真实回包这一层 —— 巡检在**真数据**上
+    会把每个币安仓位都判成"覆盖不可判定"。
+    """
     return {
         "id": oid, "algo_id": oid, "symbol": "BTCUSDT", "side": side,
         "type": kind, "trigger_price": trigger,
-        "raw": {"orderType": kind, "quantity": size, "algoId": oid},
-        "size": size,
+        "raw": {
+            "algoId": oid, "symbol": "BTCUSDT", "side": side, "positionSide": "BOTH",
+            "timeInForce": time_in_force, "quantity": str(size), "actualQty": "0.0",
+            "triggerPrice": str(trigger), "reduceOnly": True,
+            "closePosition": close_position, "algoStatus": "NEW",
+            "goodTillDate": good_till_date, "createTime": int(NOW * 1000),
+        },
     }
 
 
@@ -94,6 +108,65 @@ class ScanTest(unittest.TestCase):
                                       position_size=10, now_s=NOW)
         self.assertEqual(scan["ours"], [])
         self.assertTrue(scan["needs_repair"])
+
+
+class BinanceRealShapeTest(unittest.TestCase):
+    """币安 `algoOrder` 真实回包的两个坑（本机实跑真单核对后补的回归）。"""
+
+    def test_size_read_from_raw_quantity(self):
+        scan = scan_protective_orders([binance_leg_row("b1", size=82)], symbol="BTCUSDT",
+                                      pos_side="long", position_size=82, now_s=NOW)
+        self.assertEqual(scan["covered_size"], 82.0,
+                         "没读到 raw.quantity ⇒ 覆盖永远'不可判定'，巡检不敢动手")
+        self.assertTrue(scan["coverage_ok"])
+
+    def test_actual_qty_is_not_used_as_coverage(self):
+        """`actualQty` 是**已成交**量：新挂的单它是 0，不能拿它当覆盖量。"""
+        row = binance_leg_row("b1", size=5)
+        row["raw"]["actualQty"] = "0.0"
+        row["raw"].pop("quantity")
+        scan = scan_protective_orders([row], symbol="BTCUSDT", pos_side="long",
+                                      position_size=5, now_s=NOW)
+        self.assertIsNone(scan["covered_size"], "只有 actualQty 时必须判为不可判定")
+
+    def test_gtc_means_never_expire_not_unknown(self):
+        """GTC 是明确语义（撤销前一直有效）⇒ 不能当'到期不可判定'，否则全是噪音。"""
+        scan = scan_protective_orders([binance_leg_row("b1")], symbol="BTCUSDT",
+                                      pos_side="long", position_size=3, now_s=NOW)
+        self.assertEqual(scan["needs_renew"], False)
+        self.assertEqual(scan["needs_verify"], False)
+        self.assertEqual(scan["ours"][0]["expiry_state"], "never")
+
+    def test_good_till_date_is_absolute_expiry(self):
+        row = binance_leg_row("b1", good_till_date=int((NOW + 600) * 1000))   # 毫秒
+        scan = scan_protective_orders([row], symbol="BTCUSDT", pos_side="long",
+                                      position_size=3, now_s=NOW)
+        self.assertEqual([leg["id"] for leg in scan["expiring"]], ["b1"])
+        self.assertTrue(scan["needs_renew"])
+
+    def test_short_position_leg_side_is_buy(self):
+        """方向守卫：做空仓的保护腿是 BUY；SELL 腿属于做多仓，不该被算进来。"""
+        sell_leg = binance_leg_row("b1", side="SELL")
+        buy_leg = binance_leg_row("b2", side="BUY")
+        scan_short = scan_protective_orders([sell_leg, buy_leg], symbol="BTCUSDT",
+                                            pos_side="short", position_size=3, now_s=NOW)
+        self.assertEqual([leg["id"] for leg in scan_short["ours"]], ["b2"])
+
+    def test_close_position_flag_counts_as_full_coverage(self):
+        row = binance_leg_row("b1", close_position=True)
+        row["raw"].pop("quantity")
+        scan = scan_protective_orders([row], symbol="BTCUSDT", pos_side="long",
+                                      position_size=42, now_s=NOW)
+        self.assertTrue(scan["coverage_ok"], "closePosition=true = 整仓平，覆盖是全部")
+
+    def test_missing_both_expiry_semantics_is_unknown(self):
+        """既没有 expiration、也没有 GTC/GTD ⇒ 不可判定（不许假设安全）。"""
+        row = binance_leg_row("b1")
+        row["raw"].pop("timeInForce")
+        scan = scan_protective_orders([row], symbol="BTCUSDT", pos_side="long",
+                                      position_size=3, now_s=NOW)
+        self.assertEqual(scan["ours"][0]["expiry_state"], "unknown")
+        self.assertTrue(scan["needs_verify"])
 
 
 class ExpiryTest(unittest.TestCase):
@@ -270,6 +343,174 @@ class WiringTest(unittest.TestCase):
         init = Path(__file__).resolve().parents[2] / "scripts" / "trader" / "__init__.py"
         self.assertIn("venue_protection.py", init.read_text(encoding="utf-8"),
                       "新模块必须登记进 scripts/trader/__init__.py 的模块清单")
+
+
+class RenewReusesExistingPricesTest(unittest.TestCase):
+    """续期只该**延长时间**，不该重新定价 —— 价位是策略决定。"""
+
+    def _ad(self, rows):
+        ad = MagicMock()
+        ad.list_protective_orders.return_value = rows
+        ad.attach_protective_orders.return_value = {"sl": "new-sl"}
+        return ad
+
+    def test_renew_without_passed_prices_reuses_leg_triggers(self):
+        rows = [gate_sl_row("old-sl", created=NOW - (604800 - 60), trigger="77000")]
+        ad = self._ad(rows)
+        res = ensure_venue_protection(ad, symbol="BTC_USDT", pos_side="long",
+                                      position_size=10, now_s=NOW)   # 不传价位
+        self.assertTrue(res["ok"], res["detail"])
+        kwargs = ad.attach_protective_orders.call_args.kwargs
+        self.assertEqual(kwargs["sl_px"], 77000.0, "续期改写了原有止损价 ⇒ 偷偷改策略")
+
+    def test_scan_exposes_trigger_prices(self):
+        scan = scan_protective_orders([gate_sl_row(trigger="77000")], symbol="BTC_USDT",
+                                      pos_side="long", position_size=10, now_s=NOW)
+        self.assertEqual(scan["ours"][0]["trigger_price"], 77000.0)
+
+    def test_no_price_available_refuses_to_invent(self):
+        """没有止损腿、又没传价位 ⇒ 绝不猜一个价位补挂。"""
+        ad = self._ad([])
+        res = ensure_venue_protection(ad, symbol="BTC_USDT", pos_side="long",
+                                      position_size=10, now_s=NOW)
+        self.assertFalse(res["ok"])
+        self.assertEqual(res["stage"], "no_price")
+        ad.attach_protective_orders.assert_not_called()
+
+
+class AuditCrossVenueTest(unittest.TestCase):
+    """每周期巡检：逐所隔离、临期必续、缺腿必吼、绝不替人定价。"""
+
+    def _registry(self, adapters):
+        reg = MagicMock()
+        reg.get_adapter.side_effect = lambda v, environment=None: adapters[v]
+        return reg
+
+    def _row(self, inst="BTC_USDT", side="long", size=1.0):
+        return {"venue": "gate", "inst_id": inst, "base": inst.split("_")[0],
+                "side": side, "size_signed": size}
+
+    def test_expiring_leg_is_renewed_with_its_own_price(self):
+        gate = MagicMock()
+        gate.list_protective_orders.return_value = [
+            gate_sl_row("old-sl", created=NOW - (604800 - 60), trigger="77000")]
+        gate.attach_protective_orders.return_value = {"sl": "new-sl"}
+        reg = self._registry({"gate": gate, "binance": MagicMock()})
+        report = audit_cross_venue_protection(
+            {"gate": [self._row()]}, venue_registry=reg, environment="demo", now_s=NOW)
+        self.assertEqual(report["venues"]["gate"]["renewed"], 1)
+        self.assertEqual(len(report["actions"]), 1)
+        self.assertEqual(report["critical"], [])
+        gate.attach_protective_orders.assert_called_once()
+        self.assertEqual(gate.cancel_price_order.call_args[0][0], "old-sl")
+
+    def test_position_without_stop_leg_is_critical_and_not_written(self):
+        gate = MagicMock()
+        gate.list_protective_orders.return_value = []
+        reg = self._registry({"gate": gate, "binance": MagicMock()})
+        report = audit_cross_venue_protection(
+            {"gate": [self._row()]}, venue_registry=reg, environment="demo", now_s=NOW)
+        self.assertEqual(len(report["critical"]), 1)
+        self.assertEqual(report["venues"]["gate"]["missing"], 1)
+        gate.attach_protective_orders.assert_not_called()
+        gate.cancel_price_order.assert_not_called()
+
+    def test_one_venue_failure_does_not_stop_the_other(self):
+        gate = MagicMock()
+        gate.list_protective_orders.side_effect = RuntimeError("gate 502")
+        binance = MagicMock()
+        binance.list_protective_orders.return_value = [binance_leg_row("b1", size=1)]
+        reg = self._registry({"gate": gate, "binance": binance})
+        report = audit_cross_venue_protection(
+            {"gate": [self._row()], "binance": [self._row("BTCUSDT", size=1.0)]},
+            venue_registry=reg, environment="demo", now_s=NOW)
+        self.assertTrue(report["errors"], "gate 读失败必须登记")
+        self.assertEqual(report["venues"]["binance"]["checked"], 1,
+                         "一个所挂了不该让另一个所不被巡检")
+
+    def test_adapter_unavailable_is_an_error_not_a_silent_pass(self):
+        reg = MagicMock()
+        reg.get_adapter.side_effect = RuntimeError("凭证未配置")
+        report = audit_cross_venue_protection(
+            {"gate": [self._row()]}, venue_registry=reg, environment="demo", now_s=NOW)
+        self.assertEqual(len(report["errors"]), 1)
+        self.assertEqual(report["errors"][0]["stage"], "adapter")
+
+    def test_absent_venue_in_snapshot_is_skipped_not_assumed_clean(self):
+        reg = self._registry({"gate": MagicMock(), "binance": MagicMock()})
+        report = audit_cross_venue_protection(
+            {"gate": []}, venue_registry=reg, environment="demo", now_s=NOW)
+        self.assertEqual(len(report["skipped"]), 1)
+        self.assertIn("binance", report["skipped"][0]["venue"])
+
+    def test_bad_rows_are_skipped_not_crashed(self):
+        gate = MagicMock()
+        gate.list_protective_orders.return_value = [gate_sl_row()]
+        reg = self._registry({"gate": gate, "binance": MagicMock()})
+        report = audit_cross_venue_protection(
+            {"gate": [{"inst_id": "BTC_USDT"}]},   # 缺 side/size
+            venue_registry=reg, environment="demo", now_s=NOW)
+        self.assertTrue(report["skipped"])
+        gate.list_protective_orders.assert_not_called()
+
+
+class WatchdogStageTest(unittest.TestCase):
+    """接线层：默认关闭＝零副作用；开启＝巡检并把结论写进 executed_actions。"""
+
+    def _stage(self, flag, report=None, raises=None):
+        from scripts.trader.cycle_stages import venue_protection_watchdog_stage
+        calls = []
+
+        def fake_audit(snapshot, **kw):
+            calls.append((snapshot, kw))
+            if raises is not None:
+                raise raises
+            return report or {"venues": {}, "actions": [], "critical": [], "errors": [], "skipped": []}
+
+        actions = []
+        out = venue_protection_watchdog_stage(
+            xv_positions_by_venue={"gate": [{"inst_id": "BTC_USDT"}]},
+            executed_actions=actions,
+            venue_registry=MagicMock(),
+            current_environment=lambda: MagicMock(mode="demo"),
+            R20_VENUE_PROTECTION_WATCHDOG=flag,
+            audit_cross_venue_protection=fake_audit,
+        )
+        return out, calls, actions
+
+    def test_flag_off_is_a_strict_noop(self):
+        out, calls, actions = self._stage(False)
+        self.assertIsNone(out)
+        self.assertEqual(calls, [], "默认关闭时不得触发任何巡检（零网络、零写单）")
+        self.assertEqual(actions, [])
+
+    def test_flag_on_records_actions_and_critical(self):
+        report = {
+            "venues": {"gate": {"checked": 1}},
+            "actions": [{"venue": "gate", "inst": "BTC_USDT", "detail": "续期完成"}],
+            "critical": [{"venue": "gate", "inst": "ETH_USDT", "side": "short",
+                          "detail": "无止损腿"}],
+            "errors": [], "skipped": [],
+        }
+        out, calls, actions = self._stage(True, report=report)
+        self.assertIsNotNone(out)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][1]["environment"], "demo", "环境轴必须传给巡检")
+        self.assertTrue(any("续期完成" in a for a in actions))
+        self.assertTrue(any("无止损腿" in a for a in actions))
+
+    def test_audit_exception_is_swallowed(self):
+        """加固层不得成为新的单点：巡检炸了也不能中断交易周期。"""
+        out, _, actions = self._stage(True, raises=RuntimeError("boom"))
+        self.assertIsNone(out)
+        self.assertEqual(actions, [])
+
+    def test_facade_flag_defaults_to_off(self):
+        """源码钉：开关未设置时必须视为关闭（开闸需显式置 1）。"""
+        from pathlib import Path
+        src = (Path(__file__).resolve().parents[2] / "scripts" / "ai_factor_trader.py").read_text(encoding="utf-8")
+        self.assertIn('os.environ.get("R20_VENUE_PROTECTION_WATCHDOG", "0")', src,
+                      "默认值必须显式为 0（否则巡检会在无人知情时开闸）")
 
 
 if __name__ == "__main__":

@@ -58,6 +58,10 @@ from scripts.trader.cycle_stages import (
     fetch_universe_and_manage_positions,
     persist_state_and_sync_ledger,
     preflight_reconcile_and_housekeeping,
+    venue_protection_watchdog_stage,
+)
+from scripts.trader.venue_protection import (
+    audit_cross_venue_protection,
 )
 from scripts.trader.entry_execution import (
     execute_entry_scan,
@@ -204,6 +208,10 @@ LEDGER_JSON_FILE = os.path.join(DATA_DIR, "trading_ledger.json")
 # 批E(2026-09-13)：周期收尾的台账/DB spawn 总闸（模块导入时快照——测试用
 # patch.dict(clear=True) 清空环境也抹不掉）。生产不设 R20_LEDGER_SYNC_DISABLED。
 LEDGER_AUTOSYNC_ENABLED = str(os.environ.get("R20_LEDGER_SYNC_DISABLED", "")).strip().lower() not in ("1", "true", "yes")
+# roadmap G8：跨所（Gate/Binance）云端保护单巡检总闸。**默认关闭** —— 置于模块导入时
+# 快照（与 LEDGER_AUTOSYNC_ENABLED 同法）。开闸 = 每周期对外所仓位核验保护腿并在临期
+# 前续期（先挂新后撤旧；绝不猜价位、绝不撤人工腿）。开闸是运营决定，需人工拍板。
+R20_VENUE_PROTECTION_WATCHDOG = str(os.environ.get("R20_VENUE_PROTECTION_WATCHDOG", "0")).strip().lower() in ("1", "true", "yes")
 LOG_FILE = os.path.join(LOGS_DIR, "ai_factor_trader.log")
 POSITION_TRACKER_FILE = os.path.join(DATA_DIR, "position_trackers.json")
 # 2026-09-16：`SIGNAL_JOURNAL_FILE` 常量已删——它把路径**钉死在导入期**，
@@ -1128,6 +1136,18 @@ def execute_portfolio():
             submit_protected_limit_order=submit_protected_limit_order,
             trade_open_kwargs=trade_open_kwargs,
         )
+
+    # 4b. 跨所云端保护单巡检（roadmap G8）：Gate/Binance 的触发单带 expiration，
+    # 到期后仓位裸奔，而主链的 OKX 保护核验够不到跨所仓位（合成 id 匹配不上）。
+    # **默认关闭**（R20_VENUE_PROTECTION_WATCHDOG=1 才跑）：本刀只接线，线上行为零变化。
+    venue_protection_watchdog_stage(
+        xv_positions_by_venue=xv_positions_by_venue,
+        executed_actions=executed_actions,
+        venue_registry=venue_registry,
+        current_environment=current_environment,
+        R20_VENUE_PROTECTION_WATCHDOG=R20_VENUE_PROTECTION_WATCHDOG,
+        audit_cross_venue_protection=audit_cross_venue_protection,
+    )
 
     # 5. Persist Latest State for Web Monitoring Dashboard
     persist_state_and_sync_ledger(
