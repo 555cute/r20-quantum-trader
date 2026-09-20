@@ -8,6 +8,17 @@
   注入它才能让 POSITION_TRACKER_FILE 的 patch 继续生效）；trackers 是调用方局部量；
 - 段内 `else: algo_results = {}` 这支在原文里就是**死赋值**（其后再无使用），
   照抄保留，不在本刀顺手清理。
+
+## 第一百二十二刀：与跨所生产者**统一契约**（`cloud_oco_verified`）
+
+`cloud_oco_verified` 此前**只有跨所路径**（`multi_venue.py`）会写，OKX 路径从来不写；
+而前端判据是 `p.cloud_oco_verified !== false && p.protectionStatus !== 'unprotected'`
+⇒ **同一个 `partially_protected` 状态在 OKX 行算"已保护"、在 binance 行算"未保护"**
+（缺字段被当成 not-false）。更糟的是 `unknown`（不可判定）在 OKX 行也会被算作已保护。
+
+现两边同口径：`cloud_oco_verified = (protectionStatus == "fully_protected")`，
+并统一补 `protectionLegs`。⇒ 前端**无需改动**即得到一致且更严的判据
+（`partially_protected` / `unknown` 一律不再算"已保护"）。
 """
 from __future__ import annotations
 
@@ -65,6 +76,8 @@ def collect_algo_protection(positions, source_errors, fetch_json,
             coverage_unknown = _pos_sz <= 0 or (bool(_sl_legs) and protected_size <= 0
                                                 and not full_close)
             full_coverage = (not coverage_unknown) and protected_size >= _pos_sz * 0.999
+            # 跨所路径也发这个字段 ⇒ 两边字段齐整（口径见 tests/ui/test_protection_contract.py）
+            position["protectionLegs"] = len(matching_algos)
             live_algo = next((o for o in matching_algos if o.get("slTriggerPx") and o.get("tpTriggerPx")), None)
             if live_algo and full_coverage:
                 position["exchangeSl"] = float(live_algo.get("slTriggerPx", 0) or 0)
@@ -72,6 +85,7 @@ def collect_algo_protection(positions, source_errors, fetch_json,
                 position["protectionStatus"] = "fully_protected"
                 position["protectionCoveragePct"] = 100.0
                 position["protectionAlgoId"] = live_algo.get("algoId", "")
+                position["cloud_oco_verified"] = True
             elif coverage_unknown:
                 sl_algo = _sl_legs[0]
                 position["exchangeSl"] = float(sl_algo.get("slTriggerPx", 0) or 0) or None
@@ -79,6 +93,7 @@ def collect_algo_protection(positions, source_errors, fetch_json,
                 position["protectionStatus"] = "unknown"
                 position["protectionCoveragePct"] = None
                 position["protectionAlgoId"] = sl_algo.get("algoId", "")
+                position["cloud_oco_verified"] = False
             elif matching_algos:
                 sl_algo = next((o for o in matching_algos if o.get("slTriggerPx")), {})
                 position["exchangeSl"] = float(sl_algo.get("slTriggerPx", 0) or 0) or None
@@ -86,12 +101,14 @@ def collect_algo_protection(positions, source_errors, fetch_json,
                 position["protectionStatus"] = "partially_protected"
                 position["protectionCoveragePct"] = round(min(100.0, protected_size / max(_pos_sz, 1e-12) * 100), 1)
                 position["protectionAlgoId"] = sl_algo.get("algoId", "")
+                position["cloud_oco_verified"] = False
             else:
                 position["exchangeSl"] = None
                 position["exchangeTp"] = None
                 position["protectionStatus"] = "unprotected"
                 position["protectionCoveragePct"] = 0.0
                 position["protectionAlgoId"] = ""
+                position["cloud_oco_verified"] = False
     else:
         algo_results = {}
 
