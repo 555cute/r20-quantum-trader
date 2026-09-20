@@ -94,6 +94,15 @@ class _StubAdapter(GateAdapter):
     def _keys(self):
         return ("k", "s")
 
+    def detect_position_mode(self):
+        """第八刀：router 新增持仓模式只读体检（探测不到即禁新开仓）。
+
+        本桩继承真实 GateAdapter（因此声明 position_modes）却打桩了全部私有 IO，
+        探测会返回 unknown ⇒ 开仓路径被拒。桩必须像真适配器一样**明确**表态，
+        否则这些用例测的就不再是它们本来要测的东西（成交/回读/回滚路径）。
+        """
+        return "single"
+
     def positions(self):
         # US-009 precheck 探针：默认无既有仓（己方干净），可注入外部仓/故障
         self.calls.append(("positions",))

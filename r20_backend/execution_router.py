@@ -82,6 +82,9 @@ def open_protected_position(decision: Dict[str, Any], *,
     own_position：调用方（lab/trader）在该合约上的在管仓位记录（含 size_signed/side）；
     交易所既有仓与之一致视为己仓放行，否则视为外部连坐风险拒开（stage=precheck）。
     margin_mode：由账户实况推导传入（cross/isolated）；缺省维持历史行为 cross。
+    持仓模式：对声明了 `capabilities.position_modes` 的场所先做**只读**探测（single/dual
+    放行，dual 用 auto_size 载荷、single 用 close=true 载荷；unknown/dual_plus 禁新开仓），
+    本系统**永不自动切换**账户模式（审计 §2）。
     environment：显式资金环境（demo/live），优先使用；缺省读 decision.get('environment')。
     max_margin_usdt：调用方按权益算出的单笔保证金硬顶（权益×R20_MAX_MARGIN_EQUITY_RATIO）；
     缺省 0/None = 不臆造占比上限，但仍强制单标的绝对封顶（审计 P0-1）。
@@ -274,6 +277,30 @@ def open_protected_position(decision: Dict[str, Any], *,
                          + ("，与 lab 记录不符" if own_position else "，lab 无在管记录")
                          + "——外部仓连坐拒开", venue=venue, existing_size=ex_signed)
 
+    # 持仓模式只读体检（审计 §2 Gate 的既定政策，此前只有政策没有执行）：
+    # 本系统**永不自动切换**用户账户的持仓模式；"测不出来"与"dual_plus 拆仓"
+    # 一律**禁止新开仓并显示原因**（fail-closed）。dual 走 auto_size 载荷、
+    # single 走 close=true 载荷，二者都是本仓已实现的形态，故受支持、放行。
+    declared_modes = tuple(getattr(getattr(ad, "capabilities", None), "position_modes", ()) or ())
+    probe = getattr(ad, "detect_position_mode", None)
+    position_mode: Optional[str] = None
+    # ⚠️ 只在**该适配器真的实现了只读探测**时才体检。实测（DEMO）：Binance 声明的是
+    # `('net','long_short')` 这套**不同词汇**、且没有探测方法 —— 若按"声明了就体检、
+    # 探测不到就拒"处理，会**直接把币安新开仓全部停掉**（本刀实测拦下的自伤）。
+    # 币安侧的持仓模式探测（dualSidePosition）是独立的一刀；在它有探测之前维持原行为。
+    if declared_modes and callable(probe):
+        position_mode = str(probe() or "unknown").strip().lower()
+        if position_mode not in declared_modes:
+            return _fail("position_mode",
+                         f"{asset} 无法只读确认持仓模式（探测={position_mode}，声明支持="
+                         f"{'/'.join(declared_modes)}）——禁新开仓；本系统不自动切换账户模式",
+                         venue=venue, position_mode=position_mode)
+        if position_mode == "dual_plus":
+            return _fail("position_mode",
+                         f"{asset} 账户为 dual_plus（拆仓）——本系统不支持把拆仓折叠成净仓/双向"
+                         "解读，禁新开仓（请在交易所侧改为 single/dual 或人工处理）",
+                         venue=venue, position_mode=position_mode)
+
     # 杠杆档位（失败即止，未下单无风险）；margin_mode 由账户实况推导，缺省 cross
     try:
         ad.set_leverage(asset, leverage, margin_mode=margin_mode or "cross")
@@ -295,9 +322,12 @@ def open_protected_position(decision: Dict[str, Any], *,
     legs: dict = {}
     try:
         try:
+            # 只有**真的探测到模式**时才多传这个 kwarg：sandbox 等适配器没有
+            # `**kwargs`，无条件传会 TypeError（本刀实测拦下的一处潜在炸点）。
+            _mode_kwargs = {"position_mode": position_mode} if position_mode else {}
             legs = ad.attach_protective_orders(asset, side, tp_px=tp, sl_px=sl,
                                                expiration=trigger_expiration,
-                                               contracts=contracts)
+                                               contracts=contracts, **_mode_kwargs)
         except TypeError:
             legs = ad.attach_protective_orders(asset, side, tp_px=tp, sl_px=sl,
                                                expiration=trigger_expiration)

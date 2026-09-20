@@ -296,6 +296,13 @@ class RouterMarginClampTests(_SandboxBase):
             def _keys(self):
                 return ("k", "s")
 
+            def detect_position_mode(self):
+                # 第八刀：router 新增持仓模式只读体检（policy：探测不到就禁新开仓）。
+                # 本桩继承真实 GateAdapter（声明 position_modes）但打桩了私有 IO，
+                # 探测会返回 unknown ⇒ 整条开仓路径被拒。桩必须像真适配器一样**明确**
+                # 给出模式，否则这些用例测的就不再是它们本来要测的东西。
+                return "single"
+
             def positions(self):
                 return []
 

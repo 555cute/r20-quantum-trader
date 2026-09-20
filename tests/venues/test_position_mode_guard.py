@@ -1,0 +1,306 @@
+"""持仓模式只读体检 + 载荷预选（审计 §2 Gate 政策的**执行**）。
+
+## 背景：一条写在代码里、却一直没被执行的政策
+
+`r20_backend/exchanges/gate.py` 的模块头早就写着：
+
+> ⚠️ 仅能力声明+只读检测——本系统**永不自动切换用户账户模式**；dual_plus 拆仓
+> 不得折叠成净仓/双向解读，**检测不支持时禁新开仓并显示原因**（审计 §2 Gate）。
+
+但实现侧当时只有"先发 `close=true`、等 Gate 拒绝、再换 `auto_size` 重试"的
+**反应式**兼容：既不检测，又依赖 Gate 的错误码文案（`AUTO_INVALID_PARAM_CLOSE`）——
+文案一变，保护腿挂不上 ⇒ 整笔开仓回滚。本门钉住政策真正落地后的四条：
+
+1. **只读判定**：真实账户字段 `position_mode` / `in_dual_mode` → single/dual/dual_plus，
+   都读不到一律 `unknown`（不拿默认值冒充事实）；
+2. **dual_plus 不折叠**（拆仓语义与净仓/双向不同），且与 unknown 一样**禁新开仓**；
+3. **载荷预先选对**：dual → `auto_size`（不再浪费一次注定被拒的请求），
+   single → `close=true`；
+4. **永不自动切换**账户模式（源码级钉子：全仓不得出现 `set_position_mode` 调用）。
+"""
+from __future__ import annotations
+
+import json
+import sys
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+
+from r20_backend.exchanges.base import ExchangeCapabilityError  # noqa: E402
+from r20_backend.exchanges.gate import (  # noqa: E402
+    AUTO_SIZE_CLOSE_LONG, AUTO_SIZE_CLOSE_SHORT, GateAdapter, GateAPIError,
+    interpret_position_mode,
+)
+
+# ── 本机 DEMO 账户实测回包（逐字保留，2026-09-20）─────────────────────────
+REAL_DUAL_ACCOUNT = {
+    "in_dual_mode": True, "enable_new_dual_mode": True, "position_mode": "dual",
+    "margin_mode": 0, "margin_mode_name": "classic", "currency": "USDT",
+}
+
+
+class InterpretPositionModeTest(unittest.TestCase):
+    def test_real_demo_account_is_dual(self):
+        self.assertEqual(interpret_position_mode(REAL_DUAL_ACCOUNT), "dual")
+
+    def test_explicit_field_wins(self):
+        payload = dict(REAL_DUAL_ACCOUNT, position_mode="single", in_dual_mode=True)
+        self.assertEqual(interpret_position_mode(payload), "single",
+                         "显式 position_mode 优先于布尔兜底")
+
+    def test_dual_plus_is_never_folded(self):
+        self.assertEqual(interpret_position_mode({"position_mode": "dual_plus"}), "dual_plus",
+                         "拆仓不得被折叠成 dual/single 解读")
+
+    def test_bool_fallback(self):
+        self.assertEqual(interpret_position_mode({"in_dual_mode": False}), "single")
+        self.assertEqual(interpret_position_mode({"in_dual_mode": True}), "dual")
+        self.assertEqual(interpret_position_mode({"in_dual_mode": "false"}), "single")
+
+    def test_nested_raw_is_supported(self):
+        self.assertEqual(interpret_position_mode({"raw": REAL_DUAL_ACCOUNT}), "dual")
+
+    def test_unreadable_is_unknown_not_a_default(self):
+        for bad in ({}, None, "junk", [], {"position_mode": ""},
+                    {"in_dual_mode": "maybe"}):
+            with self.subTest(bad=bad):
+                self.assertEqual(interpret_position_mode(bad), "unknown",
+                                 "读不到必须 unknown，不能拿默认值冒充事实")
+
+
+class DetectPositionModeTest(unittest.TestCase):
+    def _adapter(self, snapshot=None, raises=None):
+        ad = GateAdapter.__new__(GateAdapter)      # 不跑 __init__（避免读凭证/环境）
+
+        def _snap():
+            if raises is not None:
+                raise raises
+            return snapshot
+        ad.account_snapshot = _snap                 # type: ignore[method-assign]
+        return ad
+
+    def test_reads_real_shaped_snapshot(self):
+        self.assertEqual(self._adapter({"raw": REAL_DUAL_ACCOUNT}).detect_position_mode(), "dual")
+
+    def test_failure_is_unknown_not_an_exception(self):
+        for exc in (RuntimeError("net down"), GateAPIError("AUTH", "bad key")):
+            with self.subTest(exc=exc):
+                ad = self._adapter(raises=exc)
+                self.assertEqual(ad.detect_position_mode(), "unknown",
+                                 "探测失败必须 fail-soft 成 unknown（由调用方禁新开仓）")
+
+
+class ProtectivePayloadTest(unittest.TestCase):
+    """载荷预选：dual 发 auto_size、single 发 close=true，且**只发一次**。"""
+
+    def _adapter(self, *, fail_close_with=None):
+        ad = GateAdapter.__new__(GateAdapter)
+        ad.bodies = []
+
+        def _req(method, path, params=None, body=None, **kw):
+            # 深拷贝：重试分支会**原地**改 initial（pop close / 加 auto_size），
+            # 浅拷贝会让 bodies[0] 显示成重试后的载荷（本门第一版就这么误判过）
+            ad.bodies.append(json.loads(json.dumps(body or {})))
+            initial = (body or {}).get("initial") or {}
+            if fail_close_with and "close" in initial:
+                raise GateAPIError(fail_close_with, "dual mode close not allowed")
+            return {"id": f"oid-{len(ad.bodies)}"}
+        ad.signed_request = _req                       # type: ignore[method-assign]
+        ad.native_symbol = lambda s: "BTC_USDT"        # type: ignore[method-assign]
+        ad.cancel_price_order = lambda oid: {"ok": True}   # type: ignore[method-assign]
+        return ad
+
+    def test_dual_mode_sends_auto_size_first(self):
+        ad = self._adapter()
+        ad.attach_protective_orders("BTC", "long", tp_px=85000, sl_px=77000,
+                                    position_mode="dual")
+        self.assertEqual(len(ad.bodies), 2, "两腿各一次请求，不该有被拒重试")
+        first = ad.bodies[0]["initial"]
+        self.assertEqual(first.get("auto_size"), AUTO_SIZE_CLOSE_LONG)
+        self.assertNotIn("close", first, "dual 载荷不得带 close（会被拒）")
+        self.assertNotIn("size", first)
+
+    def test_dual_mode_short_uses_close_short(self):
+        ad = self._adapter()
+        ad.attach_protective_orders("BTC", "short", sl_px=83000, position_mode="dual")
+        self.assertEqual(ad.bodies[0]["initial"].get("auto_size"), AUTO_SIZE_CLOSE_SHORT)
+
+    def test_single_mode_keeps_close_true(self):
+        ad = self._adapter()
+        ad.attach_protective_orders("BTC", "long", sl_px=77000, position_mode="single")
+        first = ad.bodies[0]["initial"]
+        self.assertTrue(first.get("close"))
+        self.assertEqual(first.get("size"), 0)
+        self.assertNotIn("auto_size", first)
+
+    def test_unknown_mode_keeps_reactive_fallback(self):
+        """老调用方退路：先 close=true，被拒后换 auto_size（行为与改动前一致）。"""
+        ad = self._adapter(fail_close_with="AUTO_INVALID_PARAM_CLOSE")
+        ad.attach_protective_orders("BTC", "long", sl_px=77000)      # 不传模式
+        self.assertEqual(len(ad.bodies), 2, "应为『先试 close=true、再重试 auto_size』")
+        self.assertIn("close", ad.bodies[0]["initial"])
+        self.assertEqual(ad.bodies[1]["initial"].get("auto_size"), AUTO_SIZE_CLOSE_LONG)
+
+    def test_dual_mode_does_not_retry_on_success(self):
+        """反向：dual 预选正确时，不该再出现第二次同腿请求。"""
+        ad = self._adapter(fail_close_with="AUTO_INVALID_PARAM_CLOSE")
+        ad.attach_protective_orders("BTC", "long", sl_px=77000, position_mode="dual")
+        self.assertEqual(len(ad.bodies), 1)
+        self.assertIn("auto_size", ad.bodies[0]["initial"])
+
+
+class _EntryStub(GateAdapter):
+    """入口体检用的桩：继承真实能力声明，只打桩 IO。"""
+
+    def __init__(self, mode="dual", *, declares_modes=True, **kw):
+        self._mode = mode
+        self._positions = kw.pop("positions", [])
+        self.placed = []
+        self.legs_args = {}
+        if not declares_modes:
+            import dataclasses
+            # capabilities 是 frozen dataclass（改属性会抛），故用 replace 造一个
+            # "未声明 position_modes" 的变体，等价于 Binance/sandbox 那类适配器。
+            self.capabilities = dataclasses.replace(
+                GateAdapter.capabilities, position_modes=())
+
+    def _keys(self):
+        return ("k", "s")
+
+    def detect_position_mode(self):
+        return self._mode
+
+    def positions(self):
+        return list(self._positions)
+
+    def fetch_instrument_spec(self, symbol, refresh=False):
+        from r20_backend.exchanges import InstrumentSpec
+        return InstrumentSpec(venue="gate", inst_id="BTC_USDT", base="BTC",
+                              tick_size=0.1, step_size=0.0001, ct_val=0.0001, min_size=1)
+
+    def fetch_ticker(self, symbol):
+        return {"last": 79000.0, "mark_price": 79000.0}
+
+    def set_leverage(self, symbol, leverage, margin_mode="cross"):
+        return {"leverage": str(int(leverage))}
+
+    def place_order(self, symbol, side, contracts, price=None, tif="gtc", text=""):
+        self.placed.append((symbol, side, contracts, price))
+        return {"id": 9001, "text": "t"}
+
+    def attach_protective_orders(self, symbol, pos_side, tp_px=None, sl_px=None,
+                                 expiration=604800, price_type=0, **kwargs):
+        self.legs_args = dict(kwargs)
+        return {"tp": "tp1", "sl": "sl1"}
+
+    def list_protective_orders(self, symbol):
+        return [{"id": "tp1"}, {"id": "sl1"}]
+
+    def cancel_order(self, symbol, order_id):
+        return {"cancelled": True}
+
+
+class EntryGuardTest(unittest.TestCase):
+    def setUp(self):
+        from r20_backend import execution_router
+        self.router = execution_router
+        self._pool_patch = patch.object(self.router, "_load_venue_pool_soft",
+                                       lambda venue: {"assets": ["BTC"], "max_open": 5,
+                                                      "margin_per_trade_usdt": 500.0,
+                                                      "dry_run": False})
+        self._pool_patch.start()
+        self.addCleanup(self._pool_patch.stop)
+
+    def _decision(self):
+        return {"asset": "BTC", "action": "BUY_LONG", "margin_usdt": 300.0, "leverage": 3,
+                "entry_price": 79000.0, "take_profit_price": 85000.0,
+                "stop_loss_price": 77000.0, "confidence": 88.0, "venue": "gate"}
+
+    def test_dual_account_opens_and_passes_mode_down(self):
+        ad = _EntryStub(mode="dual")
+        res = self.router.open_protected_position(self._decision(), adapter=ad, price_ref=79000.0)
+        self.assertTrue(res["ok"], res.get("detail"))
+        self.assertEqual(ad.legs_args.get("position_mode"), "dual",
+                         "探测到的模式必须下传，否则保护腿还是会先发错载荷")
+
+    def test_single_account_opens(self):
+        ad = _EntryStub(mode="single")
+        res = self.router.open_protected_position(self._decision(), adapter=ad, price_ref=79000.0)
+        self.assertTrue(res["ok"], res.get("detail"))
+        self.assertEqual(ad.legs_args.get("position_mode"), "single")
+
+    def test_unknown_mode_refuses_without_placing_anything(self):
+        ad = _EntryStub(mode="unknown")
+        res = self.router.open_protected_position(self._decision(), adapter=ad, price_ref=79000.0)
+        self.assertFalse(res["ok"])
+        self.assertEqual(res["stage"], "position_mode")
+        self.assertIn("不自动切换账户模式", res["detail"], "必须显示原因（政策原话）")
+        self.assertEqual(ad.placed, [], "拒开时不得留下任何委托")
+
+    def test_dual_plus_refuses_and_explains(self):
+        ad = _EntryStub(mode="dual_plus")
+        res = self.router.open_protected_position(self._decision(), adapter=ad, price_ref=79000.0)
+        self.assertFalse(res["ok"])
+        self.assertEqual(res["stage"], "position_mode")
+        self.assertIn("dual_plus", res["detail"])
+        self.assertIn("拆仓", res["detail"])
+        self.assertEqual(ad.placed, [])
+
+    def test_adapter_without_declared_modes_is_not_probed(self):
+        """Binance/sandbox 等未声明 position_modes 的场所：不该被这套 Gate 政策拦下。"""
+        ad = _EntryStub(mode="unknown", declares_modes=False)
+        res = self.router.open_protected_position(self._decision(), adapter=ad, price_ref=79000.0)
+        self.assertTrue(res["ok"], res.get("detail"))
+        self.assertNotIn("position_mode", ad.legs_args,
+                         "没探测到模式就不该多传 position_mode（sandbox 适配器没有 **kwargs）")
+        self.assertIn("contracts", ad.legs_args, "既有 contracts 入参不受影响")
+
+    def test_venue_declaring_other_modes_without_probe_is_not_blocked(self):
+        """实测形态：Binance 声明 `('net','long_short')` 且**没有**探测方法。
+
+        按"声明了就体检、探测不到就拒"处理会**整所停掉币安新开仓** ——
+        本门钉住：只有实现了只读探测的适配器才受这套政策约束（本刀真实自伤复现）。
+        """
+        import dataclasses
+        ad = _EntryStub(mode="unknown")
+        ad.capabilities = dataclasses.replace(GateAdapter.capabilities,
+                                              position_modes=("net", "long_short"))
+        # 模拟"该适配器没有可用的只读探测"（真实币安适配器即是此形态）。
+        # ⚠️ 不能 `del` 类上的方法：那会退回到 GateAdapter 继承来的真实现，
+        # 于是又变成"能探测但读不到" ⇒ 拒开，测的就不是这件事了。
+        ad.detect_position_mode = None
+        res = self.router.open_protected_position(self._decision(), adapter=ad,
+                                                  price_ref=79000.0)
+        self.assertTrue(res["ok"], res.get("detail"))
+        self.assertNotIn("position_mode", ad.legs_args)
+
+    def test_no_auto_switch_call_anywhere(self):
+        """政策钉：本系统**永不**自动切换用户账户的持仓模式。"""
+        hits = []
+        for base in (ROOT / "r20_backend", ROOT / "scripts"):
+            for path in base.rglob("*.py"):
+                if "__pycache__" in path.parts:
+                    continue
+                text = path.read_text(encoding="utf-8", errors="ignore")
+                if "set_position_mode" in text and "不得宣称已删" not in text:
+                    hits.append(str(path.relative_to(ROOT)))
+        self.assertEqual(hits, [], f"出现自动切换账户模式调用：{hits}")
+
+
+class CapabilityDeclarationTest(unittest.TestCase):
+    def test_gate_declares_position_modes(self):
+        from r20_backend.exchanges.gate import GateAdapter as _G
+        self.assertEqual(tuple(_G.capabilities.position_modes),
+                         ("single", "dual", "dual_plus"))
+
+    def test_interpreted_mode_is_always_in_declared_set_or_unknown(self):
+        from r20_backend.exchanges.gate import POSITION_MODES
+        for payload in ({}, REAL_DUAL_ACCOUNT, {"position_mode": "dual_plus"}):
+            self.assertIn(interpret_position_mode(payload), set(POSITION_MODES) | {"unknown"})
+
+
+if __name__ == "__main__":
+    unittest.main()
