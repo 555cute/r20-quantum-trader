@@ -35,6 +35,7 @@
 | `position_universe.py` | `collect_okx_position_payloads` 从因子快照摘出 OKX 在仓并补追踪器字段 + `merge_cross_venue_positions` 汇入三所持仓（合成 id `VENUE:inst`） | 无（纯装配；不取数 —— 必须吃**已冻结**的周期快照） |
 | `reservation_reconcile.py` | `_utc_age_seconds` SQLite UTC→秒龄（不可解析 = **-inf**，方向是红线） + `reconcile_reservation_ledger` 预留台账账实相符回笼（US-010，74 行） | `reservation_manager` / `fetch_other_venue_positions` / `state_closed` / `default_ttl_s`，**全部调用期注入** |
 | `scale_out.py` | `execute_scale_out_if_eligible` 分批平仓止盈执行引擎（首批50%锁定+云端OCO重置+保本移损+互斥加仓锁） | `okx_rest` / `venue_registry` / `record_trade` / `notify_trade_close` / `close_fee` 等全部调用期注入 |
+| `venue_protection.py` | 跨所（Gate/Binance）保护单**覆盖核验与临期续期**（roadmap G8）：`scan_protective_orders` 纯判定（缺口/临期/不可判定）+ `ensure_venue_protection` 先挂新后撤旧的安全动作（动作层已具备，周期接线见后续刀） | 零门面注入：IO 全部由调用方传 `ad`（子模块 import 期不绑定任何门面名字） |
 
 ## ⛔ 已评估、**结论是不该抽**：`execute_portfolio` 的开仓执行段
 
