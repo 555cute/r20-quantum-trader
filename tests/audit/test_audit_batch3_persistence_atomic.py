@@ -313,5 +313,71 @@ class TestVenueHealthAndStateAtomicSource(unittest.TestCase):
         self.assertIn('_atomic_write_json(os.path.join(DATA_DIR, "trading_state.json")', trader)
 
 
+class TraderSlotGuardAtomicityTest(unittest.TestCase):
+    """同槽去重守卫：**原子写 + 读不到要吼**（第一百三十六刀）。
+
+    背景：`single_trader_cycle` 的守卫此前内联在装饰器里，两处语义无法单独测试：
+    ①写用非原子 `open(..., "w")`（先截断再写）⇒ 写崩留 0 字节/半截 JSON；
+    ②读分支 `except Exception: pass` **静默**吞掉损坏 ⇒ 同槽去重**静默失效**
+    （同一 15 分钟槽可能跑两轮、重复处理同一批信号）。现抽成
+    `_slot_guard_should_skip` 并用本模块既有的 `_atomic_write_json`。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix="slot-guard-")
+        self.addCleanup(self.tmp.cleanup)
+        self.slot = os.path.join(self.tmp.name, "slot.json")
+
+    def _guard(self, now_slot):
+        import scripts.ai_factor_trader as aft
+        with patch.object(aft, "TRADER_SLOT_FILE", self.slot):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                skip = aft._slot_guard_should_skip(now_slot)
+        return skip, buf.getvalue()
+
+    def _write(self, text):
+        with open(self.slot, "w", encoding="utf-8") as f:
+            f.write(text)
+
+    def test_first_sight_allows_and_records(self):
+        skip, out = self._guard(1000)
+        self.assertFalse(skip)
+        with open(self.slot, encoding="utf-8") as f:
+            state = json.load(f)
+        self.assertEqual(state["slot"], 1000)
+        self.assertEqual(out, "", "正常路径不该刷告警")
+
+    def test_same_slot_recent_trigger_is_skipped(self):
+        self._guard(1000)
+        skip, out = self._guard(1000)
+        self.assertTrue(skip, "同槽 + 刚启动 ⇒ 必须判为重复触发")
+        self.assertIn("duplicate trigger", out)
+
+    def test_unreadable_state_warns_loudly_and_still_runs(self):
+        """读不到 ⇒ **仍放行**（不因一个状态文件停实盘），但绝不静默。"""
+        self._write("{ 这不是 JSON")
+        skip, out = self._guard(2000)
+        self.assertFalse(skip, "不因状态文件损坏而停交易（可用性优先，但要吼）")
+        self.assertIn("同槽去重状态不可读", out, "损坏必须吼出来，不得静默 pass")
+        with open(self.slot, encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["slot"], 2000, "随后应原子覆写成合法状态（自愈）")
+
+    def test_write_crash_preserves_previous_state(self):
+        """写崩 ⇒ 旧状态**字节级原样**（非原子直写会先截断，守卫就此失效）。"""
+        good = json.dumps({"slot": 7, "started_at": 1, "pid": 1})
+        self._write(good)
+        import scripts.ai_factor_trader as aft
+        with patch.object(aft, "TRADER_SLOT_FILE", self.slot), \
+                patch("os.replace", side_effect=OSError("模拟写崩")), \
+                redirect_stdout(io.StringIO()):
+            with self.assertRaises(OSError):
+                aft._slot_guard_should_skip(3000)
+        with open(self.slot, encoding="utf-8") as f:
+            self.assertEqual(f.read(), good, "写崩必须保全旧状态（绝不截断）")
+        self.assertEqual([n for n in os.listdir(self.tmp.name) if n != "slot.json"], [],
+                         "失败路径不得残留临时文件")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

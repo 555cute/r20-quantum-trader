@@ -1021,6 +1021,39 @@ def evaluate_asset_signal(f):
         load_adaptive_config=load_adaptive_config,
     )
 
+def _slot_guard_should_skip(now_slot: int) -> bool:
+    """同槽重复触发守卫：**判定 + 记录**（第一百三十六刀从装饰器内联抽出）。
+
+    为什么抽出来：它原先内联在 `single_trader_cycle` 的装饰器里，本会话发现它
+    有两处该钉的语义却**无法单独测试**：
+
+    1. **写必须是原子的**：旧写法 `open(TRADER_SLOT_FILE, "w")` 先截断再写 —— 写崩/
+       断电会留下 0 字节或半截 JSON，而读取分支把它吞进 `except: pass`
+       ⇒ **同槽去重静默失效**（同一 15 分钟槽可能跑两轮，重复处理同一批信号）。
+       现改走本模块既有的 `_atomic_write_json`（失败时旧文件原样保全）。
+    2. **读不到 ≠ 没有状态**：仍**放行**（不因一个状态文件把实盘交易停掉），
+       但必须**吼出来**——旧写法静默 `pass`，损坏时外面看不出任何异常。
+
+    返回 True = 判为同槽重复触发（调用方应 Skip 本周期）。
+    """
+    if os.path.exists(TRADER_SLOT_FILE):
+        try:
+            with open(TRADER_SLOT_FILE, "r", encoding="utf-8") as f:
+                slot_state = json.load(f)
+            same_slot = int(slot_state.get("slot", -1)) == now_slot
+            recently_started = int(time.time()) - int(slot_state.get("started_at", 0) or 0) < 120
+            if same_slot and recently_started:
+                print("[Trader] Skip: duplicate trigger detected in this 15-minute slot")
+                return True
+        except Exception as _slot_exc:
+            print(f"[Trader] warn 同槽去重状态不可读（{_slot_exc!r}）——本轮**无法判定**是否"
+                  f"同槽重复触发，仍按正常流程执行（请检查 "
+                  f"{os.path.basename(TRADER_SLOT_FILE)}）")
+    _atomic_write_json(TRADER_SLOT_FILE,
+                       {"slot": now_slot, "started_at": int(time.time()), "pid": os.getpid()})
+    return False
+
+
 def single_trader_cycle(func):
     """Prevent cron/manual overlap across the complete order-management cycle."""
     def wrapped(*args, **kwargs):
@@ -1034,19 +1067,9 @@ def single_trader_cycle(func):
             return None
         try:
             now_slot = int(time.time()) // 900
-            if os.path.exists(TRADER_SLOT_FILE):
-                try:
-                    with open(TRADER_SLOT_FILE, "r", encoding="utf-8") as f:
-                        slot_state = json.load(f)
-                    same_slot = int(slot_state.get("slot", -1)) == now_slot
-                    recently_started = int(time.time()) - int(slot_state.get("started_at", 0) or 0) < 120
-                    if same_slot and recently_started:
-                        print("[Trader] Skip: duplicate trigger detected in this 15-minute slot")
-                        return None
-                except Exception:
-                    pass
-            with open(TRADER_SLOT_FILE, "w", encoding="utf-8") as f:
-                json.dump({"slot": now_slot, "started_at": int(time.time()), "pid": os.getpid()}, f)
+            # 判定 + 记录走助手（原子写 + 读失败告警；见其 docstring）
+            if _slot_guard_should_skip(now_slot):
+                return None
             lock_handle.seek(0)
             lock_handle.truncate()
             lock_handle.write(str(os.getpid()))
