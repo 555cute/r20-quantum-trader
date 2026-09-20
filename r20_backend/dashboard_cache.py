@@ -328,9 +328,15 @@ def update_cache_cycle():
                                   enrich_position_risk_fields, trackers)
     # 2.5 Multi-Venue Parity: Aggregate active positions & open orders from Binance & Gate
     # （阶段 2·B2 第七刀：整段迁至 dashboard_payload/multi_venue.py）
+    # 第一百七十五刀：孤儿腿归属取证要台账行（只读；读不到 ⇒ None ⇒ 候选可能偏少，面板会披露）
+    try:
+        from scripts.trader.venue_protection import read_ledger_rows as _read_ledger_rows
+        _ledger_rows_for_attr = _read_ledger_rows(LEDGER_JSON_FILE)
+    except Exception:
+        _ledger_rows_for_attr = None
     long_count, short_count, total_pos_upl = _core_collect_cross_venue_positions(
         positions, pending_orders_list, long_count, short_count, total_pos_upl,
-        source_errors=source_errors)
+        source_errors=source_errors, ledger_rows=_ledger_rows_for_attr)
     # 3. Read Reset Initial State（阶段 2·B2 第九刀：迁至 dashboard_payload/reset_state.py）
     reset_time_str, initial_capital_val = _core_read_reset_initial_state(DATA_DIR)
     # 4. Load Bills and Real Order-Level Ledger

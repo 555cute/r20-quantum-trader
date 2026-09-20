@@ -78,6 +78,20 @@ function posRoi(p: any): number {
 function ocoOk(p: any): boolean {
   return p.cloud_oco_verified !== false && p.protectionStatus !== 'unprotected';
 }
+/** 孤儿腿候选数（可归因：本方标签或台账同向同量已平记录）——**只报告**，撤销是显式运营动作。 */
+function orphanCandidates(p: any): number {
+  const o = p?.protectionOrphans;
+  return o && o.readable ? (o.attributed || []).length : 0;
+}
+/** 归属不可判定的孤儿腿数（按纪律一律不碰）。 */
+function orphanUnattributed(p: any): number {
+  const o = p?.protectionOrphans;
+  return o && o.readable ? (o.unattributed || []).length : 0;
+}
+/** 读腿失败 ⇒ 不可判定（**不是**没有孤儿腿）。 */
+function orphanReadFailed(p: any): boolean {
+  return !!p?.protectionOrphans && p.protectionOrphans.readable === false;
+}
 /** 保护腿触发价类型 → 短标签（`''` = 没有该类腿/后端未给 ⇒ **不显示**，不编）。 */
 function slTriggerType(p: any): string {
   const v = String(p?.protectionSlTriggerPxType ?? '').toLowerCase();
@@ -287,6 +301,18 @@ function orderTooltipText(o: any): string {
               </span>
             </td>
             <td class="text-center">
+              <span
+                v-if="orphanCandidates(p) > 0"
+                class="inline-flex items-center gap-1 text-3xs text-[var(--warn,#f59e0b)]"
+                :title="t('dash.matrix.positions.orphanHint')"
+              >⚠ {{ t('dash.matrix.positions.orphanPill') }} {{ orphanCandidates(p) }}</span>
+              <span
+                v-else-if="orphanUnattributed(p) > 0 || orphanReadFailed(p)"
+                class="inline-flex items-center gap-1 text-3xs text-[var(--ink-2)]"
+                :title="orphanReadFailed(p)
+                  ? t('dash.matrix.positions.orphanReadFailHint')
+                  : t('dash.matrix.positions.orphanUnknownHint')"
+              >{{ t('dash.matrix.positions.orphanUnknownPill') }}</span>
               <span
                 v-if="ocoOk(p)"
                 class="inline-flex items-center gap-1 text-3xs text-[var(--up)]"

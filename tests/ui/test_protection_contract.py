@@ -66,7 +66,7 @@ def _leg(**over):
     return row
 
 
-def _xvenue_row(algos, *, size=100.0):
+def _xvenue_row(algos, *, size=100.0, ledger_rows=None):
     got: list = []
     ad_rows = [{"base": "ETH", "symbol": "ETHUSDT", "size_signed": -abs(size),
                 "side": "short", "entry_price": 100.0, "mark_price": 99.0, "leverage": 5}]
@@ -86,7 +86,8 @@ def _xvenue_row(algos, *, size=100.0):
     with patch("r20_backend.exchanges.get_adapter",
                lambda v, *a, **k: _Ad() if v == "binance" else empty), \
          patch("r20_backend.dashboard_payload.multi_venue._global_env_axis", lambda: "demo"):
-        collect_cross_venue_positions(got, [], 0, 0, 0.0, source_errors=[])
+        collect_cross_venue_positions(got, [], 0, 0, 0.0, source_errors=[],
+                                      ledger_rows=ledger_rows)
     assert got, "跨所夹具没产出持仓行"
     return got[0]
 
@@ -234,3 +235,68 @@ class ProtectionContractTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class OrphanCandidatesPayloadTest(unittest.TestCase):
+    """第一百七十五刀：孤儿腿候选进面板载荷（**只报告不撤销**，且读不到要说读不到）。"""
+
+    _ORPHAN_TAGGED = {"symbol": "XRPUSDT", "side": "buy", "type": "TAKE_PROFIT_MARKET",
+                      "raw": {"orderType": "TAKE_PROFIT_MARKET", "clientAlgoId": "t-r20tp1",
+                              "triggerPrice": "1.3255", "quantity": "826.5"}}
+
+    def test_tagged_orphan_is_listed_as_a_candidate_with_evidence(self):
+        row = _xvenue_row([self._ORPHAN_TAGGED])
+        o = row["protectionOrphans"]
+        self.assertTrue(o["readable"])
+        self.assertEqual(len(o["attributed"]), 1)
+        self.assertEqual(o["attributed"][0]["symbol"], "XRP")
+        self.assertEqual(o["attributed"][0]["evidence"], "tag")
+        self.assertEqual(o["attributed"][0]["kind"], "tp")
+
+    #: 无标签腿（`clientAlgoId` 是交易所随机串，与真机一致）——只能靠台账取证
+    #: ⚠️ `side: buy` = **平空**（故 `protects: short`）—— 与真机 XRP 826.5 那张一致；
+    #: 写成 `sell` 会被判成"保护多仓"，与台账 `空` 记录对不上（我第一版就写错了，被本用例抓到）。
+    _ORPHAN_UNTAGGED = {"symbol": "XRPUSDT", "side": "buy", "type": "TAKE_PROFIT_MARKET",
+                        "raw": {"orderType": "TAKE_PROFIT_MARKET",
+                                "clientAlgoId": "1vzDTiF4UXEHSSULlD9lug",
+                                "triggerPrice": "1.3255", "quantity": "826.5"}}
+
+    def test_ledger_evidence_promotes_and_unattributed_never_enters_candidates(self):
+        no_ledger = _xvenue_row([self._ORPHAN_UNTAGGED])["protectionOrphans"]
+        self.assertEqual(no_ledger["attributed"], [], "无标签又无台账 ⇒ 不得凭空归因")
+        self.assertEqual(len(no_ledger["unattributed"]), 1)
+        self.assertEqual(no_ledger["ledgerRows"], "unavailable", "取证依据不可用必须如实披露")
+        with_ledger = _xvenue_row([self._ORPHAN_UNTAGGED],
+                                 ledger_rows=[{"inst": "XRP", "side": "空", "sz": 826.5}])["protectionOrphans"]
+        self.assertEqual(with_ledger["ledgerRows"], "ok")
+        self.assertEqual(with_ledger["attributed"][0]["evidence"], "ledger")
+        self.assertEqual(len(with_ledger["unattributed"]), 0)
+
+    def test_client_algo_id_tag_is_now_scanned(self):
+        """扫描器补了客户端订单号：带标签的 `clientAlgoId` 现在能被认出来。
+
+        ⚠️ 真机现状（如实）：Binance 的 `clientAlgoId` 是交易所随机串（20/20 无 `r20`），
+        所以这条**不会**让当下的 Binance 腿变得可归因 —— 它只是把"标签存在但看不见"的洞补上。
+        """
+        from scripts.trader.venue_protection import _row_text
+        self.assertIn("r20sl", _row_text({"raw": {"clientAlgoId": "t-r20sl9"}}))
+        self.assertNotIn("r20sl", _row_text({"raw": {"clientAlgoId": "1vzDTiF4UXEHSSULlD9lug"}}))
+
+    def test_unreadable_legs_are_unknown_not_empty(self):
+        """读腿失败 ⇒ `readable: False`（不是"没有孤儿腿"）。"""
+        import pathlib as _p
+        src = (_p.Path(__file__).resolve().parents[2] / "r20_backend" / "dashboard_payload"
+               / "multi_venue.py").read_text(encoding="utf-8")
+        body = src[src.index("def _venue_orphan_summary("):]
+        body = body[:body.index("\ndef ")]
+        self.assertIn('if not readable:', body)
+        self.assertIn('"readable": False', body)
+
+    def test_summary_does_not_cancel_anything(self):
+        """本函数**只报告**：源码里不得出现任何撤销调用（撤销是显式运营动作）。"""
+        import pathlib as _p
+        src = (_p.Path(__file__).resolve().parents[2] / "r20_backend" / "dashboard_payload"
+               / "multi_venue.py").read_text(encoding="utf-8")
+        body = src[src.index("def _venue_orphan_summary("):]
+        body = body[:body.index("\ndef ")]
+        for forbidden in ("cancel_price_order", "cancel_protective_orders", "cancel_order"):
+            self.assertNotIn(forbidden, body, f"面板载荷里出现了撤销调用 {forbidden}")

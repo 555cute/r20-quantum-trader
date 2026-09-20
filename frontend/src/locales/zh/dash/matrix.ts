@@ -61,6 +61,13 @@ export const zhMatrix = {
     triggerUnknownHint: '交易所未上报该保护腿的触发价类型：按什么价触发不可判定',
     ocoMiss: '未挂',
     ocoMissHint: '交易所侧无止盈止损保护',
+    orphanPill: '孤儿腿候选',
+    orphanHint: '该所存在"归属明确但已无对应持仓"的保护腿（证据：本方标签或台账同向同量已平记录）。'
+      + '这些腿会在同币再开仓时**减掉新仓**，应由运营核对后显式撤销（系统绝不自动撤）。',
+    orphanUnknownPill: '孤儿腿不可判定',
+    orphanUnknownHint: '该所存在**归属不可判定**的保护腿（无标签、台账也无同向同量记录）——'
+      + '可能是用户手单，按纪律一律不碰。',
+    orphanReadFailHint: '保护腿读取失败 ⇒ 孤儿腿情况**不可判定**（读不到 ≠ 没有）',
     aiManaged: '持仓由 AI 管理',
     scaleOutPill: '半仓保本',
     scaleOutTitle: '已分批止盈50%，余仓保本奔跑中',

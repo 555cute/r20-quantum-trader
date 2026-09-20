@@ -58,6 +58,14 @@ export const enMatrix = {
     triggerUnknownHint: 'The venue did not report this leg\'s trigger price type: when it fires is undecidable',
     ocoMiss: 'Missing',
     ocoMissHint: 'No exchange-side protection',
+    orphanPill: 'orphan legs',
+    orphanHint: 'This venue has protective legs attributable to us with no matching position. '
+      + 'They can reduce a NEW position on the same symbol, so an operator must review and '
+      + 'cancel them explicitly (the system never cancels automatically).',
+    orphanUnknownPill: 'orphan legs unknown',
+    orphanUnknownHint: 'This venue has unattributable protective legs (no tag, no matching ledger '
+      + 'record) - possibly manual orders; by discipline they are never touched.',
+    orphanReadFailHint: 'Leg read failed, so orphan status is undecidable (not readable != none)',
     aiManaged: 'AI-managed positions',
     scaleOutPill: 'Half BE',
     scaleOutTitle: '50% profit locked, remainder at breakeven',

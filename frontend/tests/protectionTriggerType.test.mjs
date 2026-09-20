@@ -103,3 +103,45 @@ test('本刀只做展示：保护判据字符串未被改动', () => {
   assert.match(panel, /return p\.cloud_oco_verified !== false && p\.protectionStatus !== 'unprotected';/,
                '前端保护判据被改动 ⇒ 必须同步 tests/ui/test_protection_contract.py');
 });
+
+// ── 孤儿腿候选（第一百七十五刀）────────────────────────────────────────────────
+
+test('孤儿候选徽标：只数可归因者，不可判定与读失败分开呈现', () => {
+  const fnOk = panel.slice(panel.indexOf('function orphanCandidates('));
+  assert.ok(fnOk, '缺 orphanCandidates');
+  const bodyOk = fnOk.slice(0, fnOk.indexOf('\n}'));
+  // 结构化断言（**不是**"出现过 readable 这个词"——我第一版就是这么写的，
+  // 反向验证时被一行含 "readable" 的注释骗过 ⇒ 这里要求真的有三元守卫 `readable ?`）
+  assert.match(bodyOk, /readable\s*\?/, '可归因计数未用 readable 守卫 ⇒ 读失败会被算成 0 候选（读不到≠没有）');
+
+  const fnUn = panel.slice(panel.indexOf('function orphanUnattributed('));
+  const bodyUn = fnUn.slice(0, fnUn.indexOf('\n}'));
+  assert.match(bodyUn, /unattributed/, '不可判定计数未取 unattributed');
+
+  const fnFail = panel.slice(panel.indexOf('function orphanReadFailed('));
+  assert.match(fnFail.slice(0, fnFail.indexOf('\n}')), /readable === false/,
+               '缺"读腿失败 ⇒ 不可判定"的判据');
+});
+
+test('孤儿候选提示明确"系统绝不自动撤"', () => {
+  // 两个 token 各自断言（提示文案是多行拼接，用"窗口距离"匹配容易被长度绊倒）
+  assert.match(zh, /orphanHint:/, '中文缺 orphanHint');
+  assert.match(zh, /绝不自动撤/, '中文提示未写明"绝不自动撤"');
+  assert.match(en, /orphanHint:/, '英文缺 orphanHint');
+  assert.match(en, /never cancels automatically/i, '英文提示未写明"绝不自动撤"');
+  for (const [file, needle] of []) {
+    assert.match(file, needle, '提示未写明"绝不自动撤"⇒ 运营可能以为系统会自己清理');
+  }
+  for (const key of ['orphanPill', 'orphanHint', 'orphanUnknownPill', 'orphanUnknownHint',
+                     'orphanReadFailHint']) {
+    assert.match(zh, new RegExp(`\\b${key}:`), `中文缺键 ${key}`);
+    assert.match(en, new RegExp(`\\b${key}:`), `英文缺键 ${key}`);
+  }
+});
+
+test('面板不出现任何撤销调用（撤销只走显式运营动作）', () => {
+  for (const forbidden of ['cancel_price_order', 'cancel_protective_orders', 'cancelAlgo',
+                           'cancel_order']) {
+    assert.ok(!panel.includes(forbidden), `面板出现了撤销调用 ${forbidden}`);
+  }
+});

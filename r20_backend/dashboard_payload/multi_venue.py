@@ -87,6 +87,39 @@ def _bj_time_str(ms: int) -> str:
     return _dt.datetime.fromtimestamp(int(ms) / 1000.0, tz=tz).strftime("%m-%d %H:%M:%S")
 
 
+def _venue_orphan_summary(v_positions, v_algos, ledger_rows, *, readable):
+    """该所**孤儿保护腿**汇总（可复核候选 + 一律不碰的不可判定），供面板展示。
+
+    - 判据**只**来自 `attribute_protective_orders`（本仓归属语义的唯一来源），不另写一套；
+    - 读腿失败 ⇒ `readable=False` ⇒ 明确"不可判定"（**不是**"没有孤儿腿"）；
+    - `ledgerRows` 字段如实说明取证依据是否可用（台账读不到 ⇒ 候选可能偏少，须让运营看见）；
+    - 这里**只报告**：绝不撤销任何腿（撤销是显式运营动作，走 `cancel_orphan_attributed_legs`）。
+    """
+    if not readable:
+        return {"readable": False, "attributed": [], "unattributed": [],
+                "matched": 0, "ledgerRows": "unknown"}
+    from scripts.trader.venue_protection import attribute_protective_orders
+    try:
+        att = attribute_protective_orders(list(v_positions or []), v_algos, ledger_rows)
+    except Exception as exc:
+        return {"readable": False, "attributed": [], "unattributed": [], "matched": 0,
+                "ledgerRows": "unknown", "error": f"{type(exc).__name__}: {exc}"}
+
+    def _brief(bucket):
+        out = []
+        for leg in att.get(bucket) or []:
+            out.append({"symbol": leg.get("symbol"), "kind": leg.get("kind"),
+                        "id": leg.get("id"), "triggerPrice": leg.get("trigger_price"),
+                        "evidence": leg.get("evidence")})
+        return out
+
+    return {"readable": True,
+            "attributed": _brief("orphan_attributed"),
+            "unattributed": _brief("orphan_unattributed"),
+            "matched": len(att.get("matched") or []),
+            "ledgerRows": "ok" if ledger_rows is not None else "unavailable"}
+
+
 def _protection_verdict(algos, base_sym, pos_side, pos_size, *, readable,
                        source_errors=None, venue="", inst_id=""):
     """外所持仓的保护判据 → 面板字段（复用纯判定，不新增交易所调用）。
@@ -160,7 +193,7 @@ def _protection_verdict(algos, base_sym, pos_side, pos_size, *, readable,
 
 def collect_cross_venue_positions(positions, pending_orders_list,
                                   long_count, short_count, total_pos_upl,
-                                  *, source_errors=None):
+                                  *, source_errors=None, ledger_rows=None):
     """把 Binance/Gate 的持仓与挂单并入 OKX 主视野（就地追加，返回累计计数）。
 
     原样搬自 update_cache_cycle 的「2.5 Multi-Venue Parity」段：
@@ -208,6 +241,11 @@ def collect_cross_venue_positions(positions, pending_orders_list,
                     if source_errors is not None:
                         source_errors.append(
                             f"保护腿 {v_name}: 读取失败（保护状态不可判定）: {str(_leg_exc)[:80]}")
+
+                # 第一百七十五刀：孤儿腿汇总（复用**已取回**的 v_algos ⇒ 零新增交易所调用）。
+                # 归属层需要"该所**全部**持仓"才能判孤儿，故在这里按所算一次，再挂到该所每行。
+                _orphans = _venue_orphan_summary(v_positions, v_algos, ledger_rows,
+                                                 readable=_legs_readable)
 
                 for vp in (v_positions or []):
                     amt = float(vp.get("size_signed", 0) or 0)
@@ -302,6 +340,8 @@ def collect_cross_venue_positions(positions, pending_orders_list,
                         # 该类腿不存在 ⇒ None）。外所通常没有这个概念 ⇒ 多为 "unknown"。
                         "protectionSlTriggerPxType": _prot["protectionSlTriggerPxType"],
                         "protectionTpTriggerPxType": _prot["protectionTpTriggerPxType"],
+                        #: 该所**孤儿腿**汇总（可复核候选 + 一律不碰的不可判定）；只报告不撤销
+                        "protectionOrphans": _orphans,
                         #: `exchangeSl`/`exchangeTp` 仍是"首个匹配腿的触发价"（供展示与
                         #: 因子取用）；它**不代表覆盖有效** —— 是否有效看 `protectionStatus`。
                         "cloud_oco_verified": _prot["protectionStatus"] == "fully_protected",
