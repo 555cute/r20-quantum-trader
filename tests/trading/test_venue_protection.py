@@ -916,3 +916,28 @@ class WatchdogReportShapeContractTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class ScanDictShapeContractTest(unittest.TestCase):
+    """`scan_protective_orders` 的返回形状 ⊇ 各消费点下标（第一百四十一刀）。
+
+    同一"开闸才炸"类别：watchdog 巡检（G8 开闸后才走）对 `scan[...]` 是**直接下标**，
+    生产侧就在同模块。缺一个键 ⇒ 跨所保护巡检**周期中途** KeyError
+    ⇒ 其后的落盘/台账/面板相位全跳过（而它只是加固层，不该拖垮周期）。
+    """
+
+    _MOD = "scripts/trader/venue_protection.py"
+    _CONSUMERS = ("ensure_venue_protection", "audit_cross_venue_protection")
+
+    def test_scan_keys_cover_every_consumer(self):
+        from tests import source_scan as ss
+        provided = ss.dict_literal_keys(self._MOD, "scan_protective_orders")
+        self.assertTrue({"has_live_sl", "needs_renew"} <= provided,
+                        f"判据失效：生产侧键没抓到（实际 {sorted(provided)}）")
+        for fn in self._CONSUMERS:
+            with self.subTest(consumer=fn):
+                needs = ss.load_subscripts(self._MOD, fn, "scan")
+                self.assertTrue(needs, f"判据失效：{fn} 没抓到 scan[...] 下标")
+                missing = sorted(needs - provided)
+                self.assertEqual(missing, [],
+                                 f"{fn} 读 scan[...] 的 {missing} 生产侧不提供 "
+                                 "⇒ 跨所保护巡检会**周期中途** KeyError（后面相位全跳过）")

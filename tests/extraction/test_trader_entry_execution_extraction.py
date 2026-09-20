@@ -116,41 +116,42 @@ class EntryExecutionVerbatimTest(unittest.TestCase):
         self.assertEqual(up.count("追踪器缺失"), 2,
                          "两处都要把'未知'说清楚（不许让 gate 的'已达上限'文案冒充事实）")
 
-    def test_factor_schema_covers_entry_path_subscripts(self):
-        """因子基座必须覆盖入场路径**无条件下标**的键（第一百三十九刀）。
+    #: 因子字典的**全部**直接下标消费点（按相位）。新增相位读 `f[...]` 时补进来，
+    #: 判据自身也会从代码推导出键集 —— 但"哪些相位在消费因子"必须显式登记，
+    #: 否则新相位悄悄加一个 `f["x"]` 没人知道（这正是本门第一版只覆盖一部分的原因）。
+    _FACTOR_CONSUMERS = (
+        ("scripts/trader/entry_execution.py", "execute_entry_scan", "f"),
+        ("scripts/trader/cycle_stages.py", "fetch_universe_and_manage_positions", "f"),
+        ("scripts/trader/cycle_snapshot.py", "build_state_payload", "f"),
+    )
 
-        为什么：入场循环与它的上游 `fetch_universe_and_manage_positions` 用的是
-        `f["position"]` / `f["price"]` / `f["atr"]` / `f["ctVal"]` **直接下标**（不是 `.get`）。
-        这些键只由 `factors.fetch_single_instrument_data` 的**一个字面量基座**提供：
-        基座少一个键、或将来出现第二个生产者，就会在**周期中途**抛 KeyError
-        ⇒ 入场循环之后的相位（落盘/台账/面板）整段被跳过 —— 而门禁此前只钉"代码搬运逐字"，
-        不钉"输入形状"。
+    def test_factor_schema_covers_every_consumer_phase(self):
+        """因子基座必须覆盖**每个消费相位**的无条件下标键（第一百三十九/四十一刀）。
 
-        判据从 AST 推导（入场路径新读一个键 ⇒ 本门自动跟进），并自带失效自检。
+        为什么：入场循环、上游相位、以及 `cycle_snapshot.build_state_payload`（落盘相位）
+        都用 `f["..."]` **直接下标**（不是 `.get`）。这些键只由
+        `factors.fetch_single_instrument_data` 的**字面量基座**提供：基座少一个键、
+        或出现第二个生产者，就会在**周期中途** KeyError ⇒ 其后的相位整段被跳过。
+
+        ⚠️ 本门第一版只扫了入场循环 + 上游 ⇒ **漏了 `build_state_payload`**
+        （它读 `f["rsi"]`/`f["type"]` 等）。本刀起改为**登记式**相位清单 + 自动推导键集。
         """
-        builder_src = (ROOT / "scripts/trader/factors.py").read_text(encoding="utf-8")
-        builder = next(n for n in ast.parse(builder_src).body
-                       if isinstance(n, ast.FunctionDef)
-                       and n.name == "fetch_single_instrument_data")
-        provided = {k.value for d in ast.walk(builder) if isinstance(d, ast.Dict)
-                    for k in d.keys
-                    if isinstance(k, ast.Constant) and isinstance(k.value, str)}
-
-        def _subs(node):
-            return {n.slice.value for n in ast.walk(node)
-                    if isinstance(n, ast.Subscript) and isinstance(n.value, ast.Name)
-                    and n.value.id == "f" and isinstance(n.ctx, ast.Load)
-                    and isinstance(n.slice, ast.Constant)
-                    and isinstance(n.slice.value, str)}
-
-        needed = _subs(_impl_fn().body[0])          # 提取后的入场循环
-        needed |= _subs(ast.parse(                    # 上游相位（同一批因子）
-            (ROOT / "scripts/trader/cycle_stages.py").read_text(encoding="utf-8")))
+        from tests import source_scan as ss
+        provided = ss.dict_literal_keys("scripts/trader/factors.py",
+                                       "fetch_single_instrument_data")
+        self.assertTrue({"position", "ctVal", "price", "atr"} <= provided,
+                        f"判据失效：基座键没抓到（实际 {sorted(provided)[:8]}…）")
+        needed = set()
+        for mod, fn, var in self._FACTOR_CONSUMERS:
+            keys = ss.load_subscripts(mod, fn, var)
+            self.assertTrue(keys, f"判据失效：{mod}::{fn} 没抓到 {var}[...] 下标（相位改名了？）")
+            needed |= keys
         self.assertTrue({"position", "ctVal", "price", "atr"} <= needed,
-                        f"判据失效：没抓到预期下标（实际抓到 {sorted(needed)}）")
-        self.assertEqual(sorted(needed - provided), [],
-                         "因子基座缺这些键 ⇒ 入场路径会在**周期中途** KeyError："
-                         f"{sorted(needed - provided)}")
+                        f"判据失效：消费侧没抓到预期下标（实际 {sorted(needed)}）")
+        missing = sorted(needed - provided)
+        self.assertEqual(missing, [],
+                         "因子基座缺这些键 ⇒ 消费相位会在**周期中途** KeyError："
+                         f"{missing}")
 
     def test_facade_call_passes_every_parameter_once_same_name(self):
         params = [a.arg for a in _impl_fn().args.kwonlyargs]

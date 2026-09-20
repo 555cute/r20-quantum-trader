@@ -530,3 +530,73 @@ def router_domain_source(router_name: str = "strategy", *, root=None) -> str:
         return "\n".join(sorted(f.read_text(encoding="utf-8")
                                 for f in pkg.glob("*.py")))
     raise AssertionError(f"路由域不存在：{single} 或 {pkg}/")
+
+def load_subscripts(module_file, function_name, var_name, *, pkg_name=None) -> set:
+    """收集函数体内 `var_name[<字符串常量>]` 的**读取**下标键集合。
+
+    只取 `ast.Load`（排除函数自己写入的 `f["ai_thought"] = ...` 之类 Store）。
+
+    ## 为什么必须补一次文本扫描（本仓实测踩过）
+
+    本仓 Python 版本是 **3.11**：**f-string 内的表达式不是 AST 节点**（3.12 起才是）。
+    审计里最典型的三个渲染点（跨所保护报告、预演输出）恰好把下标写在 f-string 里，
+    只扫 AST 会**一个都抓不到** ⇒ 后续"需要的键 ⊆ 提供的键"断言**空集恒过**。
+    故这里 AST + 文本（正则）双扫，调用方仍应自带"确实抓到了预期键"的自检。
+    """
+    import ast
+    import re
+
+    node, path = find_function_node(module_file, function_name, pkg_name=pkg_name)
+    text = Path(path).read_text(encoding="utf-8")
+    keys = set()
+    for n in ast.walk(node):
+        if (isinstance(n, ast.Subscript) and isinstance(n.ctx, ast.Load)
+                and isinstance(n.value, ast.Name) and n.value.id == var_name
+                and isinstance(n.slice, ast.Constant) and isinstance(n.slice.value, str)):
+            keys.add(n.slice.value)
+    written = {n.slice.value for n in ast.walk(node)
+               if isinstance(n, ast.Subscript) and isinstance(n.ctx, (ast.Store, ast.Del))
+               and isinstance(n.value, ast.Name) and n.value.id == var_name
+               and isinstance(n.slice, ast.Constant) and isinstance(n.slice.value, str)}
+    seg = ast.get_source_segment(text, node) or ""
+    keys |= {m.group(1) for m in re.finditer(
+        rf"\b{re.escape(var_name)}\[['\"]([A-Za-z_][A-Za-z0-9_]*)['\"]\]", seg)}
+    # ⚠️ 坑 2：文本扫描**分不清读/写**（`f["ai_reason"] = ...` 也会命中）⇒ 必须减掉
+    # 函数**自己写入**的键，否则会把"消费方自产的键"误判成"生产方必须提供"
+    # （本仓实测：入场循环自己写 `f["ai_thought"]` 等 5 个键，误红过一次）。
+    return keys - written
+
+
+def dict_literal_keys(module_file, function_name, *, pkg_name=None, var_name=None) -> set:
+    """收集函数内字典**字面量**的字符串键（可限定 `var_name = {...}` 那次赋值）。"""
+    import ast
+
+    node, _path = find_function_node(module_file, function_name, pkg_name=pkg_name)
+    keys = set()
+    for n in ast.walk(node):
+        if not isinstance(n, ast.Dict):
+            continue
+        if var_name is not None:
+            owner = getattr(n, "_owner_name", None)
+            if owner is not None and owner != var_name:
+                continue
+        keys |= {k.value for k in n.keys if isinstance(k, ast.Constant)
+                 and isinstance(k.value, str)}
+    return keys
+
+
+def dict_assign_keys_by_name(module_file, function_name, *, pkg_name=None) -> dict:
+    """收集 `name = {...}` 字面量赋值：`{name: [(lineno, {keys})]}`（按行号可查最近一次）。"""
+    import ast
+
+    node, _path = find_function_node(module_file, function_name, pkg_name=pkg_name)
+    out: dict = {}
+    for n in ast.walk(node):
+        if (isinstance(n, ast.Assign) and isinstance(n.value, ast.Dict)
+                and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name)):
+            keys = {k.value for k in n.value.keys if isinstance(k, ast.Constant)
+                    and isinstance(k.value, str)}
+            out.setdefault(n.targets[0].id, []).append((n.lineno, keys))
+    for name in out:
+        out[name].sort()
+    return out
