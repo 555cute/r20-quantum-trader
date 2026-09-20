@@ -214,6 +214,40 @@ def admin_overview(x_r20_admin_token: str | None = Header(default=None)) -> dict
     return runtime_overview()
 
 
+@router.get("/api/v1/admin/metrics")
+def admin_metrics(
+    format: str = "prometheus",
+    x_r20_admin_token: str | None = Header(default=None),
+    x_r20_session: str | None = Header(default=None, alias="X-R20-Session"),
+):
+    """机构级指标：Prometheus 文本 exposition（`?format=json` 给结构化快照）。
+
+    ⚠️ **必须管理员鉴权**：指标里含账户规模、风控阈值与场所状态，属控制面数据。
+    抓取器（Prometheus/Grafana Agent）请在 Header 里带 `X-R20-Admin-Token`
+    （或已登录的 `X-R20-Session`）：
+
+    ```yaml
+    scrape_configs:
+      - job_name: r20
+        metrics_path: /api/v1/admin/metrics
+        static_configs: [{targets: ["127.0.0.1:8080"]}]
+        authorization: {credentials: "<admin token>"}
+    ```
+
+    fail-soft：某个数据源读不到时不会 500，而是发 `r20_metrics_source_ok{source="…"} 0`。
+    """
+    require_admin_header(x_r20_admin_token, x_r20_session)
+    from r20_backend import metrics as metrics_mod
+    snapshot = metrics_mod.build_snapshot()
+    if str(format or "").strip().lower() == "json":
+        return snapshot
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(
+        metrics_mod.render_prometheus(snapshot),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )
+
+
 @router.get("/api/v1/admin/audit")
 def admin_audit(x_r20_admin_token: str | None = Header(default=None), limit: int = 50) -> dict[str, Any]:
     refresh_settings()

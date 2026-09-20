@@ -80,6 +80,7 @@
 | 组合与账户 | `portfolio_aggregator.py`、`account_baseline.py` |
 | 提示词 | `prompt_views.py`、`dashboard_payload/prompts*` |
 | 通用 | `time_utils.py`、`math_utils.py`、`schemas.py`、`schedule_store.py` |
+| 可观测性 | `metrics.py`（Prometheus 文本 exposition 的唯一渲染点；路由薄壳在 `routers/system.py::admin_metrics`） |
 
 ### L4 纯计算/载荷子包（新代码的默认去处）
 
