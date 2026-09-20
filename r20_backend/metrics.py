@@ -57,6 +57,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 __all__ = [
+    "REQUIRED_SOURCES",
     "RISK_LIMIT_NAMES",
     "build_snapshot",
     "render_prometheus",
@@ -64,7 +65,15 @@ __all__ = [
     "collect_model_stats",
     "collect_risk_limits",
     "collect_market_data_health",
+    "collect_market_stream_health",
 ]
+
+#: **必需数据源**：缺失即视为故障（告警据此触发）。
+#: 不在此列的源是**可选**的：例如公共行情流探测平时并不常驻，若把"没在跑"也算故障，
+#: 告警就会**永远在响** —— 而永远在响的告警等于没有告警（运维会学会忽略它）。
+#: 故 `r20_metrics_source_ok` 带 `required` 标签，告警只盯 `required="1"`。
+REQUIRED_SOURCES: Tuple[str, ...] = ("venue_health", "model_calls", "risk_limits",
+                                     "market_data")
 
 #: 对外暴露的风控旋钮（`指标名 → risk_constants 属性名`）。刻意是**白名单**：
 #: 新增旋钮要显式登记，避免把内部实现细节或敏感键一股脑推出控制面。
@@ -191,11 +200,29 @@ def collect_market_data_health(path: Path) -> Optional[Dict[str, Any]]:
     return payload or None
 
 
+def collect_market_stream_health(path: Path) -> Optional[Dict[str, Any]]:
+    """读行情流健康快照（`data/market_stream_health.json`，探测进程写、这里读）。
+
+    缺失/损坏/schema 版本不认识 → None。`load_snapshot` 是无状态文件读取，
+    故不涉及双拼写实例问题（与行情取数快照同理）。
+    """
+    try:
+        try:
+            from scripts import market_stream as _ms
+        except Exception:
+            import market_stream as _ms                              # type: ignore[no-redef]
+        payload = _ms.load_snapshot(str(path))
+    except Exception:
+        return None
+    return payload or None
+
+
 def build_snapshot(*, data_dir: Optional[Path] = None,
                    venue_health: Optional[Dict[str, Any]] = None,
                    model_stats: Optional[Dict[str, Any]] = None,
                    risk_limits: Optional[Dict[str, float]] = None,
                    market_data_health: Optional[Dict[str, Any]] = None,
+                   market_stream_health: Optional[Dict[str, Any]] = None,
                    now: Optional[float] = None) -> Dict[str, Any]:
     """取数（可注入）。每个源独立 try，失败只影响该源的 `source_ok`。"""
     sources: Dict[str, bool] = {}
@@ -231,6 +258,15 @@ def build_snapshot(*, data_dir: Optional[Path] = None,
         market_data_health = collect_market_data_health(md_base / "market_data_health.json")
     sources["market_data"] = market_data_health is not None
 
+    if market_stream_health is None:
+        try:
+            from r20_backend.dependencies import DATA_DIR as _MS_DATA_DIR
+            ms_base = Path(data_dir) if data_dir is not None else Path(_MS_DATA_DIR)
+        except Exception:
+            ms_base = Path(data_dir or "data")
+        market_stream_health = collect_market_stream_health(ms_base / "market_stream_health.json")
+    sources["market_stream"] = market_stream_health is not None
+
     return {
         "generated_at": float(now if now is not None else time.time()),
         "sources": sources,
@@ -238,6 +274,7 @@ def build_snapshot(*, data_dir: Optional[Path] = None,
         "model_stats": model_stats or {},
         "risk_limits": risk_limits or {},
         "market_data_health": market_data_health or {},
+        "market_stream_health": market_stream_health or {},
     }
 
 
@@ -269,8 +306,8 @@ def render_prometheus(snapshot: Dict[str, Any]) -> str:
     sources = snapshot.get("sources") or {}
     for source in sorted(sources):
         emit("r20_metrics_source_ok", 1 if sources.get(source) else 0,
-             [("source", source)],
-             help_text="各指标数据源本次取数是否成功（0=该源数据缺失，不代表系统故障）")
+             [("source", source), ("required", "1" if source in REQUIRED_SOURCES else "0")],
+             help_text="各数据源本次取数是否成功（required=1 缺失才算故障；required=0 是可选源）")
 
     emit("r20_metrics_generated_at_timestamp_seconds", snapshot.get("generated_at"),
          help_text="本快照生成时刻（epoch 秒）")
@@ -342,6 +379,30 @@ def render_prometheus(snapshot: Dict[str, Any]) -> str:
              (md.get("failures", {}).get("by_kind") or {}).get(kind), [("kind", kind)],
              help_text="取数失败计数（与 calls/failures 同源，便于与第 137 刀的口径对齐）",
              type_text="counter")
+
+    # 公共行情流（只读探测；**不常驻** ⇒ 这条族平时可能整块缺失 —— 那是"没在跑"，
+    # 不是"流坏了"；两者由 source_ok + 快照年龄共同区分（别把"没跑"读成"坏了"）。
+    st = snapshot.get("market_stream_health") or {}
+    st_written = _number(st.get("written_at_ms"))
+    if st_written is not None:
+        emit("r20_market_stream_snapshot_age_seconds",
+             round(max(0.0, (snapshot.get("generated_at") or time.time()) - st_written / 1000.0), 3),
+             help_text="行情流健康快照的年龄（秒）")
+    for venue in sorted((st.get("venues") or {})):
+        info = (st.get("venues") or {}).get(venue) or {}
+        emit("r20_market_stream_frames_total", info.get("frames"), [("venue", venue)],
+             help_text="公共行情流收到的帧数（含控制帧/错误帧）", type_text="counter")
+        emit("r20_market_stream_ticks_total", info.get("ticks"), [("venue", venue)],
+             help_text="公共行情流归一出的 tick 数", type_text="counter")
+        emit("r20_market_stream_parse_errors_total", info.get("parse_errors"), [("venue", venue)],
+             help_text="帧解析失败数（非 0 说明上游改了格式或我们读错字段）", type_text="counter")
+        emit("r20_market_stream_errors_total", info.get("errors"), [("venue", venue)],
+             help_text="连接/订阅类错误数（含『已连接但零数据帧』）", type_text="counter")
+        tick_age = info.get("tick_age_s")
+        # 从未收到 tick ⇒ **不发这一条**（不可判定≠0；发 0 会被读成"刚刚有数据"）
+        if tick_age is not None:
+            emit("r20_market_stream_tick_age_seconds", tick_age, [("venue", venue)],
+                 help_text="该所距上次收到 tick 的秒数（无 tick 时不输出该序列）")
 
     out: List[str] = []
     for name, family in families.items():

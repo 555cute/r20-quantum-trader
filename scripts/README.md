@@ -35,6 +35,7 @@
 | `instrument_pool.py` | 409 | 交易宇宙（标的池）的**校验后**单一来源 |
 | `market_data_service.py` | 562 | 零进程直连公共行情服务；`_public_get/_public_post` 带**耗时/成败埋点**（调用期 `note_call`/`note_failure`，取值行为一字不变） |
 | `market_data_health.py` | 266 | 行情取数可观测性：失败**计数 + 每类一次性告警**（第 137 刀）+ 调用**耗时/成功率/百分位**与跨进程快照 `data/market_data_health.json`（第 138 刀；worker 每周期写、后端 `/metrics` 读） |
+| `market_stream.py` | 481 | 公共行情 **WebSocket 只读层**（帧解析三所归一 / 有界 tick 缓冲 / 健康账本与陈旧度 / `--probe` 探测 CLI）。**不常驻、不接决策与下单路径**；REST 取数一字未动。快照 `data/market_stream_health.json` 经 `/metrics` 暴露（可选源 `required="0"`）。三条实测坑写在模块 docstring：Gate 期货专用域、Binance 路径式订阅、Gate 订阅应答不是 tick |
 | `calculus_engine.py` | 71 | 因果微积分 / 定积分 / 概率论引擎 |
 | `order_risk.py` | 60 | 报价与风控的**确定性**安全检查（共享） |
 | `backtest_engine.py` | 382 | 多资产回测与统计验证引擎（门面，部件在 `backtest/`） |

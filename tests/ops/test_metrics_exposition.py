@@ -59,7 +59,7 @@ class RenderFormatTest(unittest.TestCase):
     def test_core_families_present(self):
         text = M.render_prometheus(self._snapshot())
         self.assertIn("r20_up 1", text)
-        self.assertIn('r20_metrics_source_ok{source="venue_health"} 1', text)
+        self.assertIn('r20_metrics_source_ok{source="venue_health",required="1"} 1', text)
         self.assertIn('r20_venue_instruments_ok{venue="okx"} 2', text)
         self.assertIn('r20_venue_instruments_failed{venue="okx"} 1', text)
         self.assertIn('r20_venue_latency_avg_ms{venue="okx"} 105', text)
@@ -144,7 +144,7 @@ class FailSoftTest(unittest.TestCase):
         # 真取数在本机可能成/败；这里只钉"渲染必须成功且带 source 行"
         text = M.render_prometheus(snap)
         for source in ("venue_health", "model_calls", "risk_limits"):
-            self.assertRegex(text, rf'r20_metrics_source_ok\{{source="{source}"\}} [01]')
+            self.assertRegex(text, rf'r20_metrics_source_ok\{{source="{source}",required="[01]"\}} [01]')
 
     def test_explicit_failure_is_visible_as_zero(self):
         snap = {
@@ -154,7 +154,7 @@ class FailSoftTest(unittest.TestCase):
         }
         text = M.render_prometheus(snap)
         for source in ("venue_health", "model_calls", "risk_limits"):
-            self.assertIn(f'r20_metrics_source_ok{{source="{source}"}} 0', text)
+            self.assertIn(f'r20_metrics_source_ok{{source="{source}",required="1"}} 0', text)
         self.assertIn("r20_up 1", text, "数据源全挂也不影响进程存活指标")
 
     def test_store_failure_returns_none_not_raises(self):
@@ -255,7 +255,7 @@ class MetricsRouteTest(unittest.TestCase):
         self.assertEqual(r.status_code, 200, r.text)
         self.assertIn("text/plain", r.headers.get("content-type", ""))
         self.assertIn("r20_up 1", r.text)
-        self.assertIn('r20_metrics_source_ok{source="risk_limits"}', r.text)
+        self.assertIn('r20_metrics_source_ok{source="risk_limits",required="1"}', r.text)
 
     def test_json_format_returns_snapshot(self):
         r = self.client.get("/api/v1/admin/metrics?format=json", headers=self._headers())
@@ -328,7 +328,7 @@ class MarketDataSourceTest(unittest.TestCase):
                                risk_limits={}, now=1789000000.0)
         self.assertFalse(snap["sources"]["market_data"])
         text = M.render_prometheus(snap)
-        self.assertIn('r20_metrics_source_ok{source="market_data"} 0', text,
+        self.assertIn('r20_metrics_source_ok{source="market_data",required="1"} 0', text,
                       "取数挂了必须可见（第 137 刀：静默失败 30 小时无信号）")
 
     def test_no_family_is_declared_twice_with_market_data_present(self):
@@ -346,7 +346,7 @@ class MarketDataSourceTest(unittest.TestCase):
                                risk_limits={}, now=1789000000.0)
         text = M.render_prometheus(snap)
         self.assertNotIn("r20_market_data_calls_total", text)
-        self.assertIn('r20_metrics_source_ok{source="market_data"} 0', text)
+        self.assertIn('r20_metrics_source_ok{source="market_data",required="1"} 0', text)
 
     def test_negative_age_is_clamped_not_emitted_as_negative(self):
         """快照时间戳来自另一个进程，时钟回拨时不许出现负年龄（会让告警逻辑发疯）。"""
@@ -369,3 +369,79 @@ class MarketDataSourceTest(unittest.TestCase):
                                risk_limits={}, now=1789000000.0)
         text = M.render_prometheus(snap)
         self.assertNotIn("read timeout", text)
+
+
+class OptionalSourceTest(unittest.TestCase):
+    """`required` 标签：可选源缺失**不算故障**（否则告警永远在响 = 没有告警）。
+
+    真实场景：公共行情流探测是**按需/非常驻**的（`scripts/market_stream.py --probe`），
+    若把它也当作"必需源"，`R20MetricsSourceMissing` 会 7×24 一直响。
+    """
+
+    def _snapshot(self, sources):
+        return {"generated_at": 1789000000.0, "sources": sources, "venue_health": {},
+                "model_stats": {}, "risk_limits": {}, "market_data_health": {},
+                "market_stream_health": {}}
+
+    def test_required_sources_are_labelled(self):
+        text = M.render_prometheus(self._snapshot({"venue_health": True, "market_stream": False}))
+        self.assertIn('r20_metrics_source_ok{source="venue_health",required="1"} 1', text)
+        self.assertIn('r20_metrics_source_ok{source="market_stream",required="0"} 0', text,
+                      "可选源缺失必须可区分，否则告警会永远在响")
+
+    def test_the_alert_expression_only_targets_required_sources(self):
+        """规则文件必须按 required 过滤 —— 这条断言是防"改回去"的钉子。"""
+        from pathlib import Path
+        alerts = (Path(__file__).resolve().parents[2]
+                  / "deploy" / "observability" / "alerts.yml").read_text(encoding="utf-8")
+        self.assertIn('r20_metrics_source_ok{required="1"} == 0', alerts)
+
+    def test_market_stream_is_declared_optional(self):
+        self.assertNotIn("market_stream", M.REQUIRED_SOURCES)
+        self.assertIn("market_data", M.REQUIRED_SOURCES, "行情取数缺失必须算故障")
+
+
+class MarketStreamSourceTest(unittest.TestCase):
+    """公共行情流健康接入 /metrics（只读探测；**可选源**）。"""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.data_dir = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _write(self, payload):
+        (self.data_dir / "market_stream_health.json").write_text(
+            json.dumps(payload), encoding="utf-8")
+
+    def _snap(self, **kw):
+        return M.build_snapshot(data_dir=self.data_dir, venue_health={}, model_stats={},
+                                risk_limits={}, market_data_health={}, now=1789000000.0, **kw)
+
+    def test_missing_or_wrong_version_is_none(self):
+        self.assertIsNone(M.collect_market_stream_health(self.data_dir / "market_stream_health.json"))
+        self._write({"schema_version": 999, "venues": {}})
+        self.assertIsNone(M.collect_market_stream_health(self.data_dir / "market_stream_health.json"))
+
+    def test_families_render_with_venue_labels(self):
+        self._write({"schema_version": 1, "written_at_ms": 1789000000_000 - 12_000,
+                     "venues": {"okx": {"frames": 30, "ticks": 29, "parse_errors": 0,
+                                        "errors": 0, "tick_age_s": 12.0},
+                                "gate": {"frames": 1, "ticks": 0, "parse_errors": 0,
+                                         "errors": 1, "tick_age_s": None}}})
+        text = M.render_prometheus(self._snap())
+        self.assertIn('r20_market_stream_ticks_total{venue="okx"} 29', text)
+        self.assertIn('r20_market_stream_errors_total{venue="gate"} 1', text)
+        self.assertIn('r20_market_stream_tick_age_seconds{venue="okx"} 12', text)
+        self.assertNotIn('r20_market_stream_tick_age_seconds{venue="gate"}', text,
+                         "从未收到 tick ⇒ 不发该序列（发 0 会被读成『刚刚有数据』）")
+        self.assertIn("r20_market_stream_snapshot_age_seconds 12", text)
+
+    def test_absent_stream_is_optional_not_a_failure(self):
+        snap = self._snap()
+        self.assertFalse(snap["sources"]["market_stream"])
+        text = M.render_prometheus(snap)
+        self.assertIn('r20_metrics_source_ok{source="market_stream",required="0"} 0', text)
+        self.assertNotIn("r20_market_stream_ticks_total", text, "没在跑就不该凭空发指标")

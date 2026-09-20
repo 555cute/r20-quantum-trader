@@ -15,14 +15,16 @@
 groups:
   - name: r20-metrics-availability
     rules:
+      # 只盯 required="1"：可选源（如公共行情流探测）平时并不常驻，若也算故障，
+      # 告警会**永远在响** —— 永远在响的告警等于没有告警（运维会学会忽略它）。
       - alert: R20MetricsSourceMissing
-        expr: r20_metrics_source_ok == 0
+        expr: r20_metrics_source_ok{required="1"} == 0
         for: 10m
         labels:
           severity: warning
         annotations:
-          summary: "指标数据源缺失：{{ $labels.source }}"
-          description: "该源连续 10 分钟取不到数（0=数据缺失，不代表系统故障）。先看后端日志与对应文件是否存在。"
+          summary: "必需指标数据源缺失：{{ $labels.source }}"
+          description: "该源连续 10 分钟取不到数（0=数据缺失，不代表系统故障）。先看后端日志与对应文件是否存在。可选源（required=\"0\"，如行情流探测）不在此告警内 —— 它平时不常驻，算进去会让告警永远在响。"
 
       - alert: R20BackendDown
         expr: up{job="r20-backend"} == 0
@@ -70,6 +72,37 @@ groups:
         annotations:
           summary: "行情取数尾延时劣化：{{ $labels.kind }}"
           description: "p95 > 3s 持续 15 分钟。超时上限 3.5s、失败前先出现尾延时抬升，故这是失败的前兆。"
+
+  - name: r20-market-stream
+    rules:
+      # 只读探测：**没部署时这些序列根本不存在**，故这些告警不会误报 ——
+      # "没跑"与"跑了但坏了"必须能区分（前者不该打扰人，后者必须吵醒人）。
+      - alert: R20MarketStreamParseErrors
+        expr: increase(r20_market_stream_parse_errors_total[15m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "行情流帧解析失败：{{ $labels.venue }}"
+          description: "上游改了字段/频道格式，或我们读错了字段。解析失败会让该所流失去意义（REST 取数不受影响）。"
+
+      - alert: R20MarketStreamSilent
+        expr: r20_market_stream_tick_age_seconds > 90
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "行情流已静默：{{ $labels.venue }}"
+          description: "该所曾收到过 tick，但已 90 秒没有新 tick（连接可能还在）。Binance JSON 订阅实测就是这个形态：应答成功、永不推数据 —— 只看连接状态会以为一切正常。"
+
+      - alert: R20MarketStreamConnectErrors
+        expr: increase(r20_market_stream_errors_total[15m]) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "行情流连接/订阅错误：{{ $labels.venue }}"
+          description: "含『已连接但零数据帧』。Gate 连错域、合约名拼错都会走到这里（实测：现货域不接受 futures.tickers）。"
 
   - name: r20-venues
     rules:

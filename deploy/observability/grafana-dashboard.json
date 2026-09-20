@@ -2,13 +2,19 @@
   "__comment": "R20 Quantum Trader 观测面板。/metrics 端点族名由 r20_backend/metrics.py 单一来源产出；本文件引用的每个族名都有门禁与真实渲染结果对照（tests/ops/test_observability_artifacts.py），改名会立刻翻红。",
   "uid": "r20-quantum-trader",
   "title": "R20 Quantum Trader — 执行与行情健康",
-  "tags": ["r20", "trading"],
+  "tags": [
+    "r20",
+    "trading"
+  ],
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
   "refresh": "1m",
   "editable": true,
-  "time": {"from": "now-6h", "to": "now"},
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "templating": {
     "list": [
       {
@@ -16,7 +22,10 @@
         "label": "数据源",
         "type": "datasource",
         "query": "prometheus",
-        "current": {"text": "Prometheus", "value": "Prometheus"}
+        "current": {
+          "text": "Prometheus",
+          "value": "Prometheus"
+        }
       }
     ]
   },
@@ -26,157 +35,660 @@
       "type": "stat",
       "title": "后端指标端点可达",
       "description": "抓不到就是 scrape 失败（进程挂了/端口不通/401 令牌失效）",
-      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-      "gridPos": {"h": 5, "w": 4, "x": 0, "y": 0},
-      "targets": [{"refId": "A", "expr": "r20_up", "legendFormat": "up"}],
-      "options": {"colorMode": "background", "graphMode": "none", "reduceOptions": {"calcs": ["lastNotNull"]}},
-      "fieldConfig": {"defaults": {"mappings": [{"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}}], "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []}
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "r20_up",
+          "legendFormat": "up"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "UP",
+                  "color": "green"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
     },
     {
       "id": 2,
       "type": "stat",
       "title": "数据源缺失数",
-      "description": "r20_metrics_source_ok == 0 的源个数：0=全绿；>0 说明该源文件读不到（不代表系统故障，但必须点开看是哪个）",
-      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-      "gridPos": {"h": 5, "w": 5, "x": 4, "y": 0},
-      "targets": [{"refId": "A", "expr": "count(r20_metrics_source_ok == 0)", "legendFormat": "missing sources"}],
-      "options": {"colorMode": "background", "graphMode": "none", "reduceOptions": {"calcs": ["lastNotNull"]}},
-      "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}, "overrides": []}
+      "description": "**必需**数据源里取不到数的个数（0=全绿）。可选源（行情流探测）缺失不算故障 —— 它平时并不常驻；把没在跑当故障会让告警永远在响。",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 4,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(r20_metrics_source_ok{required=\"1\"} == 0)",
+          "legendFormat": "missing sources"
+        }
+      ],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
     },
     {
       "id": 3,
       "type": "stat",
       "title": "行情快照年龄（秒）",
       "description": "worker 每 15 分钟写一次 data/market_data_health.json；超过 2700 秒说明周期没在跑（第 137 刀那类事故的先行信号）",
-      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-      "gridPos": {"h": 5, "w": 5, "x": 9, "y": 0},
-      "targets": [{"refId": "A", "expr": "r20_market_data_snapshot_age_seconds", "legendFormat": "age"}],
-      "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"]}},
-      "fieldConfig": {"defaults": {"unit": "s", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1200}, {"color": "red", "value": 2700}]}}, "overrides": []}
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 9,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "r20_market_data_snapshot_age_seconds",
+          "legendFormat": "age"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1200
+              },
+              {
+                "color": "red",
+                "value": 2700
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
     },
     {
       "id": 4,
       "type": "table",
       "title": "数据源状态明细",
       "description": "逐源 1/0。缺哪个源就去看对应文件与写入方（worker）是否在跑",
-      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-      "gridPos": {"h": 5, "w": 10, "x": 14, "y": 0},
-      "targets": [{"refId": "A", "expr": "r20_metrics_source_ok", "format": "table", "instant": true}],
-      "options": {"showHeader": true},
-      "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []}
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 10,
+        "x": 14,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "r20_metrics_source_ok",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "{{source}} required={{required}}"
+        }
+      ],
+      "options": {
+        "showHeader": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
     },
     {
       "id": 10,
       "type": "timeseries",
       "title": "行情取数调用速率（按 kind）",
       "description": "含成功与失败；双域直连每个 host 各算一次尝试",
-      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 5},
-      "targets": [{"refId": "A", "expr": "sum by (kind) (rate(r20_market_data_calls_total[5m]))", "legendFormat": "{{kind}}"}],
-      "fieldConfig": {"defaults": {"unit": "reqps", "custom": {"drawStyle": "line", "fillOpacity": 10}}, "overrides": []}
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (kind) (rate(r20_market_data_calls_total[5m]))",
+          "legendFormat": "{{kind}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      }
     },
     {
       "id": 11,
       "type": "timeseries",
       "title": "行情取数失败（近 15 分钟增量）",
       "description": "第 137 刀事故在这里会先抬头；两个失败口径（调用级/告警级）应完全一致",
-      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 5},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
       "targets": [
-        {"refId": "A", "expr": "sum by (kind) (increase(r20_market_data_call_failures_total[15m]))", "legendFormat": "{{kind}}"},
-        {"refId": "B", "expr": "sum by (kind) (increase(r20_market_data_failures_reported_total[15m]))", "legendFormat": "{{kind}} (reported)"}
+        {
+          "refId": "A",
+          "expr": "sum by (kind) (increase(r20_market_data_call_failures_total[15m]))",
+          "legendFormat": "{{kind}}"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (kind) (increase(r20_market_data_failures_reported_total[15m]))",
+          "legendFormat": "{{kind}} (reported)"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "bars", "fillOpacity": 40}}, "overrides": []}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 40
+          }
+        },
+        "overrides": []
+      }
     },
     {
       "id": 12,
       "type": "timeseries",
       "title": "行情取数耗时 p50 / p95（秒）",
       "description": "超时上限 3.5s；失败之前通常先出现尾延时抬升",
-      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 13},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      },
       "targets": [
-        {"refId": "A", "expr": "max by (kind) (r20_market_data_latency_p50_seconds)", "legendFormat": "{{kind}} p50"},
-        {"refId": "B", "expr": "max by (kind) (r20_market_data_latency_p95_seconds)", "legendFormat": "{{kind}} p95"}
+        {
+          "refId": "A",
+          "expr": "max by (kind) (r20_market_data_latency_p50_seconds)",
+          "legendFormat": "{{kind}} p50"
+        },
+        {
+          "refId": "B",
+          "expr": "max by (kind) (r20_market_data_latency_p95_seconds)",
+          "legendFormat": "{{kind}} p95"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "s", "custom": {"drawStyle": "line", "fillOpacity": 0}}, "overrides": []}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 0
+          }
+        },
+        "overrides": []
+      }
     },
     {
       "id": 13,
       "type": "timeseries",
       "title": "距上次取数成功的秒数（按 kind）",
       "description": "成功路径永不老化；曲线只涨不落 = 该链路实际已死",
-      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 13},
-      "targets": [{"refId": "A", "expr": "max by (kind) (r20_market_data_last_success_age_seconds)", "legendFormat": "{{kind}}"}],
-      "fieldConfig": {"defaults": {"unit": "s", "custom": {"drawStyle": "line", "fillOpacity": 0}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1800}]}}, "overrides": []}
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 13
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (kind) (r20_market_data_last_success_age_seconds)",
+          "legendFormat": "{{kind}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 0
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1800
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
     },
     {
       "id": 20,
       "type": "timeseries",
       "title": "场所取数：成功 / 失败标的数",
       "description": "失败 >0 表示该所行情不完整 —— 跨所封顶按场所计仓位，别拿不完整的所当决策依据",
-      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 21},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 21
+      },
       "targets": [
-        {"refId": "A", "expr": "r20_venue_instruments_ok", "legendFormat": "{{venue}} ok"},
-        {"refId": "B", "expr": "r20_venue_instruments_failed", "legendFormat": "{{venue}} failed"}
+        {
+          "refId": "A",
+          "expr": "r20_venue_instruments_ok",
+          "legendFormat": "{{venue}} ok"
+        },
+        {
+          "refId": "B",
+          "expr": "r20_venue_instruments_failed",
+          "legendFormat": "{{venue}} failed"
+        }
       ],
-      "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "line", "fillOpacity": 10}}, "overrides": []}
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      }
     },
     {
       "id": 21,
       "type": "timeseries",
       "title": "场所取数平均延时（毫秒）",
-      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 21},
-      "targets": [{"refId": "A", "expr": "r20_venue_latency_avg_ms", "legendFormat": "{{venue}}"}],
-      "fieldConfig": {"defaults": {"unit": "ms", "custom": {"drawStyle": "line", "fillOpacity": 0}}, "overrides": []}
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 21
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "r20_venue_latency_avg_ms",
+          "legendFormat": "{{venue}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 0
+          }
+        },
+        "overrides": []
+      }
     },
     {
       "id": 30,
       "type": "timeseries",
       "title": "大模型调用与成功率",
       "description": "左轴次数；成功率 <80% 且样本 >5 会触发告警（夜里 1 次失败不吼）",
-      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 29},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 29
+      },
       "targets": [
-        {"refId": "A", "expr": "increase(r20_model_calls_total[1h])", "legendFormat": "calls/h"},
-        {"refId": "B", "expr": "increase(r20_model_calls_successful_total[1h])", "legendFormat": "success/h"},
-        {"refId": "C", "expr": "100 * increase(r20_model_calls_successful_total[1h]) / clamp_min(increase(r20_model_calls_total[1h]), 1)", "legendFormat": "success %"},
-        {"refId": "D", "expr": "r20_model_call_duration_ms_avg", "legendFormat": "avg duration (ms)"}
+        {
+          "refId": "A",
+          "expr": "increase(r20_model_calls_total[1h])",
+          "legendFormat": "calls/h"
+        },
+        {
+          "refId": "B",
+          "expr": "increase(r20_model_calls_successful_total[1h])",
+          "legendFormat": "success/h"
+        },
+        {
+          "refId": "C",
+          "expr": "100 * increase(r20_model_calls_successful_total[1h]) / clamp_min(increase(r20_model_calls_total[1h]), 1)",
+          "legendFormat": "success %"
+        },
+        {
+          "refId": "D",
+          "expr": "r20_model_call_duration_ms_avg",
+          "legendFormat": "avg duration (ms)"
+        }
       ],
-      "fieldConfig": {"defaults": {"custom": {"drawStyle": "line", "fillOpacity": 5}}, "overrides": []}
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5
+          }
+        },
+        "overrides": []
+      }
     },
     {
       "id": 31,
       "type": "timeseries",
       "title": "累计 token 消耗（成本观测）",
-      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-      "gridPos": {"h": 8, "w": 6, "x": 12, "y": 29},
-      "targets": [{"refId": "A", "expr": "r20_model_tokens_total", "legendFormat": "tokens"}],
-      "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "line", "fillOpacity": 0}}, "overrides": []}
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 29
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "r20_model_tokens_total",
+          "legendFormat": "tokens"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 0
+          }
+        },
+        "overrides": []
+      }
     },
     {
       "id": 32,
       "type": "table",
       "title": "执行层风控生效值（跑得对不对，先看尺子）",
       "description": "白名单读取：取不到的键会跳过而不是补 0（编一个不存在的阈值比不报更危险）",
-      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-      "gridPos": {"h": 8, "w": 6, "x": 18, "y": 29},
-      "targets": [{"refId": "A", "expr": "r20_risk_limit", "format": "table", "instant": true}],
-      "options": {"showHeader": true}
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 29
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "r20_risk_limit",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
     },
     {
       "id": 22,
       "type": "table",
       "title": "场所资金环境：DEMO / 实盘",
       "description": "1=演示盘。**读任何一条所曲线之前先看这张表** —— 把 DEMO 数据当实盘读，会得出完全错误的绩效结论（本仓真实教训）",
-      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-      "gridPos": {"h": 6, "w": 8, "x": 0, "y": 37},
-      "targets": [{"refId": "A", "expr": "r20_venue_testnet", "format": "table", "instant": true}],
-      "options": {"showHeader": true},
-      "fieldConfig": {"defaults": {"mappings": [{"type": "value", "options": {"0": {"text": "LIVE", "color": "red"}, "1": {"text": "DEMO", "color": "blue"}}}], "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]}}, "overrides": []}
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 37
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "r20_venue_testnet",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "options": {
+        "showHeader": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "LIVE",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "DEMO",
+                  "color": "blue"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 40,
+      "type": "timeseries",
+      "title": "公共行情流：tick 数 / 陈旧度（只读探测，非常驻）",
+      "description": "`tick_age_seconds` 只在**该所曾收到过 tick** 时才存在 —— 曲线缺失表示从未收到（不可判定）；`errors_total` 增长含『已连接但零数据帧』（Binance JSON 订阅实测就是这个形态）。本面板整块为空 = 探测没在跑，不是流坏了。",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 37
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (venue) (rate(r20_market_stream_ticks_total[5m]))",
+          "legendFormat": "{{venue}} ticks/s"
+        },
+        {
+          "refId": "B",
+          "expr": "max by (venue) (r20_market_stream_tick_age_seconds)",
+          "legendFormat": "{{venue}} tick age (s)"
+        },
+        {
+          "refId": "C",
+          "expr": "sum by (venue) (increase(r20_market_stream_errors_total[15m]))",
+          "legendFormat": "{{venue}} errors/15m"
+        },
+        {
+          "refId": "D",
+          "expr": "sum by (venue) (increase(r20_market_stream_parse_errors_total[15m]))",
+          "legendFormat": "{{venue}} parse errors/15m"
+        },
+        {
+          "refId": "E",
+          "expr": "sum by (venue) (increase(r20_market_stream_frames_total[5m]))",
+          "legendFormat": "{{venue}} frames/5m"
+        },
+        {
+          "refId": "F",
+          "expr": "r20_market_stream_snapshot_age_seconds",
+          "legendFormat": "snapshot age (s)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 8
+          }
+        },
+        "overrides": []
+      }
     }
   ]
 }

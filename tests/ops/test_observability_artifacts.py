@@ -65,7 +65,7 @@ def _full_snapshot() -> dict:
     return {
         "generated_at": 1789000000.0,
         "sources": {"venue_health": True, "model_calls": True, "risk_limits": True,
-                    "market_data": True},
+                    "market_data": True, "market_stream": True},
         "venue_health": {
             "updated_utc": "2026-09-20 07:45:32",
             "venues": {"okx": {"ok": ["BTC"], "failed": {"SOL": "timeout"},
@@ -85,6 +85,21 @@ def _full_snapshot() -> dict:
             "last_success_ms": {"okx_public_get_ticker": 1789000000_000 - 5_000},
             "failures": {"total": 1, "by_kind": {"okx_public_get_ticker": 1},
                          "last_error": {}},
+        },
+        # ⚠️ 新增族时这里必须同步，否则反漂移门会失去覆盖（门里已有断言钉住这点）
+        "market_stream_health": {
+            "schema_version": 1,
+            "written_at_ms": 1789000000_000 - 12_000,
+            "venues": {
+                "okx": {"frames": 30, "ticks": 29, "parse_errors": 0, "errors": 0,
+                        "reconnects": 0, "last_msg_ms": 1789000000_000 - 12_000,
+                        "last_tick_ms": 1789000000_000 - 12_000, "tick_age_s": 12.0,
+                        "last_error": None},
+                "gate": {"frames": 1, "ticks": 0, "parse_errors": 0, "errors": 1,
+                         "reconnects": 0, "last_msg_ms": 1789000000_000 - 12_000,
+                         "last_tick_ms": None, "tick_age_s": None,
+                         "last_error": "已连接但窗口内零数据帧"},
+            },
         },
     }
 
