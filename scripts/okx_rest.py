@@ -287,6 +287,11 @@ def place_order(
         params["targetAdj"] = target_adj
     legs = list(attach_algo_ords or [])
     if attach_tp is not None or attach_sl is not None:
+        # ⚠️ 触发价类型（`tpTriggerPxType`/`slTriggerPxType`）**本路径不发送** ⇒ 由交易所默认决定。
+        # 本仓**未核实**该默认值（无法联网核对官方文档时，不凭记忆写死"默认 last"）；
+        # 修正路径（`amend_algo_sl` 的 `newTp/SlTriggerPxType`）支持并校验 last/index/mark，
+        # 故**同一条保护腿可能在修正后改变触发语义**。谁要显式指定，走 `attach_algo_ords`/`extra`
+        # 逐字传参（`_validate_payload` 已校验取值域）。已登记在 `docs/FAILURE_SEMANTICS.md` §6。
         leg: dict[str, Any] = {}
         if attach_tp is not None:
             leg["tpTriggerPx"] = attach_tp
