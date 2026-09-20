@@ -58,6 +58,7 @@
 | 活体数据形状（意图/追踪器文件） | **两层**：提交前只读预检（测试层）+ 周期开跑前**只读预检并打印**（运行时层，**只警告不阻断**，行为判定仍在加载侧）| 防误判/防崩 | `scripts/trader/data_shape.py` | `tests/core/test_live_artifact_shape.py::RuntimePreflightStageTest` |
 | 周期披露汇总（每轮一条） | 周期收尾固定打印 `[周期披露] …`：列出本轮**凭证坏所/对账失败/形状违规/跨所保护错误**；未开闸的加固层也如实标注 | 披露 | `scripts/trader/cycle_stages.py` | `tests/trading/test_silent_degradation_telemetry.py::CycleDisclosureSummaryTest` |
 | 周期披露指标（`/metrics`） | worker 落盘快照、后端读取；**快照缺失只标 `source_ok=0`，绝不发零值计数**（读不到 ≠ 很干净；未开闸时也不发错误计数）| 披露 | `r20_backend/metrics.py` | `tests/ops/test_metrics_exposition.py::CycleDisclosureMetricsTest` |
+| 面板侧 JSON 读取（追踪器/多所组合） | 收敛到**共享披露读取器**：文件不存在⇒静默空态；读不出来/形状不对⇒返回空**但打印 warn 并点明"空不等于没有"** | 披露 | `r20_backend/dashboard_payload/readers.py` | `tests/ui/test_dashboard_payload_seam.py::DisclosedJsonReaderTest` |
 <!-- anchors:end -->
 
 ## 3. 抽取门与"文档化差异"

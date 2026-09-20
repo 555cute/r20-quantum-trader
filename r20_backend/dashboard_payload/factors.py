@@ -8,6 +8,8 @@ FACTOR_LIBRARY_FILE / AI_DECISIONS_FILE / STATE_JSON_FILE），故按 B4/B5/B6 �
 from __future__ import annotations
 
 import json
+
+from r20_backend.dashboard_payload.readers import load_json_dict_disclosed
 import os
 
 from r20_backend.dashboard_payload.market import _safe_float
@@ -18,12 +20,12 @@ __all__ = ["load_position_trackers", "enrich_position_risk_fields",
 
 
 def load_position_trackers(tracker_file: str | os.PathLike[str]):
-    try:
-        with open(tracker_file, "r", encoding="utf-8") as handle:
-            data = json.load(handle)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+    """读持仓追踪（面板侧）。第 52 刀起委托 **共享披露读取器**（见 `readers`）。
+
+    行为保持兼容（读不到仍返回 `{}`），但**不再静默**：失败会打一行 warn，
+    让"没有数据"与"读不到"在日志里可区分（面板字段仍旧为空）。
+    """
+    return load_json_dict_disclosed(tracker_file)[0]
 
 
 def enrich_position_risk_fields(tracker_file: str | os.PathLike[str], positions, trackers=None):

@@ -337,3 +337,89 @@ class ShellDisciplineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+class DisclosedJsonReaderTest(unittest.TestCase):
+    """面板侧读取必须**披露**而非静默返回空（第 52 刀）。
+
+    背景：同一个"读追踪器"语义此前有**两份实现**（`factors` 吃文件路径、
+    `ledger_view` 吃目录），且两份都是 `except Exception: return {}` ——
+    本仓两个经典坑叠在一起：*同一语义两处写 ⇒ 必然漂移* + *读不到被渲染成"没有"*。
+    本刀收敛到共享读取器并补披露（返回值不变，保持兼容）。
+    """
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory(prefix="disclosed-read-")
+        self.addCleanup(self.tmp.cleanup)
+        self.base = Path(self.tmp.name)
+
+    def test_shared_reader_distinguishes_missing_from_unreadable(self):
+        import io
+        from contextlib import redirect_stdout
+        from r20_backend.dashboard_payload.readers import load_json_dict_disclosed
+        missing = self.base / "nope.json"
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            data, err = load_json_dict_disclosed(missing)
+        self.assertEqual((data, err), ({}, ""))
+        self.assertEqual(buf.getvalue(), "", "文件不存在是合法空态，不应吵")
+
+        broken = self.base / "broken.json"
+        broken.write_text("{ 半截", encoding="utf-8")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            data, err = load_json_dict_disclosed(broken)
+        self.assertEqual(data, {})
+        self.assertTrue(err, "读不出来必须给出原因（返回值不变，但要能区分）")
+        self.assertIn("[面板] warn", buf.getvalue())
+        self.assertIn("请勿据此判断", buf.getvalue(), "披露必须点明'空不等于没有'")
+
+    def test_non_dict_json_is_reported_not_silently_emptied(self):
+        import io
+        from contextlib import redirect_stdout
+        from r20_backend.dashboard_payload.readers import load_json_dict_disclosed
+        f = self.base / "list.json"
+        f.write_text("[1, 2, 3]", encoding="utf-8")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            data, err = load_json_dict_disclosed(f)
+        self.assertEqual(data, {})
+        self.assertIn("顶层应为 dict", err)
+        self.assertIn("形状", buf.getvalue())
+
+    def test_valid_dict_returns_data_without_noise(self):
+        import io
+        import json as _json
+        from contextlib import redirect_stdout
+        from r20_backend.dashboard_payload.readers import load_json_dict_disclosed
+        f = self.base / "ok.json"
+        f.write_text(_json.dumps({"BTC-USDT-SWAP_long": {"scale_count": 1}}), encoding="utf-8")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            data, err = load_json_dict_disclosed(f)
+        self.assertEqual(err, "")
+        self.assertEqual(data["BTC-USDT-SWAP_long"]["scale_count"], 1)
+        self.assertEqual(buf.getvalue(), "")
+
+    def test_both_tracker_loaders_agree_and_both_disclose(self):
+        """防漂移的行为钉：两份实现（路径版 / 目录版）对同一输入必须一致。"""
+        import io
+        from contextlib import redirect_stdout
+        from r20_backend.dashboard_payload.factors import load_position_trackers as by_path
+        from r20_backend.dashboard_payload.ledger_view import load_position_trackers as by_dir
+        (self.base / "position_trackers.json").write_text("{ 坏", encoding="utf-8")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            a = by_path(str(self.base / "position_trackers.json"))
+            b = by_dir(str(self.base))
+        self.assertEqual(a, b, "两份实现已经漂移（同输入不同结果）")
+        self.assertEqual(a, {})
+        self.assertGreaterEqual(buf.getvalue().count("[面板] warn"), 2,
+                                "两份实现都必须披露，而不是只有一份")
+
+    def test_multi_venue_fallback_discloses_instead_of_silently_empty(self):
+        """源码钉：多所组合的兜底分支必须带披露语（此前是静默 `return {}`）。"""
+        src = (Path(__file__).resolve().parents[2] / "r20_backend" / "dashboard_payload"
+               / "market.py").read_text(encoding="utf-8")
+        self.assertIn("多所组合读取失败", src)
+        self.assertIn("请勿据此判断", src)

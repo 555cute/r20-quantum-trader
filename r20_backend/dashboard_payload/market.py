@@ -178,5 +178,9 @@ def _load_multi_venue_portfolio(total_eq: float, avail_eq: float, positions: lis
                 venues_map["binance"] = {"status": "unavailable", "equity": None, "reason": f"Binance 账户面异常: {str(exc)[:180]}"}
 
         return aggregate_venue_accounts(venues_map, env)
-    except Exception:
+    except Exception as exc:      # noqa: BLE001 - 面板侧不得因一处异常炸掉整个载荷
+        # 第 52 刀：原先静默 `return {}` ⇒ 面板把"多所组合读取失败"渲染成**空组合**
+        # （读者会以为"没有跨所仓位"）。返回空值不变，但必须披露。
+        print(f"[面板] warn 多所组合读取失败: {exc!r}（本次将显示为空组合 —— "
+              "请勿据此判断\"没有跨所仓位\"）")
         return {}

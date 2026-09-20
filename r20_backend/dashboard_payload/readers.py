@@ -57,3 +57,37 @@ def read_text_lines(
     if strip:
         return [line.strip() for line in tail if line.strip()]
     return [line.rstrip("\n") for line in tail]
+
+def load_json_dict_disclosed(path: str | os.PathLike[str]) -> tuple[dict, str]:
+    """读 JSON dict，返回 `(数据, 错误文本)`（第 52 刀）。
+
+    为什么要有它：面板侧同一个读取语义此前**存在两份实现**（`factors` 与
+    `ledger_view`），且两份都是 `except Exception: return {}` ——
+    这正是本仓反复吃过的两个坑叠在一起：
+
+    1. **同一语义两处写 ⇒ 必然漂移**（两份签名还不一样：一份吃文件路径、一份吃目录）；
+    2. **读不到被渲染成"没有"**：追踪器读失败 ⇒ 面板给仓位补的风控字段静默缺失，
+       读者看不出"是没数据还是没读到"。
+
+    约定（对齐 `docs/FAILURE_SEMANTICS.md`）：
+
+    - 文件**不存在** ⇒ `({}, "")`（合法空态，不吵）；
+    - **读不出来/不是 dict** ⇒ `({}, 原因)` 并打印一行 warn（**返回空值不变**，
+      只补披露；调用方签名与行为保持兼容）。
+    """
+    text = os.fspath(path)
+    if not os.path.exists(text):
+        return {}, ""
+    try:
+        with open(text, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except Exception as exc:      # noqa: BLE001 - 面板侧不得因一个文件炸掉整个载荷
+        reason = f"追踪/状态文件读不出来: {exc!r}"
+        print(f"[面板] warn {os.path.basename(text)} {reason}（相关字段将显示为空，"
+              "请勿据此判断\"没有数据\"）")
+        return {}, reason
+    if not isinstance(data, dict):
+        reason = f"顶层应为 dict，实为 {type(data).__name__}"
+        print(f"[面板] warn {os.path.basename(text)} {reason}（形状不对 ⇒ 字段显示为空）")
+        return {}, reason
+    return data, ""

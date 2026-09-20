@@ -6,6 +6,8 @@ autosync_enabled 以门面模块导入时的快照值注入，绝不在调用时
 from __future__ import annotations
 
 import json
+
+from r20_backend.dashboard_payload.readers import load_json_dict_disclosed
 import os
 import time
 
@@ -58,14 +60,9 @@ def load_signal_journal_by_inst(data_dir: str) -> dict[str, list[dict]]:
 def load_position_trackers(data_dir: str) -> dict[str, dict]:
     """读取活动持仓追踪器（含持仓中开仓数理快照）。"""
     tracker_file = os.path.join(data_dir, "position_trackers.json")
-    if not os.path.exists(tracker_file):
-        return {}
-    try:
-        with open(tracker_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+    # 第 52 刀：与 `factors.load_position_trackers` 收敛到**同一实现**（此前两份、签名还不同，
+    # 是"同一语义两处写 ⇒ 必然漂移"的典型）；读不到仍返回 {}，但会打 warn 披露。
+    return load_json_dict_disclosed(tracker_file)[0]
 
 
 def match_trade_snapshot(
