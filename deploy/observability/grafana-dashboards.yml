@@ -1,0 +1,18 @@
+# Grafana 面板自动加载（与 docker-compose.yml 配套）
+#
+# 面板 JSON 挂到 `/var/lib/grafana/dashboards/`，本文件只负责"去哪读"。
+# 注意别把 JSON 面板和 provider.yml 放进同一个目录（Grafana 会尝试解析整目录）。
+apiVersion: 1
+
+providers:
+  - name: r20
+    orgId: 1
+    folder: R20
+    folderUid: r20
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

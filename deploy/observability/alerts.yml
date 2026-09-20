@@ -1,0 +1,117 @@
+# R20 告警规则（指标中枢的"会响"入口）
+#
+# 每条规则都对应一次**真实发生过**的故障形态，不是凭空设的阈值：
+#   · 第 137 刀：行情取数静默失败 30 小时 ⇒ 主脑 P0 拦截、零新仓、零信号
+#   · US-004   ：某所（gate/binance）取数大面积失败 ⇒ 该所行情不可信
+#   · 交付事故 ：worker 静默消失（周期不再运行）而没人发现
+#
+# 阈值口径（可调，但别调成"永远不响"）：
+#   · 数据源缺失允许 10m 宽限（后端重启/抓取时序抖动）
+#   · 行情健康快照 45m 未更新 → worker 断档（worker 周期 15m，给 3 个周期）
+#   · 单个 kind 连续 30m 无成功取数 → 该取数链路实际已死
+#   · 某所失败标的数 > 0 持续 30m → 该所行情不完整，别拿它做决策依据
+#
+# 校验（部署机上）：promtool check rules alerts.yml
+groups:
+  - name: r20-metrics-availability
+    rules:
+      - alert: R20MetricsSourceMissing
+        expr: r20_metrics_source_ok == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "指标数据源缺失：{{ $labels.source }}"
+          description: "该源连续 10 分钟取不到数（0=数据缺失，不代表系统故障）。先看后端日志与对应文件是否存在。"
+
+      - alert: R20BackendDown
+        expr: up{job="r20-backend"} == 0
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "R20 后端指标端点抓取失败"
+          description: "抓取失败 ≥3 分钟：进程挂了、端口不通，或指标端点鉴权失败（401 时说明 X-R20-Admin-Token 失效/未注入）。"
+
+  - name: r20-market-data
+    rules:
+      - alert: R20MarketDataSnapshotStale
+        expr: r20_market_data_snapshot_age_seconds > 2700
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "行情取数健康快照 45 分钟未更新"
+          description: "worker 周期为 15 分钟，快照超过 45 分钟未更新说明周期没有在跑（进程消失/卡死）——这是第 137 刀那类事故的先行信号。"
+
+      - alert: R20MarketDataFetchFailures
+        expr: increase(r20_market_data_call_failures_total[15m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "行情取数失败：{{ $labels.kind }}"
+          description: "近 15 分钟出现取数失败。注意双域直连每个 host 都算一次尝试，故单次逻辑取数可能计 2 次。"
+
+      - alert: R20MarketDataNoRecentSuccess
+        expr: r20_market_data_last_success_age_seconds > 1800
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "行情取数 30 分钟无成功：{{ $labels.kind }}"
+          description: "该 kind 距上次成功超过 30 分钟。若它是 ticker/candles 这类必需链路，主脑会因数据无效而停止开新仓。"
+
+      - alert: R20MarketDataLatencyHigh
+        expr: r20_market_data_latency_p95_seconds > 3
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "行情取数尾延时劣化：{{ $labels.kind }}"
+          description: "p95 > 3s 持续 15 分钟。超时上限 3.5s、失败前先出现尾延时抬升，故这是失败的前兆。"
+
+  - name: r20-venues
+    rules:
+      - alert: R20VenueInstrumentsFailing
+        expr: r20_venue_instruments_failed > 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "场所取数不完整：{{ $labels.venue }}"
+          description: "该所连续 30 分钟有标的取数失败。跨所封顶按场所计仓位，行情不完整的场所不应作为决策依据。"
+
+      - alert: R20VenueHealthStale
+        expr: time() - r20_venue_health_updated_timestamp_seconds > 2700
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "场所健康快照过期"
+          description: "venue_health.json 超过 45 分钟未更新（写入方与行情快照同一个 worker 周期）。"
+
+  - name: r20-model-and-risk
+    rules:
+      - alert: R20ModelCallFailureRate
+        expr: |
+          (
+            increase(r20_model_calls_total[1h]) > 5
+            and
+            increase(r20_model_calls_successful_total[1h]) / increase(r20_model_calls_total[1h]) < 0.8
+          )
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "大模型调用成功率 <80%（近 1 小时）"
+          description: "样本量 >5 次才判（避免夜里 1 次失败就吼）。连续失败会走 AI 健康告警并禁止复用旧指令。"
+
+      - alert: R20RiskLimitMissing
+        expr: count(r20_risk_limit) < 10
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "风控旋钮暴露不全（少于 10 个）"
+          description: "r20_risk_limit 是白名单读取，取不到的键会跳过而不是补 0。数量骤降说明 risk_constants 改名/导入失败 —— 编一个不存在的阈值比不报更危险。"

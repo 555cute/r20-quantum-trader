@@ -253,6 +253,9 @@ sh deploy/install.sh
 vim .env
 ```
 
+> 📈 **可选：观测栈**（Prometheus + Grafana，把 `/api/v1/admin/metrics` 变成告警与面板）：
+> 见 `deploy/observability/README.md`。指标含账户规模与风控阈值，端口默认只绑 127.0.0.1。
+
 ### 2. 编译前端与启动服务
 ```bash
 # 1. 激活虚拟环境

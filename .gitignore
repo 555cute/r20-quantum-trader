@@ -150,3 +150,6 @@ data/*.sqlite3
 # ~190M 的 core 文件，曾被我一次 git add -A 误提交。按后缀一概忽略。
 core
 core.*
+
+# 观测栈的令牌文件（内容 = R20_ADMIN_TOKEN）：绝不入库，只走文件挂载
+deploy/observability/metrics_token

@@ -1,0 +1,43 @@
+# R20 Quantum Trader → Prometheus 抓取配置（可观测性 Phase 1 消费侧）
+#
+# 用法（与同目录 docker-compose.yml 配套）：
+#   R20_METRICS_TOKEN=<管理端静态令牌> docker compose -f deploy/observability/docker-compose.yml up -d
+#
+# ⚠️ 令牌来源：后端指标端点 `/api/v1/admin/metrics` 走 `require_admin_header`，
+# 需要 `X-R20-Admin-Token`（对应后端 `R20_ADMIN_TOKEN`）。**令牌绝不写进本文件** ——
+# 由文件挂载注入（本仓红线：任何凭证不入库、不打日志）。
+# Prometheus 2.49+ 才支持 `http_headers`；更低版本请用下面的注释方案。
+
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+  external_labels:
+    deployment: r20
+
+rule_files:
+  - alerts.yml
+
+scrape_configs:
+  - job_name: r20-backend
+    metrics_path: /api/v1/admin/metrics
+    scheme: http
+    http_headers:
+      X-R20-Admin-Token:
+        secrets:
+          - /etc/r20/metrics_token
+    static_configs:
+      - targets:
+          - host.docker.internal:8080
+        labels:
+          component: backend
+
+  # ── Prometheus < 2.49 的替代方案（二选一，别同时开）────────────────────────
+  # 版本过低时 `http_headers` 不被识别，抓取会 401。此时把指标端点放到只监听
+  # 127.0.0.1 的反向代理后（例如 nginx `location /metrics_proxy/` 注入请求头），
+  # 让 Prometheus 抓代理地址；**不要**为了省事把该端点改成免鉴权 ——
+  # 它含账户规模与风控阈值（见 `r20_backend/metrics.py` 的约束 3）。
+  #
+  # - job_name: r20-backend-via-proxy
+  #   metrics_path: /metrics_proxy/api/v1/admin/metrics
+  #   static_configs:
+  #     - targets: ["host.docker.internal:9099"]
