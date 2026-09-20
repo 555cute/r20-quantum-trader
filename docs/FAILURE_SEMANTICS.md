@@ -70,6 +70,8 @@
 | 时间戳字段单位（`_ms`=毫秒 / `_ts`=秒）| 生产与消费两侧都必须自洽；`_ms` 字段写 `*1000`、`_ts` 字段写秒；已知例外（`last_sync_ts`）必须有**伴生不变式**（写入者全为毫秒或 None，绝不混入秒）| 防 | `tests/core/test_timestamp_unit_convention.py` | `tests/core/test_timestamp_unit_convention.py::TimestampUnitConventionTest` |
 | 下单量换算的方向（币数 / 张数）| **两条分支一律向下取整**（币数截断到 step、张数 `floor`）⇒ 换算名义**永不超出**目标；与实盘路径 `quantize_size` 同向。取整代价：可能更常低于最小张数而被拒（少下单，不超买）| 不做（fail-closed）| `r20_backend/exchanges/base.py` | `tests/venues/test_exchanges_adapter.py::ContractsRoundingBoundTest` |
 | 原子写辅助与敏感状态文件 | 凡 `_atomic_write*` 必须**临时文件 + fsync + 原子替换**（否则 rename 后断电可留空/截断）；`circuit_breaker.json` 等**读者按默认值降级**的文件**不得**被直写 | 防 | `r20_backend/policy/io.py` | `tests/core/test_atomic_write_invariant.py::AtomicWriteInvariantTest` |
+| 文档引用 ⇒ 必须已提交 | 失败语义手册与**全仓文档**引用的**源码树**路径，"磁盘上存在即必须被 git 跟踪"（`data/`、`plan_local/` 等运行态不在范围）——防 `.gitignore` 过宽造成"磁盘有、仓库无"而本地测试照常绿 | 防 | `tests/audit/test_doc_paths_are_committed.py` | `tests/audit/test_doc_paths_are_committed.py::BroadDocReferencesTest` |
+| `.gitignore` 裸词 vs 源码目录 | 裸词模式（无 `/`、无 `.`、无 `*`）按**路径组件**匹配，会静默吞掉同名源码目录（`core` 吞掉 `tests/core/` 的事故根因）——与源码树里真实存在的目录同名即翻红 | 防 | `tests/audit/test_gitignore_bare_word_collisions.py` | `tests/audit/test_gitignore_bare_word_collisions.py::GitignoreBareWordCollisionTest` |
 <!-- anchors:end -->
 
 ## 3. 抽取门与"文档化差异"
@@ -111,6 +113,18 @@
 - **失效自检**：任何"从代码推导判据"的门都要断言"我确实抓到了东西"。
 - **如实登记证伪**：假设被推翻时照样写进提交/台账（例如"`pos_sz` 类型冲突不可达"、
   "扫描路径 item 永远进不了 actions"），避免下一个人重新怀疑同一处。
+- **门禁必须跑在"将要提交的那棵树"上**（2026-09 事故条款）：`pytest` 读的是**工作树**，
+  被 `.gitignore` 吞掉的新文件照样能让本地全绿，而仓库里什么都没有 —— 本仓真实发生过：
+  `.gitignore` 一行**裸 `core`**（本意是忽略仓库根的崩溃转储）按"路径组件"匹配连带忽略了
+  `tests/core/`，5 个新门长期未提交，其中一个提交只改了本文档却在信息里宣称新增了那个门。
+  提交前逐项确认：`git status --short` 干净、每个新文件 `git ls-files --error-unmatch` 能对上、
+  提交信息点名的文件确实出现在 `git show --stat`。
+- **引用即提交**：文档里引用的源码路径必须"存在 ⇒ 已被跟踪"，
+  由 `tests/audit/test_doc_paths_are_committed.py` 强制（含全仓文档的宽扫描）。
+  新的仓库级纪律要写进**被跟踪的**文档 —— 注意 `AGENTS.md` 在本仓是被**有意忽略**的本地文件
+  （`.gitignore` 里与 `SOUL.md`/`MEMORY.md` 同属"agent 运行态"块），写在那里不随仓库走。
+  `.gitignore` 的**裸词**模式另有专检：`tests/audit/test_gitignore_bare_word_collisions.py`
+  （裸词按路径组件匹配，会静默吞掉同名源码目录 —— `core` 事故的根因）。
 
 ## 6. 明确残留（未决，需人工拍板）
 

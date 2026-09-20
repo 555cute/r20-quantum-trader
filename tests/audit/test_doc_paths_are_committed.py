@@ -90,5 +90,69 @@ class DocPathsAreCommittedTest(unittest.TestCase):
             self.assertNotIn(tracked_rel, _git_tracked([tracked_rel]))
 
 
+#: 全仓文档扫描范围（含仓库根的两份说明）
+ALL_DOCS = (ROOT / "docs", ROOT / "README.md", ROOT / "AGENTS.md")
+#: **源码树**前缀：这些目录下的文件"磁盘上存在"就必须"仓库里有"。
+#: 运行态/本地目录（`data/`、`plan_local/`、`promo_local/`、`.archive/`）**不在范围内** ——
+#: 它们被有意忽略（审计确认：文档引用的 6 个未跟踪路径全属此类），
+#: 把它们算进来只会制造噪音，反而掩盖真正的信号。
+SOURCE_ROOTS = ("tests/", "scripts/", "r20_backend/", "frontend/src/", "docs/")
+
+
+def broad_source_references(doc_text: str) -> "list[str]":
+    """从任意文档里抽取**源码树**路径引用（去 `::Case` 后缀、去行号）。"""
+    out: "list[str]" = []
+    for token in PATH_TOKEN.findall(doc_text):
+        candidate = token.split("::", 1)[0].strip()
+        if "/" in candidate and candidate.startswith(SOURCE_ROOTS):
+            out.append(candidate)
+    return sorted(set(out))
+
+
+class BroadDocReferencesTest(unittest.TestCase):
+    """**所有**文档：源码树里"存在即应被跟踪"（第一百五十六刀）。
+
+    为什么扩到全仓文档：上一刀的根因（`.gitignore` 裸 `core` 吞掉 `tests/core/`）不只威胁
+    失败语义手册——任何文档引用的源码路径都可能"磁盘上有、仓库里没有"。范围限定在源码树，
+    是因为运行态数据（`data/*.json`）被文档引用但**本就该**忽略（审计已确认）。
+    """
+
+    def _all_refs(self):
+        refs: "dict[str, list[str]]" = {}
+        for doc in ALL_DOCS:
+            if doc.is_dir():
+                for f in sorted(doc.rglob("*.md")):
+                    for r in broad_source_references(f.read_text(encoding="utf-8")):
+                        refs.setdefault(r, []).append(str(f.relative_to(ROOT)))
+            elif doc.exists():
+                for r in broad_source_references(doc.read_text(encoding="utf-8")):
+                    refs.setdefault(r, []).append(doc.name)
+        return refs
+
+    def test_scan_is_not_vacuous(self):
+        refs = self._all_refs()
+        self.assertGreaterEqual(len(refs), 20,
+                                f"全仓文档只抽到 {len(refs)} 个源码路径引用 ⇒ 抽取逻辑失效")
+
+    def test_existing_source_paths_are_tracked(self):
+        refs = self._all_refs()
+        on_disk = [r for r in refs if (ROOT / r).exists()]
+        self.assertGreaterEqual(len(on_disk), 10, "磁盘上存在的源码引用太少 ⇒ 检查无意义")
+        untracked = _git_tracked(on_disk)
+        self.assertEqual(
+            untracked, set(),
+            "以下源码路径**磁盘上存在但未被 git 跟踪**（文档引用它们，仓库里却没有）：\n"
+            + "\n".join(f"  {p}   ← {refs[p][:2]}" for p in sorted(untracked))
+            + "\n常见原因：.gitignore 过宽（如裸 `core` 命中 `tests/core/`）")
+
+    def test_broad_check_has_teeth(self):
+        """牙齿：源码树里造一个未跟踪文件，宽扫描必须报出来。"""
+        import tempfile
+        with tempfile.TemporaryDirectory(dir=str(ROOT / "tests"), prefix=".untracked-wide-") as td:
+            probe = Path(td) / "probe.py"
+            probe.write_text("# 存在但未跟踪\n", encoding="utf-8")
+            rel = str(probe.relative_to(ROOT))
+            self.assertIn(rel, _git_tracked([rel]), "宽扫描没有牙齿")
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
