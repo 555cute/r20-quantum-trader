@@ -8,6 +8,7 @@
 | `sizing.py` | 按 AI 决策与账户实况推导下单张数并套四道钳制 | 由调用方传入上限常量 |
 | `circuit_breaker.py` | 黑天鹅哨兵、熔断态、止损冷却期读写 | 无（读自身状态文件） |
 | `risk_gates.py` | **发送前三道风控闸门**：杠杆区间夹取 / 单笔保证金夹取 / 跨所同向敞口拒开 | 无（纯计算；常量与 `_fail` 由调用方注入） |
+| `own_records.py` | **己仓对账**：交易所实况 × 本方台账 holding 行 → 逐仓归属判定（`own` / `stale_closed` 账实不符 / `mismatch` / `untracked` / `ledger_unavailable`）。**`untracked` 与 `ledger_unavailable` 是『不可判定』，绝不是『外部仓』** | 无（台账路径可注入；纯计算） |
 | `cooldowns.py` | **止损冷却单一事实源**：读冷却状态（损坏≠缺失）/ 是否仍在冷却 / 只读展示面 | 无（路径与时长由调用方传入） |
 
 > `cooldowns.py`（结构优化阶段 4·B3 第五十刀）原为

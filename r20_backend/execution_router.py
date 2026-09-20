@@ -19,6 +19,8 @@ import math
 import os
 from typing import Any, Dict, Optional
 
+from .execution import own_records as own_position_records
+
 from .execution.risk_gates import (
     check_total_exposure as _check_total_exposure,
     clamp_leverage as _clamp_leverage,
@@ -58,6 +60,13 @@ MODE_HAZARDS: Dict[str, str] = {
     "dual_plus": "拆仓语义，本系统不把它折叠成净仓/双向解读",
     "long_short": "Hedge 对冲语义，positionSide 下单/保护腿载荷未在真实账户核验",
 }
+
+
+#: 己仓对账所用台账路径。空 = 用默认（`<repo>/data/trading_ledger.json`）。
+#: ⚠️ 必须**调用期读取**（`import` 期快照会让测试 patch 失效，且本仓已有先例）；
+#: 测试把它指向夹具，否则预检会读到**线上真台账**、断言随机器数据漂移
+#: （本刀实测踩到：BTC 的判定被线上一条 closed 行左右成 stale_closed）。
+OWN_POSITION_LEDGER_FILE: str = ""
 
 
 def _fail(stage: str, detail: str, venue: str = "gate", **extra: Any) -> RouteResult:
@@ -275,16 +284,57 @@ def open_protected_position(decision: Dict[str, Any], *,
             if _open_count >= pool_max_open:
                 return _fail("venue_pool",
                              f"{venue.upper()} 当前持仓 {_open_count} 笔已达池上限 max_open={pool_max_open}", venue=venue)
+    # 己仓归属对账：`own_position` 未传入时**不再默认宣称"外部仓"**（2026-09-20 实盘
+    # 证据：UNI/binance 是台账 holding 行里的**本方**仓、ARB/binance 是**账实不符**
+    # （交易所仍持有而台账该行已 closed），旧文案一律报成"外部仓连坐拒开"=说谎的诊断，
+    # 会把运维引去找根本不存在的"外部仓"）。判定仍**全部拒开**（本刀不改交易行为），
+    # 只是把"谁在持有/能不能判定"说清楚，并把判定放进入参供调用方与巡检消费。
+    _own_ledger = None
+    if not own_position:
+        try:
+            _own_ledger = own_position_records.load_ledger(
+                OWN_POSITION_LEDGER_FILE or None)
+        except Exception:
+            _own_ledger = None            # 读不到 → 判"不可判定"，绝不判"外部仓"
     for p in existing:
         ex_signed = float(p.get("size_signed") or 0)
-        own_signed = float(own_position.get("size_signed") or 0) if own_position else None
-        own_match = bool(own_position) and abs(ex_signed - (own_signed or 0)) < 1e-6 \
-            and str(own_position.get("side") or "").lower() == str(p.get("side") or "").lower()
-        if not own_match:
+        ex_side = str(p.get("side") or "")
+        if own_position:
+            own_signed = float(own_position.get("size_signed") or 0)
+            own_match = (abs(ex_signed - own_signed) < 1e-6
+                         and str(own_position.get("side") or "").lower() == ex_side.lower())
+            if own_match:
+                continue
             return _fail("precheck",
-                         f"{asset} 交易所存在非本系统在管既有仓 size_signed={ex_signed:g}({p.get('side')})"
-                         + ("，与 lab 记录不符" if own_position else "，lab 无在管记录")
-                         + "——外部仓连坐拒开", venue=venue, existing_size=ex_signed)
+                         f"{asset} 交易所既有仓与**调用方在管记录**不符 "
+                         f"size_signed={ex_signed:g}({ex_side}) vs 记录 {own_signed:g}"
+                         f"({own_position.get('side')})——拒开（记录漂移须先核对账实）",
+                         venue=venue, existing_size=ex_signed, own_verdict="mismatch")
+        try:
+            _verdict = own_position_records.classify_exchange_position(
+                venue=venue, asset=asset, size_signed=ex_signed, side=ex_side,
+                ledger=_own_ledger)
+        except Exception as exc:                      # 判定件异常 ≠ 外部仓
+            _verdict = {"verdict": "ledger_unavailable",
+                        "reason": f"己仓对账失败（{type(exc).__name__}）——归属**不可判定**"}
+        _v = str(_verdict.get("verdict") or "untracked")
+        _why = str(_verdict.get("reason") or "")
+        if _v == "own":
+            _detail = (f"{asset} **本方已在管该仓**（{_why}），交易所实况 "
+                       f"size_signed={ex_signed:g}({ex_side})——本入口不重复开仓"
+                       "（重复开仓=敞口翻倍）；加仓/减仓请走持仓管理路径")
+        elif _v == "stale_closed":
+            _detail = (f"{asset} **账实不符**（{_why}），交易所实况 "
+                       f"size_signed={ex_signed:g}({ex_side})——拒开并须人工核对"
+                       "（该敞口可能无人管理）")
+        elif _v == "mismatch":
+            _detail = (f"{asset} 本方记录与交易所不符（{_why}），交易所实况 "
+                       f"size_signed={ex_signed:g}({ex_side})——拒开")
+        else:
+            _detail = (f"{asset} {_why}；交易所实况 size_signed={ex_signed:g}({ex_side})"
+                       "——拒开（不宣称『外部仓』）")
+        return _fail("precheck", _detail, venue=venue, existing_size=ex_signed,
+                     own_verdict=_v)
 
     # 持仓模式只读体检（审计 §2 Gate 的既定政策，此前只有政策没有执行）：
     # 本系统**永不自动切换**用户账户的持仓模式；"测不出来"与"dual_plus 拆仓"

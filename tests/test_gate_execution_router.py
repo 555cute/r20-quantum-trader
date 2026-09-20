@@ -313,14 +313,29 @@ class TestExternalPositionPrecheck(unittest.TestCase):
         self.assertEqual(r["stage"], "precheck")
         self.assertNotIn("place", [c[0] for c in ad.calls])   # 探针在任何委托之前
 
-    def test_lab_no_record_but_exchange_has_position_rejects(self):
-        # own_position=None（lab 无在管记录）而交易所有仓 → 来源不明，拒开
+    def test_no_own_record_but_exchange_has_position_rejects(self):
+        """`own_position=None` 且台账该合约无记录 → 拒开，但**不得宣称"外部仓"**。
+
+        第一百一十刀改写：旧断言钉的是 `"lab 无在管记录"` —— 试验田早已整体移除
+        （`7a963f9`），文案却留着"lab"，且把**归属不可判定**说成外部仓（实测 UNI 是
+        本方仓、ARB 是账实不符，都被这条文案误导）。现断言诚实的不可判定语义 +
+        判定入参 `own_verdict`。台账路径钉到夹具，避免读到线上真台账。
+        """
+        import json
+        import tempfile
         ad = _StubAdapter(positions_rows=[{"base": "BTC", "side": "short",
                                            "size_signed": -12}])
-        with self._env():
-            r = router.open_protected_position(_decision(), adapter=ad, price_ref=79000.0)
+        with tempfile.TemporaryDirectory() as d:
+            fixture = os.path.join(d, "ledger.json")
+            with open(fixture, "w", encoding="utf-8") as f:
+                json.dump({}, f)
+            with self._env(), patch.object(router, "OWN_POSITION_LEDGER_FILE", fixture):
+                r = router.open_protected_position(_decision(), adapter=ad, price_ref=79000.0)
         self.assertEqual(r["stage"], "precheck")
-        self.assertIn("lab 无在管记录", r["detail"])
+        self.assertEqual(r["own_verdict"], "untracked")
+        self.assertIn("不可判定", r["detail"])
+        self.assertIn("不宣称", r["detail"])
+        self.assertNotIn("外部仓连坐拒开", r["detail"])
 
     def test_own_matching_position_passes_through(self):
         # lab 在管记录与交易所一致（如 tracker 恢复场景）→ 己仓放行
