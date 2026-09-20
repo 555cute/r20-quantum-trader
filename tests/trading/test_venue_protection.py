@@ -1072,3 +1072,85 @@ class TriggerPxTypePerVenueTest(unittest.TestCase):
                                    now_s=1_700_000_000.0)
         self.assertTrue(v.get("ours"), "夹具没被判为本方腿")
         self.assertEqual(v["ours"][0].get("trigger_px_type"), "price_type:0")
+
+class LedgerEvidenceTest(unittest.TestCase):
+    """第一百七十四刀：台账取证 —— 只读、三态、**读不到就不产生证据**。"""
+
+    def test_reader_three_states(self):
+        import json, tempfile, pathlib as _p
+        from scripts.trader.venue_protection import read_ledger_rows
+        with tempfile.TemporaryDirectory() as d:
+            missing = _p.Path(d) / "nope.json"
+            self.assertIsNone(read_ledger_rows(missing), "文件不存在 ⇒ None（不是空台账）")
+            bad = _p.Path(d) / "bad.json"
+            bad.write_text("{oops", encoding="utf-8")
+            warns = []
+            self.assertIsNone(read_ledger_rows(bad, log=warns.append), "坏 JSON ⇒ None")
+            self.assertTrue(warns, "读失败必须告警（不得静默当'没有记录'）")
+            ok = _p.Path(d) / "ok.json"
+            ok.write_text(json.dumps([{"inst": "XRP", "side": "空", "sz": 826.5}]), encoding="utf-8")
+            rows = read_ledger_rows(ok)
+            self.assertEqual(len(rows), 1)
+            wrapped = _p.Path(d) / "wrapped.json"
+            wrapped.write_text(json.dumps({"trades": [{"inst": "ARB"}]}), encoding="utf-8")
+            self.assertEqual(len(read_ledger_rows(wrapped)), 1, "dict 包裹也要能读")
+            notlist = _p.Path(d) / "notlist.json"
+            notlist.write_text(json.dumps({"nope": 1}), encoding="utf-8")
+            self.assertIsNone(read_ledger_rows(notlist, log=lambda *_: None))
+
+    def test_ledger_evidence_promotes_an_unattributed_leg(self):
+        """台账有同币同向同量已平记录 ⇒ 腿从"归属不可判定"升为"可归因孤儿"（证据 ledger）。"""
+        from scripts.trader.venue_protection import attribute_protective_orders
+        leg = {"id": "b-1", "symbol": "XRPUSDT", "type": "TAKE_PROFIT_MARKET",
+               "raw": {"orderType": "TAKE_PROFIT_MARKET", "triggerPrice": "1.3255",
+                       "quantity": "826.5"}}
+        without = attribute_protective_orders([], [leg], None)
+        self.assertEqual(len(without["orphan_unattributed"]), 1, "无台账 ⇒ 归属不可判定")
+        with_ledger = attribute_protective_orders(
+            [], [leg], [{"inst": "XRP", "side": "空", "sz": 826.5, "status": "closed",
+                         "id": "binance_closed_1"}])
+        self.assertEqual(len(with_ledger["orphan_attributed"]), 1, "有台账 ⇒ 可归因")
+        self.assertEqual(with_ledger["orphan_attributed"][0].get("evidence"), "ledger")
+
+    def test_ledger_with_wrong_size_does_not_create_evidence(self):
+        """量对不上 ⇒ **不**产生证据（宁可留在不可判定，也不许"看起来像"就当证据）。"""
+        from scripts.trader.venue_protection import attribute_protective_orders
+        leg = {"id": "b-2", "symbol": "XRPUSDT", "type": "TAKE_PROFIT_MARKET",
+               "raw": {"orderType": "TAKE_PROFIT_MARKET", "triggerPrice": "1.5",
+                       "quantity": "826.5"}}
+        rep = attribute_protective_orders([], [leg], [{"inst": "XRP", "side": "空", "sz": 100.0}])
+        self.assertEqual(rep["orphan_attributed"], [])
+        self.assertEqual(len(rep["orphan_unattributed"]), 1)
+
+    def test_stage_forwards_ledger_rows_to_the_audit(self):
+        """舞台必须把 `ledger_rows` 透传给审计层（漏传＝取证能力形同不存在）。"""
+        from scripts.trader.cycle_stages import venue_protection_watchdog_stage
+        seen = {}
+
+        def _fake_audit(snapshot, **kw):
+            seen.update(kw)
+            return {"venues": {}, "would": [], "critical": [], "errors": [], "skipped": [],
+                    "actions": [], "attribution": {}, "dry_run": kw.get("dry_run")}
+
+        class _Env:
+            mode = "demo"
+
+        venue_protection_watchdog_stage(
+            xv_positions_by_venue={"gate": [], "binance": []},
+            executed_actions=[], venue_registry=object(),
+            current_environment=lambda: _Env(),
+            R20_VENUE_PROTECTION_WATCHDOG=True,
+            audit_cross_venue_protection=_fake_audit,
+            ledger_rows=[{"inst": "XRP", "side": "空", "sz": 826.5}],
+        )
+        self.assertIn("ledger_rows", seen, "舞台没把台账行透传给审计层")
+        self.assertEqual(seen["ledger_rows"][0]["inst"], "XRP")
+
+    def test_production_call_site_passes_ledger_rows(self):
+        """活路径（ai_factor_trader）必须真的传台账行 —— 否则线上取证永远空转。"""
+        import pathlib as _p
+        src = (_p.Path(__file__).resolve().parents[2] / "scripts" / "ai_factor_trader.py").read_text(
+            encoding="utf-8")
+        call = src.split("_wd_report = venue_protection_watchdog_stage(")[1].split("\n    )")[0]
+        self.assertIn("ledger_rows=read_ledger_rows(LEDGER_JSON_FILE)", call,
+                      "活调用点未传台账行（或写法变了 ⇒ 请同步本门）")

@@ -589,8 +589,12 @@ def venue_protection_scan(
         def get_adapter(v: str, environment: str | None = None):
             return get_adapter(v, environment=environment or adapter_environment(v, env.mode))
 
+    # 第一百七十四刀：把台账行交给归属层做**取证**（`ledger` 档证据＝同币同向同量已平记录）。
+    # 读不到 ⇒ None ⇒ 不产生证据（腿留在"归属不可判定"，绝不自动撤）。
+    from scripts.trader.venue_protection import read_ledger_rows
     report = audit_cross_venue_protection(snapshot, venue_registry=_Registry,
-                                          environment=env.mode, dry_run=True)
+                                          environment=env.mode, dry_run=True,
+                                          ledger_rows=read_ledger_rows(DATA_DIR / "trading_ledger.json"))
     report["environment"] = env.mode
     report["snapshot_errors"] = snapshot_errors
     try:

@@ -65,6 +65,7 @@ from scripts.trader.cycle_stages import (
     venue_protection_watchdog_stage,
 )
 from scripts.trader.venue_protection import (
+    read_ledger_rows,
     audit_cross_venue_protection,
     watchdog_debounce_step,
 )
@@ -1271,6 +1272,8 @@ def execute_portfolio():
         debounce_s=R20_VENUE_PROTECTION_WATCHDOG_DEBOUNCE_S,
         debounce_step=watchdog_debounce_step,
         audit_cross_venue_protection=audit_cross_venue_protection,
+        # 第一百七十四刀：台账行（只读；读不到 ⇒ None ⇒ 不产生 ledger 证据）
+        ledger_rows=read_ledger_rows(LEDGER_JSON_FILE),
     )
 
     # 4c. 行情取数健康快照（第 137 刀事故的可观测性闭环）：把本轮的取数

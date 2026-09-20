@@ -33,7 +33,9 @@
 """
 from __future__ import annotations
 
+import json
 import time
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 __all__ = [
@@ -42,6 +44,7 @@ __all__ = [
     "select_legs_to_cancel_after_close",
     "audit_cross_venue_protection",
     "cancel_orphan_attributed_legs",
+    "read_ledger_rows",
     "ensure_venue_protection",
     "scan_protective_orders",
     "DEFAULT_WATCHDOG_DEBOUNCE_S",
@@ -769,6 +772,49 @@ def select_legs_to_cancel_after_close(closed_position: Optional[Dict[str, Any]],
         },
         "attribution": r,
     }
+
+
+def read_ledger_rows(path: Any, *, log: Any = print) -> Optional[List[Dict[str, Any]]]:
+    """读台账行，**只**供归属取证（本模块其余部分保持无 IO，此处是显式例外）。
+
+    ## 三态（与"读不到 ≠ 没有"一致，且方向必须**偏保守**）
+
+    | 情形 | 返回 | 归属后果 |
+    |---|---|---|
+    | 文件不存在 | `None` | 不产生 `ledger` 证据 ⇒ 腿留在 `orphan_unattributed` ⇒ **绝不自动撤** |
+    | 不可读 / JSON 坏 / 不是列表 | `None` + 告警 | 同上（fail-closed：读不到就不产生证据）|
+    | 正常 | 行列表 | `ledger` 档证据可用（同币同向同量 ⇒ 高度可能是本方）|
+
+    为什么保守方向是"不产生证据"而不是"当成空台账"：把读失败当"没有台账记录"，会把本可
+    证明归属的腿降级为"归属不可判定"；反过来把读失败当"都是我们的"，则会**撤掉用户手单**。
+    两害相权，取"什么也不做"。
+    """
+    try:
+        fp = Path(path)
+    except Exception:
+        return None
+    if not fp.exists():
+        return None
+    try:
+        data = json.loads(fp.read_text(encoding="utf-8"))
+    except Exception as exc:
+        log(f"[台账取证] warn 读不到台账（{type(exc).__name__}: {exc}）⇒ 本轮不产生 ledger 证据")
+        return None
+    if isinstance(data, dict):
+        # ⚠️ 不能写成 `data.get("trades") or data.get("rows") or []`：那会把"结构不认识的 dict"
+        # 悄悄变成**空台账**（＝"确实没有记录"），于是本可证明归属的腿被降级成不可判定。
+        # 结构认不出来 ⇒ 与"读不到"同档：不产生证据（本门用例抓到的正是这一处）。
+        inner = data.get("trades")
+        if inner is None:
+            inner = data.get("rows")
+        if inner is None:
+            log("[台账取证] warn 台账是 dict 但没有 trades/rows 列表 ⇒ 本轮不产生 ledger 证据")
+            return None
+        data = inner
+    if not isinstance(data, list):
+        log("[台账取证] warn 台账结构不是列表 ⇒ 本轮不产生 ledger 证据")
+        return None
+    return [r for r in data if isinstance(r, dict)]
 
 
 def cancel_orphan_attributed_legs(ad: Any, *,

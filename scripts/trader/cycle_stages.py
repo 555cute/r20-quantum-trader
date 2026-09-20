@@ -500,7 +500,8 @@ def venue_protection_watchdog_stage(*,
         state_path=None,
         debounce_s=None,
         debounce_step=None,
-        now_s=None):
+        now_s=None,
+        ledger_rows=None):
     """跨所云端保护单巡检（roadmap G8 的周期接线；**默认关闭**）。
 
     ## 为什么单独一格、且默认关闭
@@ -563,6 +564,9 @@ def venue_protection_watchdog_stage(*,
             venue_registry=venue_registry,
             environment=env_mode,
             dry_run=bool(_dry),
+            # 第一百七十四刀：台账行供**归属取证**（`ledger` 档证据＝同币同向同量已平记录）。
+            # 读不到（None）⇒ 不产生证据 ⇒ 腿留在"归属不可判定" ⇒ 绝不自动撤。
+            ledger_rows=ledger_rows,
         )
 
     if _debounce_on:
