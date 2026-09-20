@@ -55,7 +55,21 @@ def collect_position_rows(pos_data, positions, trackers, *, load_instruments):
             if pos_val == 0.0:
                 continue
 
-            pos_side = p.get("posSide", p.get("side", "")).lower()
+            # ⚠️ 第一百二十三刀：**净持仓模式**（OKX `posSide="net"`、Binance 原始
+            # `positionSide="BOTH"`、字段缺失）原样透传会连坏两处：
+            #   ① 多空计数**两边都不涨**（`"long" in "net"` 为假）⇒ 面板多空数偏小；
+            #   ② 下游按"含 long 才算多"判断 ⇒ **净多头被当成空头** ——
+            #      提示词的 `方向:` 与极值/回撤分支（`account_text`）、
+            #      `factors.py` 的策略标签（净多头被贴"逢高做空"）。
+            # 展示用 side 一律由**带符号持仓量**归一（此处 `pos_val` 已非 0）；
+            # 交易所原值不必回传：跨所/OKX 的腿匹配集合里本来就含 `"net"`。
+            _raw_pos_side = str(p.get("posSide") or p.get("side") or "").lower()
+            if "long" in _raw_pos_side:
+                pos_side = "long"
+            elif "short" in _raw_pos_side:
+                pos_side = "short"
+            else:
+                pos_side = "long" if pos_val > 0 else "short"
             if "long" in pos_side:
                 long_count += 1
             elif "short" in pos_side:
