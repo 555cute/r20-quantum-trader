@@ -286,16 +286,23 @@ def is_circuit_breaker_active(usdt_available: Optional[float] = None, fetch_cand
             return True, f"熔断状态文件损坏，安全暂停开仓: {e}"
 
     if LEDGER_JSON_FILE.exists():
-        _failed_venues, _sidecar_unknown = _ledger_sync_sidecar_state()
-        if _sidecar_unknown:
-            # ⚠️ 用户拍板 fail-closed（第一百四十四刀）：**不可判定 ≠ 安全** ——
-            # 旁车损坏/过旧 ⇒ "跨所同步是否完整"无从得知 ⇒ 当日亏损求和可能不完整，
-            # 此时必须禁开仓（仓位管理与既有保护不受影响）。
-            return True, (f"台账同步状态不可判定（{_sidecar_unknown}）⇒ 当日亏损求和不可判全，"
-                          "安全暂停开仓")
-        if _failed_venues:
-            return True, ("台账跨所同步不完整（失败所: " + ",".join(_failed_venues) +
-                          "），当日亏损求和不可判全，安全暂停开仓")
+        # 第一百四十七刀：与 trader 孪生版**结构对称** —— 旁车读取本身若抛（助手理论上
+        # 内部已全覆盖，但"理论上不会抛"不是契约），也必须 fail-closed，而不是让异常
+        # 逃出本函数（逃出去由调用方决定，方向就不可控了）。
+        try:
+            _failed_venues, _sidecar_unknown = _ledger_sync_sidecar_state()
+            if _sidecar_unknown:
+                # ⚠️ 用户拍板 fail-closed（第一百四十四刀）：**不可判定 ≠ 安全** ——
+                # 旁车损坏/过旧 ⇒ "跨所同步是否完整"无从得知 ⇒ 当日亏损求和可能不完整，
+                # 此时必须禁开仓（仓位管理与既有保护不受影响）。
+                return True, (f"台账同步状态不可判定（{_sidecar_unknown}）⇒ 当日亏损求和不可判全，"
+                              "安全暂停开仓")
+            if _failed_venues:
+                return True, ("台账跨所同步不完整（失败所: " + ",".join(_failed_venues) +
+                              "），当日亏损求和不可判全，安全暂停开仓")
+        except Exception as _sidecar_exc:      # noqa: BLE001 - 风险路径：宁可停，不可漏
+            # 与 trader 孪生版**同范围**：整个旁车判定块都在保护范围内
+            return True, f"台账同步旁车检查不可用，安全暂停开仓: {_sidecar_exc}"
         try:
             with open(LEDGER_JSON_FILE, "r", encoding="utf-8") as f:
                 ledger = json.load(f)
