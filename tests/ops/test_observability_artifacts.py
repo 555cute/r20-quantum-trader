@@ -343,3 +343,39 @@ class PrometheusConfigShapeTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DocsNumberAntiRotTest(unittest.TestCase):
+    """文档数字防腐烂：README 里写的面板/规则条数必须与**真实文件**一致。
+
+    教训（本刀自己踩的）：README 与提交信息里写了"13 个面板"，真实是 **14** ——
+    这正是本仓最讨厌的那类"看着像事实的数字"。人写数字会错，所以让门来数。
+    """
+
+    def setUp(self):
+        self.doc = (OBS / "README.md").read_text(encoding="utf-8")
+        self.payload = json.loads(DASHBOARD.read_text(encoding="utf-8"))
+
+    def test_panel_count_in_docs_matches_reality(self):
+        real = len(self.payload.get("panels") or [])
+        stated = [int(m) for m in re.findall(r"\*\*(\d+) 个面板", self.doc)]
+        self.assertTrue(stated, "README 应写明面板数量（`**N 个面板**`）")
+        self.assertEqual(stated[0], real, f"README 写 {stated[0]} 个面板，实际 {real} 个")
+
+    def test_query_count_in_docs_matches_reality(self):
+        real = sum(len(p.get("targets") or []) for p in self.payload.get("panels") or [])
+        stated = [int(m) for m in re.findall(r"(\d+) 条查询", self.doc)]
+        self.assertTrue(stated, "README 应写明查询条数（`N 条查询`）")
+        self.assertEqual(stated[0], real, f"README 写 {stated[0]} 条查询，实际 {real} 条")
+
+    def test_alert_count_in_docs_matches_reality(self):
+        real = len(_alert_entries())
+        stated = [int(m) for m in re.findall(r"\*\*(\d+) 条\*\*", self.doc)]
+        self.assertTrue(stated, "README 应写明告警条数")
+        self.assertEqual(stated[0], real, f"README 写 {stated[0]} 条告警，实际 {real} 条")
+
+    def test_alert_table_lists_every_rule(self):
+        """README 的告警表必须逐条列出真实规则名 —— 漏一条就有人不知道要看什么。"""
+        for entry in _alert_entries():
+            self.assertIn(entry["name"], self.doc,
+                          f"README 告警表漏了 {entry['name']}（响了没人知道该做什么）")

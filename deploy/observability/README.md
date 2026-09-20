@@ -5,8 +5,8 @@
 | 文件 | 作用 |
 |---|---|
 | `prometheus.yml` | 抓取配置（指标端点需管理员鉴权，令牌走**文件注入**，绝不入仓库） |
-| `alerts.yml` | 告警规则（每条对应一次**真实发生过**的故障形态） |
-| `grafana-dashboard.json` | Grafana 面板（导入即用；UID `r20-quantum-trader`） |
+| `alerts.yml` | 告警规则（**10 条**，每条对应一次**真实发生过**的故障形态） |
+| `grafana-dashboard.json` | Grafana 面板（导入即用；UID `r20-quantum-trader`；**14 个面板 / 20 条查询**） |
 | `grafana-datasource.yml` / `grafana-dashboards.yml` | Grafana 自动配置（数据源 + 面板加载） |
 | `docker-compose.yml` | Prometheus + Grafana 一键起（端口**只绑 127.0.0.1**） |
 
