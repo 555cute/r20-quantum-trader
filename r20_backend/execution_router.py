@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import math
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from .execution import own_records as own_position_records
 
@@ -48,6 +48,43 @@ except ImportError:  # pragma: no cover - scripts/ 在 sys.path 时走上面分�
         # 常量不可得时不臆造区间：夹取退化为 no-op（下面靠 `or leverage` 短路），
         # 绝不因为读不到配置就凭空放大或缩小杠杆。
         MAX_LEVERAGE = MIN_LEVERAGE = None  # type: ignore[assignment]
+
+
+def _exposure_venues(venue: str, environment: Optional[str]):
+    """核算跨所敞口时应统计的场所 → `(counted, skipped)`。
+
+    判据 = **凭证已配置**（本部署是否在这里有账户），注册表驱动、不硬编码。
+
+    ⚠️ 为什么**不用** `execution_open` 判（本刀实测踩到的第二处坑）：
+    OKX 走的是 `ai_factor_trader` 直签链路，能力表里**没有**声明
+    `adapter_execution_flag` ⇒ `execution_open("okx")` **结构性恒 False**
+    （见 `registry.execution_open` 文档）。而 OKX 恰恰是持仓最多的那一所
+    （实盘日志「持仓 OKX 1/9｜跨所 4 笔」）。若按开闸判，跨所敞口会**把 OKX 整个漏掉**
+    —— 本机实测第一版就是这样：只统计到 binance 的 726U，而 OKX 在持仓位完全没算。
+
+    - 计入 = 本次场所 + 其它**凭证齐备**的已登记场所；
+    - 凭证未配置/读取失败 ⇒ 不计入，但**进 `skipped` 留痕**（不假装统计是全量的）；
+    - 计入场所**读失败 ⇒ 抛错 fail-closed**（"读不到"绝不渲染成"没有敞口"）。
+    """
+    counted: List[str] = [str(venue)]
+    skipped: List[str] = []
+    try:
+        from .exchanges.registry import (registered_venues as _venues,
+                                         venue_credentials as _creds)
+        for _v in _venues():
+            _v = str(_v)
+            if _v in counted:
+                continue
+            try:
+                if all(_creds(_v, environment)):
+                    counted.append(_v)
+                else:
+                    skipped.append(f"{_v}(凭证未配置)")
+            except Exception:
+                skipped.append(f"{_v}(凭证读取失败)")
+    except Exception:
+        pass                      # 枚举失败：退回"只算本次场所"，并由 skipped 显式留痕
+    return counted, skipped
 
 
 class RouteResult(Dict[str, Any]):
@@ -162,12 +199,45 @@ def open_protected_position(decision: Dict[str, Any], *,
     # `ad.positions()`；而同一函数后面还会**再调一次** `ad.positions()`。
     # 抽离时把这次调用收成**惰性缓存**：行为等价（每次都是新取的 ad.positions()），
     # 且顺带把原来的**两次取数收成一次**。
-    _pos_cache: list = []
+    _pos_cache: dict = {}
 
     def _positions_for_exposure():
+        """**跨所**同向敞口所需的持仓集合（本刀修正一处会说谎的风控）。
+
+        ⚠️ 2026-09-20 实测：本闸门名叫「跨所同向敞口」、文档写「跨所同向名义额合计」，
+        但 `positions_reader` 一直是 `ad.positions()` —— **只读被下单的那一个场所**。
+        而 `.env` 里 `R20_MAX_TOTAL_EXPOSURE_USDT=3000.0` 是**真的配了的**
+        （`scripts/risk_constants.py` 在 cron/手动路径下显式加载 `.env`；本机实测
+        `TOTAL_EXPOSURE_CAP == 3000.0`），三所平权后上限最多可被突破到 3 倍
+        （每所各算自己那份）——**是活着的闸门在少数**，不是死代码。
+
+        统计口径（显式写清，避免再次"名字比实现大"）：
+        - 计入 = 本次下单场所 + 其它 `execution_open` 为真的**已开闸场所**；
+        - 每个场所读失败 ⇒ **fail-closed 拒开**（抛错由闸门兜成 `stage=exposure`）：
+          "读不到"绝不能渲染成"没有敞口"；
+        - 仅在 `total_exposure_cap > 0` 时才被调用（闸门自身短路）⇒ 闸门停用时
+          **不产生任何额外网络调用**。
+        - 已知残留：某场所**已关闸但仍有仓**时不计入（该场所已不交易，
+          其保护单健康由 venue-protection 巡检覆盖）；这条写在注释里而不是假装没有。
+        """
         if not _pos_cache:
-            _pos_cache.append(ad.positions() or [])
-        return _pos_cache[0]
+            rows: list = []
+            _counted: list = []
+            _counted_candidates, _skipped_venues = _exposure_venues(venue, env_name)
+            for _v in _counted_candidates:
+                try:
+                    _ad_v = ad if _v == venue else get_adapter(_v, environment=env_name)
+                    for _p in (_ad_v.positions() or []):
+                        rows.append(dict(_p, venue=_v))
+                    _counted.append(_v)
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"跨所敞口不可核算：{_v} 持仓读取失败（{type(exc).__name__}: "
+                        f"{str(exc)[:80]}）——按 fail-closed 拒开") from exc
+            _pos_cache["rows"] = rows
+            _pos_cache["venues"] = tuple(_counted)
+            _pos_cache["skipped"] = tuple(_skipped_venues)
+        return _pos_cache["rows"]
 
     _exposure_fail = _check_total_exposure(
         venue=venue, asset=asset, action=action, margin=_margin_unclamped,
@@ -175,6 +245,19 @@ def open_protected_position(decision: Dict[str, Any], *,
         all_positions=None, positions_reader=_positions_for_exposure,
         fail_factory=_fail)
     if _exposure_fail is not None:
+        # 覆盖率留痕：写明"统计了哪些场所、哪些没计及原因"。风控说"跨所"，
+        # 就必须让运维看得见这个"跨"到底跨到了哪几所（否则又是名字比实现大）。
+        try:
+            _covered = tuple(_pos_cache.get("venues") or ())
+            _not_counted = tuple(_pos_cache.get("skipped") or ())
+            _note = f"；统计范围={'/'.join(_covered) or '—'}"
+            if _not_counted:
+                _note += f"，未计={'、'.join(_not_counted)}"
+            _exposure_fail["detail"] = f"{_exposure_fail.get('detail') or ''}{_note}"
+            _exposure_fail["counted_venues"] = list(_covered)
+            _exposure_fail["skipped_venues"] = list(_not_counted)
+        except Exception:
+            pass
         return _exposure_fail
 
     # 止盈宽度平滑收窄：防止 AI 规划过远天际线挂单无法落袋（受最大 R:R 与 ATR 跨度上限约束）

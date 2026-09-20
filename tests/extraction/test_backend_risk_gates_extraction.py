@@ -376,19 +376,41 @@ class FacadeWiringTest(unittest.TestCase):
 
 
 class ProductionCapStillDisabledTest(unittest.TestCase):
-    """实盘护栏：修复不得意外开启一个从未生效过的闸门。"""
+    """⚠️ 本护栏**已失效过**（第一百一十一刀查明），现改为诚实版。
 
-    def test_production_total_exposure_cap_is_zero(self):
-        """`.env` 未配置该项 → 闸门停用 → 本次修复不改变实盘行为。
+    旧版断言 `scripts.risk_constants.MAX_TOTAL_EXPOSURE_USDT == 0.0`，并自称
+    "若有人将来配置了它，这条会翻红"。但 pytest 做了**环境隔离**（`tests/__init__.py`），
+    于是它读到的永远是 0.0 —— **看不见生产 `.env`**，而生产 `.env` 里
+    `R20_MAX_TOTAL_EXPOSURE_USDT=3000.0`（`scripts/risk_constants.py` 在 cron/手动路径
+    显式加载 `.env`，本机实测 `TOTAL_EXPOSURE_CAP == 3000.0`）。护栏"安全通过"，
+    闸门却早已生效——而且是**只算一所的"跨所"闸门**（已由
+    `tests/audit/test_cross_venue_exposure_gate.py` 修正语义并钉住）。
+    """
 
-        若有人将来配置了它，这条会翻红 —— 那**正是**提醒：闸门首次真正生效，
-        需要重新评估"会不会拒掉本来会开的单"。（这正是该配置的本意。）
-        """
+    def test_isolated_env_still_reads_zero_here(self):
+        """如实记录本环境事实：pytest 内该常量恒 0（≠ 生产事实）。"""
         import scripts.risk_constants as rc
-        self.assertEqual(
-            float(getattr(rc, "MAX_TOTAL_EXPOSURE_USDT", 0.0) or 0.0), 0.0,
-            "生产 R20_MAX_TOTAL_EXPOSURE_USDT 已非 0 —— 敞口闸门将首次生效，"
-            "请确认这是有意为之，并复核会被拦下的单")
+        self.assertEqual(float(getattr(rc, "MAX_TOTAL_EXPOSURE_USDT", 0.0) or 0.0), 0.0)
+
+    def test_production_env_cap_is_read_from_the_file_not_the_isolated_env(self):
+        """诚实护栏：**直接读 `.env`** 才能看到生产真值，并要求闸门语义与之匹配。"""
+        from pathlib import Path
+        env_file = Path(__file__).resolve().parents[2] / ".env"
+        if not env_file.exists():
+            self.skipTest("无 .env（干净检出）")
+        cap = 0.0
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("R20_MAX_TOTAL_EXPOSURE_USDT="):
+                try:
+                    cap = float(line.split("=", 1)[1].strip().strip('"').strip("'"))
+                except ValueError:
+                    cap = 0.0
+        if cap:
+            src = (Path(__file__).resolve().parents[2] / "r20_backend" /
+                   "execution_router.py").read_text(encoding="utf-8")
+            self.assertIn("_exposure_venues(", src,
+                          f"生产已配置上限 {cap}U ⇒ 闸门生效，必须跨所口径")
 
 
 if __name__ == "__main__":

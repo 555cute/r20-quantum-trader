@@ -147,6 +147,10 @@ def check_total_exposure(
     except Exception as exc:
         return fail_factory("exposure", f"无法读取持仓以核算跨所敞口: {exc}", venue=venue)
     same_side = 0.0
+    #: 实际贡献同向敞口的**场所**集合（行由调用方打 `venue` 标签）。
+    #: 这是"名字必须与实现相符"的可解释性证据：detail 里直接写明统计了哪些场所，
+    #: 免得再出现"名叫跨所、实际只算一所"（2026-09-20 实测修复的那处）。
+    contributing: List[str] = []
     for row in positions:
         if str(row.get("base") or "").upper() != asset:
             continue
@@ -169,11 +173,16 @@ def check_total_exposure(
         _want = "buy" if _a in ("buy_long", "buy", "long") else "sell" if _a in ("sell_short", "sell", "short") else ""
         if not _want or row_action != _want:
             continue
+        _row_venue = str(row.get("venue") or "").strip().lower()
+        if _row_venue and _row_venue not in contributing:
+            contributing.append(_row_venue)
         same_side += abs(float(row.get("size_signed") or 0)) * float(row.get("mark_price") or row.get("entry_price") or 0)
     projected = same_side + margin * leverage
     if projected > exposure_cap:
+        _src = f"（同向来自 {'/'.join(contributing)}）" if contributing else ""
         return fail_factory("exposure",
                             f"跨所同向敞口将达 {projected:.0f}U，超上限 {exposure_cap:.0f}U"
-                            f"（已持有同向 {same_side:.0f}U + 本单名义 {margin * leverage:.0f}U）",
-                            venue=venue, projected_exposure=round(projected, 2), cap=exposure_cap)
+                            f"（已持有同向 {same_side:.0f}U{_src} + 本单名义 {margin * leverage:.0f}U）",
+                            venue=venue, projected_exposure=round(projected, 2),
+                            cap=exposure_cap, contributing_venues=list(contributing))
     return None
