@@ -104,6 +104,15 @@ SEGMENT_DELTAS = {
          "reconcile_reservation_ledger(real_pos_dict, pending_inst_ids, _xv_env, "
          "venue_snapshot=xv_positions_by_venue, "
          "venue_snapshot_verified=xv_ok and (not _pending_enum_errors))"),
+        # ---- 第一百二十八刀：槽位计数**少算**时的如实告知（零行为变更） ---------
+        # 外所挂单枚举失败 ⇒ `reserved_*_count` 少算该所在场单，而执行层开仓闸用的
+        # 正是它们 ⇒ 可能超发槽位。本行只把后果讲明（是否改 fail-closed 待人工拍板）。
+        ("reserved_short_count = short_count + pending_short_count",
+         "reserved_short_count = short_count + pending_short_count\n"
+         "if _pending_enum_errors:\n"
+         "    print(f'[跨所封顶] warn 外所挂单未枚举成功（{len(_pending_enum_errors)} 所）"
+         "——本周期槽位/同向占用**少算**该所在场单（{reserved_slot_count} 为下限），"
+         "若照常放行新开仓可能突破仓位上限（仅仓位数口径；USDT 预算不受影响）')"),
     ],
 }
 
@@ -125,6 +134,37 @@ class ReconcileCallContractTest(unittest.TestCase):
         self.assertIn("xv_ok", kw["venue_snapshot_verified"], "持仓侧核验必须参与")
         self.assertIn("_pending_enum_errors", kw["venue_snapshot_verified"],
                       "挂单枚举失败也必须挡住释放（否则在场活单的预留会被误释放）")
+
+
+class QuotaUnderCountIsDisclosedTest(unittest.TestCase):
+    """槽位计数**少算**时必须如实告知，且"输入失败语义表"必须留在 docstring 里。
+
+    背景（第一百二十八刀逐项实测）：外所挂单枚举失败时，`reserved_slot_count` /
+    `reserved_long_count` / `reserved_short_count` **少算**该所的在场单，而执行层的
+    开仓闸用的正是它们（`reserved_slot_count < MAX_CONCURRENT_POSITIONS`）⇒ 可能超发槽位。
+    持仓侧失败会 `entries_blocked=True`，**挂单侧目前不拦**（唯一残留缺口，待人工拍板）。
+
+    本门钉两件事：① 少算的那一刻有明确告知（不许静默）；② 审计表随代码走
+    （谁改了语义就必须更新表，否则门会指向这里）。
+    """
+
+    def test_under_count_is_disclosed_at_the_quota_computation(self):
+        fn = _func("fetch_positions_and_reconcile")
+        hits = []
+        for node in ast.walk(fn):
+            if isinstance(node, ast.If) and "_pending_enum_errors" in ast.unparse(node.test):
+                body_src = "\n".join(ast.unparse(s) for s in node.body)
+                if "print" in body_src:
+                    hits.append(body_src)
+        self.assertTrue(hits, "挂单枚举失败时必须在计数处给出告知（零行为变更但不得静默）")
+        self.assertTrue(any("少算" in h for h in hits),
+                        "告知文案必须讲明'少算'及其口径（仓位数，不涉及 USDT 预算）")
+
+    def test_failure_semantics_table_is_kept(self):
+        doc = ast.get_docstring(_func("fetch_positions_and_reconcile")) or ""
+        self.assertIn("输入失败语义表", doc, "逐项失败语义表必须随函数走")
+        for must in ("整周期 abort", "entries_blocked=True", "残留缺口"):
+            self.assertIn(must, doc, f"审计表缺少关键结论：{must}")
 
 
 class CycleStagesVerbatimTest(unittest.TestCase):

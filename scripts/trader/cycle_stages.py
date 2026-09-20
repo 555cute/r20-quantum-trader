@@ -170,6 +170,24 @@ def fetch_positions_and_reconcile(*,
     其余路径不碰它 —— 若不把上游（preflight）的值传进来，未命中分支时它会
     **未绑定**（首版即如此，空世界 smoke 当场抓出 `UnboundLocalError`）。
     其余 12 项输出在本段内均"必然绑定"（确定赋值分析），无需入参。
+
+    ⚠️ **输入失败语义表**（第一百二十八刀逐项实测，改动前先读）：
+
+    | 输入 | 读失败时的行为 | 决策方是否被告知 |
+    |---|---|---|
+    | OKX 持仓 `query_positions` | **整周期 abort**（`return None`） | 日志 |
+    | OKX 挂单 `pending_orders` | **整周期 abort** | 日志 |
+    | OKX 余额 `balances` | **整周期 abort** | 日志 |
+    | 清理存量挂单 `clean_stale_open_orders` | **整周期 abort** | 日志 |
+    | OKX 挂单对账（preflight `reconcile_pending_orders`） | `entries_blocked=True`（禁新开仓） | 日志 |
+    | 跨所**持仓** `fetch_other_venue_positions` | `entries_blocked=True` + 预留对账**不释放** + 提示词写"未知(拉取失败)" | 日志/提示词 |
+    | 跨所**挂单** `collect_pending_inst_ids` | 预留对账**不释放**（第一百二十七刀）；⚠️ **不拦新开仓**，且槽位/同向占用**少算** | 仅 warn |
+    | 凭证已死场所 `broken_venues` | 跳过该所枚举（不报错、不拦） | 收侧另有 CRITICAL |
+
+    唯一**残留缺口**是"跨所挂单枚举失败不拦新开仓"：计数少算是**仓位数口径**
+    （槽位/同向上限），不涉及 USDT 预算（预算由预留台账与敞口闸把关）。
+    改 fail-closed 是**实盘行为变更**（可能因某所一次读失败而停一轮新开仓，
+    但也可能因某所**每轮**都失败的良性异常而长期静默停止开仓）⇒ 已列入待人工拍板。
     """
     positions_ok, all_positions, positions_error = query_positions()
     if not positions_ok:
@@ -249,6 +267,17 @@ def fetch_positions_and_reconcile(*,
     reserved_slot_count = active_pos_count + len(pending_inst_ids)
     reserved_long_count = long_count + pending_long_count
     reserved_short_count = short_count + pending_short_count
+    # ⚠️ 第一百二十八刀（**已知残留缺口**，等策略拍板）：外所挂单枚举失败时，
+    # 上面三个计数**少算**该所的在场单，而执行层的开仓闸用的正是它们
+    # （`reserved_slot_count < MAX_CONCURRENT_POSITIONS` 与同向上限）⇒ 本周期可能
+    # **超发槽位**。位置读取失败会 `entries_blocked=True`（禁新开仓），挂单侧目前**不拦**。
+    # 口径边界：只影响**仓位数**（槽位/同向），**不涉及 USDT 预算** —— 预算由预留台账
+    # 与敞口闸另行把关。本行只做**如实告知**（零行为变更）；是否改 fail-closed 见
+    # `fetch_positions_and_reconcile` docstring 的"输入失败语义表"。
+    if _pending_enum_errors:
+        print(f"[跨所封顶] warn 外所挂单未枚举成功（{len(_pending_enum_errors)} 所）——"
+              f"本周期槽位/同向占用**少算**该所在场单（{reserved_slot_count} 为下限），"
+              "若照常放行新开仓可能突破仓位上限（仅仓位数口径；USDT 预算不受影响）")
 
     # 1a. 跨所封顶（三所平权开单后的风控收口）：开闸所（gate/binance）的
     # 活跃持仓计入总仓/同向配额；读取失败 → 本周期禁止新增开仓（fail-closed，
