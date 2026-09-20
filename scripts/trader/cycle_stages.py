@@ -638,3 +638,31 @@ def venue_protection_watchdog_stage(*,
         print(f"[跨所保护巡检] 本轮实写 {len(report.get('actions') or [])} 个动作"
               f"（防抖窗口 {_qualify_min:.0f} 分钟，观察 {len(_observed)} 项）")
     return report
+
+def data_shape_preflight_stage(*, intents_path, trackers_path,
+                               validate_intents_file, validate_trackers_file) -> list:
+    """周期开跑前的**只读形状预检**（第 49 刀）：把"静默忽略"变成"指名道姓"。
+
+    与加载侧的分工（刻意如此）：
+
+    | 侧 | 负责 |
+    |---|---|
+    | 加载侧（`load_open_intents` / `load_trackers`）| **行为**：读不出来 ⇒ fail-closed / 拒绝覆盖 |
+    | 本阶段 | **可见性**：读得到但形状不合规 ⇒ 打印并指出下游后果 |
+
+    ⚠️ 本阶段**只警告、不阻断、不写盘**。它要抓的典型是那些"读得到却会被静默忽略"的
+    形状问题 —— 例如追踪器键名拼写不合约定（`BTC_USDT_long`）会让水位查找落空、
+    状态静默丢失，而不触发任何异常。
+
+    返回违规行列表（调用方只用于展示/测试；不做控制流判定）。
+    """
+    violations = []
+    for label, path, checker in (("意图", intents_path, validate_intents_file),
+                                 ("追踪器", trackers_path, validate_trackers_file)):
+        for line in checker(path):
+            violations.append(f"[数据形状预检] {label}: {line}")
+    for line in violations:
+        print(line)
+    if not violations:
+        print("[数据形状预检] 意图/追踪器形状合规")
+    return violations

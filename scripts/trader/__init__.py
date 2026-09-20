@@ -33,6 +33,7 @@
 | `leverage.py` | `clamp_ai_leverage` AI 杠杆夹取（配置区间 → 池内单标的上限，顺序是关键） | MIN/MAX_LEVERAGE + 池值，均调用期 |
 | `sizing.py` | `size_for_decision` 按 AI 决策推导下单张数（四道钳制：0.5x 下限 / 2.0x 上限 / 余额硬顶只砍不放 / 步长量化） | quantize_size + max_size_within_margin 由门面注入 |
 | `position_universe.py` | `collect_okx_position_payloads` 从因子快照摘出 OKX 在仓并补追踪器字段 + `merge_cross_venue_positions` 汇入三所持仓（合成 id `VENUE:inst`） | 无（纯装配；不取数 —— 必须吃**已冻结**的周期快照） |
+| `data_shape.py` | 生产数据产物**形状校验**（意图/追踪器：类型·键名·单调性，每条违规带下游后果）+ `read_json_safe` 只读读取 | 无（纯函数；不取数、不写盘） |
 | `reservation_reconcile.py` | `_utc_age_seconds` SQLite UTC→秒龄（不可解析 = **-inf**，方向是红线） + `reconcile_reservation_ledger` 预留台账账实相符回笼（US-010，74 行） | `reservation_manager` / `fetch_other_venue_positions` / `state_closed` / `default_ttl_s`，**全部调用期注入** |
 | `scale_out.py` | `execute_scale_out_if_eligible` 分批平仓止盈执行引擎（首批50%锁定+云端OCO重置+保本移损+互斥加仓锁） | `okx_rest` / `venue_registry` / `record_trade` / `notify_trade_close` / `close_fee` 等全部调用期注入 |
 | `venue_protection.py` | 跨所（Gate/Binance）保护单**覆盖核验与临期续期**（roadmap G8）：`scan_protective_orders` 纯判定（缺口/临期/不可判定）+ `ensure_venue_protection` 先挂新后撤旧的安全动作（动作层已具备，周期接线见后续刀）+ `attribute_protective_orders` **逐腿归属**（matched / 旧量腿 / 可归因孤儿 / **归属不可判定**——后者不得自动撤销） | 零门面注入：IO 全部由调用方传 `ad`（子模块 import 期不绑定任何门面名字） |

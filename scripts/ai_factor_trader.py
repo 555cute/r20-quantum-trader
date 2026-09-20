@@ -53,6 +53,7 @@ from scripts.trader.venue_evidence import (
     persist_venue_decision as _venue_evidence_persist,
 )
 from scripts.trader.cycle_stages import (
+    data_shape_preflight_stage,
     fetch_positions_and_reconcile,
     scan_risk_gates_and_ai_brain,
     fetch_universe_and_manage_positions,
@@ -111,6 +112,8 @@ from scripts.trader.circuit_guard import (
     check_black_swan_sentinel as _circuit_guard_sentinel,
     is_circuit_breaker_active as _circuit_guard_breaker,
 )
+from scripts.trader.data_shape import (validate_intents_file,
+                                       validate_trackers_file)
 from scripts.trader.cycle_snapshot import (
     broken_execution_venues,
     build_state_payload,
@@ -1142,6 +1145,14 @@ def execute_portfolio():
     if _preflight is None:
         return None
     entries_blocked, timestamp_full = _preflight
+
+    # 0.5 只读形状预检：把"读得到但会被静默忽略"的形状问题**尽早指名道姓**
+    #     （只警告、不阻断 —— 行为判定在加载侧：意图 fail-closed、追踪器拒绝覆盖）
+    data_shape_preflight_stage(
+        intents_path=OPEN_INTENT_FILE,
+        trackers_path=POSITION_TRACKER_FILE,
+        validate_intents_file=validate_intents_file,
+        validate_trackers_file=validate_trackers_file)
 
     # 1. Fetch Real Positions. A failed account query aborts the complete cycle.
     _phase1 = fetch_positions_and_reconcile(
