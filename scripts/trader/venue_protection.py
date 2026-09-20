@@ -41,6 +41,7 @@ __all__ = [
     "attribute_protective_orders",
     "select_legs_to_cancel_after_close",
     "audit_cross_venue_protection",
+    "cancel_orphan_attributed_legs",
     "ensure_venue_protection",
     "scan_protective_orders",
     "DEFAULT_WATCHDOG_DEBOUNCE_S",
@@ -745,6 +746,86 @@ def select_legs_to_cancel_after_close(closed_position: Optional[Dict[str, Any]],
         },
         "attribution": r,
     }
+
+
+def cancel_orphan_attributed_legs(ad: Any, *,
+                                  positions: Optional[Sequence[Dict[str, Any]]],
+                                  symbols: Sequence[str],
+                                  ledger_rows: Optional[Sequence[Dict[str, Any]]] = None,
+                                  dry_run: bool = True,
+                                  log: Any = print) -> Dict[str, Any]:
+    """撤销"**归属明确、但已无对应持仓**"的保护腿（逐腿、按 id）。
+
+    ## 为什么需要这个函数（而 G8 巡检不替你做）
+
+    `audit_cross_venue_protection` 明确"**只报告不撤销**"：孤儿腿该不该撤是**运营决定**。
+    但"运营决定"不等于"手动乱撤" —— 本函数把那次决定变成**有护栏的动作**：
+
+    | 护栏 | 为什么 |
+    |---|---|
+    | 只撤 `attribute_protective_orders` 的 `orphan_attributed` 桶 | 该桶的证据是 `tag`（本方标签）或 `ledger`（台账同向同量已平）——**可证明/高度可能**是本方的腿 |
+    | `orphan_unattributed` / `side_mismatch` / `size_mismatch` **一律不碰** | 归属不可判定 ⇒ 可能是用户手单（doctrine：绝不自动撤） |
+    | 该合约**仍有活动持仓** ⇒ 整合约跳过 | 此时"孤儿"判定可能只是持仓取数缺失；宁可留腿，不可裸奔 |
+    | 逐腿走 `ad.cancel_price_order(id)`，**不用** `cancel_protective_orders(symbol)` | 后者会撤掉该合约**全部**触发单——包括仍在保护活动仓的那些 |
+
+    返回 `{"dry_run", "cancelled", "would_cancel", "skipped", "not_touched", "errors", "attribution"}`。
+    `dry_run=True`（默认）**只回报告不写单**。
+    """
+    report: Dict[str, Any] = {"dry_run": bool(dry_run), "cancelled": [], "would_cancel": [],
+                              "skipped": [], "not_touched": [], "errors": [],
+                              "attribution": {}}
+    pos_by_base: Dict[str, List[Dict[str, Any]]] = {}
+    for row in (positions or []):
+        if not isinstance(row, dict):
+            continue
+        base = str(row.get("base") or row.get("symbol") or "").split("_")[0].split("-")[0].upper()
+        if base:
+            pos_by_base.setdefault(base, []).append(row)
+
+    for symbol in symbols:
+        base = str(symbol or "").split("_")[0].split("-")[0].upper()
+        if not base:
+            report["skipped"].append({"symbol": symbol, "why": "币种解析不出"})
+            continue
+        live_pos = [p for p in pos_by_base.get(base, [])
+                    if abs(_as_float(p.get("size_signed") or p.get("pos")) or 0.0) > 0]
+        if live_pos:
+            report["not_touched"].append(
+                {"symbol": base, "why": "该合约仍有活动持仓 ⇒ 整合约跳过（宁可留腿，不可裸奔）"})
+            continue
+        try:
+            legs = list(ad.list_protective_orders(symbol) or [])
+        except Exception as exc:
+            report["errors"].append({"symbol": base, "stage": "list",
+                                     "detail": f"{type(exc).__name__}: {exc}"})
+            continue
+        att = attribute_protective_orders([], legs, ledger_rows)
+        # 归属层自己给了 counts（且含 cleanup_candidates/needs_human 等派生键）⇒ 直接用，不重算
+        report["attribution"][base] = {"counts": att.get("counts") or {}}
+        for leg in att.get("orphan_attributed", []):
+            leg_id = str(leg.get("id") or "")
+            item = {"symbol": base, "id": leg_id, "kind": leg.get("kind"),
+                    "trigger_price": leg.get("trigger_price"),
+                    "evidence": leg.get("evidence")}
+            if not leg_id:
+                report["skipped"].append(dict(item, why="腿没有 id ⇒ 无法逐腿撤（不用按合约全撤）"))
+                continue
+            if dry_run:
+                report["would_cancel"].append(item)
+                continue
+            try:
+                ad.cancel_price_order(leg_id)
+                report["cancelled"].append(item)
+                log(f"[跨所保护清理] 已撤销孤儿腿 {base} {item['kind']} id={leg_id}")
+            except Exception as exc:
+                report["errors"].append(dict(item, stage="cancel",
+                                             detail=f"{type(exc).__name__}: {exc}"))
+        for bucket in ("orphan_unattributed", "side_mismatch", "size_mismatch"):
+            for leg in att.get(bucket, []):
+                report["not_touched"].append({"symbol": base, "id": leg.get("id"),
+                                              "bucket": bucket,
+                                              "why": "归属不可判定/不匹配 ⇒ 按 doctrine 不碰"})
+    return report
 
 
 def audit_cross_venue_protection(xv_positions_by_venue: Optional[Dict[str, Any]], *,

@@ -941,3 +941,93 @@ class ScanDictShapeContractTest(unittest.TestCase):
                 self.assertEqual(missing, [],
                                  f"{fn} 读 scan[...] 的 {missing} 生产侧不提供 "
                                  "⇒ 跨所保护巡检会**周期中途** KeyError（后面相位全跳过）")
+
+class CancelOrphanAttributedLegsTest(unittest.TestCase):
+    """第一百七十刀：**有护栏的**孤儿腿撤销（G8 只报告不撤销，这一步是显式运营动作）。
+
+    四条护栏各有一个用例；其中"归属不可判定绝不撤"是**安全底线**（可能是用户手单）。
+    """
+
+    def _ad(self, legs_by_symbol):
+        calls = []
+
+        class _Ad:
+            def list_protective_orders(self, symbol):
+                return [dict(r) for r in legs_by_symbol.get(symbol, [])]
+
+            def cancel_price_order(self, order_id):
+                calls.append(order_id)
+                return {"id": order_id, "status": "finished"}
+
+        ad = _Ad()
+        ad.calls = calls
+        return ad
+
+    def _tagged_orphan(self):
+        return {"id": "o-1", "initial": {"contract": "DOGE_USDT", "size": 0,
+                                         "text": "t-r20tp261158", "is_close": True},
+                "trigger": {"price": "0.0811"}}
+
+    def test_tagged_orphan_is_cancelled_only_when_not_dry_run(self):
+        from scripts.trader.venue_protection import cancel_orphan_attributed_legs
+        ad = self._ad({"DOGE_USDT": [self._tagged_orphan()]})
+        dry = cancel_orphan_attributed_legs(ad, positions=[], symbols=["DOGE_USDT"], dry_run=True)
+        self.assertEqual(dry["would_cancel"][0]["id"], "o-1")
+        self.assertEqual(ad.calls, [], "dry-run 绝不能撤单")
+        live = cancel_orphan_attributed_legs(ad, positions=[], symbols=["DOGE_USDT"], dry_run=False)
+        self.assertEqual(live["cancelled"][0]["id"], "o-1")
+        self.assertEqual(ad.calls, ["o-1"], "非 dry-run 必须**逐腿按 id** 撤")
+
+    def test_unattributed_leg_is_never_cancelled(self):
+        """安全底线：没有标签也没有台账证据 ⇒ 归属不可判定 ⇒ 绝不撤（可能是用户手单）。"""
+        from scripts.trader.venue_protection import cancel_orphan_attributed_legs
+        leg = {"id": "u-1", "type": "STOP_MARKET", "symbol": "ETHUSDT",
+               "raw": {"orderType": "STOP_MARKET", "triggerPrice": "2555", "quantity": "0.532"}}
+        ad = self._ad({"ETH_USDT": [leg]})
+        rep = cancel_orphan_attributed_legs(ad, positions=[], symbols=["ETH_USDT"], dry_run=False)
+        self.assertEqual(ad.calls, [], "归属不可判定的腿被撤了 ⇒ 安全底线破了")
+        self.assertEqual(rep["cancelled"], [])
+        self.assertTrue(any(n["bucket"] == "orphan_unattributed" for n in rep["not_touched"]))
+
+    def test_symbol_with_a_live_position_is_skipped_whole(self):
+        """合约仍有活动持仓 ⇒ 整合约跳过（孤儿判定可能只是取数缺失，宁留腿不裸奔）。"""
+        from scripts.trader.venue_protection import cancel_orphan_attributed_legs
+        ad = self._ad({"DOGE_USDT": [self._tagged_orphan()]})
+        rep = cancel_orphan_attributed_legs(
+            ad, positions=[{"base": "DOGE", "side": "long", "size_signed": 100}],
+            symbols=["DOGE_USDT"], dry_run=False)
+        self.assertEqual(ad.calls, [])
+        self.assertTrue(rep["not_touched"][0]["why"].startswith("该合约仍有活动持仓"))
+
+    def test_cancel_failure_is_recorded_not_raised(self):
+        from scripts.trader.venue_protection import cancel_orphan_attributed_legs
+
+        class _Ad:
+            def list_protective_orders(self, symbol):
+                return [{"id": "o-2", "initial": {"contract": "DOGE_USDT", "size": 0,
+                                                  "text": "t-r20sl1", "is_close": True}}]
+
+            def cancel_price_order(self, order_id):
+                raise RuntimeError("network down")
+
+        rep = cancel_orphan_attributed_legs(_Ad(), positions=[], symbols=["DOGE_USDT"], dry_run=False)
+        self.assertEqual(rep["cancelled"], [])
+        self.assertIn("network down", rep["errors"][0]["detail"])
+
+    def test_list_failure_is_recorded_per_symbol(self):
+        from scripts.trader.venue_protection import cancel_orphan_attributed_legs
+
+        class _Ad:
+            def list_protective_orders(self, symbol):
+                raise RuntimeError("venue 502")
+
+            def cancel_price_order(self, order_id):   # pragma: no cover - 不该被调用
+                raise AssertionError("读腿失败时不得撤单")
+
+        rep = cancel_orphan_attributed_legs(_Ad(), positions=[], symbols=["DOGE_USDT"], dry_run=False)
+        self.assertEqual(rep["errors"][0]["stage"], "list")
+        self.assertEqual(rep["cancelled"], [])
+
+    def test_function_is_exported(self):
+        import scripts.trader.venue_protection as vp
+        self.assertIn("cancel_orphan_attributed_legs", vp.__all__)
