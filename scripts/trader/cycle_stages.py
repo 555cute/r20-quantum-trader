@@ -667,43 +667,79 @@ def data_shape_preflight_stage(*, intents_path, trackers_path,
         print("[数据形状预检] 意图/追踪器形状合规")
     return violations
 
-def cycle_disclosure_summary(*, broken_venues=(), entries_blocked=False,
+def cycle_disclosure_payload(*, broken_venues=(), entries_blocked=False,
                             shape_violations=(), watchdog_report=None,
-                            watchdog_enabled=True) -> str:
-    """周期**披露汇总**（第 50 刀）：把"本轮跳过/未核验了什么"压成**一条可检索**的行。
+                            watchdog_enabled=True) -> dict:
+    """周期披露的**结构化**载荷（第 51 刀）：供"渲染一条行"与"落盘成指标"共用。
 
-    为什么需要它：本仓的披露此前散落在各处 `print`（跨所挂单"未计入"、预留"未核验"、
-    凭证坏所、形状违规……）。散落的披露**会随重构静默消失**，而《失败语义手册》要求
-    "披露"是**可验证**的纪律 —— 于是统一在周期收尾打一条汇总：
+    单一事实源：`cycle_disclosure_summary` 只负责把它渲染成一行；
+    `write_cycle_disclosure_snapshot` 只负责把它原子落盘给后端 `/metrics` 读。
+    两处都不再各自解释"什么算跳过" —— 这正是本仓反复吃过的"同一语义两处写"。
+
+    ⚠️ 绝不抛异常（非 dict 的 watchdog 报告、`None` 集合、含 `None` 的列表一律宽容）：
+    报告器不得成为新的单点故障。
+    """
+    venues = sorted({str(v) for v in (broken_venues or []) if str(v)})
+    bad = [str(b) for b in (shape_violations or [])]
+    rep = watchdog_report if isinstance(watchdog_report, dict) else {}
+    return {
+        "broken_venues": venues,
+        "broken_venue_count": len(venues),
+        "entries_blocked": bool(entries_blocked),
+        "shape_violation_count": len(bad),
+        "shape_violation_head": bad[:3],
+        "watchdog_enabled": bool(watchdog_enabled),
+        "watchdog_errors": len(rep.get("errors") or []),
+        "watchdog_critical": len(rep.get("critical") or []),
+        "clean": not (venues or entries_blocked or bad),
+    }
+
+
+def cycle_disclosure_summary(payload: dict) -> str:
+    """把披露载荷渲染成**一条可检索**的行（渲染器；判定/落盘见 payload 与快照写入）。
 
         [周期披露] 本轮无跳过/未核验项
         [周期披露] 本轮跳过/未核验：凭证坏所=2(binance,gate); 对账失败（禁本轮新开仓）
 
     判据很朴素但有效：**这条行必须每轮都出现**（门禁钉调用点）⇒ 有人删掉某处披露时，
     汇总行里的数字会随之变化，评审看日志就能发现"怎么不报了"。
-
-    ⚠️ 它只是**报告器**：不参与任何控制流判定，绝不抛异常（入参都做了宽容处理）。
     """
+    payload = payload if isinstance(payload, dict) else {}
     parts = []
-    venues = sorted({str(v) for v in (broken_venues or []) if str(v)})
-    if venues:
-        parts.append(f"凭证坏所={len(venues)}({','.join(venues)})")
-    if entries_blocked:
+    n_ven = int(payload.get("broken_venue_count") or 0)
+    if n_ven:
+        parts.append(f"凭证坏所={n_ven}({','.join(payload.get('broken_venues') or [])})")
+    if payload.get("entries_blocked"):
         parts.append("对账失败（禁本轮新开仓）")
-    bad = list(shape_violations or [])
-    if bad:
-        head = "; ".join(str(b) for b in bad[:3])
-        more = f" …共{len(bad)}条" if len(bad) > 3 else ""
-        parts.append(f"数据形状违规={len(bad)}（{head}{more}）")
-    # ⚠️ 报告器绝不能因入参形状而抛（否则"披露"本身成了新的单点故障）
-    if isinstance(watchdog_report, dict):
-        errs = len(watchdog_report.get("errors") or [])
-        crit = len(watchdog_report.get("critical") or [])
-        if errs or crit:
-            parts.append(f"跨所保护：错误={errs} 严重缺口={crit}")
+    n_bad = int(payload.get("shape_violation_count") or 0)
+    if n_bad:
+        head = "; ".join(payload.get("shape_violation_head") or [])
+        more = f" …共{n_bad}条" if n_bad > 3 else ""
+        parts.append(f"数据形状违规={n_bad}（{head}{more}）")
+    errs, crit = int(payload.get("watchdog_errors") or 0), int(payload.get("watchdog_critical") or 0)
+    if errs or crit:
+        parts.append(f"跨所保护：错误={errs} 严重缺口={crit}")
     line = ("[周期披露] 本轮跳过/未核验：" + "; ".join(parts)) if parts \
         else "[周期披露] 本轮无跳过/未核验项"
-    if not watchdog_enabled:
+    if not payload.get("watchdog_enabled", True):
         # 未开闸的加固层是**没在跑的保护**，属"应当被看见"的事实（不是错误）
         line += "；跨所保护巡检未开闸"
     return line
+
+
+def write_cycle_disclosure_snapshot(*, path, payload, _atomic_write_json) -> bool:
+    """把披露载荷**原子**落盘给后端 `/metrics` 跨进程读取（第 51 刀）。
+
+    与行情取数健康快照同一路数（worker 写、后端读）；`written_at_ms` 用于算新鲜度，
+    让"很久没更新"与"本轮很干净"在指标上可区分（读不到 ≠ 没有）。
+    失败只返回 False（绝不抛、绝不改变交易行为）。
+    """
+    import time as _time
+    body = dict(payload or {})
+    body["written_at_ms"] = int(_time.time() * 1000)
+    try:
+        _atomic_write_json(path, body)
+        return True
+    except Exception as exc:      # noqa: BLE001 - 可观测性失败绝不拖垮周期
+        print(f"[周期披露] warn 快照写入失败（不影响交易）: {exc!r}")
+        return False

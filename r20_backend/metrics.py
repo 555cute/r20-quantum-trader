@@ -66,6 +66,7 @@ __all__ = [
     "collect_risk_limits",
     "collect_market_data_health",
     "collect_market_stream_health",
+    "collect_cycle_disclosure",
 ]
 
 #: **必需数据源**：缺失即视为故障（告警据此触发）。
@@ -200,6 +201,24 @@ def collect_market_data_health(path: Path) -> Optional[Dict[str, Any]]:
     return payload or None
 
 
+def collect_cycle_disclosure(path: Path) -> Optional[Dict[str, Any]]:
+    """读 worker 写的**周期披露快照**（`data/cycle_disclosure.json`，第 51 刀）。
+
+    缺失/损坏 → None ⇒ 调用方标 `source_ok=0`，且**不发任何计数序列**。
+    这一点是刻意的（对齐本文件既有的"不可判定≠0"先例）：若把"读不到"渲染成
+    `broken_venues=0`，面板会读成"本轮很干净"，而真相是**不知道**。
+    """
+    try:
+        raw = Path(path).read_text(encoding="utf-8")
+    except Exception:
+        return None
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def collect_market_stream_health(path: Path) -> Optional[Dict[str, Any]]:
     """读行情流健康快照（`data/market_stream_health.json`，探测进程写、这里读）。
 
@@ -223,6 +242,7 @@ def build_snapshot(*, data_dir: Optional[Path] = None,
                    risk_limits: Optional[Dict[str, float]] = None,
                    market_data_health: Optional[Dict[str, Any]] = None,
                    market_stream_health: Optional[Dict[str, Any]] = None,
+                   cycle_disclosure: Optional[Dict[str, Any]] = None,
                    now: Optional[float] = None) -> Dict[str, Any]:
     """取数（可注入）。每个源独立 try，失败只影响该源的 `source_ok`。"""
     sources: Dict[str, bool] = {}
@@ -267,6 +287,15 @@ def build_snapshot(*, data_dir: Optional[Path] = None,
         market_stream_health = collect_market_stream_health(ms_base / "market_stream_health.json")
     sources["market_stream"] = market_stream_health is not None
 
+    if cycle_disclosure is None:
+        try:
+            from r20_backend.dependencies import DATA_DIR as _CD_DATA_DIR
+            cd_base = Path(data_dir) if data_dir is not None else Path(_CD_DATA_DIR)
+        except Exception:
+            cd_base = Path(data_dir or "data")
+        cycle_disclosure = collect_cycle_disclosure(cd_base / "cycle_disclosure.json")
+    sources["cycle_disclosure"] = cycle_disclosure is not None
+
     return {
         "generated_at": float(now if now is not None else time.time()),
         "sources": sources,
@@ -275,6 +304,7 @@ def build_snapshot(*, data_dir: Optional[Path] = None,
         "risk_limits": risk_limits or {},
         "market_data_health": market_data_health or {},
         "market_stream_health": market_stream_health or {},
+        "cycle_disclosure": cycle_disclosure or {},
     }
 
 
@@ -403,6 +433,25 @@ def render_prometheus(snapshot: Dict[str, Any]) -> str:
         if tick_age is not None:
             emit("r20_market_stream_tick_age_seconds", tick_age, [("venue", venue)],
                  help_text="该所距上次收到 tick 的秒数（无 tick 时不输出该序列）")
+
+    cd = snapshot.get("cycle_disclosure") or {}
+    if isinstance(cd, dict) and cd:
+        emit("r20_cycle_disclosure_snapshot_age_seconds", _age(cd.get("written_at_ms")),
+             help_text="周期披露快照距写入的秒数（worker 每轮写一次）")
+        emit("r20_cycle_disclosure_broken_venues", cd.get("broken_venue_count"),
+             help_text="本轮因凭证坏被跳过的交易所数量（未计入配额/敞口）")
+        emit("r20_cycle_disclosure_shape_violations", cd.get("shape_violation_count"),
+             help_text="本轮生产数据形状违规条数（读得到但形状不对）")
+        emit("r20_cycle_disclosure_entries_blocked", 1 if cd.get("entries_blocked") else 0,
+             help_text="本轮是否因对账失败禁止新开仓（1=是）")
+        emit("r20_cycle_disclosure_watchdog_enabled", 1 if cd.get("watchdog_enabled") else 0,
+             help_text="跨所保护巡检本轮是否开闸（0=没在跑的保护，属应当被看见的事实）")
+        # 未开闸时**不发**错误计数：没跑就没有"错误数"，发 0 会被读成"跑了且没问题"
+        if cd.get("watchdog_enabled"):
+            emit("r20_cycle_disclosure_watchdog_errors", cd.get("watchdog_errors"),
+                 help_text="跨所保护巡检本轮错误数")
+            emit("r20_cycle_disclosure_watchdog_critical", cd.get("watchdog_critical"),
+                 help_text="跨所保护巡检本轮严重缺口数（无止损腿/覆盖不可判定）")
 
     out: List[str] = []
     for name, family in families.items():

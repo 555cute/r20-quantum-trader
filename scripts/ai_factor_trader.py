@@ -53,7 +53,9 @@ from scripts.trader.venue_evidence import (
     persist_venue_decision as _venue_evidence_persist,
 )
 from scripts.trader.cycle_stages import (
+    cycle_disclosure_payload,
     cycle_disclosure_summary,
+    write_cycle_disclosure_snapshot,
     data_shape_preflight_stage,
     fetch_positions_and_reconcile,
     scan_risk_gates_and_ai_brain,
@@ -679,6 +681,7 @@ VENUE_HEALTH_FILE = os.path.join(DATA_DIR, "venue_health.json")
 #: 跨进程原因：取数在 worker（15 分钟 respawn），`/metrics` 在后端进程 ——
 #: 进程内计数器看不到对方（与 venue_health.json 同一套手法）。
 MARKET_DATA_HEALTH_FILE = os.path.join(DATA_DIR, "market_data_health.json")
+CYCLE_DISCLOSURE_FILE = os.path.join(DATA_DIR, "cycle_disclosure.json")
 #: 组合风险预算总上限（US-001 预留层封顶口径；0/未配置 = 只累计台账不封顶）
 PORTFOLIO_RISK_BUDGET_ENV = "R20_PORTFOLIO_RISK_BUDGET_USDT"
 #: 场所取数健康度可容忍年龄（brain 15min 周期写盘，给 2 个周期 + 余量）
@@ -1305,13 +1308,18 @@ def execute_portfolio():
         evaluate_asset_signal=evaluate_asset_signal,
         os=os    )
 
-    # 6. 周期披露汇总（第 50 刀）：每轮必须留下**一条可检索**的"跳过/未核验"行
-    print(cycle_disclosure_summary(
+    # 6. 周期披露汇总（第 50/51 刀）：每轮必须留下**一条可检索**的"跳过/未核验"行，
+    #    并把同一份载荷原子落盘给后端 /metrics（跨进程可观测：读不到 ≠ 没有）
+    _disc = cycle_disclosure_payload(
         broken_venues=_BROKEN_VENUES,
         entries_blocked=entries_blocked,
         shape_violations=_shape_violations,
         watchdog_report=_wd_report,
-        watchdog_enabled=R20_VENUE_PROTECTION_WATCHDOG))
+        watchdog_enabled=R20_VENUE_PROTECTION_WATCHDOG)
+    print(cycle_disclosure_summary(_disc))
+    write_cycle_disclosure_snapshot(
+        path=CYCLE_DISCLOSURE_FILE, payload=_disc,
+        _atomic_write_json=_atomic_write_json)
 
 if __name__ == "__main__":
     if not selected_environment().configured:

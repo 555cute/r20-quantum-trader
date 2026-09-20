@@ -259,8 +259,10 @@ class CycleDisclosureSummaryTest(unittest.TestCase):
     """
 
     def _sum(self, **kw):
-        from scripts.trader.cycle_stages import cycle_disclosure_summary
-        return cycle_disclosure_summary(**kw)
+        # 第 51 刀起：payload（结构化）与渲染分离 —— 渲染用例依旧只关心"那一行"
+        from scripts.trader.cycle_stages import (cycle_disclosure_payload,
+                                                 cycle_disclosure_summary)
+        return cycle_disclosure_summary(cycle_disclosure_payload(**kw))
 
     def test_clean_cycle_says_so(self):
         line = self._sum()
@@ -312,8 +314,65 @@ class CycleDisclosureSummaryTest(unittest.TestCase):
         src = (Path(__file__).resolve().parents[2] / "scripts" / "ai_factor_trader.py"
                ).read_text(encoding="utf-8")
         self.assertIn("print(cycle_disclosure_summary(", src)
+        # 同一份载荷还要**落盘**给后端 /metrics（有函数没人调 = 纪律落空）
+        self.assertIn("write_cycle_disclosure_snapshot(", src)
+        self.assertIn("path=CYCLE_DISCLOSURE_FILE", src)
         for kw in ("broken_venues=_BROKEN_VENUES", "entries_blocked=entries_blocked",
                    "shape_violations=_shape_violations", "watchdog_report=_wd_report",
                    "watchdog_enabled=R20_VENUE_PROTECTION_WATCHDOG"):
             with self.subTest(arg=kw):
                 self.assertIn(kw, src, f"汇总缺参数 {kw} ⇒ 该路披露不会被汇总")
+
+class CycleDisclosurePayloadAndSnapshotTest(unittest.TestCase):
+    """披露载荷（结构化）+ 快照落盘（第 51 刀）。
+
+    分层的理由：**渲染**（给人看的一行）与**落盘**（给 /metrics 读的结构）必须共用
+    同一份判定 —— 否则就是本仓反复吃过的"同一语义两处写 ⇒ 必然漂移"。
+    """
+
+    def test_payload_is_structured_and_marks_clean(self):
+        from scripts.trader.cycle_stages import cycle_disclosure_payload
+        clean = cycle_disclosure_payload()
+        self.assertTrue(clean["clean"])
+        self.assertEqual(clean["broken_venue_count"], 0)
+        self.assertFalse(clean["watchdog_enabled"] is None)
+        dirty = cycle_disclosure_payload(broken_venues=["gate"], entries_blocked=True,
+                                         shape_violations=["x", "y"])
+        self.assertFalse(dirty["clean"])
+        self.assertEqual(dirty["broken_venues"], ["gate"])
+        self.assertEqual(dirty["shape_violation_count"], 2)
+        self.assertEqual(dirty["shape_violation_head"], ["x", "y"])
+
+    def test_payload_tolerates_garbage(self):
+        from scripts.trader.cycle_stages import cycle_disclosure_payload
+        p = cycle_disclosure_payload(broken_venues=None, shape_violations=[None],
+                                     watchdog_report=MagicMock())
+        self.assertEqual(p["broken_venue_count"], 0)
+        self.assertEqual(p["shape_violation_count"], 1)     # None 也如实计入（不假装没发生）
+        self.assertEqual(p["watchdog_errors"], 0)           # 非 dict ⇒ 不猜、不计
+
+    def test_snapshot_is_written_atomically_with_freshness_stamp(self):
+        import json as _json
+        import tempfile
+        from pathlib import Path as _P
+        from scripts.trader.cycle_stages import (cycle_disclosure_payload,
+                                                 write_cycle_disclosure_snapshot)
+        from scripts.ai_factor_trader import _atomic_write_json
+        with tempfile.TemporaryDirectory() as td:
+            target = _P(td) / "cycle_disclosure.json"
+            ok = write_cycle_disclosure_snapshot(
+                path=str(target), payload=cycle_disclosure_payload(broken_venues=["gate"]),
+                _atomic_write_json=_atomic_write_json)
+            self.assertTrue(ok)
+            body = _json.loads(target.read_text(encoding="utf-8"))
+            self.assertEqual(body["broken_venue_count"], 1)
+            self.assertIsInstance(body["written_at_ms"], int)
+            left = [n for n in __import__("os").listdir(td) if n != "cycle_disclosure.json"]
+            self.assertEqual(left, [], "原子写不得留临时文件")
+
+    def test_snapshot_write_failure_returns_false_and_never_raises(self):
+        from scripts.trader.cycle_stages import write_cycle_disclosure_snapshot
+        def boom(*a, **k):
+            raise OSError("磁盘满")
+        self.assertFalse(write_cycle_disclosure_snapshot(
+            path="/proc/nonexistent/x.json", payload={}, _atomic_write_json=boom))

@@ -445,3 +445,80 @@ class MarketStreamSourceTest(unittest.TestCase):
         text = M.render_prometheus(snap)
         self.assertIn('r20_metrics_source_ok{source="market_stream",required="0"} 0', text)
         self.assertNotIn("r20_market_stream_ticks_total", text, "没在跑就不该凭空发指标")
+
+class CycleDisclosureMetricsTest(unittest.TestCase):
+    """周期披露指标的**诚实性**（第 51 刀）。
+
+    关键契约（对齐本文件既有的"不可判定≠0"先例）：快照缺失/损坏 ⇒ 只标
+    `source_ok=0`，**绝不发零值计数** —— 否则面板会把"不知道"读成"本轮很干净"。
+    """
+
+    def _snap(self, cd):
+        return {
+            "generated_at": 1789000000.0,
+            "sources": {"cycle_disclosure": cd is not None},
+            "cycle_disclosure": cd or {},
+        }
+
+    def test_counts_are_emitted_when_snapshot_present(self):
+        text = M.render_prometheus(self._snap({
+            "written_at_ms": int(1788999900.0 * 1000),
+            "broken_venue_count": 2, "shape_violation_count": 1,
+            "entries_blocked": True, "watchdog_enabled": True,
+            "watchdog_errors": 3, "watchdog_critical": 1,
+        }))
+        for needle in ("r20_cycle_disclosure_broken_venues 2",
+                       "r20_cycle_disclosure_shape_violations 1",
+                       "r20_cycle_disclosure_entries_blocked 1",
+                       "r20_cycle_disclosure_watchdog_enabled 1",
+                       "r20_cycle_disclosure_watchdog_errors 3",
+                       "r20_cycle_disclosure_watchdog_critical 1"):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, text)
+
+    def test_missing_snapshot_emits_no_counts_only_source_flag(self):
+        text = M.render_prometheus(self._snap(None))
+        self.assertIn('r20_metrics_source_ok{source="cycle_disclosure",required="0"} 0', text)
+        self.assertNotIn("r20_cycle_disclosure_broken_venues", text,
+                         "读不到不得渲染成 0（那是把'不知道'说成'很干净'）")
+
+    def test_disabled_watchdog_emits_no_error_counts(self):
+        """没跑就没有"错误数"：发 0 会被读成"跑了且没问题"。"""
+        text = M.render_prometheus(self._snap({
+            "written_at_ms": int(1788999900.0 * 1000),
+            "broken_venue_count": 0, "shape_violation_count": 0,
+            "entries_blocked": False, "watchdog_enabled": False,
+            "watchdog_errors": 0, "watchdog_critical": 0,
+        }))
+        self.assertIn("r20_cycle_disclosure_watchdog_enabled 0", text)
+        self.assertNotIn("r20_cycle_disclosure_watchdog_errors", text)
+        self.assertNotIn("r20_cycle_disclosure_watchdog_critical", text)
+
+    def test_collector_returns_none_for_missing_or_broken_file(self):
+        import tempfile
+        from pathlib import Path as _P
+        with tempfile.TemporaryDirectory() as td:
+            missing = _P(td) / "nope.json"
+            self.assertIsNone(M.collect_cycle_disclosure(missing))
+            broken = _P(td) / "broken.json"
+            broken.write_text("{ 半截", encoding="utf-8")
+            self.assertIsNone(M.collect_cycle_disclosure(broken))
+            good = _P(td) / "good.json"
+            good.write_text(json.dumps({"broken_venue_count": 1}), encoding="utf-8")
+            self.assertEqual(M.collect_cycle_disclosure(good)["broken_venue_count"], 1)
+
+class CycleDisclosureFileAgreementTest(unittest.TestCase):
+    """worker 写的文件名 与 后端读的文件名 必须一致（第 51 刀）。
+
+    这是本仓"同一语义两处写 ⇒ 必然漂移"的最典型形态：一边写 `data/x.json`、
+    另一边读 `data/y.json`，两边测试都绿，线上永远读不到。故直接钉文件名。
+    """
+
+    def test_worker_and_backend_agree_on_the_filename(self):
+        root = Path(__file__).resolve().parents[2]
+        facade = (root / "scripts" / "ai_factor_trader.py").read_text(encoding="utf-8")
+        backend = (root / "r20_backend" / "metrics.py").read_text(encoding="utf-8")
+        self.assertIn('CYCLE_DISCLOSURE_FILE = os.path.join(DATA_DIR, "cycle_disclosure.json")',
+                      facade, "worker 侧文件名变了？")
+        self.assertIn('cd_base / "cycle_disclosure.json"', backend,
+                      "后端读的文件名与 worker 写的不一致 ⇒ 指标永远读不到")
