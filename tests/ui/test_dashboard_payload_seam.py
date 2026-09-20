@@ -335,6 +335,79 @@ class ShellDisciplineTests(unittest.TestCase):
         self.assertTrue(str(app.DATA_DIR).endswith("data") or "data" in str(app.DATA_DIR))
 
 
+class ReaderFamilyFailureSemanticsTest(unittest.TestCase):
+    """面板侧**读取器家族**：缺失静默、读不出来必披露（第一百四十九刀）。
+
+    缺陷形状：`readers.read_json` / `read_text` / `read_text_lines` 旧实现都是
+    "任何失败 ⇒ 默认值/空"（`except (OSError, ValueError, UnicodeDecodeError): return default`），
+    而同一模块里我在第 52 刀刚给 `load_json_dict_disclosed` 补了披露 ⇒ **一个模块两套失败语义**，
+    正是本仓反复吃过的"同一语义两处写"。这些读取器喂的是面板区块（AI 决策、因子库、
+    复盘报告、快讯、日志尾），静默失败等于把"读坏了"渲染成"确实没有"。
+    """
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory(prefix="reader-family-")
+        self.addCleanup(self.tmp.cleanup)
+        self.base = Path(self.tmp.name)
+
+    def _corrupt(self, name, text="{ 半截"):
+        f = self.base / name
+        f.write_text(text, encoding="utf-8")
+        return f
+
+    def test_json_reader_discloses_corrupt_but_is_silent_when_missing(self):
+        import io
+        from contextlib import redirect_stdout
+        from r20_backend.dashboard_payload.readers import read_json
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            missing = read_json(self.base / "nope.json", {"d": 1})
+        self.assertEqual(missing, {"d": 1})
+        self.assertEqual(buf.getvalue(), "", "文件不存在是合法空态，不应吵")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            broken = read_json(self._corrupt("broken.json"), {"d": 1})
+        self.assertEqual(broken, {"d": 1})
+        self.assertIn("[面板] warn", buf.getvalue())
+        self.assertIn("请勿据此判断", buf.getvalue())
+
+    def test_text_reader_discloses_corrupt_but_is_silent_when_missing(self):
+        import io
+        from contextlib import redirect_stdout
+        from r20_backend.dashboard_payload.readers import read_text
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            self.assertEqual(read_text(self.base / "nope.txt", "d"), "d")
+        self.assertEqual(buf.getvalue(), "")
+        # 目录不是可读文本：存在但读不出来 ⇒ 必披露
+        (self.base / "adir").mkdir()
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            self.assertEqual(read_text(self.base / "adir", "d"), "d")
+        self.assertIn("[面板] warn", buf.getvalue())
+
+    def test_text_lines_reader_discloses_corrupt_but_is_silent_when_missing(self):
+        import io
+        from contextlib import redirect_stdout
+        from r20_backend.dashboard_payload.readers import read_text_lines
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            self.assertEqual(read_text_lines(self.base / "nope.log", 10), [])
+        self.assertEqual(buf.getvalue(), "")
+        (self.base / "adir").mkdir()
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            self.assertEqual(read_text_lines(self.base / "adir", 10), [])
+        self.assertIn("[面板] warn", buf.getvalue())
+        # 正常读取不得吵，且语义不变（strip / limit）
+        f = self.base / "ok.log"
+        f.write_text("a\n\n b \nc\n", encoding="utf-8")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            self.assertEqual(read_text_lines(f, 2), ["b", "c"])
+        self.assertEqual(buf.getvalue(), "")
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
 

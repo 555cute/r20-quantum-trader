@@ -22,36 +22,63 @@ from typing import Any
 __all__ = ["read_json", "read_text", "read_text_lines"]
 
 
+def _warn_unreadable(path: str | os.PathLike[str], what: str, exc: BaseException) -> None:
+    """面板侧读取失败的**统一披露**（第一百四十九刀）。一行，且点明"空不等于没有"。"""
+    print(f"[面板] warn {os.path.basename(os.fspath(path))} {what}读不出来/损坏（{exc!r}）"
+          " ⇒ 该区块显示为默认/空值，请勿据此判断\"没有数据\"")
+
+
 def read_json(path: str | os.PathLike[str], default: Any) -> Any:
-    """读 JSON；任何失败都返回 default。"""
+    """读 JSON → `default`。
+
+    第一百四十九刀：与同模块的 `load_json_dict_disclosed` 对齐失败语义 ——
+    文件**不存在** ⇒ 静默 `default`（合法空态）；**读不出来/损坏** ⇒ `default` + 一行 warn。
+    旧实现"任何失败都返回 default"会把"损坏"渲染成"确实没有"（同一模块里两套语义，
+    正是本仓"同一语义两处写 ⇒ 必然漂移"）。
+    """
+    text = os.fspath(path)
+    if not os.path.exists(text):
+        return default
     try:
-        with open(path, "r", encoding="utf-8") as handle:
+        with open(text, "r", encoding="utf-8") as handle:
             return json.load(handle)
-    except (OSError, ValueError, UnicodeDecodeError):
+    except Exception as exc:      # noqa: BLE001 - 面板不得因一个文件炸掉整个载荷
+        _warn_unreadable(text, "", exc)
         return default
 
 
 def read_text(path: str | os.PathLike[str], default: str = "") -> str:
-    """读文本全文；任何失败都返回 default。"""
+    """读文本全文 → `default`（失败语义同 `read_json`：缺失静默，读不出来必披露）。"""
+    text = os.fspath(path)
+    if not os.path.exists(text):
+        return default
     try:
-        with open(path, "r", encoding="utf-8") as handle:
+        with open(text, "r", encoding="utf-8") as handle:
             return handle.read()
-    except (OSError, UnicodeDecodeError):
+    except Exception as exc:      # noqa: BLE001
+        _warn_unreadable(text, "文本", exc)
         return default
 
 
 def read_text_lines(
     path: str | os.PathLike[str], limit: int, strip: bool = True
 ) -> list[str]:
-    """读文本末尾 limit 行；任何失败都返回 []。
+    """读文本末尾 limit 行 → `[]`。
 
     strip=True 时丢弃空行（对齐 r20_backend/dashboard_cache.py 原日志读取语义：
     `[l.strip() for l in lines[-60:] if l.strip()]`）。
+
+    第一百四十九刀失败语义：文件**不存在** ⇒ 静默 `[]`；**读不出来** ⇒ `[]` + 一行 warn
+    （面板的"没有日志"与"日志读不出来"从此可区分）。
     """
+    text = os.fspath(path)
+    if not os.path.exists(text):
+        return []
     try:
-        with open(path, "r", encoding="utf-8") as handle:
+        with open(text, "r", encoding="utf-8") as handle:
             lines = handle.readlines()
-    except (OSError, UnicodeDecodeError):
+    except Exception as exc:      # noqa: BLE001
+        _warn_unreadable(text, "文本", exc)
         return []
     tail = lines[-limit:] if limit > 0 else []
     if strip:
