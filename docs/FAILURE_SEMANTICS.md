@@ -67,6 +67,7 @@
 | 面板侧**读取器家族**（json / 文本 / 文本尾） | 三者统一失败语义：文件**不存在** ⇒ 静默默认/空；**读不出来** ⇒ 默认/空 + 一行 warn（点明"空不等于没有"）| 披露 | `r20_backend/dashboard_payload/readers.py` | `tests/ui/test_dashboard_payload_seam.py::ReaderFamilyFailureSemanticsTest` |
 | 数值强转 `safe_float`（**三处**：两公开 + 一私有） | 单一事实源在 `math_utils`；三入口必须是**薄壳**且 20 组边界输入**同判**（`nan`/`±inf`/`None`/空串/列表/bool…）；`nan`/`inf`⇒`default`、`True→1.0` 属既有语义，改动须有意识 | 防 | `r20_backend/math_utils.py` | `tests/core/test_numeric_coercion_single_source.py::SafeFloatSingleSourceTest` |
 | 日切键（`strftime("%Y-%m-%d")`）| 基座必须**可证明**是 +08:00：无参 `now()`／`utcnow()`／`timezone.utc`／本地时区一律翻红（日切错了不报错，只在 00:00–08:00 静默偏一天）| 防 | `scripts/trader/circuit_guard.py` | `tests/core/test_day_key_uses_beijing_tz.py::DayKeyUsesBeijingTzTest` |
+| 时间戳字段单位（`_ms`=毫秒 / `_ts`=秒）| 生产与消费两侧都必须自洽；`_ms` 字段写 `*1000`、`_ts` 字段写秒；已知例外（`last_sync_ts`）必须有**伴生不变式**（写入者全为毫秒或 None，绝不混入秒）| 防 | `tests/core/test_timestamp_unit_convention.py` | `tests/core/test_timestamp_unit_convention.py::TimestampUnitConventionTest` |
 <!-- anchors:end -->
 
 ## 3. 抽取门与"文档化差异"
