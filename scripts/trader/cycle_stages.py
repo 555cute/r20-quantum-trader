@@ -271,7 +271,11 @@ def fetch_positions_and_reconcile(*,
     #     （活仓/在途挂单一律保留；无仓无挂且超 TTL 才 closed——宁慢不错杀）。
     try:
         reconcile_reservation_ledger(real_pos_dict, pending_inst_ids, _xv_env,
-                                     venue_snapshot=xv_positions_by_venue)
+                                     venue_snapshot=xv_positions_by_venue,
+                                     # ⚠️ 第一百二十六刀：把"这次跨所实况到底核验成功没有"
+                                     # 一并交给对账器。此前只传快照 ⇒ 读取失败时传进去的是
+                                     # **空字典**，对账器据它判"外所无仓无挂"并误释放活仓预留。
+                                     venue_snapshot_verified=xv_ok)
     except Exception as _rc_exc:
         print(f"[预留对账] warn 对账器异常（不影响本周期交易）: {_rc_exc}")
 

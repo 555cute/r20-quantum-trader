@@ -51,14 +51,17 @@ class ReservationReconcileTests(unittest.TestCase):
         con.commit()
         con.close()
 
-    def _run(self, real_pos, pending, env="demo", snapshot=None):
+    def _run(self, real_pos, pending, env="demo", snapshot=None, verified=True,
+             fetch_ok=True):
         with patch.object(trader, "reservation_manager", lambda: self.mgr), \
                 patch.object(trader, "fetch_other_venue_positions",
-                             lambda e: (True, snapshot or {}, "")):
+                             lambda e: (fetch_ok, snapshot or {},
+                                        "" if fetch_ok else "binance 读取失败")):
             buf = io.StringIO()
             with redirect_stdout(buf):
                 n = trader.reconcile_reservation_ledger(real_pos, pending, env,
-                                                        venue_snapshot=snapshot)
+                                                        venue_snapshot=snapshot,
+                                                        venue_snapshot_verified=verified)
         self.out = buf.getvalue()
         return n
 
@@ -230,3 +233,84 @@ class CrossVenuePendingKeepTest(unittest.TestCase):
                 self.assertEqual(self._run({pending_inst}, {"binance": []}), 0,
                                  f"{pending_inst} 未归一 ⇒ 预留被误释放")
 
+
+class UnverifiedSnapshotMustNotReleaseTest(unittest.TestCase):
+    """第一百二十六刀：**跨所实况未核验 ⇒ 一笔都不许释放**。
+
+    缺陷形状（实测）：`fetch_other_venue_positions` 读取失败时返回 `(False, {}, err)`，
+    调用点（`cycle_stages`）此前把那个**空字典**原样透传 ⇒ 对账器据 `{}` 判定
+    "外所无仓无挂"，把**活仓的外所预留**（实测 binance 726U）按超 TTL 释放成
+    `closed`，日志还打印"无仓无挂"这一**假陈述**。释放不可逆 ⇒ 预算台账少算活仓。
+
+    方向纪律（模块 docstring）：保留是保守的（多占只压缩额度），释放不可逆 ⇒ 未知必须保留。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="us010-unv-")
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.db = os.path.join(self.tmp, "res.db")
+        self.mgr = risk_reservation.get_manager(db_path=self.db)
+        self.out = ""
+
+    def _reserve_stale(self, venue="binance", intent="UNI-USDT-SWAP:SELL_SHORT:900"):
+        self.mgr.reserve((venue, "demo", "fp-test"), intent, 726.0, state="pending")
+        con = sqlite3.connect(self.db)
+        con.execute("UPDATE risk_reservations SET updated_at = ?, created_at = ? "
+                    "WHERE intent_id = ?", (_utc_stamp(99999), _utc_stamp(99999), intent))
+        con.commit()
+        con.close()
+
+    def _run(self, **kw):
+        # ⚠️ 先把 fetch_ok 取出来：否则 `**kw` 会在调用点被求值，
+        # 把 `fetch_ok` 当成对账器的形参传进去（TypeError）。
+        fetch_ok = kw.pop("fetch_ok", True)
+        with patch.object(trader, "reservation_manager", lambda: self.mgr), \
+                patch.object(trader, "fetch_other_venue_positions",
+                             lambda e: (fetch_ok, {}, "")):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                n = trader.reconcile_reservation_ledger(
+                    {}, set(), "demo", **kw)
+        self.out = buf.getvalue()
+        return n
+
+    def test_unverified_empty_snapshot_releases_nothing(self):
+        self._reserve_stale()
+        n = self._run(venue_snapshot={}, venue_snapshot_verified=False)
+        self.assertEqual(n, 0, "未核验的空快照不得释放任何预留")
+        self.assertIn("UNI-USDT-SWAP:SELL_SHORT:900",
+                      {r["intent_id"] for r in self.mgr.list_unreleased("demo")})
+        self.assertIn("未核验", self.out)
+        self.assertNotIn("无仓无挂", self.out, "不得给出'无仓无挂'这种假陈述")
+
+    def test_self_fetch_failure_releases_nothing(self):
+        """`venue_snapshot=None`（自取）且读取失败 ⇒ 同样不释放。"""
+        self._reserve_stale()
+        n = self._run(venue_snapshot=None, fetch_ok=False)
+        self.assertEqual(n, 0)
+        self.assertIn("UNI-USDT-SWAP:SELL_SHORT:900",
+                      {r["intent_id"] for r in self.mgr.list_unreleased("demo")})
+        self.assertIn("自取失败", self.out)
+
+    def test_verified_empty_snapshot_still_reclaims(self):
+        """核验成功且**确实**无仓无挂 ⇒ 照常回笼（fail-closed 不得挡住正常回笼）。"""
+        self._reserve_stale()
+        n = self._run(venue_snapshot={}, venue_snapshot_verified=True)
+        self.assertEqual(n, 1)
+        self.assertNotIn("UNI-USDT-SWAP:SELL_SHORT:900",
+                         {r["intent_id"] for r in self.mgr.list_unreleased("demo")})
+
+    def test_default_keeps_backward_compatible_behaviour(self):
+        """不传新形参时行为与既有调用方一致（默认已核验）。"""
+        self._reserve_stale()
+        with patch.object(trader, "reservation_manager", lambda: self.mgr), \
+                patch.object(trader, "fetch_other_venue_positions", lambda e: (True, {}, "")):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                n = trader.reconcile_reservation_ledger({}, set(), "demo",
+                                                        venue_snapshot={})
+        self.assertEqual(n, 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -75,6 +75,7 @@ def reconcile_reservation_ledger(
     default_ttl_s: float,
     ttl_s: Optional[float] = None,
     venue_snapshot: Optional[Dict[str, list]] = None,
+    venue_snapshot_verified: bool = True,
 ) -> int:
     """周期级预留对账（US-010）：账实相符原则回笼陈旧占用。
 
@@ -89,6 +90,9 @@ def reconcile_reservation_ledger(
       `XRP-USDT-SWAP` 等价）；不要求方向一致——保留是保守方向，释放不可逆；
     - 现货两清（无仓无挂）且 updated_at 超 TTL → release(state=closed) 回笼；
     - 时间戳不可解析 / 环境不匹配 / account_key 异常 → 保守保留；
+    - **跨所实况未核验**（`venue_snapshot_verified=False`，或自取失败）→
+      **本周期一笔都不释放**：把"读不到"当"没有仓"会误释放**活仓**的预留
+      （第一百二十六刀实测：binance 726U 活仓预留被释放）；
     - 单条释放失败不影响其余（下周期重试，幂等 UNIQUE 键）。
 
     返回释放条数。调用方必须传**本周期刚核验过的**持仓/挂单实况（fail-closed
@@ -99,6 +103,17 @@ def reconcile_reservation_ledger(
     """
     ttl = default_ttl_s if ttl_s is None else float(ttl_s)
     now_utc = time.time()
+    # ⚠️ 第一百二十六刀：**跨所实况未核验 ⇒ 本周期一律不释放任何预留**。
+    # 原实现把"读不到"当成"没有仓"：`fetch_other_venue_positions` 失败时返回
+    # `(False, {}, err)`，而调用点（`cycle_stages`）把那个**空字典**原样透传进来，
+    # 本函数便据 `{}` 判定"外所无仓无挂" ⇒ 把**活仓的外所预留**按超 TTL 释放成
+    # `closed`（实测：binance 一笔 726U 的活仓预留被释放，日志还打印"无仓无挂"
+    # ——假陈述）。本模块 docstring 的方向纪律摆在这儿：
+    # 「保留是保守的（多占只压缩额度），释放是不可逆的」⇒ 未知必须保留。
+    if not venue_snapshot_verified:
+        print("[预留对账] warn 跨所实况未核验——本周期不释放任何预留"
+              "（释放不可逆，宁可慢一轮；下周期核验通过再回笼）")
+        return 0
     try:
         mgr = reservation_manager()
         rows = mgr.list_unreleased(environment)
@@ -115,11 +130,15 @@ def reconcile_reservation_ledger(
     # 跨所封顶快照（gate/binance）——有仓则对应意图必须保留（复用主循环已读结果，零重复出网）
     if venue_snapshot is None:
         try:
-            _xv_ok, venue_snapshot, _ = fetch_other_venue_positions(environment)
-            if not _xv_ok:
-                venue_snapshot = {}
-        except Exception:
-            venue_snapshot = {}
+            _xv_ok, venue_snapshot, _xv_err = fetch_other_venue_positions(environment)
+        except Exception as _xv_exc:
+            _xv_ok, venue_snapshot, _xv_err = False, {}, str(_xv_exc)
+        if not _xv_ok:
+            # 读失败 ≠ 没有仓：与上面同一条纪律（此前这里静默 `venue_snapshot = {}`，
+            # 于是"未知"被当成"两清"）。返回 0 而非继续释放。
+            print(f"[预留对账] warn 跨所实况自取失败（{_xv_err or '未知原因'}）"
+                  "——本周期不释放任何预留")
+            return 0
     for v, _rows in (venue_snapshot or {}).items():
         for _p in _rows:
             base = str(_p.get("base") or str(_p.get("inst_id", "")).split("_")[0]).upper()

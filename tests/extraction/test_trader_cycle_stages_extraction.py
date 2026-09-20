@@ -71,6 +71,25 @@ def _seg_stmts(fn: ast.FunctionDef) -> list:
     return body
 
 
+#: ⚠️ **文档化差异**（第一百二十六刀新增本表）：抽取门默认要求段体与基线
+#: **同一棵 AST**；某一段若确需**有意的行为修复**，必须在此登记"旧文本 → 新文本"，
+#: 于是"基线 + 差异 == 新段"，表外任何改动照旧翻红。
+#:
+#: 本刀唯一一条：预留对账的调用点必须把**跨所实况是否核验成功**交给对账器。
+#: 缺陷形状（实测）：`fetch_other_venue_positions` 读取失败返回 `(False, {}, err)`，
+#: 调用点原样把**空字典**透传 ⇒ 对账器据 `{}` 判"外所无仓无挂"，把**活仓的外所预留**
+#: （binance 726U）按超 TTL 释放成 `closed`（释放不可逆 ⇒ 台账少算活仓）。
+SEGMENT_DELTAS = {
+    "fetch_positions_and_reconcile": [
+        ("reconcile_reservation_ledger(real_pos_dict, pending_inst_ids, _xv_env, "
+         "venue_snapshot=xv_positions_by_venue)",
+         "reconcile_reservation_ledger(real_pos_dict, pending_inst_ids, _xv_env, "
+         "venue_snapshot=xv_positions_by_venue, "
+         "venue_snapshot_verified=xv_ok)"),
+    ],
+}
+
+
 class CycleStagesVerbatimTest(unittest.TestCase):
     def test_segments_are_ast_identical_to_baseline(self):
         for name, (rev, lo, hi) in SPECS.items():
@@ -78,10 +97,19 @@ class CycleStagesVerbatimTest(unittest.TestCase):
                 base = _baseline_portfolio(rev)
                 seg = base.body[lo:hi + 1]
                 got = _seg_stmts(_func(name))
+                # ⚠️ 用 `ast.unparse` 而不是 `ast.dump`：只有源码形态才做得了
+                # "文档化差异"的文本替换（与本仓 reservation_reconcile 门同一手法）。
+                # 两侧都来自 `ast.parse` ⇒ 仍是结构化比较，不受空白/换行影响。
+                base_src = ast.unparse(ast.Module(body=seg, type_ignores=[]))
+                got_src = ast.unparse(ast.Module(body=got, type_ignores=[]))
+                for _old_tok, _new_tok in SEGMENT_DELTAS.get(name, []):
+                    self.assertIn(_old_tok, base_src,
+                                  f"{name} 的文档化差异锚点在基线里找不到"
+                                  "（差异必须唯一且可核对）")
+                    base_src = base_src.replace(_old_tok, _new_tok)
                 self.assertEqual(
-                    ast.dump(ast.Module(body=got, type_ignores=[]), include_attributes=False),
-                    ast.dump(ast.Module(body=seg, type_ignores=[]), include_attributes=False),
-                    f"{name} 段体与抽取前**不再同一棵 AST**")
+                    base_src, got_src,
+                    f"{name} 段体与抽取前**不再同一棵 AST**（超出文档化差异）")
 
     def test_facade_calls_pass_every_parameter_once_same_name(self):
         facade = ast.parse((ROOT / "scripts/ai_factor_trader.py").read_text(encoding="utf-8"))

@@ -146,9 +146,13 @@ class FacadeShellTest(unittest.TestCase):
     def test_public_signature_unchanged(self):
         """⚠️ `test_reservation_reconcile.py` 用**位置参数**调用，签名不得变。"""
         sig = inspect.signature(trader.reconcile_reservation_ledger)
+        # 第一百二十六刀：**只允许追加带默认值的形参**（位置调用方一字不受影响）。
+        # `venue_snapshot_verified` 必须一路透传到对账器 —— 跨所读取失败时
+        # `venue_snapshot` 是空字典，对账器会据此误判"外所无仓无挂"并释放活仓预留。
         self.assertEqual(list(sig.parameters),
                          ["real_pos_dict", "pending_inst_ids", "environment",
-                          "ttl_s", "venue_snapshot"])
+                          "ttl_s", "venue_snapshot", "venue_snapshot_verified"])
+        self.assertIs(sig.parameters["venue_snapshot_verified"].default, True)
 
     def test_shell_delegates_with_all_dependencies(self):
         """四个依赖必须都在门面壳里**调用时**传入。"""
@@ -280,6 +284,33 @@ class BehaviourPreservedTest(unittest.TestCase):
          "        pending_bases.add(_p_base)"),
         ("or (venue == 'okx' and inst_id in pending)",
          "or (venue == 'okx' and inst_id in pending) or base in pending_bases"),
+        # ---- 第一百二十六刀：两处 fail-closed 修改 -------------------------------
+        # 缺陷：跨所实况**未核验**时，原实现把"读不到"当成"没有仓" ——
+        # `fetch_other_venue_positions` 失败返回 `(False, {}, err)`，调用点把那个
+        # **空字典**原样透传，本函数便据 `{}` 判定"外所无仓无挂" ⇒ 把**活仓的外所
+        # 预留**按超 TTL 释放成 closed（实测 binance 一笔 726U 活仓预留被释放，
+        # 日志还打印"无仓无挂"这一假陈述）。方向纪律见模块 docstring：
+        # 「保留是保守的（多占只压缩额度），释放是不可逆的」⇒ 未知必须保留。
+        ("now_utc = time.time()",
+         "now_utc = time.time()\n"
+         "if not venue_snapshot_verified:\n"
+         "    print('[预留对账] warn 跨所实况未核验——本周期不释放任何预留"
+         "（释放不可逆，宁可慢一轮；下周期核验通过再回笼）')\n"
+         "    return 0"),
+        ("    try:\n"
+         "        _xv_ok, venue_snapshot, _ = fetch_other_venue_positions(environment)\n"
+         "        if not _xv_ok:\n"
+         "            venue_snapshot = {}\n"
+         "    except Exception:\n"
+         "        venue_snapshot = {}",
+         "    try:\n"
+         "        _xv_ok, venue_snapshot, _xv_err = fetch_other_venue_positions(environment)\n"
+         "    except Exception as _xv_exc:\n"
+         "        _xv_ok, venue_snapshot, _xv_err = (False, {}, str(_xv_exc))\n"
+         "    if not _xv_ok:\n"
+         "        print(f\"[预留对账] warn 跨所实况自取失败（{_xv_err or '未知原因'}）"
+         "——本周期不释放任何预留\")\n"
+         "        return 0"),
     ]
 
     def _body(self, src: str, name: str) -> str:

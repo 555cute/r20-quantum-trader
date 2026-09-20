@@ -764,10 +764,12 @@ def reconcile_reservation_ledger(real_pos_dict: Dict[str, Any],
                                  pending_inst_ids: set,
                                  environment: str,
                                  ttl_s: float = None,
-                                 venue_snapshot: Optional[Dict[str, list]] = None) -> int:
+                                 venue_snapshot: Optional[Dict[str, list]] = None,
+                                 venue_snapshot_verified: bool = True) -> int:
     """薄壳：转调 `scripts/trader/reservation_reconcile.py`（第五十八刀）。
 
-    ⚠️ **签名对外一字未变**（`tests/core/test_reservation_reconcile.py` 用位置参数调用）。
+    ⚠️ 位置参数与既有调用**一字未变**（`tests/core/test_reservation_reconcile.py` 用位置参数调用）；
+    第一百二十六刀新增 `venue_snapshot_verified`（默认 True ⇒ 老调用方行为不变）。
     四个依赖全部在**调用时**注入 —— 尤其 `reservation_manager` 与
     `fetch_other_venue_positions` 是本模块的模块级名字，测试用
     `patch.object(trader, …)` 替换它们；若子模块 import 期绑一份，
@@ -783,6 +785,9 @@ def reconcile_reservation_ledger(real_pos_dict: Dict[str, Any],
         default_ttl_s=RESERVATION_RECONCILE_TTL_S,
         ttl_s=ttl_s,
         venue_snapshot=venue_snapshot,
+        # 第一百二十六刀：跨所实况**是否核验成功**必须一路传到对账器 ——
+        # 读取失败时 `venue_snapshot` 是空字典，对账器据此会误判"外所无仓无挂"。
+        venue_snapshot_verified=venue_snapshot_verified,
     )
 
 
