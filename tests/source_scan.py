@@ -600,3 +600,25 @@ def dict_assign_keys_by_name(module_file, function_name, *, pkg_name=None) -> di
     for name in out:
         out[name].sort()
     return out
+
+def subscript_assign_keys(module_file, function_name, var_name, key, *, pkg_name=None) -> set:
+    """收集 `var_name["key"] = {...}` 这类**下标赋值**的字面量键。
+
+    用途：本仓的"形状契约"里，有的形状不是 `name = {...}` 而是 `f["position"] = {...}`
+    （因子快照里的仓位块就是如此）⇒ 需要专门取这一处的字面量键，不能用"函数内所有
+    字典字面量"糊过去（那会把蜡烛/基础字典的键也算进来，判据失真）。
+    """
+    import ast
+
+    node, _path = find_function_node(module_file, function_name, pkg_name=pkg_name)
+    keys = set()
+    for n in ast.walk(node):
+        if not isinstance(n, ast.Assign) or not isinstance(n.value, ast.Dict):
+            continue
+        for tgt in n.targets:
+            if (isinstance(tgt, ast.Subscript) and isinstance(tgt.value, ast.Name)
+                    and tgt.value.id == var_name
+                    and isinstance(tgt.slice, ast.Constant) and tgt.slice.value == key):
+                keys |= {k.value for k in n.value.keys if isinstance(k, ast.Constant)
+                         and isinstance(k.value, str)}
+    return keys

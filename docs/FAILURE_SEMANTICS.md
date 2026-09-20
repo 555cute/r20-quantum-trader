@@ -54,6 +54,7 @@
 | 因子字典形状 | 消费相位直接下标 ⇒ 基座必须提供；门禁自动核对 | 防周期中途崩 | `scripts/trader/factors.py` | `tests/extraction/test_trader_entry_execution_extraction.py::test_factor_schema_covers_every_consumer_phase` |
 | 跨所保护报告 item | 渲染处直接下标 ⇒ 生产侧必须覆盖；门禁自动核对 | 防中途崩 | `scripts/trader/venue_protection.py` | `tests/trading/test_venue_protection.py::WatchdogReportShapeContractTest` |
 | 保护单扫描 `scan` 字典 | 同上（加固层不该拖垮周期） | 防中途崩 | `scripts/trader/venue_protection.py` | `tests/trading/test_venue_protection.py::ScanDictShapeContractTest` |
+| 仓位块形状 `f["position"]` | 消费相位（管理相，在入场之前）直接下标 ⇒ 生产侧那**一处**字面量必须覆盖；门禁自动核对 | 防周期中途崩 | `scripts/trader/factors.py` | `tests/extraction/test_trader_entry_execution_extraction.py::test_position_payload_shape_covers_manage_phase` |
 <!-- anchors:end -->
 
 ## 3. 抽取门与"文档化差异"

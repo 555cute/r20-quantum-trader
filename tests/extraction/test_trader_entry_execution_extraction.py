@@ -153,6 +153,40 @@ class EntryExecutionVerbatimTest(unittest.TestCase):
                          "因子基座缺这些键 ⇒ 消费相位会在**周期中途** KeyError："
                          f"{missing}")
 
+    #: 仓位块（`f["position"]`）的**直接下标**消费点（按相位）。缺键 ⇒ 管理相位
+    #: （在入场循环**之前**跑）会**周期中途** KeyError ⇒ 该轮连仓位管理都没做。
+    _POSITION_CONSUMERS = (
+        ("scripts/trader/position_exit.py", "manage_position_tp_and_trailing", "curr_pos"),
+    )
+
+    def test_position_payload_shape_covers_manage_phase(self):
+        """`f["position"]` 字面量必须覆盖管理相位的无条件下标（第一百四十二刀）。
+
+        生产侧是 `factors.fetch_single_instrument_data` 里 `f["position"] = {...}` 那**一处**
+        字面量（不是"函数内所有字典"，故用 `subscript_assign_keys` 精确取）；
+        消费侧 `position_exit.manage_position_tp_and_trailing` 读 `curr_pos["pos"]`/
+        `["side"]`/`["avgPx"]`/`["upl"]` —— 全是直接下标。
+
+        为什么值得钉：该相位在入场循环**之前**执行，一旦 KeyError，整轮周期中断
+        （连存量仓位的止盈/移动止损都不再处理），而问题只在"某个所返回的仓位缺字段"
+        时才暴露 —— 属"某天某所一变就炸"的隐患。
+        """
+        from tests import source_scan as ss
+        provided = ss.subscript_assign_keys(
+            "scripts/trader/factors.py", "fetch_single_instrument_data", "f", "position")
+        # 自检只钉**最不可少**的两个键：把 avgPx/upl 留给覆盖断言去抓
+        # （否则删掉它们时先撞自检，覆盖断言永远得不到负例证明）
+        self.assertTrue({"pos", "side"} <= provided,
+                        f"判据失效：仓位块键没抓到（实际 {sorted(provided)}）")
+        for mod, fn, var in self._POSITION_CONSUMERS:
+            with self.subTest(consumer=f"{mod}::{fn}"):
+                needs = ss.load_subscripts(mod, fn, var)
+                self.assertTrue(needs, f"判据失效：{mod}::{fn} 没抓到 {var}[...] 下标")
+                missing = sorted(needs - provided)
+                self.assertEqual(missing, [],
+                                 f"{fn} 读仓位块的 {missing} 生产侧不提供 "
+                                 "⇒ 管理相位**周期中途** KeyError（其后相位全跳过）")
+
     def test_facade_call_passes_every_parameter_once_same_name(self):
         params = [a.arg for a in _impl_fn().args.kwonlyargs]
         self.assertEqual(len(params), 41, "参数个数变了？")
