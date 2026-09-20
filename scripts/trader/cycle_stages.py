@@ -424,7 +424,8 @@ def venue_protection_watchdog_stage(*,
         venue_registry,
         current_environment,
         R20_VENUE_PROTECTION_WATCHDOG,
-        audit_cross_venue_protection):
+        audit_cross_venue_protection,
+        dry_run=False):
     """跨所云端保护单巡检（roadmap G8 的周期接线；**默认关闭**）。
 
     ## 为什么单独一格、且默认关闭
@@ -436,6 +437,13 @@ def venue_protection_watchdog_stage(*,
 
     **接线不等于开闸**：`R20_VENUE_PROTECTION_WATCHDOG` 未置 1 时本函数直接返回，
     **零网络、零写单**（线上行为与本刀之前逐字一致）。开闸是运营决定，需人拍板。
+
+    ## 开闸前的第一步：`dry_run=True` 预演（第一百二十九刀）
+
+    总闸开启 + `R20_VENUE_PROTECTION_WATCHDOG_DRY_RUN=1` ⇒ 本格照常每周期判定，
+    但把 `dry_run=True` 透给审计层：**只判定、不写单**，并把审计层 `would`
+    里"本来会做"的动作逐条打印出来。这是把"一次误判"与"一串真实订单"隔开的那道闸，
+    也是本格从"默认关闭"走向"开闸"之间**唯一安全**的过渡档。
 
     ## 边界（刻意的保守选择）
 
@@ -457,11 +465,26 @@ def venue_protection_watchdog_stage(*,
             xv_positions_by_venue,
             venue_registry=venue_registry,
             environment=env_mode,
+            dry_run=bool(dry_run),
         )
     except Exception as exc:
         print(f"[跨所保护巡检] warn 巡检异常（不影响本周期）: {exc}")
         return None
 
+    if dry_run:
+        # ⚠️ 预演模式下 `actions` 必然为空（审计层不写单）——要报的是 `would`。
+        # 若预演却出现了 `actions`，那是审计层违约，如实喊出来而不是悄悄展示。
+        if report.get("actions"):
+            print("🔴 [跨所保护] 预演模式下审计层仍返回了 actions —— 断言失败，请立即排查"
+                  "（预演不得写单）")
+        print("[跨所保护] ⚠️ 预演模式（dry-run）：本周期**只判定不写单**，"
+              "下列是'如果开闸本来会做'的动作")
+        for item in report.get("would") or []:
+            _w = (f"[跨所保护·预演] {str(item.get('venue','')).upper()} "
+                  f"{item.get('inst') or ''} {item.get('stage') or ''} "
+                  f"{item.get('detail') or ''}").strip()
+            print(_w)
+            executed_actions.append(_w)
     for item in report.get("actions") or []:
         executed_actions.append(
             f"[跨所保护] {item['venue'].upper()} {item['inst']} {item['detail']}")

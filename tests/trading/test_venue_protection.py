@@ -466,7 +466,7 @@ class AuditCrossVenueTest(unittest.TestCase):
 class WatchdogStageTest(unittest.TestCase):
     """接线层：默认关闭＝零副作用；开启＝巡检并把结论写进 executed_actions。"""
 
-    def _stage(self, flag, report=None, raises=None):
+    def _stage(self, flag, report=None, raises=None, dry_run=False):
         from scripts.trader.cycle_stages import venue_protection_watchdog_stage
         calls = []
 
@@ -484,8 +484,35 @@ class WatchdogStageTest(unittest.TestCase):
             current_environment=lambda: MagicMock(mode="demo"),
             R20_VENUE_PROTECTION_WATCHDOG=flag,
             audit_cross_venue_protection=fake_audit,
+            dry_run=dry_run,
         )
         return out, calls, actions
+
+    def test_dry_run_is_passed_through_and_reports_would(self):
+        """预演模式：把 `dry_run=True` 透给审计层，并逐条报出"本来会做"的动作。
+
+        这是 G8 从"默认关闭"走向"开闸"之间**唯一安全**的过渡档：
+        判定照跑，但绝不写单 —— 把"一次误判"和"一串真实订单"隔开。
+        """
+        report = {
+            "venues": {"gate": {"checked": 1}},
+            "actions": [],                      # 预演下必须为空（审计层不写单）
+            "would": [{"venue": "gate", "inst": "BTC_USDT", "stage": "renew",
+                       "detail": "距到期 1.2 天，本来会续期"}],
+            "critical": [], "errors": [], "skipped": [],
+        }
+        out, calls, actions = self._stage(True, report=report, dry_run=True)
+        self.assertIsNotNone(out)
+        self.assertTrue(calls[0][1].get("dry_run"), "dry_run 必须透传给审计层")
+        self.assertTrue(any("预演" in a for a in actions), "必须把 would 报进 executed_actions")
+        self.assertTrue(any("本来会续期" in a for a in actions))
+
+    def test_dry_run_defaults_to_false(self):
+        """不传 dry_run ⇒ 一律按真实模式（不给"悄悄预演"留后门）。"""
+        out, calls, actions = self._stage(True, report={
+            "venues": {}, "actions": [], "would": [], "critical": [], "errors": [],
+            "skipped": []})
+        self.assertFalse(calls[0][1].get("dry_run"))
 
     def test_flag_off_is_a_strict_noop(self):
         out, calls, actions = self._stage(False)
@@ -520,6 +547,10 @@ class WatchdogStageTest(unittest.TestCase):
         src = (Path(__file__).resolve().parents[2] / "scripts" / "ai_factor_trader.py").read_text(encoding="utf-8")
         self.assertIn('os.environ.get("R20_VENUE_PROTECTION_WATCHDOG", "0")', src,
                       "默认值必须显式为 0（否则巡检会在无人知情时开闸）")
+        # 第一百二十九刀：预演标志同样必须默认关 —— 否则总闸一开就是真实写单，
+        # 而"先预演一轮"这道过渡闸形同虚设。
+        self.assertIn('os.environ.get("R20_VENUE_PROTECTION_WATCHDOG_DRY_RUN", "0")', src,
+                      "预演标志默认值必须显式为 0")
 
 
 class DryRunTest(unittest.TestCase):

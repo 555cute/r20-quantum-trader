@@ -214,6 +214,10 @@ LEDGER_AUTOSYNC_ENABLED = str(os.environ.get("R20_LEDGER_SYNC_DISABLED", "")).st
 # 快照（与 LEDGER_AUTOSYNC_ENABLED 同法）。开闸 = 每周期对外所仓位核验保护腿并在临期
 # 前续期（先挂新后撤旧；绝不猜价位、绝不撤人工腿）。开闸是运营决定，需人工拍板。
 R20_VENUE_PROTECTION_WATCHDOG = str(os.environ.get("R20_VENUE_PROTECTION_WATCHDOG", "0")).strip().lower() in ("1", "true", "yes")
+# 第一百二十九刀：**预演模式**（G8 开闸前的第一步）。置 1 时巡检每周期照常判定，
+# 但**绝不下单/撤单**——只报"如果开闸这一轮会做什么"（审计层的 `dry_run`/`would`）。
+# 与总闸同法：默认关，且总闸未开时本标志无意义（整个巡检不跑）。
+R20_VENUE_PROTECTION_WATCHDOG_DRY_RUN = str(os.environ.get("R20_VENUE_PROTECTION_WATCHDOG_DRY_RUN", "0")).strip().lower() in ("1", "true", "yes")
 LOG_FILE = os.path.join(LOGS_DIR, "ai_factor_trader.log")
 POSITION_TRACKER_FILE = os.path.join(DATA_DIR, "position_trackers.json")
 # 2026-09-16：`SIGNAL_JOURNAL_FILE` 常量已删——它把路径**钉死在导入期**，
@@ -1151,12 +1155,16 @@ def execute_portfolio():
     # 4b. 跨所云端保护单巡检（roadmap G8）：Gate/Binance 的触发单带 expiration，
     # 到期后仓位裸奔，而主链的 OKX 保护核验够不到跨所仓位（合成 id 匹配不上）。
     # **默认关闭**（R20_VENUE_PROTECTION_WATCHDOG=1 才跑）：本刀只接线，线上行为零变化。
+    # 开闸前先用 `R20_VENUE_PROTECTION_WATCHDOG_DRY_RUN=1` 预演一轮：照常判定但不写单，
+    # 日志逐条给出"本来会做"的动作（见该函数 docstring）。
     venue_protection_watchdog_stage(
         xv_positions_by_venue=xv_positions_by_venue,
         executed_actions=executed_actions,
         venue_registry=venue_registry,
         current_environment=current_environment,
         R20_VENUE_PROTECTION_WATCHDOG=R20_VENUE_PROTECTION_WATCHDOG,
+        # 第一百二十九刀：预演模式（总闸未开时无意义）——开闸前先看"会做什么"。
+        dry_run=R20_VENUE_PROTECTION_WATCHDOG_DRY_RUN,
         audit_cross_venue_protection=audit_cross_venue_protection,
     )
 
