@@ -8,6 +8,10 @@
 """
 from __future__ import annotations
 
+import json
+import os
+import shutil
+import tempfile
 import unittest
 from unittest.mock import MagicMock, call
 
@@ -16,6 +20,8 @@ from scripts.trader.venue_protection import (
     audit_cross_venue_protection,
     ensure_venue_protection,
     scan_protective_orders,
+    watchdog_debounce_step,
+    watchdog_gap_key,
 )
 
 NOW = 1_789_000_000.0          # 固定"现在"，避免用例依赖时钟
@@ -551,6 +557,16 @@ class WatchdogStageTest(unittest.TestCase):
         # 而"先预演一轮"这道过渡闸形同虚设。
         self.assertIn('os.environ.get("R20_VENUE_PROTECTION_WATCHDOG_DRY_RUN", "0")', src,
                       "预演标志默认值必须显式为 0")
+        # 第一百三十刀：防抖默认 30 分钟，且**门面必须真的把状态路径与判定函数传下去**
+        # —— 漏传会静默退化成"不防抖直通写单"，这正是本刀要防的事。
+        self.assertIn('os.environ.get("R20_VENUE_PROTECTION_WATCHDOG_DEBOUNCE_MIN", "30")', src,
+                      "防抖窗口默认值必须显式（30 分钟）")
+        self.assertIn("state_path=VENUE_PROTECTION_WATCHDOG_STATE_FILE", src,
+                      "门面必须把防抖状态路径传进巡检格")
+        self.assertIn("debounce_step=watchdog_debounce_step", src,
+                      "门面必须把防抖判定函数传进巡检格")
+        self.assertIn("debounce_s=R20_VENUE_PROTECTION_WATCHDOG_DEBOUNCE_S", src,
+                      "门面必须把防抖窗口传进巡检格（漏传=None ⇒ 退化成不防抖）")
 
 
 class DryRunTest(unittest.TestCase):
@@ -672,6 +688,125 @@ class PreflightEndpointTest(unittest.TestCase):
         ad.cancel_price_order.assert_not_called()
         ad.cancel_algo_order.assert_not_called()
 
+
+class WatchdogDebouncePureTest(unittest.TestCase):
+    """防抖的纯逻辑（第一百三十刀）：缺口必须**持续**够久才算"合格"。"""
+
+    def _rep(self, detail="距到期 1.2 天", venue="gate", inst="BTC_USDT", stage="renew"):
+        return {"would": [{"venue": venue, "inst": inst, "stage": stage,
+                           "detail": detail}]}
+
+    def test_key_ignores_volatile_detail(self):
+        """键必须忽略 `detail`（含"距到期 X 天"这类每轮都变的数字）。"""
+        a = watchdog_gap_key(self._rep("距到期 1.2 天")["would"][0])
+        b = watchdog_gap_key(self._rep("距到期 0.4 天")["would"][0])
+        self.assertEqual(a, b)
+        self.assertEqual(a, "gate|BTC_USDT|renew")
+
+    def test_gap_qualifies_only_after_the_window(self):
+        st, obs, q = watchdog_debounce_step(None, self._rep(), now_s=1000.0, debounce_s=1800.0)
+        self.assertEqual(q, [], "首次出现不得立即动手")
+        self.assertEqual(st, {"gate|BTC_USDT|renew": 1000.0}, "首见时刻必须记住")
+        st, _, q = watchdog_debounce_step(st, self._rep("措辞变了"), now_s=2000.0,
+                                          debounce_s=1800.0)
+        self.assertEqual(q, [], "未到窗口不得动手")
+        self.assertEqual(st["gate|BTC_USDT|renew"], 1000.0, "首见时刻不得被后续周期刷新")
+        st, _, q = watchdog_debounce_step(st, self._rep(), now_s=2800.0, debounce_s=1800.0)
+        self.assertEqual(q, ["gate|BTC_USDT|renew"], "持续够窗口才合格")
+
+    def test_healed_gap_is_pruned(self):
+        st, _, _ = watchdog_debounce_step(None, self._rep(), now_s=1000.0, debounce_s=1800.0)
+        st2, obs, q = watchdog_debounce_step(st, {"would": []}, now_s=1200.0, debounce_s=1800.0)
+        self.assertEqual(st2, {}, "缺口愈合 ⇒ 状态自清（不攒垃圾、不残留陈旧首见时刻）")
+        self.assertEqual(obs, [])
+        self.assertEqual(q, [])
+
+    def test_zero_window_means_no_debounce(self):
+        """`debounce_s<=0` 是**显式**不防抖（运营选择），不是默认值。"""
+        _, _, q = watchdog_debounce_step(None, self._rep(), now_s=1000.0, debounce_s=0.0)
+        self.assertEqual(q, ["gate|BTC_USDT|renew"])
+
+
+class WatchdogStageDebounceTest(unittest.TestCase):
+    """巡检格的防抖接线：观察轮不写单；够窗口才真写；状态不可读写 ⇒ 不写单。"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="wd-deb-")
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.state = os.path.join(self.tmp, "wd_state.json")
+
+    def _stage(self, *, now_s, dry_run=False, report_would=True, state_path=None,
+               real_actions=True, raises=None):
+        from scripts.trader.cycle_stages import venue_protection_watchdog_stage
+        calls = []
+
+        def fake_audit(snapshot, **kw):
+            calls.append(bool(kw.get("dry_run")))
+            if raises is not None:
+                raise raises
+            would = ([{"venue": "gate", "inst": "BTC_USDT", "stage": "renew",
+                       "detail": "距到期 1.2 天"}] if report_would else [])
+            real = [{"venue": "gate", "inst": "BTC_USDT", "detail": "续期完成"}] \
+                if real_actions else []
+            return {"venues": {}, "would": would,
+                    "actions": (real if not kw.get("dry_run") else []),
+                    "critical": [], "errors": [], "skipped": []}
+
+        actions = []
+        out = venue_protection_watchdog_stage(
+            xv_positions_by_venue={"gate": [{"inst_id": "BTC_USDT"}]},
+            executed_actions=actions,
+            venue_registry=MagicMock(),
+            current_environment=lambda: MagicMock(mode="demo"),
+            R20_VENUE_PROTECTION_WATCHDOG=True,
+            audit_cross_venue_protection=fake_audit,
+            dry_run=dry_run,
+            state_path=(self.state if state_path is None else state_path),
+            debounce_s=1800.0,
+            debounce_step=watchdog_debounce_step,
+            now_s=now_s,
+        )
+        return out, calls, actions
+
+    def test_first_sighting_observes_and_never_writes(self):
+        out, calls, actions = self._stage(now_s=1000.0)
+        self.assertEqual(calls, [True], "首见只允许观察轮（dry_run=True），绝不允许真写")
+        self.assertTrue(os.path.exists(self.state), "必须落盘首见时刻")
+        self.assertTrue(any("观察" in a for a in actions))
+        self.assertFalse(any("续期完成" in a for a in actions))
+
+    def test_qualified_gap_triggers_one_real_pass(self):
+        self._stage(now_s=1000.0)
+        out, calls, actions = self._stage(now_s=3000.0)   # +2000s ≥ 1800s
+        self.assertEqual(calls, [True, False], "够窗口 ⇒ 观察轮后接一次真写轮")
+        self.assertTrue(any("续期完成" in a for a in actions))
+
+    def test_healed_gap_clears_state_and_never_writes(self):
+        self._stage(now_s=1000.0)
+        out, calls, actions = self._stage(now_s=3000.0, report_would=False)
+        self.assertEqual(calls, [True], "缺口已愈合 ⇒ 不得写单")
+        with open(self.state, encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["gaps"], {}, "愈合后状态必须清空")
+
+    def test_unreadable_state_fails_closed(self):
+        """状态不可读 ⇒ **绝不允许真写轮**（观察轮是只读的，跑无妨）。
+
+        契约是"不知道这缺口持续多久就不动手"，不是"连只读判定都不做"。
+        """
+        with open(self.state, "w", encoding="utf-8") as f:
+            f.write("{ 这不是 JSON")
+        out, calls, actions = self._stage(now_s=3000.0)
+        self.assertNotIn(False, calls, "状态不可读 ⇒ 不得出现真写轮（fail-closed）")
+        self.assertEqual(calls, [True], "只允许只读的观察轮")
+        self.assertEqual([a for a in actions if "续期完成" in a], [],
+                         "状态不可读时不得报出任何真实动作")
+
+    def test_dry_run_previews_qualification_without_writing(self):
+        self._stage(now_s=1000.0)                     # 观察：记住首见
+        out, calls, actions = self._stage(now_s=3000.0, dry_run=True)
+        self.assertEqual(calls, [True], "预演下绝不出现真写轮")
+        self.assertTrue(any("预演" in a for a in actions))
+        self.assertFalse(any("续期完成" in a for a in actions))
 
 if __name__ == "__main__":
     unittest.main()

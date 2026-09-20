@@ -62,6 +62,7 @@ from scripts.trader.cycle_stages import (
 )
 from scripts.trader.venue_protection import (
     audit_cross_venue_protection,
+    watchdog_debounce_step,
 )
 from scripts.trader.entry_execution import (
     execute_entry_scan,
@@ -218,6 +219,17 @@ R20_VENUE_PROTECTION_WATCHDOG = str(os.environ.get("R20_VENUE_PROTECTION_WATCHDO
 # 但**绝不下单/撤单**——只报"如果开闸这一轮会做什么"（审计层的 `dry_run`/`would`）。
 # 与总闸同法：默认关，且总闸未开时本标志无意义（整个巡检不跑）。
 R20_VENUE_PROTECTION_WATCHDOG_DRY_RUN = str(os.environ.get("R20_VENUE_PROTECTION_WATCHDOG_DRY_RUN", "0")).strip().lower() in ("1", "true", "yes")
+# 第一百三十刀：**防抖窗口**（分钟，默认 30）：缺口必须持续这么久才允许真实写单。
+# 续期窗口是 24h，30 分钟远小于它 —— 防的是"瞬时口径波动被当成缺口"。
+# 置 0 = 显式关闭防抖（立即动手）。
+try:
+    R20_VENUE_PROTECTION_WATCHDOG_DEBOUNCE_S = float(
+        os.environ.get("R20_VENUE_PROTECTION_WATCHDOG_DEBOUNCE_MIN", "30")) * 60.0
+except (TypeError, ValueError):
+    R20_VENUE_PROTECTION_WATCHDOG_DEBOUNCE_S = 30 * 60.0
+# 防抖状态（跨周期记忆"这缺口从什么时候开始"）：只记时刻，不记凭证/不记仓位细节
+VENUE_PROTECTION_WATCHDOG_STATE_FILE = os.path.join(
+    DATA_DIR, "venue_protection_watchdog_state.json")
 LOG_FILE = os.path.join(LOGS_DIR, "ai_factor_trader.log")
 POSITION_TRACKER_FILE = os.path.join(DATA_DIR, "position_trackers.json")
 # 2026-09-16：`SIGNAL_JOURNAL_FILE` 常量已删——它把路径**钉死在导入期**，
@@ -1165,6 +1177,10 @@ def execute_portfolio():
         R20_VENUE_PROTECTION_WATCHDOG=R20_VENUE_PROTECTION_WATCHDOG,
         # 第一百二十九刀：预演模式（总闸未开时无意义）——开闸前先看"会做什么"。
         dry_run=R20_VENUE_PROTECTION_WATCHDOG_DRY_RUN,
+        # 第一百三十刀：防抖 —— 缺口必须持续够久才允许真实写单（状态不可读写则不写单）。
+        state_path=VENUE_PROTECTION_WATCHDOG_STATE_FILE,
+        debounce_s=R20_VENUE_PROTECTION_WATCHDOG_DEBOUNCE_S,
+        debounce_step=watchdog_debounce_step,
         audit_cross_venue_protection=audit_cross_venue_protection,
     )
 

@@ -43,10 +43,17 @@ __all__ = [
     "audit_cross_venue_protection",
     "ensure_venue_protection",
     "scan_protective_orders",
+    "DEFAULT_WATCHDOG_DEBOUNCE_S",
+    "watchdog_gap_key",
+    "watchdog_debounce_step",
 ]
 
 #: 默认提前续期窗口（24h；roadmap G8 的验收口径）
 DEFAULT_RENEW_WITHIN_S = 24 * 3600
+#: watchdog **防抖窗口**默认值（30 分钟）：缺口必须**持续**这么久才允许写单。
+#: 续期窗口是 24h，故 30 分钟远小于它 —— 防的是"瞬时口径波动被当成缺口"，
+#: 而不是拖延真实缺口（真实缺口在窗口内会一直出现，够时即动手）。
+DEFAULT_WATCHDOG_DEBOUNCE_S = 30 * 60
 #: 覆盖缺口容忍度（相对持仓量）：小于千分之一视为浮点噪音，不修
 DEFAULT_TOLERANCE_RATIO = 0.001
 #: 判定"这条腿属于本系统"的文本标记（与云端棘轮同一套：Gate `t-r20sl*`、Binance 类型名）
@@ -824,3 +831,47 @@ def audit_cross_venue_protection(xv_positions_by_venue: Optional[Dict[str, Any]]
                                      "detail": f"{type(exc).__name__}: {str(exc)[:120]}"})
         report["venues"][venue] = venue_stat
     return report
+
+def watchdog_gap_key(item: Dict[str, Any]) -> str:
+    """缺口的**稳定身份**：`venue|inst|stage`。
+
+    ⚠️ `detail` 是逐周期措辞（含"距到期 1.2 天"这类会变的数字），**不能进键** ——
+    否则同一个缺口每周期都算"新缺口"，防抖永不成立（等于没防抖）。
+    """
+    return "|".join((str(item.get("venue") or "").lower(),
+                     str(item.get("inst") or ""),
+                     str(item.get("stage") or "")))
+
+
+def watchdog_debounce_step(state: Optional[Dict[str, Any]],
+                           report: Optional[Dict[str, Any]], *,
+                           now_s: float, debounce_s: float):
+    """跨周期防抖一步（**纯函数**：无 I/O、无时间读取 —— `now_s` 由调用方给）。
+
+    观察项 = 审计层"本来会做"的动作（`would`）。真模式下 `actions` 与 `would` **同源**
+    （同一套判定，只是 `dry_run` 决定写不写），故用 `would` 做观察不需要额外取数。
+
+    - `state`：`{gap_key: first_seen_ts}`；
+    - 新缺口：记 `now_s`；本周期**未再出现**的缺口：丢弃（缺口愈合 ⇒ 状态自清，不攒垃圾）；
+    - 返回 `(new_state, observed_keys, qualified_keys)`：`qualified_keys` 只含
+      "已持续 ≥ `debounce_s`" 的缺口 —— **只有它们**允许触发真实写单那一轮。
+
+    方向纪律：`debounce_s <= 0` 视为**不防抖**（立即合格）—— 这是显式的运营选择，
+    不是默认值（默认见 `DEFAULT_WATCHDOG_DEBOUNCE_S`）。
+    """
+    _state = dict(state or {})
+    observed: List[str] = []
+    for item in (report or {}).get("would") or []:
+        if not isinstance(item, dict):
+            continue
+        key = watchdog_gap_key(item)
+        if key in observed:
+            continue
+        observed.append(key)
+        if key not in _state:
+            _state[key] = float(now_s)
+    _kept = {k: float(v) for k, v in _state.items() if k in observed}
+    _qualify_s = 0.0 if debounce_s is None else max(0.0, float(debounce_s))
+    qualified = sorted(k for k in observed
+                       if float(now_s) - _kept.get(k, float(now_s)) >= _qualify_s)
+    return _kept, observed, qualified

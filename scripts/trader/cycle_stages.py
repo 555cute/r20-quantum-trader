@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 
@@ -418,6 +419,50 @@ def scan_risk_gates_and_ai_brain(*,
     return (ASSET_MARGIN_CAP, brain_cache, cb_active, cb_reason)
 
 
+def _load_watchdog_state(path) -> Optional[Dict[str, Any]]:
+    """读防抖状态。**文件不存在 ⇒ `{}`**（首次运行，合法空态）；不可读/损坏 ⇒ `None`。
+
+    ⚠️ 区分这两种"空"是刻意的：把"读不出来"当成"没有缺口"正是本会话反复修的
+    那一类缺陷。调用方拿到 `None` 必须**不写单**。
+    """
+    try:
+        if not os.path.exists(path):
+            return {}
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        gaps = data.get("gaps") if isinstance(data, dict) else None
+        if not isinstance(gaps, dict):
+            return None
+        out: Dict[str, Any] = {}
+        for k, v in gaps.items():
+            try:
+                out[str(k)] = float(v)
+            except (TypeError, ValueError):
+                # 单条时间戳坏了 ⇒ 只丢这条（其余仍可用），但要留痕
+                print(f"[跨所保护巡检] warn 防抖状态里 {k} 的时间戳不可解析，已丢弃该条")
+        return out
+    except Exception as exc:
+        print(f"[跨所保护巡检] warn 防抖状态读取失败（{exc}）")
+        return None
+
+
+def _save_watchdog_state(path, state: Dict[str, Any]) -> bool:
+    """原子写防抖状态（临时文件 + `os.replace`）。失败只返回 False，绝不抛。"""
+    try:
+        _dir = os.path.dirname(path)
+        if _dir:
+            os.makedirs(_dir, exist_ok=True)
+        tmp = f"{path}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"gaps": dict(list(state.items())[:500]),
+                       "updated_at": time.time()}, f, ensure_ascii=False)
+        os.replace(tmp, path)
+        return True
+    except Exception as exc:
+        print(f"[跨所保护巡检] warn 防抖状态写入失败（{exc}）")
+        return False
+
+
 def venue_protection_watchdog_stage(*,
         xv_positions_by_venue,
         executed_actions,
@@ -425,7 +470,11 @@ def venue_protection_watchdog_stage(*,
         current_environment,
         R20_VENUE_PROTECTION_WATCHDOG,
         audit_cross_venue_protection,
-        dry_run=False):
+        dry_run=False,
+        state_path=None,
+        debounce_s=None,
+        debounce_step=None,
+        now_s=None):
     """跨所云端保护单巡检（roadmap G8 的周期接线；**默认关闭**）。
 
     ## 为什么单独一格、且默认关闭
@@ -437,6 +486,19 @@ def venue_protection_watchdog_stage(*,
 
     **接线不等于开闸**：`R20_VENUE_PROTECTION_WATCHDOG` 未置 1 时本函数直接返回，
     **零网络、零写单**（线上行为与本刀之前逐字一致）。开闸是运营决定，需人拍板。
+
+    ## 防抖：缺口必须**持续**够久才写单（第一百三十刀）
+
+    `state_path` + `debounce_step` 都在时启用：每周期先跑一次**观察轮**
+    （`dry_run=True`，零写单）拿"本来会做"的动作，按 `venue|inst|stage` 记首次出现时刻；
+    只有**已持续 ≥ `debounce_s`** 的缺口才允许触发真实写单那一轮。缺口愈合 ⇒ 状态自清。
+
+    未出现够久的周期**只观察不写单**，并把每个缺口的"已持续 X 分钟"报进
+    `executed_actions`（运营能看到它在逼近阈值）。`debounce_s <= 0` = 显式不防抖。
+
+    ⚠️ **状态不可读写 ⇒ 本周期不写单**（fail-closed）：状态失真的防抖等于没有防抖，
+    宁可晚一轮动手，也不要在"不知道这缺口多久了"的情况下写单。
+    不传 `state_path`/`debounce_step`（测试与显式调用）⇒ 防抖关闭、单轮直通。
 
     ## 开闸前的第一步：`dry_run=True` 预演（第一百二十九刀）
 
@@ -460,16 +522,66 @@ def venue_protection_watchdog_stage(*,
     except Exception as exc:
         print(f"[跨所保护巡检] warn 环境轴不可得（{exc}），本轮跳过")
         return None
-    try:
-        report = audit_cross_venue_protection(
+
+    _now = time.time() if now_s is None else float(now_s)
+    _debounce_on = bool(state_path) and callable(debounce_step)
+    _observe = None
+    _new_state: Dict[str, Any] = {}
+    _observed: List[str] = []
+    _qualified: List[str] = []
+    _qualify_min = 0.0 if debounce_s is None else max(0.0, float(debounce_s)) / 60.0
+
+    def _run_audit(_dry):
+        return audit_cross_venue_protection(
             xv_positions_by_venue,
             venue_registry=venue_registry,
             environment=env_mode,
-            dry_run=bool(dry_run),
+            dry_run=bool(_dry),
         )
-    except Exception as exc:
-        print(f"[跨所保护巡检] warn 巡检异常（不影响本周期）: {exc}")
-        return None
+
+    if _debounce_on:
+        # 观察轮：**只判定不写单**，拿到"本来会做"的动作（真模式与它同源）
+        try:
+            _observe = _run_audit(True)
+        except Exception as exc:
+            # fail-soft：巡检是加固层，不该成为新的单点
+            print(f"[跨所保护巡检] warn 观察轮异常（不影响本周期）: {exc}")
+            return None
+        _state = _load_watchdog_state(state_path)
+        if _state is None:
+            print("[跨所保护巡检] warn 防抖状态不可读——本周期**不写单**（不知道缺口持续多久就不动手）")
+            return None
+        try:
+            _new_state, _observed, _qualified = debounce_step(
+                _state, _observe, now_s=_now, debounce_s=debounce_s)
+        except Exception as exc:
+            print(f"[跨所保护巡检] warn 防抖计算异常（{exc}）——本周期不写单")
+            return None
+        if not _save_watchdog_state(state_path, _new_state):
+            print("[跨所保护巡检] warn 防抖状态不可写——本周期**不写单**（否则下轮状态失真）")
+            return None
+
+    if dry_run:
+        # 预演：观察轮即结果（若要写单的那一轮，本也不该写）
+        report = _observe if _debounce_on else _run_audit(True)
+        if _debounce_on:
+            print(f"[跨所保护巡检] 预演：{len(_observed)} 个缺口，其中 {len(_qualified)} 个"
+                  f"已持续 ≥ {_qualify_min:.0f} 分钟（开闸后这些才会真的写单）")
+    elif _debounce_on and not _qualified:
+        print(f"[跨所保护巡检] {len(_observed)} 个缺口尚未持续够 {_qualify_min:.0f} 分钟"
+              f"——本周期只观察不写单")
+        for _k in _observed:
+            _age = max(0.0, _now - float(_new_state.get(_k) or _now)) / 60.0
+            _line = f"[跨所保护·观察] {_k} 已持续 {_age:.1f} 分钟"
+            print(_line)
+            executed_actions.append(_line)
+        report = _observe
+    else:
+        try:
+            report = _run_audit(False)
+        except Exception as exc:
+            print(f"[跨所保护巡检] warn 巡检异常（不影响本周期）: {exc}")
+            return None
 
     if dry_run:
         # ⚠️ 预演模式下 `actions` 必然为空（审计层不写单）——要报的是 `would`。
@@ -496,4 +608,7 @@ def venue_protection_watchdog_stage(*,
     for item in report.get("errors") or []:
         print(f"[跨所保护巡检] warn {item.get('venue')} {item.get('inst') or ''} "
               f"{item.get('stage')}: {item.get('detail')}")
+    if _debounce_on and not dry_run:
+        print(f"[跨所保护巡检] 本轮实写 {len(report.get('actions') or [])} 个动作"
+              f"（防抖窗口 {_qualify_min:.0f} 分钟，观察 {len(_observed)} 项）")
     return report
