@@ -83,6 +83,20 @@ def merge_ledger_sync_status(source_errors: List[str], data_dir, *, datetime) ->
                         # 批C：分页化后该标记仅在「历史分页未取尽且仍停在基线窗口之内」时出现
                         # （早期版本按单页 len>=100 反推，会把「已覆盖在册窗口」误报成截断）。
                         source_errors.append(f"ledger-{_v}: 历史分页未取尽（仍在基线窗口内），可能存在截断")
+                # 无主活动持仓（2026-09-20 实测 ARB/binance -2416.7）：交易所有仓、
+                # 却不在准入清单 ⇒ **没进台账** ⇒ 风险界面看不到，而开仓侧又把它当
+                # "外部仓"永久拒开。这条必须显式上报：它意味着**可能无人管理的敞口**。
+                _unm = _ls.get("unmanaged_positions")
+                if isinstance(_unm, dict) and int(_unm.get("count") or 0) > 0:
+                    _items = [i for i in (_unm.get("items") or []) if isinstance(i, dict)]
+                    _desc = ", ".join(
+                        f"{i.get('instId')} {i.get('size')}" if i.get("size") is not None
+                        else str(i.get("instId") or "?") for i in _items[:3])
+                    _more = (f" 等 {int(_unm.get('count'))} 笔"
+                             if int(_unm.get("count")) > len(_items[:3]) else "")
+                    source_errors.append(
+                        f"ledger: {int(_unm.get('count'))} 个活动持仓不在准入清单、未进台账"
+                        f"（风险界面看不到，可能无人管理）: {_desc}{_more}")
     except Exception:
         pass
 

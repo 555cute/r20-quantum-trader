@@ -10,6 +10,7 @@ import os
 import sys
 import datetime
 import tempfile
+import warnings
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:
@@ -26,6 +27,10 @@ WORKSPACE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.environ.get("R20_DATA_DIR") or os.path.join(WORKSPACE_DIR, "data")
 LEDGER_JSON_FILE = os.path.join(DATA_DIR, "trading_ledger.json")
 LEDGER_SYNC_STATUS_FILE = os.path.join(DATA_DIR, "ledger_sync_status.json")
+
+#: 本轮同步中被准入清单挡掉的**活动持仓**（模块级：`_write_sync_status` 与同步主体
+#: 不在同一函数内；每轮同步开始时由同步主体清空）。
+_UNMANAGED_LIVE: list = []
 # 审计 A2（数据诚实）：逐所台账同步状态旁车。任一 fetch 失败只 print-warn 后
 # 返回 []，与「该所确无平仓」在 trading_ledger.json 里不可分辨；旁车记录
 # ok/failed(原因)/failed(截断风险)，供 data_health/前台显式 PARTIAL。
@@ -86,6 +91,28 @@ def _fetch_history_paged(fetch_fn, *, id_field="posId", cursor_field="uTime", li
     return rows, truncated
 
 
+#: 状态旁车里最多列出几条"无主活动持仓"（有界；超出只报总数，避免无界增长）。
+UNMANAGED_LIST_MAX = 10
+
+
+def unmanaged_positions_payload(unmanaged, *, limit: int = UNMANAGED_LIST_MAX):
+    """丢弃的活仓 → 旁车载荷（**有界**）：`{"count", "items", "omitted"}`。
+
+    有界是硬要求：这个字段会被写进每 15 分钟覆盖的旁车并进面板 source_errors，
+    无界列表会随持仓数无限膨胀（本刀对"标签/列表基数必须有界"的一贯要求）。
+    计数**必须**是完整数（`count` 不受 `limit` 影响）——报少一条等于没报。
+    """
+    rows = list(unmanaged or [])
+    items = []
+    for r in rows[: max(0, int(limit))]:
+        items.append({"venue": str(r.get("venue") or ""),
+                      "instId": str(r.get("instId") or ""),
+                      "size": r.get("size"),
+                      "side_raw": str(r.get("side_raw") or "")})
+    return {"count": len(rows), "items": items,
+            "omitted": max(0, len(rows) - len(items))}
+
+
 def _write_sync_status(env):
     """原子写旁车；读侧一律容错缺文件（旧版本无旁车=按 OK 不误伤）。
     路径按调用时 DATA_DIR 解析——测试 patch 模块 DATA_DIR 即封闭（律①）。"""
@@ -97,6 +124,10 @@ def _write_sync_status(env):
         "environment": "demo" if getattr(env, "simulated", False) else "live",
         "venues": dict(_FETCH_STATUS),
     }
+    # 无主活动持仓：**有才写**（空/缺字段=旧版本旁车，读侧一律容错）
+    _unm = unmanaged_positions_payload(_UNMANAGED_LIVE)
+    if _unm["count"]:
+        payload["unmanaged_positions"] = _unm
     fd, tmp = tempfile.mkstemp(prefix=".lss-", suffix=".tmp", dir=_dir)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -560,7 +591,8 @@ def _other_venue_live_positions(env_axis):
     return items, ok_venues
 
 
-def _holding_row(p, venue, *, env, trackers, tz_bj, allowed, council_by_inst):
+def _holding_row(p, venue, *, env, trackers, tz_bj, allowed, council_by_inst,
+                 unmanaged=None):
     """活动持仓 → 台账 holding 行（OKX 与 binance/gate 共用同一构造器，字段语义一致）。
 
     id 带场所：`holding_{venue}_{inst}_{side}`。旧式 `holding_{inst}_{side}` 不含场所，
@@ -571,6 +603,15 @@ def _holding_row(p, venue, *, env, trackers, tz_bj, allowed, council_by_inst):
         return None
     inst_id = p.get("instId", "")
     if inst_id not in allowed:
+        # ⚠️ 2026-09-20 实测：这里曾**静默丢弃**——ARB 在 binance 持有 -2416.7 空仓，
+        # 却因不在准入清单而连一行 holding 都没有；台账于是"看不见"这笔在持敞口，
+        # 而开仓预检又把它当"外部仓"永久拒开（两处都错，且都没人说）。
+        # 现在把丢弃的活仓**记入调用方收集器**（写入同步旁车 + 日志 + 面板 source_errors）：
+        # 仍然**不**把它写进台账（那会改变风险界面语义，须单独拍板），但**不许再无声**。
+        if unmanaged is not None:
+            unmanaged.append({"venue": str(venue or ""), "instId": inst_id,
+                              "size": pos_sz,
+                              "side_raw": str(p.get("posSide", p.get("side", "")) or "")})
         return None
     inst = inst_id.replace("-USDT-SWAP", "")
     side_raw = str(p.get("posSide", p.get("side", ""))).lower()
@@ -740,12 +781,15 @@ def build_lifecycle_ledger():
     # okx_rest.positions() 生成——活动持仓面板显示 6 条 binance 持仓时台账只有 1 条
     # OKX 的；而旧行靠 id 合并续命，OKX 平掉后那条 holding 行永不消失（幽灵持仓）。
     _holding_rows = []
+    _unmanaged_live = []           # 被准入清单挡掉的活动持仓（不许静默）
+    _UNMANAGED_LIVE.clear()
     _queried_venues = set()
     if _okx_positions_ok:
         _queried_venues.add("okx")
     for p in pos_data:
         _row = _holding_row(p, "okx", env=env, trackers=trackers, tz_bj=tz_bj,
-                            allowed=allowed, council_by_inst=council_by_inst)
+                            allowed=allowed, council_by_inst=council_by_inst,
+                            unmanaged=_unmanaged_live)
         if _row:
             _holding_rows.append(_row)
 
@@ -753,11 +797,25 @@ def build_lifecycle_ledger():
     _queried_venues |= _ok_venues
     for p in _other_positions:
         _row = _holding_row(p, str(p.get("venue") or ""), env=env, trackers=trackers, tz_bj=tz_bj,
-                            allowed=allowed, council_by_inst=council_by_inst)
+                            allowed=allowed, council_by_inst=council_by_inst,
+                            unmanaged=_unmanaged_live)
         if _row:
             _holding_rows.append(_row)
 
     trades_lifecycle.extend(_holding_rows)
+
+    # 不许静默：把被准入清单挡掉的活动持仓同时**写进旁车、打进日志**
+    _UNMANAGED_LIVE.extend(_unmanaged_live)
+    if _unmanaged_live:
+        _nm = unmanaged_positions_payload(_unmanaged_live)
+        _desc = ", ".join(f"{i['instId']} {i['size']:g}" if isinstance(i.get("size"), (int, float))
+                          else f"{i['instId']}" for i in _nm["items"])
+        print(f"⚠️ [sync_full_ledger] {_nm['count']} 个活动持仓不在准入清单，"
+              f"**未进台账**（风险界面看不到、可能无人管理）: {_desc}"
+              + (f" …另有 {_nm['omitted']} 个" if _nm["omitted"] else ""))
+        warnings.warn(
+            f"[sync_full_ledger] {_nm['count']} 个活动持仓不在准入清单而未进台账: {_desc}",
+            RuntimeWarning)
 
     # Process Official Closed Positions
     # 审计批7(2026-09-13)·同 posId 多轮往返吞腿修复：PEPE 当日两笔平仓（06:33→10:31
