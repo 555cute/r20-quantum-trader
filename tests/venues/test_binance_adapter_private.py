@@ -427,6 +427,11 @@ class BinanceExecutionAndProtectionTests(unittest.TestCase):
         # Mock 适配器关键动作（封闭三律：fetch_instrument_spec 必须钉死——
         # 不 mock 会真连 urlopen，离线套件下被 socket 守卫拦成 stage=specs 红）
         ad._keys = lambda: ("ak", "sk")
+        # 持仓模式只读探测（router 新增体检）：真适配器会去打
+        # GET /fapi/v1/positionSide/dual，本用例只打桩了规格/行情，必须一并钉死，
+        # 否则探测走真网络（离线套件下被守卫拦成 unknown ⇒ 开仓被拒）。
+        # 取值 "net" 与真实 DEMO 账户一致（实测 dualSidePosition=False）。
+        ad.detect_position_mode = lambda: "net"
         ad.fetch_instrument_spec = Mock(return_value=InstrumentSpec(
             venue="binance", inst_id="BTCUSDT", base="BTC", tick_size=0.1,
             step_size=0.001, ct_val=1.0, min_size=0.001, max_leverage=20))
@@ -471,6 +476,11 @@ class BinanceExecutionAndProtectionTests(unittest.TestCase):
 
         ad = self.adapter
         ad._keys = lambda: ("ak", "sk")
+        # 持仓模式只读探测（router 新增体检）：真适配器会去打
+        # GET /fapi/v1/positionSide/dual，本用例只打桩了规格/行情，必须一并钉死，
+        # 否则探测走真网络（离线套件下被守卫拦成 unknown ⇒ 开仓被拒）。
+        # 取值 "net" 与真实 DEMO 账户一致（实测 dualSidePosition=False）。
+        ad.detect_position_mode = lambda: "net"
         # 同族封闭钉：规格 + listing 对账两处分发前动作必须 mock（离线套件纪律）
         from r20_backend.exchanges import InstrumentSpec as _Spec
         ad.fetch_instrument_spec = Mock(return_value=_Spec(

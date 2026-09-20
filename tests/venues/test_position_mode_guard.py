@@ -304,3 +304,97 @@ class CapabilityDeclarationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ── G11-b：币安侧持仓模式（词汇与 Gate 不同，判定函数刻意分开）────────────────
+class BinancePositionModeTest(unittest.TestCase):
+    """实测（2026-09-20 DEMO）：`GET /fapi/v1/positionSide/dual` → `{"dualSidePosition": false}`，
+    740 行 positionRisk 全为 `positionSide=BOTH` ⇒ **净模式**。"""
+
+    def test_real_demo_payload_is_net(self):
+        from r20_backend.exchanges.binance import interpret_dual_side_position as ib
+        self.assertEqual(ib({"dualSidePosition": False}), "net")
+        self.assertEqual(ib({"dualSidePosition": True}), "long_short")
+        self.assertEqual(ib({"dualSidePosition": "false"}), "net")
+
+    def test_unreadable_is_unknown(self):
+        from r20_backend.exchanges.binance import interpret_dual_side_position as ib
+        for bad in ({}, None, [], {"dualSidePosition": None}, {"dualSidePosition": "maybe"}):
+            with self.subTest(bad=bad):
+                self.assertEqual(ib(bad), "unknown")
+
+    def test_gate_and_binance_vocabularies_are_separate(self):
+        """两所模式词汇不同（single/dual/dual_plus vs net/long_short）——绝不共用一个枚举。"""
+        from r20_backend.exchanges.binance import BinanceAdapter
+        from r20_backend.exchanges.gate import GateAdapter
+        self.assertEqual(tuple(GateAdapter.capabilities.position_modes),
+                         ("single", "dual", "dual_plus"))
+        self.assertEqual(tuple(BinanceAdapter.capabilities.position_modes),
+                         ("net", "long_short"))
+        self.assertEqual(set(GateAdapter.capabilities.position_modes)
+                         & set(BinanceAdapter.capabilities.position_modes), set(),
+                         "两所声明域不该有交集（否则一定是有人合并了枚举）")
+
+    def test_detect_uses_read_only_endpoint_and_fails_soft(self):
+        from r20_backend.exchanges.binance import BinanceAdapter
+        ad = BinanceAdapter.__new__(BinanceAdapter)
+        calls = []
+
+        def _req(method, path, **kw):
+            calls.append((method, path))
+            return {"dualSidePosition": False}
+        ad.signed_request = _req                      # type: ignore[method-assign]
+        self.assertEqual(ad.detect_position_mode(), "net")
+        self.assertEqual(calls, [("GET", "/fapi/v1/positionSide/dual")],
+                         "必须是只读 GET（本系统绝不 POST 切换账户模式）")
+
+        ad.signed_request = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("net down"))  # type: ignore[method-assign]
+        self.assertEqual(ad.detect_position_mode(), "unknown", "探测失败必须 fail-soft")
+
+    def test_entry_ready_subset_declared_for_both_venues(self):
+        from r20_backend.exchanges.binance import BinanceAdapter
+        from r20_backend.exchanges.gate import GateAdapter
+        self.assertEqual(tuple(BinanceAdapter.capabilities.entry_ready_position_modes), ("net",),
+                         "hedge 载荷未核验 ⇒ 不在可交易子集内")
+        self.assertEqual(tuple(GateAdapter.capabilities.entry_ready_position_modes),
+                         ("single", "dual"), "dual_plus 不可折叠 ⇒ 不在可交易子集内")
+        for caps in (BinanceAdapter.capabilities, GateAdapter.capabilities):
+            with self.subTest(venue=caps.venue):
+                self.assertTrue(set(caps.entry_ready_position_modes)
+                                <= set(caps.position_modes),
+                                "可交易子集必须是声明域的子集")
+
+    def test_hedge_mode_is_refused_with_explanation(self):
+        """币安切到对冲模式 ⇒ 拒开并说明（载荷未核验，不是"我们没实现所以停所"）。
+
+        ⚠️ 本用例用**真实币安的模式词汇与可交易子集**驱动守卫，但 decision 的
+        `venue` 仍写 gate：合约挂牌/规格这条链路走的是本桩的 Gate 口径，
+        本用例**不覆盖**币安的挂牌与规格链路（那有各自的门）。
+        """
+        import dataclasses
+        from r20_backend.exchanges.binance import BinanceAdapter
+        from r20_backend import execution_router
+        ad = _EntryStub(mode="long_short")
+        # 模式词汇与"已验证可交易子集"取**真实币安声明**；其余能力沿用 Gate 形状，
+        # 因为本桩的规格/换算打桩是 Gate 口径（只需把币安那两个字段换过来即可隔离守卫行为）。
+        ad.capabilities = dataclasses.replace(
+            GateAdapter.capabilities,
+            position_modes=BinanceAdapter.capabilities.position_modes,
+            entry_ready_position_modes=BinanceAdapter.capabilities.entry_ready_position_modes)
+        with patch.object(execution_router, "_load_venue_pool_soft",
+                          lambda venue: {"assets": ["BTC"], "max_open": 5,
+                                         "margin_per_trade_usdt": 500.0, "dry_run": False}):
+            res = execution_router.open_protected_position(
+                {"asset": "BTC", "action": "BUY_LONG", "margin_usdt": 300.0, "leverage": 3,
+                 "entry_price": 79000.0, "take_profit_price": 85000.0,
+                 "stop_loss_price": 77000.0, "confidence": 88.0, "venue": "gate"},
+                adapter=ad, price_ref=79000.0)
+        self.assertFalse(res["ok"])
+        self.assertEqual(res["stage"], "position_mode")
+        self.assertIn("long_short", res["detail"])
+        self.assertIn("Hedge", res["detail"])
+        self.assertEqual(ad.placed, [], "拒开时不得留下任何委托")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -52,6 +52,14 @@ class RouteResult(Dict[str, Any]):
     """dict 子类型：{ok, venue, stage, detail, order_id, tp_id, sl_id, size_signed...}"""
 
 
+#: 各所"检测得到、但载荷未核验"的持仓模式 → 给运维的人读危害说明。
+#: 放在这里是因为它是**运维文案**（各所自己的模式词汇仍归各所 capability 声明）。
+MODE_HAZARDS: Dict[str, str] = {
+    "dual_plus": "拆仓语义，本系统不把它折叠成净仓/双向解读",
+    "long_short": "Hedge 对冲语义，positionSide 下单/保护腿载荷未在真实账户核验",
+}
+
+
 def _fail(stage: str, detail: str, venue: str = "gate", **extra: Any) -> RouteResult:
     r = RouteResult(ok=False, venue=venue, stage=stage, detail=detail)
     r.update(extra)
@@ -82,8 +90,9 @@ def open_protected_position(decision: Dict[str, Any], *,
     own_position：调用方（lab/trader）在该合约上的在管仓位记录（含 size_signed/side）；
     交易所既有仓与之一致视为己仓放行，否则视为外部连坐风险拒开（stage=precheck）。
     margin_mode：由账户实况推导传入（cross/isolated）；缺省维持历史行为 cross。
-    持仓模式：对声明了 `capabilities.position_modes` 的场所先做**只读**探测（single/dual
-    放行，dual 用 auto_size 载荷、single 用 close=true 载荷；unknown/dual_plus 禁新开仓），
+    持仓模式：对**实现了只读探测**的场所先体检 —— 探测所得必须在该所
+    `capabilities.position_modes` 声明域内，且落在 `entry_ready_position_modes`
+    （载荷已在真实账户核验过的子集）内才放行；否则禁新开仓并写明原因。
     本系统**永不自动切换**账户模式（审计 §2）。
     environment：显式资金环境（demo/live），优先使用；缺省读 decision.get('environment')。
     max_margin_usdt：调用方按权益算出的单笔保证金硬顶（权益×R20_MAX_MARGIN_EQUITY_RATIO）；
@@ -292,13 +301,20 @@ def open_protected_position(decision: Dict[str, Any], *,
         position_mode = str(probe() or "unknown").strip().lower()
         if position_mode not in declared_modes:
             return _fail("position_mode",
-                         f"{asset} 无法只读确认持仓模式（探测={position_mode}，声明支持="
+                         f"{asset} 无法只读确认持仓模式（探测={position_mode}，该所声明支持="
                          f"{'/'.join(declared_modes)}）——禁新开仓；本系统不自动切换账户模式",
                          venue=venue, position_mode=position_mode)
-        if position_mode == "dual_plus":
+        # "检测得到" ≠ "敢在这些模式下开仓"：`entry_ready_position_modes` 是该所
+        # **载荷已在真实账户核验过**的子集。Gate 的 dual_plus（拆仓不可折叠）、
+        # Binance 的 long_short（hedge 载荷未核验）都在此被拦下并说明原因。
+        ready_modes = tuple(getattr(getattr(ad, "capabilities", None),
+                                    "entry_ready_position_modes", ()) or ())
+        if ready_modes and position_mode not in ready_modes:
+            hazard = MODE_HAZARDS.get(position_mode, "该模式下单/保护腿载荷未核验")
             return _fail("position_mode",
-                         f"{asset} 账户为 dual_plus（拆仓）——本系统不支持把拆仓折叠成净仓/双向"
-                         "解读，禁新开仓（请在交易所侧改为 single/dual 或人工处理）",
+                         f"{asset} 账户持仓模式={position_mode}（{hazard}）——本系统仅在 "
+                         f"{'/'.join(ready_modes)} 下核验过下单与保护腿载荷，禁新开仓；"
+                         "请在交易所侧改回受支持模式或人工处理",
                          venue=venue, position_mode=position_mode)
 
     # 杠杆档位（失败即止，未下单无风险）；margin_mode 由账户实况推导，缺省 cross

@@ -144,6 +144,9 @@ class GateAdapter(BaseExchangeAdapter):
         decimal_amount=True,              # 十进制张数 amount 字符串（与 size 并传时 amount 优先）；
                                           # 按环境+合约规格双许可放行，真实账户支持未验（审计 §3）→ 保守回退 int
         position_modes=POSITION_MODES,
+        # dual 走 auto_size、single 走 close=true（均有单测 + 真帧核验）；
+        # dual_plus 拆仓不得折叠 ⇒ 不在"已验证可交易"子集内
+        entry_ready_position_modes=("single", "dual"),
         conditional_family="independent_resource",
         protection_semantics="price_orders 原生触发单：受理挂出即回读 id 确认；reduce_only 腿"
                              "对手成交后残留触发单自然失效不反向开仓；棘轮优先原生 amend 无缝改单",

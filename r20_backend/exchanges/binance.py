@@ -27,6 +27,31 @@ from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+# Gate 与 Binance 的持仓模式**词汇不同**（实测：Gate `position_mode='dual'`、
+# Binance `dualSidePosition` 布尔）。故各所有各所的判定函数，绝不共用一个枚举。
+
+
+def interpret_dual_side_position(payload: Any) -> str:
+    """由 `/fapi/v1/positionSide/dual` 回包判定 → `"net"|"long_short"|"unknown"`。
+
+    实测回包：`{"dualSidePosition": False}`（DEMO 账户为**净模式**）。
+    - `True` → `"long_short"`（对冲/Hedge：positionSide 必须显式 LONG/SHORT，且禁传 reduceOnly）
+    - `False` → `"net"`
+    - 读不到/类型不对 → `"unknown"`（不拿默认值冒充事实；调用方据此禁新开仓）
+
+    刻意与 Gate 的 `interpret_position_mode` **分开**：两所模式词汇不同，合并枚举
+    迟早会把 `dual` 与 `long_short` 混为一谈（那是两套完全不同的下单契约）。
+    """
+    if not isinstance(payload, dict):
+        return "unknown"
+    value = payload.get("dualSidePosition")
+    if isinstance(value, bool):
+        return "long_short" if value else "net"
+    if isinstance(value, str) and value.strip().lower() in ("true", "false"):
+        return "long_short" if value.strip().lower() == "true" else "net"
+    return "unknown"
+
+
 from .base import (BaseExchangeAdapter, ExchangeCapabilities,
                    ExchangeCapabilityError, InstrumentSpec)
 from .binance_orders import (
@@ -85,6 +110,10 @@ class BinanceAdapter(BinanceAlgoRequestsMixin, BaseExchangeAdapter):
         native_amend=False,                      # 改单=撤+重下（algo 族无原生 amend 依据，未验不宣称）
         decimal_amount=False,                    # base_asset 十进制数量是原生语义，非 Gate 式张数 amount
         position_modes=("net", "long_short"),    # Hedge Mode 显式 positionSide，禁 reduceOnly
+        # 仅 net **载荷已验证**（2026-09-20 实测 DEMO `dualSidePosition=False`、
+        # 740 行 positionRisk 全为 positionSide=BOTH）；long_short 虽在声明域内，
+        # 但没有真实对冲账户核验过下单/保护腿载荷 ⇒ 检测到它时禁新开仓并说明原因。
+        entry_ready_position_modes=("net",),
         conditional_family="algo_service",       # /fapi/v1/algoOrder 独立新建/查询/撤销
         protection_semantics="独立 algo 资源族（STOP/TP/TRAILING 等 CONDITIONAL）：普通 openOrders "
                              "不代表保护单全集，必须双源合并读取；closePosition=true 仅指定条件市价单"
@@ -418,6 +447,19 @@ class BinanceAdapter(BinanceAlgoRequestsMixin, BaseExchangeAdapter):
         return out
 
     # ---- 下单与执行闭环（US-005）----
+    def detect_position_mode(self) -> str:
+        """**只读**探测账户持仓模式（net / long_short），失败/读不到 → "unknown"。
+
+        端点：`GET /fapi/v1/positionSide/dual`（实测回包 `{"dualSidePosition": false}`）。
+        永不抛异常、永不改账户（本系统**不会**调用 `/fapi/v1/positionSide/dual` 的
+        POST 去切换模式）。
+        """
+        try:
+            data = self.signed_request("GET", "/fapi/v1/positionSide/dual")
+        except Exception:
+            return "unknown"
+        return interpret_dual_side_position(data)
+
     def place_order(self, symbol: str, side: str, contracts: float,
                     price: Optional[float] = None, tif: str = "gtc",
                     text: str = "", position_side: Optional[str] = None,

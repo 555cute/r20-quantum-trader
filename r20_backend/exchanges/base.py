@@ -60,7 +60,16 @@ class ExchangeCapabilities:
     decimal_amount: bool = False      # 十进制张数 amount 字符串（Gate 模型支持，账户实况未验）
     # 持仓模式族（仅声明支持域，永不自动切换用户账户；未支持档=禁新开仓并显示原因）
     # gate: ("single","dual","dual_plus")——dual_plus 拆仓不得折叠成净仓/双向（审计 §2）
+    #        binance: ("net","long_short")——两所**词汇不同**，判定必须按所各表（实测）
     position_modes: tuple = ()
+    # 其中**载荷已验证、允许新开仓**的模式子集（宽于它的模式=检测得到但禁开，
+    # 因为本系统没有在真实账户上核验过那种模式的下单/保护腿载荷）：
+    #   gate: single/dual（dual 走 auto_size，single 走 close=true，均有单测+真帧）
+    #         dual_plus 拆仓不折叠 ⇒ 不在子集内
+    #   binance: net（positionSide=BOTH）。long_short（hedge）**未核验** ⇒ 不在子集内；
+    #         其 place_order/attach 虽有 position_side 入参，但缺真实对冲账户验证
+    # 空 = 不体检（不认识模式的场所维持原行为，绝不因"没实现"就停掉一个所）
+    entry_ready_position_modes: tuple = ()
     conditional_family: str = "none"  # attached | independent_resource | algo_service
     protection_semantics: str = ""    # 保护生效条件的人读语义（见各所声明与 §0 设计纠正）
     # ---- 公共行情 ----
