@@ -515,7 +515,10 @@ def record_open_intent(inst_id: str, side: str, ts_ms: int = None) -> None:
     """壳（第八十三刀搬至 `scripts/trader/ledger_writer.py`，调用期同名注入）。"""
     return _ledger_writer_intent(inst_id, side, ts_ms,
                                  OPEN_INTENT_FILE=OPEN_INTENT_FILE,
-                                 OPEN_INTENT_TTL_MS=OPEN_INTENT_TTL_MS)
+                                 OPEN_INTENT_TTL_MS=OPEN_INTENT_TTL_MS,
+                                 # 第一百三十五刀：落盘改**原子替换**（消灭"写崩留
+                                 # 0 字节/半截 JSON ⇒ 读取侧按孤儿撤单"这一状态）
+                                 _atomic_write_json=_atomic_write_json)
 
 class OpenIntentsUnreadable(RuntimeError):
     """本地开仓意图**存在却读不出来**（与"文件不存在/合法为空"区分，第一百三十四刀）。"""

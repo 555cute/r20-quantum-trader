@@ -26,7 +26,8 @@ import time
 
 
 def record_open_intent(inst_id: str, side: str, ts_ms: int = None, *,
-                       OPEN_INTENT_FILE: str, OPEN_INTENT_TTL_MS: int) -> None:
+                       OPEN_INTENT_FILE: str, OPEN_INTENT_TTL_MS: int,
+                       _atomic_write_json) -> None:
     """下单成功后记录本地开仓意图，供重启后挂单对账归属（US-006）。
 
     审计(2026-09-13)·PEPE 永动机修复之二：写入时**清理**——过期(TTL 6h)条目丢弃、
@@ -49,8 +50,12 @@ def record_open_intent(inst_id: str, side: str, ts_ms: int = None, *,
         intents = [i for i in intents
                    if not (str(i.get("instId")) == inst_id and str(i.get("side", "")).lower() == _side_l)]
         intents.append({"instId": inst_id, "side": side, "ts": int(ts_ms or _now_ms)})
-        with open(OPEN_INTENT_FILE, "w", encoding="utf-8") as f:
-            json.dump(intents[-200:], f, ensure_ascii=False, indent=2)
+        # ⚠️ 第一百三十五刀：**原子替换**（mkstemp+fsync+os.replace）。
+        # 旧体 `open(OPEN_INTENT_FILE, "w")` 是**非原子直写** —— 写崩/断电会留下
+        # 0 字节或半截 JSON，而读取侧（挂单对账 / 存量挂单回收）据此把"读不到"
+        # 当成"没有意图"⇒ 逐笔按孤儿撤单（第一百三十四刀已让读取侧 fail-closed，
+        # 本刀**从源头消灭这个状态**：失败时旧文件原样保全）。
+        _atomic_write_json(OPEN_INTENT_FILE, intents[-200:])
     except Exception as e:
         print(f"[挂单对账] 记录开仓意图失败（不影响本单交易）: {e}")
 
