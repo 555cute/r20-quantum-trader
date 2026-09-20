@@ -102,7 +102,9 @@ def build_position_lines(active_positions_detail: Optional[List[Dict[str, Any]]]
 
 _PROTECTION_TEXT = {
     "fully_protected": "完全保护",
-    "partially_protected": "部分保护（覆盖不足）",
+    #: 没有覆盖率数字时**不宣称"覆盖不足"**（那是没有证据的结论）；有数字时由
+    #: `_protection_text` 覆盖成"止损满量但缺止盈腿 / 止损仅覆盖 X%"。
+    "partially_protected": "部分保护（覆盖量未知）",
     "unprotected": "⚠️ 无活止损腿",
     "unknown": "保护状态不可判定",
 }
@@ -121,11 +123,25 @@ def _protection_text(p: Dict[str, Any]) -> str:
         return ""
     txt = _PROTECTION_TEXT.get(status, status)
     pct = p.get("protectionCoveragePct")
-    if isinstance(pct, (int, float)) and status != "unprotected":
+    _has_pct = isinstance(pct, (int, float))
+    if status == "partially_protected":
+        # ⚠️ 第一百二十一刀：修我自己上一刀造出的**自相矛盾文案**。
+        # OKX 的判据里 `partially_protected` 的含义是"有匹配腿，但不是满量 SL+TP 双腿"
+        # （`algo_protection`：`fully_protected` 要求同一腿同时有 SL 与 TP）——
+        # 于是"只有满量止损、没有止盈"这种**下行已全覆盖**的仓也会落到这一档，
+        # 而覆盖率是 100% ⇒ 旧文案渲染成「部分保护（覆盖不足） 100%」，自相矛盾。
+        # 现在按覆盖率分开说：满量只缺止盈腿 / 止损只覆盖 X%。
+        if _has_pct and float(pct) >= 99.9:
+            txt = "部分保护（止损满量但缺止盈腿）"
+        elif _has_pct:
+            txt = f"部分保护（止损仅覆盖 {float(pct):g}%）"
+    elif _has_pct and status != "unprotected":
         txt += f" {float(pct):g}%"
     expiry = str(p.get("protectionExpiry") or "").strip()
     if expiry == "expired":
-        txt += "（腿已过期）"
+        # "另有"是刻意的：`unprotected` 档下过期腿正是缺口本身，而 `partially_*` 档下
+        # 说明**还有别的腿**过期 —— 两种情形都如实，不夸大也不含糊。
+        txt += "（另有腿已过期）" if status in ("fully_protected", "partially_protected") else "（腿已过期）"
     elif expiry == "expiring":
         txt += "（腿临期）"
     elif expiry == "unknown" and status != "unprotected":

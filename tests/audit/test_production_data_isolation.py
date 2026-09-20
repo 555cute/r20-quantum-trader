@@ -180,7 +180,6 @@ class SubprocessDataWritesRedirectedTest(unittest.TestCase):
         未修复前：还原后 env 里没有 R20_DATA_DIR → 翻红。
         """
         import threading
-        import time
 
         from tests import config_sandbox
         import scripts.instrument_pool as pool
@@ -188,10 +187,17 @@ class SubprocessDataWritesRedirectedTest(unittest.TestCase):
 
         seen: list[dict] = []
         real_run_script = spawn_mod.run_script
+        _done = threading.Event()
+        #: 期望的 spawn 次数**按实际存在的脚本算**（别写死 2：脚本缺席时用例会假红）。
+        _expected = sum(1 for _s in (ROOT / "scripts" / "factor_library.py",
+                                     ROOT / "scripts" / "news_sentiment_harvester.py")
+                        if _s.exists())
 
         def _fake_run_script(script, *, timeout=20, label=None, env=None):
             # 记录**实际传给子进程的 env**（None = 继承 = 竞态未修）
             seen.append(dict(env) if env is not None else None)
+            if len(seen) >= _expected:
+                _done.set()
 
             class _R:
                 returncode = 0
@@ -204,17 +210,22 @@ class SubprocessDataWritesRedirectedTest(unittest.TestCase):
         p.start()
         try:
             pool.sync_instruments_state()
-            # ⚠️ 必须在**撤 patch 之前**等后台线程把两次 run_script 都走完 ——
+            # ⚠️ 必须在**撤 patch 之前**等后台线程把 spawn 都走完 ——
             # 否则测试自己会漏出一次**真 spawn**（假想 cleanup 时序反而制造事故）。
-            deadline = time.monotonic() + 5.0
-            while time.monotonic() < deadline and len(seen) < 2:
-                time.sleep(0.02)
+            #
+            # ⚠️ 第一百二十一刀去 flaky：原来等的是**写死 5 秒**。本用例空载、
+            # 乃至 8 路 CPU 争用下都复现不了；只在**整包跑**里偶发（已两次：
+            # 第 20 刀、第 25 刀），而本机同时跑着活体 `r20_gateway.worker` ——
+            # 5 秒窗口被它抢走即可假红。现改成**事件驱动**（线程走完即返回），
+            # 30 秒只是安全网：真超时才说明"结构变了或卡死"。
+            _done.wait(30.0)
         finally:
             p.stop()
             self.doCleanups()          # 提前还原 env 与常量（幂等）
 
-        self.assertEqual(len(seen), 2,
-                         f"后台线程没走完两次 spawn（只见 {len(seen)} 次）"
+        self.assertGreaterEqual(_expected, 1, "两个脚本都不在？本用例已失去意义")
+        self.assertEqual(len(seen), _expected,
+                         f"后台线程没走完 spawn（只见 {len(seen)}/{_expected} 次，等满 30s）"
                          " —— 结构变了或卡死，本用例失去意义")
         bad = [i for i, env in enumerate(seen) if env is None
                or env.get("R20_DATA_DIR") != str(Path(sandbox) / "data")]

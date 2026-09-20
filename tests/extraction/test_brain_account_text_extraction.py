@@ -716,6 +716,30 @@ class ProtectionVerdictPromptTest(unittest.TestCase):
                          protectionCoveragePct=50.0, protectionExpiry="expired")
         self.assertIn("腿已过期", out)
 
+    def test_full_size_stop_without_tp_is_not_called_insufficient(self):
+        """⭐ 第一百二十一刀：修我自己上一刀造出的**自相矛盾文案**。
+
+        OKX 判据里 `partially_protected` 含"只有满量止损、没有止盈"这一档
+        （下行已全覆盖）⇒ 旧文案渲染成「部分保护（覆盖不足） 100%」，自相矛盾。
+        """
+        out = self._line(protectionStatus="partially_protected",
+                         protectionCoveragePct=100.0)
+        self.assertIn("止损满量但缺止盈腿", out)
+        self.assertNotIn("覆盖不足", out)
+        self.assertNotIn("100%", out, "覆盖率已由文字表达，不重复自相矛盾的百分比")
+
+    def test_partial_without_coverage_number_claims_nothing_extra(self):
+        """没有覆盖率数字时不得宣称"覆盖不足"（无证据不下结论）。"""
+        out = self._line(protectionStatus="partially_protected")
+        self.assertIn("部分保护（覆盖量未知）", out)
+        self.assertNotIn("覆盖不足", out)
+
+    def test_partial_coverage_states_the_real_percentage(self):
+        out = self._line(protectionStatus="partially_protected",
+                         protectionCoveragePct=40.0)
+        self.assertIn("止损仅覆盖 40%", out)
+        self.assertNotIn("覆盖不足", out)
+
     def test_no_verdict_no_segment(self):
         """没有判据就不写这一段（不假装）。"""
         self.assertNotIn("保护:", self._line())
