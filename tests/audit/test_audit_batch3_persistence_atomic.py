@@ -379,5 +379,72 @@ class TraderSlotGuardAtomicityTest(unittest.TestCase):
                          "失败路径不得残留临时文件")
 
 
+class StopCooldownWriterSingleSourceTest(unittest.TestCase):
+    """止损冷却**写入规则只有一处实现**（第一百四十八刀）。
+
+    历史：读取路径早已收敛（结构优化 4·B3 第五十刀），**写入**却留了两份等价实现
+    （`r20_backend/execution/circuit_breaker.py` 与 `scripts/ai_factor_trader.py`），
+    只差一句提示文案 —— 本仓老毛病"同一语义两处写 ⇒ 必然漂移"。此处漂移的代价很实：
+    冷却登记规则一变，两进程可能一个记一个不记，而"止损后能否立刻反手"直接取决于它。
+
+    本门钉两件事：①两个公开入口都必须是**薄壳**（转调同一实现）；②单一实现的三条规则
+    逐条成立（损坏拒绝写回 / 正常写入 schema / 落盘失败只告警）。
+    """
+
+    def test_both_entrypoints_are_shells_over_one_implementation(self):
+        import ast
+        import r20_backend.execution.circuit_breaker as cb
+        root = Path(__file__).resolve().parents[2]
+        for path, mod in ((root / "r20_backend" / "execution" / "circuit_breaker.py", cb),
+                          (root / "scripts" / "ai_factor_trader.py", None)):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            fn = next(n for n in ast.walk(tree)
+                      if isinstance(n, ast.FunctionDef) and n.name == "add_stop_cooldown")
+            with self.subTest(path=path.name):
+                body = [n for n in fn.body
+                        if not (isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)
+                                and isinstance(n.value.value, str))]      # 去掉 docstring
+                self.assertEqual(len(body), 1, "写入规则又长回函数体里了（应转调单一事实源）")
+                only = body[0]
+                self.assertIsInstance(only, ast.Return)
+                call = only.value
+                self.assertIsInstance(call, ast.Call)
+                self.assertEqual(getattr(call.func, "id", ""), "_cooldowns_add",
+                                 "薄壳必须转调 cooldowns.add_stop_cooldown")
+
+    def test_rules_of_the_single_implementation(self):
+        import json as _json
+        import tempfile
+        from r20_backend.execution import cooldowns as cd
+        with tempfile.TemporaryDirectory(prefix="cd-single-") as td:
+            f = os.path.join(td, "stop_cooldown.json")
+            written = []
+            logs = []
+            log = logs.append
+            # 规则①：状态损坏 ⇒ **拒绝写回**（保全现场），且必吼
+            with open(f, "w") as h:
+                h.write("{half")
+            cd.add_stop_cooldown("BTC-USDT-SWAP", "long", f,
+                                 atomic_write_json=lambda p, d: written.append((p, d)), log=log)
+            self.assertEqual(written, [], "损坏现场被覆盖了（读取侧按『仍在冷却』兜底，写入侧不许毁现场）")
+            self.assertTrue(any("CRITICAL" in m for m in logs), "拒绝写回必须吼出来")
+            self.assertEqual(open(f).read(), "{half", "现场必须原封不动")
+            # 规则②：正常写入的 schema
+            with open(f, "w") as h:
+                h.write(_json.dumps({}))
+            cd.add_stop_cooldown("ETH-USDT-SWAP", "short", f, reason="测试冷却",
+                                 atomic_write_json=lambda p, d: written.append((p, d)), log=log)
+            self.assertEqual(len(written), 1)
+            path_written, payload = written[0]
+            self.assertEqual(path_written, f)
+            self.assertEqual(set(payload["ETH-USDT-SWAP_short"]),
+                             {"instId", "side", "ts", "reason"})
+            self.assertEqual(payload["ETH-USDT-SWAP_short"]["reason"], "测试冷却")
+            # 规则③：落盘失败 ⇒ 只告警，不抛（绝不打断平仓流程）
+            def boom(p, d):
+                raise OSError("磁盘满")
+            cd.add_stop_cooldown("SOL-USDT-SWAP", "long", f, atomic_write_json=boom, log=log)
+            self.assertTrue(any("落盘失败" in m for m in logs))
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

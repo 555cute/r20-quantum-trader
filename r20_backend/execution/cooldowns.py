@@ -104,3 +104,36 @@ def load_stop_cooldowns(cooldown_file) -> Dict[str, Any]:
     不要用本函数做放开判定（它拿不到 corrupt 信号）。
     """
     return read_stop_cooldowns_state(cooldown_file)[0]
+
+def add_stop_cooldown(inst_id: str, side: str, cooldown_file, *, reason: str = "止损冷却",
+                      atomic_write_json, log=print) -> None:
+    """登记一笔止损冷却（**写入路径的单一事实源**，第一百四十八刀）。
+
+    收敛历史：读取路径在结构优化阶段 4·B3 第五十刀已收敛到本模块，但**写入**一直有
+    两份等价实现（`r20_backend/execution/circuit_breaker.py` 与
+    `scripts/ai_factor_trader.py`），只差一句提示文案 —— 正是本仓反复吃过的
+    "同一语义两处写 ⇒ 必然漂移"（此处漂移的代价是：冷却登记规则一变，两个进程
+    可能一个记一个不记，而"止损后能否立刻反手"直接取决于它）。
+
+    两条规则（与既有实现逐条等价，勿"顺手"改）：
+
+    1. **状态损坏 ⇒ 拒绝合并写回**（保全现场，宁可这笔冷却不登记，也不覆盖掉现场：
+       读取侧对损坏按"仍在冷却"fail-closed，故保守方向一致）；
+    2. 落盘失败 ⇒ 只告警（本笔冷却丢失，依赖云端 SL 兜底）。
+    """
+    cooldowns, corrupt = read_stop_cooldowns_state(cooldown_file)
+    if corrupt:
+        log(f"[止损冷却] CRITICAL 状态文件损坏，拒绝合并写回以保全现场"
+            f"（期间所有标的按『仍在冷却』fail-closed）: {cooldown_file}")
+        return
+    key = f"{inst_id}_{side}"
+    cooldowns[key] = {
+        "instId": inst_id,
+        "side": side,
+        "ts": int(time.time()),
+        "reason": reason,
+    }
+    try:
+        atomic_write_json(cooldown_file, cooldowns)
+    except Exception as e:      # noqa: BLE001 - 冷却丢失只告警，绝不打断平仓流程
+        log(f"[止损冷却] warn 落盘失败（本笔冷却丢失，依赖云端SL兜底）: {e}")

@@ -11,6 +11,7 @@ from scripts.risk_constants import STOP_COOLDOWN_MINUTES
 from r20_backend.time_utils import beijing_day
 from r20_backend.execution.sizing import effective_daily_loss_limit
 from r20_backend.execution.cooldowns import (
+    add_stop_cooldown as _cooldowns_add,
     is_in_stop_cooldown as _cooldowns_is_in,
     load_stop_cooldowns as _cooldowns_load,
     read_stop_cooldowns_state as _cooldowns_read_state,
@@ -202,21 +203,13 @@ def _atomic_write_json(path, payload) -> None:
 
 
 def add_stop_cooldown(inst_id: str, side: str, reason: str = "止损冷却") -> None:
-    cooldowns, corrupt = _read_stop_cooldowns_state()
-    if corrupt:
-        print(f"[止损冷却] CRITICAL 状态文件损坏，拒绝合并写回保全现场: {STOP_COOLDOWN_FILE}")
-        return
-    key = f"{inst_id}_{side}"
-    cooldowns[key] = {
-        "instId": inst_id,
-        "side": side,
-        "ts": int(time.time()),
-        "reason": reason,
-    }
-    try:
-        _atomic_write_json(STOP_COOLDOWN_FILE, cooldowns)
-    except Exception as e:
-        print(f"[止损冷却] warn 落盘失败: {e}")
+    """薄壳：转调单一事实源（`cooldowns.add_stop_cooldown`，第一百四十八刀）。
+
+    ⚠️ 文件路径与原子写函数都**在调用时**从本模块全局解析（测试会 patch
+    `cb.STOP_COOLDOWN_FILE`；import 期烘焙会让补丁静默失效）。
+    """
+    return _cooldowns_add(inst_id, side, STOP_COOLDOWN_FILE, reason=reason,
+                          atomic_write_json=_atomic_write_json)
 
 
 def is_in_stop_cooldown(inst_id: str, side: str) -> bool:

@@ -63,6 +63,7 @@
 | 席位绑定**写闸**（模型库读取） | 模型库**读不出来** ⇒ 返回问题 ⇒ 调用方 `raise ValueError` **拒绝保存**；合法为空（全新环境）仍放行 | 不做（fail-closed）| `r20_backend/council/roster.py` | `tests/llm/test_council_manager.py::SeatBindingWriteGateFailClosedTest` |
 | 舆情采集的熔断状态读取（**展示/提示词**侧第二份实现） | 熔断文件**损坏/读不到** ⇒ 标 `unknown` 并把 `macro_sentiment` 写成"熔断状态不可判"（**不得报平安**）；从未写过文件 ⇒ 合法"未熔断" | 披露 | `scripts/news_sentiment_harvester.py` | `tests/core/test_news_sentiment_harvester.py::CircuitBreakerUnknownStateTest` |
 | 熔断判定**孪生对拍**（后端风控面 vs trader 活路径） | 两份实现只允许**形式差异**，抽取后的决策序列必须逐项相等（含 try 保护范围）；"加固只改一边" ⇒ 门翻红 | 防 | `r20_backend/execution/circuit_breaker.py` | `tests/audit/test_circuit_breaker_twin_parity.py::TwinParityTest` |
+| 止损冷却**写入路径** | 只有一处实现：损坏 ⇒ **拒绝写回保全现场**（读取侧按"仍在冷却"兜底），落盘失败 ⇒ 只告警；两个公开入口必须是**薄壳** | 防 | `r20_backend/execution/cooldowns.py` | `tests/audit/test_audit_batch3_persistence_atomic.py::StopCooldownWriterSingleSourceTest` |
 <!-- anchors:end -->
 
 ## 3. 抽取门与"文档化差异"

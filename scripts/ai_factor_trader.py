@@ -314,6 +314,7 @@ from r20_backend.execution import (
     quantize_size,
 )
 from r20_backend.execution.cooldowns import (
+    add_stop_cooldown as _cooldowns_add,
     is_in_stop_cooldown as _cooldowns_is_in,
     load_stop_cooldowns as _cooldowns_load,
     read_stop_cooldowns_state as _cooldowns_read_state,
@@ -467,22 +468,14 @@ def load_stop_cooldowns():
     return _cooldowns_load(STOP_COOLDOWN_FILE)
 
 def add_stop_cooldown(inst_id: str, side: str, reason: str = "止损冷却"):
-    cooldowns, corrupt = _read_stop_cooldowns_state()
-    if corrupt:
-        print(f"[止损冷却] CRITICAL 状态文件损坏，拒绝合并写回以保全现场"
-              f"（期间所有标的按『仍在冷却』fail-closed）: {STOP_COOLDOWN_FILE}")
-        return
-    key = f"{inst_id}_{side}"
-    cooldowns[key] = {
-        "instId": inst_id,
-        "side": side,
-        "ts": int(time.time()),
-        "reason": reason
-    }
-    try:
-        _atomic_write_json(STOP_COOLDOWN_FILE, cooldowns)
-    except Exception as e:
-        print(f"[止损冷却] warn 落盘失败（本笔冷却丢失，依赖云端SL兜底）: {e}")
+    """薄壳：转调单一事实源（`cooldowns.add_stop_cooldown`，第一百四十八刀）。
+
+    写入规则（损坏拒绝写回以保全现场 / 落盘失败只告警）只有一处实现；
+    本壳只负责在**调用时**提供本模块的 `STOP_COOLDOWN_FILE` 与 `_atomic_write_json`
+    （测试会 patch 本模块全局；`position_exit` 等抽取模块也把本名字当注入面）。
+    """
+    return _cooldowns_add(inst_id, side, STOP_COOLDOWN_FILE, reason=reason,
+                          atomic_write_json=_atomic_write_json)
 
 def is_in_stop_cooldown(inst_id: str, side: str) -> bool:
     """薄壳：转调单一事实源（结构优化阶段 4·B3 第五十刀）。
