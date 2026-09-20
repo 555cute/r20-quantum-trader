@@ -175,6 +175,8 @@ import fcntl
 from typing import Tuple, Dict, Any, List, Optional
 from concurrent.futures import ThreadPoolExecutor
 from market_data_service import fetch_candles, fetch_ticker
+# 行情取数健康快照的写盘入口（读侧在后端 /metrics，见 MARKET_DATA_HEALTH_FILE 注释）。
+from market_data_health import write_snapshot as write_market_data_health_snapshot
 import scripts.okx_rest as okx_rest
 
 # 执行层风控参数单一事实源（后台「风控管理页」写入 .env，本进程 import 时读取生效）
@@ -596,6 +598,10 @@ def prune_trackers(trackers: Dict[str, Any], real_pos_dict: Dict[str, Any]) -> i
 
 AI_DECISION_CACHE_FILE = os.path.join(DATA_DIR, "ai_brain_decisions.json")
 VENUE_HEALTH_FILE = os.path.join(DATA_DIR, "venue_health.json")
+#: 行情取数健康快照（worker 每周期写、后端 `/metrics` 读）。
+#: 跨进程原因：取数在 worker（15 分钟 respawn），`/metrics` 在后端进程 ——
+#: 进程内计数器看不到对方（与 venue_health.json 同一套手法）。
+MARKET_DATA_HEALTH_FILE = os.path.join(DATA_DIR, "market_data_health.json")
 #: 组合风险预算总上限（US-001 预留层封顶口径；0/未配置 = 只累计台账不封顶）
 PORTFOLIO_RISK_BUDGET_ENV = "R20_PORTFOLIO_RISK_BUDGET_USDT"
 #: 场所取数健康度可容忍年龄（brain 15min 周期写盘，给 2 个周期 + 余量）
@@ -1148,6 +1154,11 @@ def execute_portfolio():
         R20_VENUE_PROTECTION_WATCHDOG=R20_VENUE_PROTECTION_WATCHDOG,
         audit_cross_venue_protection=audit_cross_venue_protection,
     )
+
+    # 4c. 行情取数健康快照（第 137 刀事故的可观测性闭环）：把本轮的取数
+    # 失败计数/耗时/最近成功时刻落盘，供后端 `/metrics` 跨进程读取。
+    # 只写一个 JSON、失败只返回 False（绝不抛异常、绝不改变交易行为）。
+    write_market_data_health_snapshot(path=MARKET_DATA_HEALTH_FILE)
 
     # 5. Persist Latest State for Web Monitoring Dashboard
     persist_state_and_sync_ledger(

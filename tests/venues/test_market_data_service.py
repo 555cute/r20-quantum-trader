@@ -1,8 +1,11 @@
 import json
 import unittest
 from requests import Response
+import unittest.mock
 from unittest.mock import patch
 from scripts.market_data_service import (
+    _public_get,
+    _public_post,
     fetch_ticker,
     fetch_tickers_bulk,
     fetch_orderbook_depth,
@@ -202,3 +205,120 @@ class TestMarketDataServiceHttpBoundary(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _health_module():
+    """取**服务模块真正绑定的那个** `market_data_health` 实例。
+
+    双拼写陷阱（`scripts/README.md` §双拼写）：`market_data_health` 与
+    `scripts.market_data_health` 在 `sys.modules` 里是**两个不同实例**。
+    靠"先 import 哪个"或"哪个已加载"来猜都不可靠 —— 实测在**全量套件**里会因
+    导入顺序不同而猜错、读到另一份空计数器（单跑却绿）。故这里从服务模块绑定的
+    函数对象反查其定义模块：`fn.__module__` 精确指向运行时那个实例。
+    """
+    import sys
+    mds = __import__("scripts.market_data_service", fromlist=["x"])
+    fn = getattr(mds, "note_call", None)
+    module = sys.modules.get(getattr(fn, "__module__", "")) if fn is not None else None
+    if module is not None and hasattr(module, "note_call"):
+        return module
+    raise AssertionError("定位不到 market_data_service 绑定的 market_data_health 实例")
+
+
+class PublicFetchInstrumentationTest(unittest.TestCase):
+    """第 138 刀：`_public_get/_public_post` 的埋点必须**一字不改取值行为**。
+
+    事故背景（第 137 刀）：静默 `except` 吞掉取数失败 ⇒ 现价恒 0 ⇒ 主脑 P0 拦截、
+    30 小时无信号。本类钉住：失败仍返回 None（行为不变），但**必须留痕**。
+    """
+
+    def setUp(self):
+        health = _health_module()
+        self.health = health
+        health.reset()
+
+    def tearDown(self):
+        self.health.reset()
+
+    def _resp(self, status=200, payload=None):
+        resp = Response()
+        resp.status_code = status
+        resp._content = json.dumps(payload if payload is not None
+                                   else {"code": "0", "data": [{"last": "70000"}]}).encode()
+        return resp
+
+    def test_success_records_call_and_returns_identical_payload(self):
+        session = unittest.mock.MagicMock()
+        session.get.return_value = self._resp()
+        with patch("scripts.market_data_service.get_market_session", return_value=session), \
+             patch("scripts.market_data_service.OKX_PUBLIC_HOSTS", ["https://www.okx.com"]):
+            out = _public_get("/api/v5/market/ticker", {"instId": "BTC-USDT-SWAP"})
+        self.assertEqual(out, {"code": "0", "data": [{"last": "70000"}]},
+                         "埋点不得改变返回值")
+        snap = self.health.snapshot()
+        self.assertEqual(snap["calls"]["okx_public_get_ticker"], 1)
+        self.assertEqual(snap["failed_calls"].get("okx_public_get_ticker", 0), 0)
+        self.assertIn("okx_public_get_ticker", snap["last_success_ms"])
+
+    def test_non_zero_code_is_a_failed_call_not_a_success(self):
+        session = unittest.mock.MagicMock()
+        session.get.return_value = self._resp(payload={"code": "51001", "msg": "no data"})
+        with patch("scripts.market_data_service.get_market_session", return_value=session), \
+             patch("scripts.market_data_service.OKX_PUBLIC_HOSTS", ["https://www.okx.com"]):
+            out = _public_get("/api/v5/market/ticker")
+        self.assertIsNone(out, "非 0 code 仍旧返回 None（行为不变）")
+        snap = self.health.snapshot()
+        self.assertEqual(snap["calls"]["okx_public_get_ticker"], 1)
+        self.assertEqual(snap["failed_calls"]["okx_public_get_ticker"], 1)
+
+    def test_all_hosts_failing_still_returns_none_but_leaves_a_trace(self):
+        """本仓最贵的一次事故就是这样：返回 None 且**零痕迹**。"""
+        session = unittest.mock.MagicMock()
+        session.get.side_effect = RuntimeError("connection reset by peer")
+        with patch("scripts.market_data_service.get_market_session", return_value=session):
+            out = _public_get("/api/v5/market/ticker")
+        self.assertIsNone(out, "取值行为必须一字不变")
+        snap = self.health.snapshot()
+        attempts = len(__import__("scripts.market_data_service", fromlist=["x"]).OKX_PUBLIC_HOSTS)
+        self.assertEqual(snap["calls"]["okx_public_get_ticker"], attempts,
+                         "每个 host 的每次尝试都要计入（双域直连的失败面必须可见）")
+        self.assertEqual(snap["failed_calls"]["okx_public_get_ticker"], attempts)
+        self.assertEqual(snap["failures"]["by_kind"]["okx_public_get_ticker"], attempts,
+                         "失败必须进失败账本（第 137 刀的口径）")
+
+    def test_post_path_is_instrumented_too(self):
+        session = unittest.mock.MagicMock()
+        session.post.return_value = self._resp()
+        with patch("scripts.market_data_service.get_market_session", return_value=session), \
+             patch("scripts.market_data_service.OKX_PUBLIC_HOSTS", ["https://www.okx.com"]):
+            _public_post("/api/v5/market/candles", {"instId": "BTC-USDT-SWAP"})
+        self.assertEqual(self.health.snapshot()["calls"]["okx_public_post_candles"], 1)
+
+    def test_call_kind_is_bounded_and_sanitised(self):
+        """标签基数必须有界：绝不把带参数的整条 URL（instId/limit…）当指标标签。"""
+        mds = __import__("scripts.market_data_service", fromlist=["x"])
+        kind = mds._call_kind("get", "/api/v5/market/ticker?instId=BTC-USDT-SWAP&limit=100")
+        self.assertEqual(kind, "okx_public_get_ticker",
+                         "query 混进标签 ⇒ 基数爆炸 + instId 泄进监控面")
+        self.assertNotIn("/", kind)
+        self.assertEqual(mds._call_kind("get", "/api/v5/market/candles"), "okx_public_get_candles")
+        self.assertEqual(mds._call_kind("get", ""), "okx_public_get_unknown")
+
+    def test_non_exception_failure_enters_both_ledgers(self):
+        """HTTP/code 失败**没有异常**，但也是"取数失败"——两本账必须对得上。
+
+        实测（第 138 刀）：第一版只记了 `failed_calls`、没记 `failures`，
+        于是指标里两个口径给出不同的数（2 vs 1）—— 运维看到两个不同的失败数
+        就会不再信任监控。这条门钉住"两账一致"。
+        """
+        session = unittest.mock.MagicMock()
+        session.get.return_value = self._resp(payload={"code": "51001", "msg": "instrument not found"})
+        with patch("scripts.market_data_service.get_market_session", return_value=session), \
+             patch("scripts.market_data_service.OKX_PUBLIC_HOSTS", ["https://www.okx.com"]):
+            self.assertIsNone(_public_get("/api/v5/market/ticker"))
+        snap = self.health.snapshot()
+        self.assertEqual(snap["failed_calls"]["okx_public_get_ticker"],
+                         snap["failures"]["by_kind"]["okx_public_get_ticker"],
+                         "failed_calls 与 failures 必须同口径")
+        self.assertIn("51001", snap["failures"]["last_error"]["okx_public_get_ticker"],
+                      "排障文本要带上交易所自己的 code/msg，否则无法定位")

@@ -21,15 +21,46 @@ P0 数据有效性拦截、**约 30 小时没有开新仓**，而整个过程**�
 """
 from __future__ import annotations
 
+import json
+import os
+import tempfile
 import threading
-from typing import Any, Dict, Optional
+import time
+from collections import deque
+from typing import Any, Deque, Dict, Optional
 
 _LOCK = threading.Lock()
 _FAILURES: Dict[str, int] = {}
 _LOGGED: set[str] = set()
 _LAST_ERROR: Dict[str, str] = {}
 
-__all__ = ["note_failure", "stats", "reset", "failure_count"]
+#: 快照格式版本（跨进程消费：worker 写、后端 /metrics 读）。加字段就升版本，
+#: 老消费者看到不认识的版本应当**当作不可用**，而不是猜字段。
+SCHEMA_VERSION = 1
+#: 每个 kind 保留的最近耗时样本数（够算 p50/p95，且内存有界——这是每 15 分钟
+#: 一个新进程的短命脚本，绝不能攒成无界列表）。
+_MAX_SAMPLES = 64
+
+_CALLS: Dict[str, int] = {}
+_FAILED_CALLS: Dict[str, int] = {}
+_TOTAL_SECONDS: Dict[str, float] = {}
+_MAX_SECONDS: Dict[str, float] = {}
+_SAMPLES: Dict[str, Deque[float]] = {}
+_LAST_OK_MS: Dict[str, int] = {}
+_LAST_CALL_MS: Dict[str, int] = {}
+
+__all__ = [
+    "SCHEMA_VERSION",
+    "note_failure",
+    "note_call",
+    "stats",
+    "call_stats",
+    "snapshot",
+    "write_snapshot",
+    "load_snapshot",
+    "reset",
+    "failure_count",
+]
 
 
 def note_failure(kind: str, exc: Optional[BaseException] = None) -> None:
@@ -87,3 +118,149 @@ def reset() -> None:
         _FAILURES.clear()
         _LOGGED.clear()
         _LAST_ERROR.clear()
+        _CALLS.clear()
+        _FAILED_CALLS.clear()
+        _TOTAL_SECONDS.clear()
+        _MAX_SECONDS.clear()
+        _SAMPLES.clear()
+        _LAST_OK_MS.clear()
+        _LAST_CALL_MS.clear()
+
+
+def note_call(kind: str, seconds: float, ok: bool = True) -> None:
+    """记一次取数调用的**耗时与成败**（只做可观测性，绝不改变取值行为）。
+
+    与 `note_failure` 的分工：`note_failure` 回答"失败了没有、失败几次"，
+    `note_call` 回答"**每次调用**花多久、成功率多少、最近一次成功是什么时候"。
+    后者是这次要补的洞 —— 第 137 刀的事故里失败计数其实存在，但**没人把它接出去**，
+    而且"延时在爬"这种前兆连计数都没有。
+
+    语义边界（与 `note_failure` 完全一致）：
+    - **绝不抛异常**：内部整体兜底，它不能成为新的故障源；
+    - `seconds` 非有限数/负数一律按 0 计（不臆造耗时，也不让 NaN 污染百分位）；
+    - 样本只保留最近 `_MAX_SAMPLES` 条（有界内存）；同 kind 多线程调用安全。
+    """
+    try:
+        try:
+            dt = float(seconds)
+        except (TypeError, ValueError):
+            dt = 0.0
+        if dt != dt or dt in (float("inf"), float("-inf")) or dt < 0:   # NaN/Inf/负数
+            dt = 0.0
+        now_ms = int(time.time() * 1000)
+        with _LOCK:
+            _CALLS[kind] = _CALLS.get(kind, 0) + 1
+            _TOTAL_SECONDS[kind] = _TOTAL_SECONDS.get(kind, 0.0) + dt
+            if dt > _MAX_SECONDS.get(kind, 0.0):
+                _MAX_SECONDS[kind] = dt
+            samples = _SAMPLES.get(kind)
+            if samples is None:
+                samples = _SAMPLES[kind] = deque(maxlen=_MAX_SAMPLES)
+            samples.append(dt)
+            _LAST_CALL_MS[kind] = now_ms
+            if ok:
+                _LAST_OK_MS[kind] = now_ms
+            else:
+                _FAILED_CALLS[kind] = _FAILED_CALLS.get(kind, 0) + 1
+    except Exception:
+        return
+
+
+def _percentile(sorted_values: list, ratio: float) -> Optional[float]:
+    """最近秩百分位（样本少时也稳定；空样本返回 None，不返回 0 冒充）。"""
+    if not sorted_values:
+        return None
+    index = max(0, min(len(sorted_values) - 1, int(round(ratio * (len(sorted_values) - 1)))))
+    return sorted_values[index]
+
+
+def call_stats() -> Dict[str, Any]:
+    """按 kind 的调用/耗时统计快照（纯副本，可安全 JSON 化）。
+
+    ``{"calls": {...}, "failed_calls": {...}, "latency": {kind: {...}},
+       "last_success_ms": {...}, "last_call_ms": {...}}``
+    """
+    with _LOCK:
+        calls = dict(_CALLS)
+        failed = dict(_FAILED_CALLS)
+        total = dict(_TOTAL_SECONDS)
+        maximum = dict(_MAX_SECONDS)
+        last_ok = dict(_LAST_OK_MS)
+        last_call = dict(_LAST_CALL_MS)
+        samples = {k: sorted(v) for k, v in _SAMPLES.items()}
+    latency: Dict[str, Any] = {}
+    for kind, values in samples.items():
+        count = calls.get(kind, len(values))
+        latency[kind] = {
+            "count": len(values),
+            "avg_ms": round(1000.0 * total.get(kind, 0.0) / count, 3) if count else None,
+            "max_ms": round(1000.0 * maximum.get(kind, 0.0), 3),
+            "p50_ms": (lambda p: None if p is None else round(1000.0 * p, 3))(_percentile(values, 0.50)),
+            "p95_ms": (lambda p: None if p is None else round(1000.0 * p, 3))(_percentile(values, 0.95)),
+        }
+    return {"calls": calls, "failed_calls": failed, "latency": latency,
+            "last_success_ms": last_ok, "last_call_ms": last_call}
+
+
+def snapshot() -> Dict[str, Any]:
+    """完整可观测性快照（**跨进程契约**：worker 写文件、后端读文件）。
+
+    刻意与 `stats()` 分开：`stats()` 是既有的**失败计数**契约（有门禁钉住其精确形状），
+    本函数是"失败 + 成功率 + 延时百分位 + 最近成功时刻"的合并视图，并带 schema 版本。
+    """
+    payload = {
+        "schema_version": SCHEMA_VERSION,
+        "written_at_ms": int(time.time() * 1000),
+        "failures": stats(),
+    }
+    payload.update(call_stats())
+    return payload
+
+
+def write_snapshot(path: str, payload: Optional[Dict[str, Any]] = None) -> bool:
+    """原子写快照到 `path`（tmp + `os.replace`）。**绝不抛异常**，失败返回 False。
+
+    为什么要落文件而不是留在内存：取数发生在 **worker 进程**（每 15 分钟 respawn），
+    而 `/metrics` 由 **后端进程** 提供 —— 进程内计数器永远看不到对方，
+    这与既有的 `data/venue_health.json` 是同一套跨进程手法。
+    """
+    try:
+        data = payload if payload is not None else snapshot()
+        target = os.fspath(path)
+        parent = os.path.dirname(target)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=parent or ".", prefix=".mdh-", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(data, fh, ensure_ascii=False, indent=2)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, target)
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except Exception:
+                pass
+            raise
+        return True
+    except Exception:
+        return False
+
+
+def load_snapshot(path: str) -> Dict[str, Any]:
+    """读快照；缺失/损坏/**版本不认识**一律返回 `{}`（调用方据此标 source_ok=0）。
+
+    返回 `{}` 而不是抛异常或返回半份数据：宁可显式"没有数据"，
+    也不要用未知 schema 的字段拼出一个看着正常的指标。
+    """
+    try:
+        with open(os.fspath(path), "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    if payload.get("schema_version") != SCHEMA_VERSION:
+        return {}
+    return payload

@@ -33,8 +33,8 @@
 | `ai_brain_trader.py` | 1117 | AI 主脑全标的池决策引擎（与主脚本共用风控常量） |
 | `factor_library.py` | 298 | 多因子库：`compute_instrument_factors()` 逐标的装配因子 |
 | `instrument_pool.py` | 409 | 交易宇宙（标的池）的**校验后**单一来源 |
-| `market_data_service.py` | 525 | 零进程直连公共行情服务 |
-| `market_data_health.py` | 89 | 行情取数失败的**计数 + 每类一次性告警**（可观测性；第 137 刀因"静默 `except` 吞掉取数失败导致 30 小时无信号"而补） |
+| `market_data_service.py` | 562 | 零进程直连公共行情服务；`_public_get/_public_post` 带**耗时/成败埋点**（调用期 `note_call`/`note_failure`，取值行为一字不变） |
+| `market_data_health.py` | 266 | 行情取数可观测性：失败**计数 + 每类一次性告警**（第 137 刀）+ 调用**耗时/成功率/百分位**与跨进程快照 `data/market_data_health.json`（第 138 刀；worker 每周期写、后端 `/metrics` 读） |
 | `calculus_engine.py` | 71 | 因果微积分 / 定积分 / 概率论引擎 |
 | `order_risk.py` | 60 | 报价与风控的**确定性**安全检查（共享） |
 | `backtest_engine.py` | 382 | 多资产回测与统计验证引擎（门面，部件在 `backtest/`） |

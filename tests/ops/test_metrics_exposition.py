@@ -11,8 +11,10 @@
 """
 from __future__ import annotations
 
+import json
 import re
 import unittest
+from pathlib import Path
 
 from r20_backend import metrics as M
 
@@ -265,3 +267,105 @@ class MetricsRouteTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MarketDataSourceTest(unittest.TestCase):
+    """第 138 刀：行情取数健康（跨进程文件）接进 /metrics。
+
+    事故背景：失败计数在 worker 进程内存里，后端 `/metrics` 在另一个进程 ——
+    进程内计数器**永远看不到对方**，故走文件（与 venue_health.json 同法）。
+    """
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.data_dir = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _write(self, payload):
+        (self.data_dir / "market_data_health.json").write_text(
+            json.dumps(payload), encoding="utf-8")
+
+    def _payload(self):
+        return {
+            "schema_version": 1,
+            "written_at_ms": 1789000000_000 - 30_000,     # 快照年龄 30 秒
+            "calls": {"okx_public_get_ticker": 12},
+            "failed_calls": {"okx_public_get_ticker": 3},
+            "latency": {"okx_public_get_ticker": {"count": 12, "avg_ms": 150.0,
+                                                  "max_ms": 1200.0,
+                                                  "p50_ms": 120.0, "p95_ms": 980.0}},
+            "last_success_ms": {"okx_public_get_ticker": 1789000000_000 - 5_000},
+            "failures": {"total": 3, "by_kind": {"okx_public_get_ticker": 3},
+                         "last_error": {"okx_public_get_ticker": "Timeout: read timeout"}},
+        }
+
+    def test_missing_file_is_none_not_empty_dict(self):
+        """不可判定必须与"全为 0"可区分（0 次调用 ≠ 没有数据）。"""
+        self.assertIsNone(M.collect_market_data_health(self.data_dir / "market_data_health.json"))
+
+    def test_wrong_schema_version_is_refused(self):
+        self._write({"schema_version": 999, "calls": {"k": 1}})
+        self.assertIsNone(M.collect_market_data_health(self.data_dir / "market_data_health.json"))
+
+    def test_renders_calls_failures_latency_and_ages(self):
+        self._write(self._payload())
+        snap = M.build_snapshot(data_dir=self.data_dir, venue_health={}, model_stats={},
+                                risk_limits={}, now=1789000000.0)
+        self.assertTrue(snap["sources"]["market_data"])
+        text = M.render_prometheus(snap)
+        self.assertIn('r20_market_data_calls_total{kind="okx_public_get_ticker"} 12', text)
+        self.assertIn('r20_market_data_call_failures_total{kind="okx_public_get_ticker"} 3', text)
+        self.assertIn('r20_market_data_latency_p50_seconds{kind="okx_public_get_ticker"} 0.12', text)
+        self.assertIn('r20_market_data_latency_p95_seconds{kind="okx_public_get_ticker"} 0.98', text)
+        self.assertIn("r20_market_data_snapshot_age_seconds 30", text)
+        self.assertIn('r20_market_data_last_success_age_seconds{kind="okx_public_get_ticker"} 5', text)
+
+    def test_source_ok_zero_when_file_absent(self):
+        snap = M.build_snapshot(data_dir=self.data_dir, venue_health={}, model_stats={},
+                               risk_limits={}, now=1789000000.0)
+        self.assertFalse(snap["sources"]["market_data"])
+        text = M.render_prometheus(snap)
+        self.assertIn('r20_metrics_source_ok{source="market_data"} 0', text,
+                      "取数挂了必须可见（第 137 刀：静默失败 30 小时无信号）")
+
+    def test_no_family_is_declared_twice_with_market_data_present(self):
+        """带 label 的新族最容易把 HELP/TYPE 印两遍 ⇒ 抓取器丢弃整次抓取。"""
+        self._write(self._payload())
+        snap = M.build_snapshot(data_dir=self.data_dir, venue_health={}, model_stats={},
+                               risk_limits={}, now=1789000000.0)
+        text = M.render_prometheus(snap)
+        helps = [ln.split()[2] for ln in text.splitlines() if ln.startswith("# HELP ")]
+        self.assertEqual(len(helps), len(set(helps)), f"重复 HELP：{helps}")
+
+    def test_no_snapshot_renders_no_market_data_family(self):
+        """源缺失时不得凭空发指标（发 0 会假装"调用过 0 次"）。"""
+        snap = M.build_snapshot(data_dir=self.data_dir, venue_health={}, model_stats={},
+                               risk_limits={}, now=1789000000.0)
+        text = M.render_prometheus(snap)
+        self.assertNotIn("r20_market_data_calls_total", text)
+        self.assertIn('r20_metrics_source_ok{source="market_data"} 0', text)
+
+    def test_negative_age_is_clamped_not_emitted_as_negative(self):
+        """快照时间戳来自另一个进程，时钟回拨时不许出现负年龄（会让告警逻辑发疯）。"""
+        payload = self._payload()
+        payload["written_at_ms"] = 1789000000_000 + 60_000      # 比 now 还晚 60 秒
+        payload["last_success_ms"] = {"okx_public_get_ticker": 1789000000_000 + 60_000}
+        self._write(payload)
+        snap = M.build_snapshot(data_dir=self.data_dir, venue_health={}, model_stats={},
+                               risk_limits={}, now=1789000000.0)
+        text = M.render_prometheus(snap)
+        ages = [ln for ln in text.splitlines() if "_age_seconds" in ln]
+        self.assertTrue(ages)
+        for line in ages:
+            self.assertNotIn(" -", line, f"年龄为负：{line}")
+
+    def test_failure_detail_string_never_leaks_into_metrics(self):
+        """last_error 是给人看的排障文本，不该作为标签进监控面。"""
+        self._write(self._payload())
+        snap = M.build_snapshot(data_dir=self.data_dir, venue_health={}, model_stats={},
+                               risk_limits={}, now=1789000000.0)
+        text = M.render_prometheus(snap)
+        self.assertNotIn("read timeout", text)

@@ -33,14 +33,24 @@
 | `r20_model_call_duration_ms_avg` | 平均调用耗时 |
 | `r20_model_tokens_total` | 累计 token 消耗（成本观测） |
 | `r20_risk_limit{name}` | 执行层风控生效值（跑得对不对，先看尺子） |
+| `r20_market_data_calls_total{kind}` / `_call_failures_total{kind}` | 行情取数调用次数 / 其中失败次数 |
+| `r20_market_data_latency_p50_seconds{kind}` / `_p95_seconds{kind}` | 取数耗时中位数 / p95（尾延时是卡顿的先行信号） |
+| `r20_market_data_last_success_age_seconds{kind}` | 该 kind 距上次成功的秒数（成功路径永不老化） |
+| `r20_market_data_snapshot_age_seconds` | worker 写的健康快照年龄（worker 断档时会持续变大） |
 
 > 反漂移：新增/改名旋钮时，`r20_risk_limit` 的名字取自本模块 `RISK_LIMIT_NAMES`
 > 单一清单，取不到的键**跳过而不是补 0** —— 编一个不存在的阈值比不报更危险。
+>
+> 跨进程说明：行情取数发生在 **worker 进程**（每 15 分钟 respawn），而 `/metrics`
+> 由**后端进程**提供 —— 进程内计数器看不到对方，故走 `data/market_data_health.json`
+> 文件契约（与 `venue_health.json` 同一手法）；快照带 `schema_version`，
+> 版本不认识一律当"没有数据"（`source_ok=0`），绝不用未知字段拼指标。
 """
 from __future__ import annotations
 
 import json
 import math
+
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -53,6 +63,7 @@ __all__ = [
     "collect_venue_health",
     "collect_model_stats",
     "collect_risk_limits",
+    "collect_market_data_health",
 ]
 
 #: 对外暴露的风控旋钮（`指标名 → risk_constants 属性名`）。刻意是**白名单**：
@@ -160,10 +171,31 @@ def collect_risk_limits(module: Any = None) -> Optional[Dict[str, float]]:
     return out or None
 
 
+def collect_market_data_health(path: Path) -> Optional[Dict[str, Any]]:
+    """读 worker 写的行情取数健康快照（`data/market_data_health.json`）。
+
+    缺失/损坏/schema 版本不认识 → None（调用方标 `source_ok=0`）。
+
+    这里**不需要**关心 `market_data_health` 的双拼写实例问题：`load_snapshot` 是
+    **无状态文件读取**（不像计数器那样存在两个实例各背一份内存账），两个拼写读的是
+    同一个文件。try/except 只是为了在两种 sys.path 布局下都能 import 到。
+    """
+    try:
+        try:
+            from scripts import market_data_health as _mdh
+        except Exception:
+            import market_data_health as _mdh                              # type: ignore[no-redef]
+        payload = _mdh.load_snapshot(str(path))
+    except Exception:
+        return None
+    return payload or None
+
+
 def build_snapshot(*, data_dir: Optional[Path] = None,
                    venue_health: Optional[Dict[str, Any]] = None,
                    model_stats: Optional[Dict[str, Any]] = None,
                    risk_limits: Optional[Dict[str, float]] = None,
+                   market_data_health: Optional[Dict[str, Any]] = None,
                    now: Optional[float] = None) -> Dict[str, Any]:
     """取数（可注入）。每个源独立 try，失败只影响该源的 `source_ok`。"""
     sources: Dict[str, bool] = {}
@@ -190,12 +222,22 @@ def build_snapshot(*, data_dir: Optional[Path] = None,
         risk_limits = collect_risk_limits()
     sources["risk_limits"] = risk_limits is not None
 
+    if market_data_health is None:
+        try:
+            from r20_backend.dependencies import DATA_DIR as _MD_DATA_DIR
+            md_base = Path(data_dir) if data_dir is not None else Path(_MD_DATA_DIR)
+        except Exception:
+            md_base = Path(data_dir or "data")
+        market_data_health = collect_market_data_health(md_base / "market_data_health.json")
+    sources["market_data"] = market_data_health is not None
+
     return {
         "generated_at": float(now if now is not None else time.time()),
         "sources": sources,
         "venue_health": venue_health or {},
         "model_stats": model_stats or {},
         "risk_limits": risk_limits or {},
+        "market_data_health": market_data_health or {},
     }
 
 
@@ -264,6 +306,42 @@ def render_prometheus(snapshot: Dict[str, Any]) -> str:
     for name in sorted((snapshot.get("risk_limits") or {})):
         emit("r20_risk_limit", (snapshot.get("risk_limits") or {}).get(name), [("name", name)],
              help_text="执行层风控生效值（与引擎同一常量模块）")
+
+    # 行情取数健康（第 137 刀事故的直接闭环：那次"取数全挂 30 小时零信号"，
+    # 在这里会表现为 calls 停止增长 + failures 上升 + last_success_age 变大）。
+    md = snapshot.get("market_data_health") or {}
+
+    def _seconds(value: Any, digits: int = 6) -> Optional[float]:
+        """毫秒 → 秒，并**四舍五入**：`repr()` 会把 83.347ms 印成
+        `0.08334699999999999`，抓取器能读但人读不了（可观测性也要给人看）。"""
+        num = _number(value)
+        return None if num is None else round(num / 1000.0, digits)
+
+    def _age(ms_value: Any, digits: int = 3) -> Optional[float]:
+        num = _number(ms_value)
+        if num is None:
+            return None
+        return round(max(0.0, (snapshot.get("generated_at") or time.time()) - num / 1000.0), digits)
+
+    emit("r20_market_data_snapshot_age_seconds", _age(md.get("written_at_ms")),
+         help_text="行情健康快照的年龄（秒；worker 断档时会持续变大）")
+    for kind in sorted((md.get("calls") or {})):
+        emit("r20_market_data_calls_total", (md.get("calls") or {}).get(kind), [("kind", kind)],
+             help_text="行情取数调用累计次数（含成功与失败）", type_text="counter")
+        emit("r20_market_data_call_failures_total", (md.get("failed_calls") or {}).get(kind),
+             [("kind", kind)], help_text="行情取数调用累计失败次数", type_text="counter")
+        latency = (md.get("latency") or {}).get(kind) or {}
+        emit("r20_market_data_latency_p50_seconds", _seconds(latency.get("p50_ms")),
+             [("kind", kind)], help_text="行情取数耗时中位数（秒）")
+        emit("r20_market_data_latency_p95_seconds", _seconds(latency.get("p95_ms")),
+             [("kind", kind)], help_text="行情取数耗时 p95（秒；尾延时是卡顿的先行信号）")
+        emit("r20_market_data_last_success_age_seconds", _age((md.get("last_success_ms") or {}).get(kind)),
+             [("kind", kind)], help_text="该 kind 距上次取数成功的秒数（成功路径永不老化）")
+    for kind in sorted((md.get("failures", {}).get("by_kind") or {})):
+        emit("r20_market_data_failures_reported_total",
+             (md.get("failures", {}).get("by_kind") or {}).get(kind), [("kind", kind)],
+             help_text="取数失败计数（与 calls/failures 同源，便于与第 137 刀的口径对齐）",
+             type_text="counter")
 
     out: List[str] = []
     for name, family in families.items():

@@ -25,6 +25,39 @@ OKX_PUBLIC_HOSTS = [
     "https://aws.okx.com",
 ]
 
+# 行情取数可观测性（第 137 刀）：失败计数 + 耗时/成功率。
+# ⚠️ 双拼写铁律：本模块既以顶层名 `market_data_service`（SCRIPTS_DIR 在 sys.path 上，
+# 生产/门面即如此）被导入，也以 `scripts.market_data_service`（仓库根在 sys.path 上，
+# 部分测试即如此）被导入 —— 两种拼写是**不同的模块实例**，故必须写成 try/except 兼容
+# 两种路径（scripts/README.md §双拼写）。
+try:
+    from market_data_health import note_call, note_failure
+except ImportError:                                    # pragma: no cover - 包导入路径
+    from scripts.market_data_health import note_call, note_failure
+
+
+def _call_kind(method: str, path: str) -> str:
+    """把请求路径归一成**有界**的指标 kind（`okx_public_get_ticker` 之类）。
+
+    绝不把整条 URL/带参数的路径当标签：那会让基数随调用爆炸（Prometheus 反模式），
+    也会把 query 里的内容（instId/limit…）带进监控面。OKX 公共路径是固定小集合
+    （ticker/candles/…），取最后一段即可 —— 故**先剥掉 query/fragment 再取尾段**。
+    """
+    clean = str(path or "").split("?", 1)[0].split("#", 1)[0].rstrip("/")
+    tail = clean.rsplit("/", 1)[-1] or "unknown"
+    safe = "".join(ch if (ch.isalnum() or ch in "_-") else "_" for ch in tail)
+    return f"okx_public_{method}_{safe}"
+
+
+class MarketDataResponseError(RuntimeError):
+    """交易所**回了话但没给数据**（HTTP≠200 或 code≠0）。
+
+    它不是 Python 异常，但语义上同样是"这次取数失败"：调用方拿不到数据。
+    第 137 刀的事故里正是这种"没有异常、只是没数据"的情形最难察觉，
+    所以它必须与真异常**进同一本失败账**（否则指标里 failed_calls 与 failures
+    两个口径会对不上，运维一眼看到两个不同的数就会失去信任）。
+    """
+
 DEFAULT_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "application/json",
@@ -96,15 +129,27 @@ def get_market_session() -> requests.Session:
 def _public_get(path: str, params: Optional[Dict[str, Any]] = None, timeout: float = 3.5) -> Optional[Dict[str, Any]]:
     """Try primary then fallback OKX public endpoints."""
     session = get_market_session()
+    kind = _call_kind("get", path)
     for base in OKX_PUBLIC_HOSTS:
         url = f"{base}{path}"
+        started = time.time()
         try:
             resp = session.get(url, params=params, timeout=timeout)
             if resp.status_code == 200:
                 data = resp.json()
                 if str(data.get("code", "0")) == "0":
+                    note_call(kind, time.time() - started, ok=True)
                     return data
+                reason = f"code={data.get('code')} msg={str(data.get('msg'))[:80]}"
+            else:
+                reason = f"http={resp.status_code}"
+            note_call(kind, time.time() - started, ok=False)
+            note_failure(kind, MarketDataResponseError(reason))
         except Exception as exc:
+            # 第 137 刀的教训：静默 `except` 会让"现价恒 0 / 30 小时无信号"。
+            # 取值行为一字不变（仍旧吞掉、仍旧换下一个 host），但**必须留痕**。
+            note_call(kind, time.time() - started, ok=False)
+            note_failure(kind, exc)
             logger.debug("Public GET %s failed on %s: %s", path, base, exc)
     return None
 
@@ -113,15 +158,25 @@ def _public_post(path: str, payload: Dict[str, Any], timeout: float = 4.0) -> Op
     """Try primary then fallback OKX public POST endpoints."""
     session = get_market_session()
     headers = {"Content-Type": "application/json"}
+    kind = _call_kind("post", path)
     for base in OKX_PUBLIC_HOSTS:
         url = f"{base}{path}"
+        started = time.time()
         try:
             resp = session.post(url, json=payload, headers=headers, timeout=timeout)
             if resp.status_code == 200:
                 data = resp.json()
                 if str(data.get("code", "0")) == "0":
+                    note_call(kind, time.time() - started, ok=True)
                     return data
+                reason = f"code={data.get('code')} msg={str(data.get('msg'))[:80]}"
+            else:
+                reason = f"http={resp.status_code}"
+            note_call(kind, time.time() - started, ok=False)
+            note_failure(kind, MarketDataResponseError(reason))
         except Exception as exc:
+            note_call(kind, time.time() - started, ok=False)
+            note_failure(kind, exc)
             logger.debug("Public POST %s failed on %s: %s", path, base, exc)
     return None
 

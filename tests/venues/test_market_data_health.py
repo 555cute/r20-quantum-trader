@@ -40,6 +40,10 @@ import market_data_health as health  # noqa: E402
 
 failure_count, note_failure, reset, stats = (
     health.failure_count, health.note_failure, health.reset, health.stats)
+# 第 138 刀新增账本：耗时/成功率/跨进程快照（同样按**运行时同一实例**取，见上述告警）
+note_call, snapshot = health.note_call, health.snapshot
+write_snapshot, load_snapshot = health.write_snapshot, health.load_snapshot
+SCHEMA_VERSION = health.SCHEMA_VERSION
 
 ITEM = {"instId": "BTC-USDT-SWAP", "name": "BTC", "type": "crypto", "ccy": "BTC", "precision": 2}
 
@@ -189,3 +193,117 @@ class WiringTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CallLatencyTest(unittest.TestCase):
+    """第 138 刀：从"失败计数"补到"成功率 + 耗时百分位 + 最近成功时刻"。
+
+    事故复盘（第 137 刀）：失败计数其实存在，但**没人接出去**；而"延时在爬"这种
+    前兆连计数都没有。本类钉住新账本的三条底线：**非抛异常 / 有界内存 / 不臆造数字**。
+    """
+
+    def setUp(self):
+        reset()
+
+    def tearDown(self):
+        reset()
+
+    def test_calls_and_failures_are_counted_separately(self):
+        note_call("okx_public_get_ticker", 0.10, ok=True)
+        note_call("okx_public_get_ticker", 0.20, ok=False)
+        snap = snapshot()
+        self.assertEqual(snap["calls"]["okx_public_get_ticker"], 2)
+        self.assertEqual(snap["failed_calls"]["okx_public_get_ticker"], 1)
+
+    def test_latency_percentiles_and_max(self):
+        for dt in (0.01, 0.02, 0.03, 0.04, 0.05, 1.00):
+            note_call("k", dt, ok=True)
+        lat = snapshot()["latency"]["k"]
+        self.assertEqual(lat["count"], 6)
+        self.assertAlmostEqual(lat["max_ms"], 1000.0, places=3)
+        self.assertAlmostEqual(lat["p50_ms"], 30.0, places=3)
+        self.assertAlmostEqual(lat["p95_ms"], 1000.0, places=3, msg="尾延时必须体现在 p95")
+
+    def test_bogus_durations_never_poison_percentiles(self):
+        """NaN/Inf/负数/None 一律按 0 计：绝不让坏输入污染百分位或抛出去。"""
+        for bad in (float("nan"), float("inf"), float("-inf"), -5.0, None, "abc"):
+            note_call("k", bad, ok=True)
+        snap = snapshot()
+        self.assertEqual(snap["calls"]["k"], 6)
+        self.assertEqual(snap["latency"]["k"]["max_ms"], 0.0)
+
+    def test_samples_are_bounded(self):
+        for i in range(500):
+            note_call("k", 0.001, ok=True)
+        self.assertLessEqual(len(snapshot()["latency"]["k"].values()), 6)
+        self.assertEqual(snapshot()["calls"]["k"], 500, "计数不受样本窗口限制")
+        self.assertLessEqual(_max_samples_probe(), 64)
+
+    def test_last_success_only_moves_on_success(self):
+        note_call("k", 0.01, ok=False)
+        self.assertNotIn("k", snapshot()["last_success_ms"])
+        note_call("k", 0.01, ok=True)
+        self.assertIn("k", snapshot()["last_success_ms"])
+
+    def test_snapshot_has_schema_version(self):
+        self.assertEqual(snapshot()["schema_version"], SCHEMA_VERSION)
+        self.assertIn("written_at_ms", snapshot())
+
+    def test_stats_contract_unchanged(self):
+        """既有 `stats()` 形状是门禁钉死的（精确相等）—— 新账本不得挤进去。"""
+        note_call("k", 0.01, ok=True)
+        self.assertEqual(stats(), {"total": 0, "by_kind": {}, "last_error": {}})
+
+    def test_note_call_never_raises(self):
+        class Boom(str):
+            def __str__(self):        # type: ignore[override]
+                raise RuntimeError("boom")
+        note_call(Boom("k"), 0.1)     # 不抛即通过
+
+
+def _max_samples_probe() -> int:
+    from scripts.market_data_health import _MAX_SAMPLES
+    return _MAX_SAMPLES
+
+
+class SnapshotFileTest(unittest.TestCase):
+    """跨进程契约：worker 写盘、后端 `/metrics` 读盘（与 venue_health.json 同法）。"""
+
+    def setUp(self):
+        reset()
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmp.name) / "nested" / "market_data_health.json"
+
+    def tearDown(self):
+        reset()
+        self.tmp.cleanup()
+
+    def test_round_trip_and_parent_dir_created(self):
+        note_call("okx_public_get_ticker", 0.25, ok=True)
+        self.assertTrue(write_snapshot(str(self.path)), "写盘失败")
+        loaded = load_snapshot(str(self.path))
+        self.assertEqual(loaded["calls"]["okx_public_get_ticker"], 1)
+        self.assertEqual(loaded["schema_version"], SCHEMA_VERSION)
+
+    def test_missing_or_broken_file_is_empty_not_raised(self):
+        self.assertEqual(load_snapshot(str(self.path)), {})
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text("{not json", encoding="utf-8")
+        self.assertEqual(load_snapshot(str(self.path)), {})
+
+    def test_unknown_schema_version_is_refused(self):
+        """版本不认识必须当"没有数据"：用未知 schema 的字段拼指标比不报更危险。"""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps({"schema_version": 999, "calls": {"k": 1}}),
+                             encoding="utf-8")
+        self.assertEqual(load_snapshot(str(self.path)), {})
+
+    def test_write_failure_returns_false_and_does_not_raise(self):
+        self.assertFalse(write_snapshot("/proc/definitely/not/writable/x.json"))
+
+    def test_snapshot_is_pure_copy(self):
+        note_call("k", 0.01, ok=True)
+        first = snapshot()
+        first["calls"]["k"] = 999
+        self.assertEqual(snapshot()["calls"]["k"], 1, "snapshot() 必须返回纯副本")
