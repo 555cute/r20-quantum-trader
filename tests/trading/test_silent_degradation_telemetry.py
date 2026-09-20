@@ -26,7 +26,7 @@ import types
 import unittest
 import warnings
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
@@ -249,3 +249,71 @@ class SignalJournalIsolationTest(unittest.TestCase):
         self.assertEqual(rows[-1]["i"], 500)
         leftovers = [n for n in os.listdir(self.tmp) if n != "signal_journal.json"]
         self.assertEqual(leftovers, [], f"原子写不得留临时文件：{leftovers}")
+
+class CycleDisclosureSummaryTest(unittest.TestCase):
+    """周期披露汇总（第 50 刀）：每轮必须留下**一条可检索**的"跳过/未核验"行。
+
+    为什么把它当门禁：披露此前散落在各处 `print`，**重构时最容易静默消失**。
+    汇总行把"本轮跳过了什么"固定成日志里的一条 —— 有人删掉某处披露，数字就会变，
+    评审看日志即可发现。
+    """
+
+    def _sum(self, **kw):
+        from scripts.trader.cycle_stages import cycle_disclosure_summary
+        return cycle_disclosure_summary(**kw)
+
+    def test_clean_cycle_says_so(self):
+        line = self._sum()
+        self.assertTrue(line.startswith("[周期披露] "), line)
+        self.assertIn("本轮无跳过/未核验项", line)
+
+    def test_broken_venues_are_listed_sorted_and_deduped(self):
+        line = self._sum(broken_venues=["gate", "binance", "gate"])
+        self.assertIn("凭证坏所=2(binance,gate)", line)
+
+    def test_entries_blocked_is_disclosed(self):
+        self.assertIn("对账失败（禁本轮新开仓）", self._sum(entries_blocked=True))
+
+    def test_shape_violations_are_counted_with_a_head(self):
+        line = self._sum(shape_violations=["a", "b", "c", "d", "e"])
+        self.assertIn("数据形状违规=5", line)
+        self.assertIn("共5条", line)
+        self.assertIn("a", line)
+        self.assertNotIn("e", line, "只展示前 3 条明细（避免刷屏）")
+
+    def test_watchdog_report_counts_errors_and_critical(self):
+        rep = {"errors": [{"stage": "list"}], "critical": [{"venue": "gate"}, {"venue": "x"}]}
+        line = self._sum(watchdog_report=rep)
+        self.assertIn("跨所保护：错误=1 严重缺口=2", line)
+
+    def test_clean_watchdog_report_adds_no_clause(self):
+        line = self._sum(watchdog_report={"errors": [], "critical": []})
+        self.assertNotIn("跨所保护", line)
+
+    def test_disabled_watchdog_is_disclosed_as_not_running(self):
+        """未开闸的加固层是"没在跑的保护" —— 应当被看见（但不算错误）。"""
+        line = self._sum(watchdog_enabled=False)
+        self.assertIn("跨所保护巡检未开闸", line)
+        self.assertIn("本轮无跳过/未核验项", line)
+
+    def test_reporter_never_raises_on_garbage_input(self):
+        """报告器不得成为新的单点故障（本仓固有约束）。"""
+        for kw in ({"broken_venues": None, "shape_violations": None},
+                   {"watchdog_report": MagicMock()},
+                   {"broken_venues": [None, ""], "shape_violations": [None]},
+                   {"entries_blocked": None}):
+            with self.subTest(kw=sorted(kw)):
+                line = self._sum(**kw)
+                self.assertTrue(line.startswith("[周期披露] "), line)
+
+    def test_facade_prints_the_summary_every_cycle(self):
+        """源码钉：汇总必须在周期收尾被打印（否则整条纪律只是"有个函数没人调"）。"""
+        from pathlib import Path
+        src = (Path(__file__).resolve().parents[2] / "scripts" / "ai_factor_trader.py"
+               ).read_text(encoding="utf-8")
+        self.assertIn("print(cycle_disclosure_summary(", src)
+        for kw in ("broken_venues=_BROKEN_VENUES", "entries_blocked=entries_blocked",
+                   "shape_violations=_shape_violations", "watchdog_report=_wd_report",
+                   "watchdog_enabled=R20_VENUE_PROTECTION_WATCHDOG"):
+            with self.subTest(arg=kw):
+                self.assertIn(kw, src, f"汇总缺参数 {kw} ⇒ 该路披露不会被汇总")

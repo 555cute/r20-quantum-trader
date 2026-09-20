@@ -53,6 +53,7 @@ from scripts.trader.venue_evidence import (
     persist_venue_decision as _venue_evidence_persist,
 )
 from scripts.trader.cycle_stages import (
+    cycle_disclosure_summary,
     data_shape_preflight_stage,
     fetch_positions_and_reconcile,
     scan_risk_gates_and_ai_brain,
@@ -1148,7 +1149,7 @@ def execute_portfolio():
 
     # 0.5 只读形状预检：把"读得到但会被静默忽略"的形状问题**尽早指名道姓**
     #     （只警告、不阻断 —— 行为判定在加载侧：意图 fail-closed、追踪器拒绝覆盖）
-    data_shape_preflight_stage(
+    _shape_violations = data_shape_preflight_stage(
         intents_path=OPEN_INTENT_FILE,
         trackers_path=POSITION_TRACKER_FILE,
         validate_intents_file=validate_intents_file,
@@ -1261,7 +1262,7 @@ def execute_portfolio():
     # **默认关闭**（R20_VENUE_PROTECTION_WATCHDOG=1 才跑）：本刀只接线，线上行为零变化。
     # 开闸前先用 `R20_VENUE_PROTECTION_WATCHDOG_DRY_RUN=1` 预演一轮：照常判定但不写单，
     # 日志逐条给出"本来会做"的动作（见该函数 docstring）。
-    venue_protection_watchdog_stage(
+    _wd_report = venue_protection_watchdog_stage(
         xv_positions_by_venue=xv_positions_by_venue,
         executed_actions=executed_actions,
         venue_registry=venue_registry,
@@ -1303,6 +1304,14 @@ def execute_portfolio():
         build_state_payload=build_state_payload,
         evaluate_asset_signal=evaluate_asset_signal,
         os=os    )
+
+    # 6. 周期披露汇总（第 50 刀）：每轮必须留下**一条可检索**的"跳过/未核验"行
+    print(cycle_disclosure_summary(
+        broken_venues=_BROKEN_VENUES,
+        entries_blocked=entries_blocked,
+        shape_violations=_shape_violations,
+        watchdog_report=_wd_report,
+        watchdog_enabled=R20_VENUE_PROTECTION_WATCHDOG))
 
 if __name__ == "__main__":
     if not selected_environment().configured:

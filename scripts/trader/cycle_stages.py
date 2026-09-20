@@ -666,3 +666,44 @@ def data_shape_preflight_stage(*, intents_path, trackers_path,
     if not violations:
         print("[数据形状预检] 意图/追踪器形状合规")
     return violations
+
+def cycle_disclosure_summary(*, broken_venues=(), entries_blocked=False,
+                            shape_violations=(), watchdog_report=None,
+                            watchdog_enabled=True) -> str:
+    """周期**披露汇总**（第 50 刀）：把"本轮跳过/未核验了什么"压成**一条可检索**的行。
+
+    为什么需要它：本仓的披露此前散落在各处 `print`（跨所挂单"未计入"、预留"未核验"、
+    凭证坏所、形状违规……）。散落的披露**会随重构静默消失**，而《失败语义手册》要求
+    "披露"是**可验证**的纪律 —— 于是统一在周期收尾打一条汇总：
+
+        [周期披露] 本轮无跳过/未核验项
+        [周期披露] 本轮跳过/未核验：凭证坏所=2(binance,gate); 对账失败（禁本轮新开仓）
+
+    判据很朴素但有效：**这条行必须每轮都出现**（门禁钉调用点）⇒ 有人删掉某处披露时，
+    汇总行里的数字会随之变化，评审看日志就能发现"怎么不报了"。
+
+    ⚠️ 它只是**报告器**：不参与任何控制流判定，绝不抛异常（入参都做了宽容处理）。
+    """
+    parts = []
+    venues = sorted({str(v) for v in (broken_venues or []) if str(v)})
+    if venues:
+        parts.append(f"凭证坏所={len(venues)}({','.join(venues)})")
+    if entries_blocked:
+        parts.append("对账失败（禁本轮新开仓）")
+    bad = list(shape_violations or [])
+    if bad:
+        head = "; ".join(str(b) for b in bad[:3])
+        more = f" …共{len(bad)}条" if len(bad) > 3 else ""
+        parts.append(f"数据形状违规={len(bad)}（{head}{more}）")
+    # ⚠️ 报告器绝不能因入参形状而抛（否则"披露"本身成了新的单点故障）
+    if isinstance(watchdog_report, dict):
+        errs = len(watchdog_report.get("errors") or [])
+        crit = len(watchdog_report.get("critical") or [])
+        if errs or crit:
+            parts.append(f"跨所保护：错误={errs} 严重缺口={crit}")
+    line = ("[周期披露] 本轮跳过/未核验：" + "; ".join(parts)) if parts \
+        else "[周期披露] 本轮无跳过/未核验项"
+    if not watchdog_enabled:
+        # 未开闸的加固层是**没在跑的保护**，属"应当被看见"的事实（不是错误）
+        line += "；跨所保护巡检未开闸"
+    return line
