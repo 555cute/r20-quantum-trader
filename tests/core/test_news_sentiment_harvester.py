@@ -5,7 +5,10 @@ import os
 import shutil
 import tempfile
 import time
+import importlib
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 from unittest.mock import MagicMock, patch
 
 import scripts.news_sentiment_harvester as harvester
@@ -220,6 +223,65 @@ class TestNewsSentimentHarvester(unittest.TestCase):
             self.assertTrue(payload["circuit_breaker"].get("active"))
         shutil.rmtree(cbs, ignore_errors=True)
 
+
+class CircuitBreakerUnknownStateTest(unittest.TestCase):
+    """熔断文件读不出来 ⇒ 提示词/载荷必须说"不可判"，不能报平安（第一百四十六刀）。
+
+    缺陷：`news_sentiment_harvester.is_circuit_breaker_active` 是权威判定器的**第二份实现**
+    （只服务展示），其 `except: pass` 让"文件损坏"返回 `(False, {})` = "没在熔断"，
+    于是 `macro_sentiment` 会写成"偏多震荡/偏空承压"—— 借"读不到"报了平安；
+    而权威模块对同一情形是 **True（安全暂停开仓）**。展示侧不得比交易侧更乐观。
+    """
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path as _P
+        self.tmp = tempfile.TemporaryDirectory(prefix="harvester-cb-")
+        self.addCleanup(self.tmp.cleanup)
+        self.cb_file = _P(self.tmp.name) / "circuit_breaker.json"
+
+    def _run(self, content=None):
+        mod = importlib.import_module("scripts.news_sentiment_harvester")
+        with patch.object(mod, "CIRCUIT_BREAKER_FILE", str(self.cb_file)):
+            if content is not None:
+                self.cb_file.write_text(content, encoding="utf-8")
+            return mod.is_circuit_breaker_active()
+
+    def test_corrupt_file_is_unknown_not_calm(self):
+        active, info = self._run('{"active": tru')
+        self.assertFalse(active)
+        self.assertTrue(info.get("unknown"), "损坏必须标成不可判（不是'没在熔断'）")
+        self.assertIn("损坏", info.get("reason", ""))
+
+    def test_missing_file_stays_legitimately_inactive(self):
+        active, info = self._run()
+        self.assertFalse(active)
+        self.assertFalse(info.get("unknown"), "从未写过熔断文件是合法空态，不应算不可判")
+
+    def test_active_breaker_still_reported_active(self):
+        import json as _json
+        import time as _time
+        content = _json.dumps({"active": True, "expires_at_ts": _time.time() + 600})
+        active, info = self._run(content)
+        self.assertTrue(active)
+        self.assertEqual(info.get("active"), True)
+
+    def test_expired_breaker_is_not_active_and_not_unknown(self):
+        import json as _json
+        import time as _time
+        content = _json.dumps({"active": True, "expires_at_ts": _time.time() - 10})
+        active, info = self._run(content)
+        self.assertFalse(active)
+        self.assertFalse(info.get("unknown"))
+
+    def test_callers_branch_on_unknown_before_claiming_calm(self):
+        """源码钉：两处"报平安"分支都必须先排除 unknown（含陈旧回退路径）。"""
+        src = (Path(__file__).resolve().parents[2] / "scripts"
+               / "news_sentiment_harvester.py").read_text(encoding="utf-8")
+        self.assertIn('elif cb_info.get("unknown"):', src)
+        self.assertIn("熔断状态不可判", src)
+        self.assertIn('if not cb_active and not cb_info.get("unknown"):', src,
+                      "陈旧回退路径也必须排除不可判（否则仍会写'偏多震荡'）")
 
 if __name__ == "__main__":
     unittest.main()

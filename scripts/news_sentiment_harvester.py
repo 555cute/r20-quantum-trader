@@ -128,14 +128,29 @@ def trigger_circuit_breaker(headline: str, keyword: str):
     print(f"🚨 黑天鹅熔断已激活: {headline}")
 
 def is_circuit_breaker_active():
+    """读熔断状态文件 → `(active, info)`（服务于**提示词/展示**）。
+
+    ⚠️ 本函数是 `r20_backend.execution.circuit_breaker` 判定器的**同语义第二份实现**
+    （此处只用于"宏观环境"这一提示词字段，故长期未收敛）。第一百四十六刀修正其中
+    一处**方向相反**的失败语义：
+
+    - 旧实现：文件存在但**读不出来/损坏** ⇒ `except: pass` ⇒ 返回 `(False, {})`
+      = "没在熔断" —— 展示侧借"读不到"报了平安；
+    - 权威模块对**同一情形**返回 **True**（"熔断状态文件损坏，安全暂停开仓"）。
+
+    现改为：损坏/不可读 ⇒ `(False, {"active": False, "unknown": True, "reason": …})`，
+    调用方据此写 **"熔断状态不可判"**，而不是"偏多震荡/偏空承压"（阅读者与模型都不被误导；
+    真正的交易侧熔断仍由权威模块独立 fail-closed 决定，本函数不改任何交易行为）。
+    """
     if os.path.exists(CIRCUIT_BREAKER_FILE):
         try:
             with open(CIRCUIT_BREAKER_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                if data.get("active") and time.time() < data.get("expires_at_ts", 0):
-                    return True, data
-        except Exception:
-            pass
+            if data.get("active") and time.time() < data.get("expires_at_ts", 0):
+                return True, data
+        except Exception as exc:      # noqa: BLE001 - 读不到必须变成"不可判"，不是"平安"
+            return False, {"active": False, "unknown": True,
+                           "reason": f"熔断状态文件读不出来/损坏: {exc!r}"}
     return False, {}
 
 def fetch_crypto_rss_news(limit=30) -> list:
@@ -571,6 +586,9 @@ def fetch_and_analyze_news_sentiment():
     cb_active, cb_info = is_circuit_breaker_active()
     if cb_active:
         macro_env = "🚨 避险熔断中"
+    elif cb_info.get("unknown"):
+        # 不可判定 ≠ 安全（也不等于"平安"）：如实写"不可判"，绝不落进下面的"偏多震荡"
+        macro_env = "熔断状态不可判（熔断文件损坏/读不到）"
     else:
         bull_count = sum(1 for c, s in coin_sentiments.items() if s["sentiment_factor_score"] > 0.15)
         bear_count = sum(1 for c, s in coin_sentiments.items() if s["sentiment_factor_score"] < -0.15)
@@ -584,7 +602,8 @@ def fetch_and_analyze_news_sentiment():
         "source_reason": ("Cointelegraph/CoinDesk 加密快讯 + 币安动态 + 金十数据宏观要闻 + OKX Rubik 账户多空比" if parsed_news
                           else "金十数据/宏观快讯拉取失败，显示缺失而非中性"),
         "macro_sentiment": macro_env,
-        "circuit_breaker": cb_info if cb_active else {"active": False},
+        "circuit_breaker": (cb_info if (cb_active or cb_info.get("unknown"))
+                            else {"active": False}),
         "coins_sentiment": coin_sentiments,
         "latest_news": parsed_news[:50],
         # Freshness of the *content* (newest item time), not of this run.
@@ -607,7 +626,7 @@ def fetch_and_analyze_news_sentiment():
                         payload["coins_sentiment"] = {k: v for k, v in previous["coins_sentiment"].items() if k in target_coins}
                         bull_count = sum(1 for s in payload["coins_sentiment"].values() if float(s.get("sentiment_factor_score", 0)) > 0.25)
                         bear_count = sum(1 for s in payload["coins_sentiment"].values() if float(s.get("sentiment_factor_score", 0)) < -0.1)
-                        if not cb_active:
+                        if not cb_active and not cb_info.get("unknown"):
                             payload["macro_sentiment"] = "偏多震荡" if bull_count > bear_count else ("偏空承压" if bear_count > bull_count else "中性平衡")
                     payload["stale_sections"] = True
         except Exception:
