@@ -281,6 +281,55 @@ def _expiry(row: Dict[str, Any]) -> tuple:
     return None, "unknown"
 
 
+_TRIGGER_TYPE_KEYS = ("tpTriggerPxType", "slTriggerPxType", "triggerPxType", "trigger_px_type")
+
+
+def trigger_px_type(row: Dict[str, Any]) -> Optional[str]:
+    """保护腿的**触发价类型**（OKX：`tp/slTriggerPxType`；其它所可能没有这个概念）。
+
+    读不到 ⇒ `None`（表示"未上报"），调用方必须把它**披露**成未知 ——
+    **不得**用"我们期望的类型"顶替：读不到 ≠ 按标记价触发（读不到 ≠ 没有）。
+    """
+    raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
+    for container in (row, raw):
+        for key in _TRIGGER_TYPE_KEYS:
+            val = container.get(key)
+            if isinstance(val, str) and val.strip():
+                return val.strip().lower()
+    return None
+
+
+def protection_trigger_type_fields(legs: Optional[Sequence[Dict[str, Any]]],
+                                   *, readable: bool = True) -> Dict[str, Any]:
+    """保护腿触发价类型 → 面板/提示词字段（**两个生产路径共用同一份三态语义**）。
+
+    三态（与"读不到 ≠ 没有"一致，且**绝不**用默认值顶替）：
+
+    | 情形 | 取值 |
+    |---|---|
+    | 取数失败（`readable=False`）| `"unknown"` —— 读不到，可能本来有 |
+    | 确实没有该类腿 | `None` —— 没有这东西 |
+    | 有腿但该所未上报类型 | `"unknown"` —— 腿在，但"按什么价触发"不可判定 |
+
+    顶级止损与止盈**各自**取值：同一条腿可能在修正后变成不同类型，
+    合并成一个字段就会说谎。
+    """
+    if not readable:
+        return {"protectionSlTriggerPxType": "unknown", "protectionTpTriggerPxType": "unknown"}
+    out: Dict[str, Any] = {"protectionSlTriggerPxType": None, "protectionTpTriggerPxType": None}
+    for leg in legs or []:
+        if not isinstance(leg, dict):
+            continue
+        kind = str(leg.get("kind") or "").lower()
+        if kind not in ("sl", "tp"):
+            continue
+        val = leg.get("trigger_px_type") or trigger_px_type(leg)
+        key = "protectionSlTriggerPxType" if kind == "sl" else "protectionTpTriggerPxType"
+        if out[key] is None:
+            out[key] = val or "unknown"
+    return out
+
+
 def scan_protective_orders(rows: Optional[Sequence[Dict[str, Any]]], *,
                            symbol: str,
                            pos_side: str,
@@ -332,6 +381,8 @@ def scan_protective_orders(rows: Optional[Sequence[Dict[str, Any]]], *,
                       or row.get("order_id") or row.get("ordId") or ""),
             "kind": kind,
             "trigger_price": _trigger_price(row),
+            # 第一百六十七刀：触发价类型（读不到 ⇒ None，由展示层披露成 unknown）
+            "trigger_px_type": trigger_px_type(row),
         }
         expires_at, exp_state = _expiry(row)
         leg["expires_at"] = expires_at

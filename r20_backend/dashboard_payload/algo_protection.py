@@ -29,8 +29,28 @@ from scripts import okx_rest
 __all__ = ["collect_algo_protection"]
 
 
+def _trigger_type_legs(algo):
+    """把一条 OKX 算法腿按**它确实带了的触发价**标注 `kind`（供类型字段三态判定）。
+
+    只有带 `slTriggerPx` 才算"有止损腿"，只有带 `tpTriggerPx` 才算"有止盈腿" ——
+    否则"没有该类腿"会被误报成"未上报类型"。
+    """
+    legs = []
+    if algo.get("slTriggerPx"):
+        legs.append({"kind": "sl", "trigger_px_type": algo.get("slTriggerPxType")})
+    if algo.get("tpTriggerPx"):
+        legs.append({"kind": "tp", "trigger_px_type": algo.get("tpTriggerPxType")})
+    return legs
+
+
 def collect_algo_protection(positions, source_errors, fetch_json,
                            enrich_risk_fields, trackers):
+    # 惰性 import（不在 import 期拉 scripts 侧模块）；提到函数首行是因为下面的三态
+    # 类型字段在循环里**多处**使用，曾因 import 写在用点之后触发 UnboundLocalError。
+    from scripts.trader.venue_protection import (
+        _is_full_close, protection_trigger_type_fields,
+    )
+
     # Parallel Phase 2: Exchange algo orders for live TP/SL protection
     if positions:
         with ThreadPoolExecutor(max_workers=min(len(positions), 6)) as pool:
@@ -49,6 +69,9 @@ def collect_algo_protection(positions, source_errors, fetch_json,
             if not algo_ok:
                 source_errors.append(f"algo {position['instId']}: {algo_error}")
                 algo_orders = []
+            # 第一百六十七刀：触发价类型（读失败/无腿/未上报 三态，**不**用默认值顶替）。
+            # 取数失败时先按"unknown"写，下面有腿时会按选中的腿覆盖。
+            position.update(protection_trigger_type_fields([], readable=bool(algo_ok)))
             matching_algos = [
                 o for o in (algo_orders or [])
                 if str(o.get("state", "live")).lower() in {"live", "effective"}
@@ -61,8 +84,6 @@ def collect_algo_protection(positions, source_errors, fetch_json,
             # `partially_protected / 0%`，而交易所那条腿其实**平掉整个仓位**。
             # 判定与跨所路径**共用同一个已专测谓词**（`venue_protection._is_full_close`
             # 覆盖 Gate close/auto_size、Binance/OKX closePosition），不另写一套。
-            from scripts.trader.venue_protection import _is_full_close
-
             _pos_sz = float(position.get("pos_sz") or position.get("pos") or 0)
             _sl_legs = [o for o in matching_algos if o.get("slTriggerPx")]
             full_close = any(_is_full_close(o) for o in _sl_legs)
@@ -86,6 +107,8 @@ def collect_algo_protection(positions, source_errors, fetch_json,
                 position["protectionCoveragePct"] = 100.0
                 position["protectionAlgoId"] = live_algo.get("algoId", "")
                 position["cloud_oco_verified"] = True
+                position.update(protection_trigger_type_fields(
+                    _trigger_type_legs(live_algo), readable=True))
             elif coverage_unknown:
                 sl_algo = _sl_legs[0]
                 position["exchangeSl"] = float(sl_algo.get("slTriggerPx", 0) or 0) or None
@@ -94,6 +117,8 @@ def collect_algo_protection(positions, source_errors, fetch_json,
                 position["protectionCoveragePct"] = None
                 position["protectionAlgoId"] = sl_algo.get("algoId", "")
                 position["cloud_oco_verified"] = False
+                position.update(protection_trigger_type_fields(
+                    _trigger_type_legs(sl_algo), readable=True))
             elif matching_algos:
                 sl_algo = next((o for o in matching_algos if o.get("slTriggerPx")), {})
                 position["exchangeSl"] = float(sl_algo.get("slTriggerPx", 0) or 0) or None
@@ -102,6 +127,8 @@ def collect_algo_protection(positions, source_errors, fetch_json,
                 position["protectionCoveragePct"] = round(min(100.0, protected_size / max(_pos_sz, 1e-12) * 100), 1)
                 position["protectionAlgoId"] = sl_algo.get("algoId", "")
                 position["cloud_oco_verified"] = False
+                position.update(protection_trigger_type_fields(
+                    _trigger_type_legs(sl_algo), readable=True))
             else:
                 position["exchangeSl"] = None
                 position["exchangeTp"] = None

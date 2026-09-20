@@ -25,6 +25,7 @@
 | `cloud_oco_verified` | 云端双腿**已验证**（前端 KPI 的否决位） | 必须存在，且 **⟺ `fully_protected`** |
 | `protectionLegs` | 归属本仓的腿数（非"已覆盖"） | int ≥ 0 |
 | `protectionExpiry` | 腿到期态（**OKX 算法单无此语义 ⇒ 可缺**） | `never`/`expiring`/`expired`/`unknown` |
+| `protectionSlTriggerPxType` / `protectionTpTriggerPxType` | 保护腿**触发价类型**（第一百六十七刀）：按什么价触发该腿 | `mark`/`last`/`index`（原样透传交易所上报值）；**`"unknown"` ⟺ 读不到或该腿未上报**；**`None` ⟺ 该类腿不存在**（≠ unknown）|
 
 消费者：面板 `KpiRibbon.vue` / `PositionsOrdersPanel.vue`（`cloud_oco_verified !== false
 && protectionStatus !== 'unprotected'`）、图表 `chartLiveLevels.ts`、提示词
@@ -110,6 +111,56 @@ def _scenarios():
            "raw": {"orderType": "STOP_MARKET", "triggerPrice": "105"}}],
          "unknown"),
     ]
+
+
+class TriggerTypeDisclosureTest(unittest.TestCase):
+    """触发价类型的三态披露（**读不到 ⇒ unknown，绝不填默认值**）。"""
+
+    def test_okx_leg_type_is_disclosed_verbatim(self):
+        row = _okx_row([_leg(slTriggerPxType="mark", tpTriggerPxType="mark")])
+        self.assertEqual(row["protectionSlTriggerPxType"], "mark")
+        self.assertEqual(row["protectionTpTriggerPxType"], "mark")
+        # 修正后两腿类型不同也要如实分开报（合并成一个字段会说谎）
+        row2 = _okx_row([_leg(slTriggerPxType="last", tpTriggerPxType="mark")])
+        self.assertEqual(row2["protectionSlTriggerPxType"], "last")
+        self.assertEqual(row2["protectionTpTriggerPxType"], "mark")
+
+    def test_leg_present_but_type_unreported_is_unknown_not_mark(self):
+        """腿在、类型未上报 ⇒ `unknown`。**不得**用"我们期望的 mark"顶替。"""
+        row = _okx_row([_leg()])          # 夹具不带任何 *TriggerPxType
+        self.assertEqual(row["protectionSlTriggerPxType"], "unknown")
+        self.assertEqual(row["protectionTpTriggerPxType"], "unknown")
+        xv = _xvenue_row([{"symbol": "ETHUSDT", "side": "buy", "type": "STOP_MARKET",
+                           "raw": {"orderType": "STOP_MARKET", "triggerPrice": "105",
+                                   "quantity": "100"}}])
+        # 外所（Binance 等）没有这个概念 ⇒ 腿在但类型不可判定
+        self.assertEqual(xv["protectionSlTriggerPxType"], "unknown")
+
+    def test_missing_leg_is_none_not_unknown(self):
+        """没有该类腿 ⇒ `None`（"没有这东西"不同于"读不到"）。"""
+        row = _okx_row([_leg(tpTriggerPx=None)])
+        self.assertIsNone(row["protectionTpTriggerPxType"])
+        self.assertEqual(row["protectionSlTriggerPxType"], "unknown")
+        empty = _okx_row([])
+        self.assertIsNone(empty["protectionSlTriggerPxType"])
+        self.assertIsNone(empty["protectionTpTriggerPxType"])
+
+    def test_both_producers_emit_the_same_field_names(self):
+        okx = _okx_row([_leg(slTriggerPxType="mark")])
+        xv = _xvenue_row([{"symbol": "ETHUSDT", "side": "buy", "type": "STOP_MARKET",
+                           "raw": {"orderType": "STOP_MARKET", "triggerPrice": "105",
+                                   "quantity": "100"}}])
+        for field in ("protectionSlTriggerPxType", "protectionTpTriggerPxType"):
+            self.assertIn(field, okx, f"OKX 生产者缺字段 {field}")
+            self.assertIn(field, xv, f"跨所生产者缺字段 {field}")
+
+    def test_venue_reader_maps_okx_type_and_reports_missing_as_none(self):
+        """单一取数点：`trigger_px_type` 认 OKX 两种键；读不到 ⇒ `None`（不是 "mark"）。"""
+        from scripts.trader.venue_protection import trigger_px_type
+        self.assertEqual(trigger_px_type({"slTriggerPxType": "mark"}), "mark")
+        self.assertEqual(trigger_px_type({"raw": {"tpTriggerPxType": "LAST"}}), "last")
+        self.assertIsNone(trigger_px_type({"slTriggerPx": "90"}))
+        self.assertIsNone(trigger_px_type({"slTriggerPxType": "   "}))
 
 
 class ProtectionContractTest(unittest.TestCase):

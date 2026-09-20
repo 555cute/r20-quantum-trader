@@ -100,6 +100,9 @@ def build_position_lines(active_positions_detail: Optional[List[Dict[str, Any]]]
     return "\n".join(pos_lines)
 
 
+#: 触发价类型 → 中文（第一百六十七刀）。交易所上报什么就说什么，不做二次推断。
+_TRIGGER_TYPE_TEXT = {"mark": "标记价", "last": "最新成交价", "index": "指数价"}
+
 _PROTECTION_TEXT = {
     "fully_protected": "完全保护",
     #: 没有覆盖率数字时**不宣称"覆盖不足"**（那是没有证据的结论）；有数字时由
@@ -137,6 +140,14 @@ def _protection_text(p: Dict[str, Any]) -> str:
             txt = f"部分保护（止损仅覆盖 {float(pct):g}%）"
     elif _has_pct and status != "unprotected":
         txt += f" {float(pct):g}%"
+    # 第一百六十七刀：**按什么价触发**（OKX `slTriggerPxType`）。
+    # 与触发价本身同等重要：按最新成交价触发的止损，一根插针就能打掉；
+    # 读不到就说"未上报"（**不填**我们期望的类型，也不假装知道）。
+    _sl_type = str(p.get("protectionSlTriggerPxType") or "").strip().lower()
+    if _sl_type in _TRIGGER_TYPE_TEXT:
+        txt += f"（止损按{_TRIGGER_TYPE_TEXT[_sl_type]}触发）"
+    elif _sl_type == "unknown" and status != "unprotected":
+        txt += "（止损触发价类型未上报）"
     expiry = str(p.get("protectionExpiry") or "").strip()
     if expiry == "expired":
         # "另有"是刻意的：`unprotected` 档下过期腿正是缺口本身，而 `partially_*` 档下

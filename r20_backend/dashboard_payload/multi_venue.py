@@ -94,12 +94,20 @@ def _protection_verdict(algos, base_sym, pos_side, pos_size, *, readable,
     诚实边界见 `collect_cross_venue_positions` docstring：不可判定/读不到 ⇒ `unknown`
     且**不告警**（没有证据就不下结论）；过期腿不计入"有活止损"。
     """
+    # 惰性 import 提到首行：早退分支（`not readable`）也要用 `protection_trigger_type_fields`，
+    # 而它在原位置（下面 try 内）会被 Python 视为局部名 ⇒ 早退时 UnboundLocalError，
+    # 再被外层 `except Exception` 吞掉 ⇒ **读腿失败会整行丢掉持仓**（本门实测抓到）。
+    from scripts.trader.venue_protection import (
+        protection_trigger_type_fields, scan_protective_orders,
+    )
     out = {"protectionStatus": "unknown", "protectionCoveragePct": None,
            "protectionExpiry": "unknown", "protectionLegs": 0}
     if not readable:
+        # 第一百六十七刀：读不到 ⇒ 触发价类型也是"unknown"（不得当"没有"，也不得填默认值）
+        out.update(protection_trigger_type_fields([], readable=False))
         return out
     try:
-        from scripts.trader.venue_protection import scan_protective_orders
+        scan_protective_orders
         # ⚠️ 传进来的是**该所全量腿**（positions 一次拉全量）⇒ 必须开
         # `require_symbol_match`，否则**别的币的腿也会被算进覆盖**
         # （本刀真机实测：UNI 空仓一度算到 11 张腿，其中大部分是 ETH/SOL/XRP 的）。
@@ -141,6 +149,8 @@ def _protection_verdict(algos, base_sym, pos_side, pos_size, *, readable,
         expiry = "unknown"
     out.update({"protectionStatus": status, "protectionCoveragePct": pct,
                 "protectionExpiry": expiry, "protectionLegs": len(ours)})
+    # 触发价类型（与 OKX 路径同一份三态语义、同一字段名）
+    out.update(protection_trigger_type_fields(ours, readable=True))
     if source_errors is not None and not has_live_sl and status != "unknown":
         source_errors.append(
             f"保护缺口 {venue} {inst_id}: 该持仓**没有活止损腿**"
@@ -288,6 +298,10 @@ def collect_cross_venue_positions(positions, pending_orders_list,
                         "protectionCoveragePct": _prot["protectionCoveragePct"],
                         "protectionExpiry": _prot["protectionExpiry"],
                         "protectionLegs": _prot["protectionLegs"],
+                        # 第一百六十七刀：触发价类型（与 OKX 路径同名同三态：读不到 ⇒ "unknown"，
+                        # 该类腿不存在 ⇒ None）。外所通常没有这个概念 ⇒ 多为 "unknown"。
+                        "protectionSlTriggerPxType": _prot["protectionSlTriggerPxType"],
+                        "protectionTpTriggerPxType": _prot["protectionTpTriggerPxType"],
                         #: `exchangeSl`/`exchangeTp` 仍是"首个匹配腿的触发价"（供展示与
                         #: 因子取用）；它**不代表覆盖有效** —— 是否有效看 `protectionStatus`。
                         "cloud_oco_verified": _prot["protectionStatus"] == "fully_protected",

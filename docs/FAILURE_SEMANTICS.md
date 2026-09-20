@@ -73,6 +73,7 @@
 | 文档引用 ⇒ 必须已提交 | 失败语义手册与**全仓文档**引用的**源码树**路径，"磁盘上存在即必须被 git 跟踪"（`data/`、`plan_local/` 等运行态不在范围）——防 `.gitignore` 过宽造成"磁盘有、仓库无"而本地测试照常绿 | 防 | `tests/audit/test_doc_paths_are_committed.py` | `tests/audit/test_doc_paths_are_committed.py::BroadDocReferencesTest` |
 | `.gitignore` 裸词 vs 源码目录 | 裸词模式（无 `/`、无 `.`、无 `*`）按**路径组件**匹配，会静默吞掉同名源码目录（`core` 吞掉 `tests/core/` 的事故根因）——与源码树里真实存在的目录同名即翻红 | 防 | `tests/audit/test_gitignore_bare_word_collisions.py` | `tests/audit/test_gitignore_bare_word_collisions.py::GitignoreBareWordCollisionTest` |
 | 保护腿触发价类型（`tp/slTriggerPxType`）| **显式发送 `mark`（标记价触发）**：入场附着腿与云端棘轮腿（`place_algo_oco`）同一口径，不再依赖未核实的交易所默认值；`last`/`index` 可显式覆盖，修正路径仍可改类型（会改变触发语义）| 防 | `scripts/okx_rest.py` | `tests/venues/test_okx_trigger_price_type_semantics.py::TriggerPriceTypeSemanticsTest` |
+| 保护腿触发价类型（展示口径）| 两个生产者（OKX `algo_protection` / 跨所 `multi_venue`）必须**同名同三态**输出 `protectionSl/TpTriggerPxType`：读不到 ⇒ `"unknown"`、该类腿不存在 ⇒ `None`、上报值原样透传；提示词如实转述（未上报就说未上报）| 披露 | `r20_backend/dashboard_payload/multi_venue.py` | `tests/ui/test_protection_contract.py::TriggerTypeDisclosureTest` |
 <!-- anchors:end -->
 
 ## 3. 抽取门与"文档化差异"

@@ -702,6 +702,27 @@ class ProtectionVerdictPromptTest(unittest.TestCase):
                          protectionCoveragePct=100.0, protectionExpiry="never")
         self.assertIn("保护: 完全保护 100%", out)
 
+    def test_trigger_price_type_is_disclosed(self):
+        """第一百六十七刀：按什么价触发要如实说（mark 抗插针，last 易被插针打掉）。"""
+        self.assertIn("止损按标记价触发", self._line(
+            protectionStatus="fully_protected", protectionCoveragePct=100.0,
+            protectionSlTriggerPxType="mark"))
+        self.assertIn("止损按最新成交价触发", self._line(
+            protectionStatus="fully_protected", protectionCoveragePct=100.0,
+            protectionSlTriggerPxType="last"))
+
+    def test_unreported_trigger_type_says_so_never_guesses(self):
+        """腿在但类型未上报 ⇒ 明说"未上报"，**不得**默认成标记价。"""
+        out = self._line(protectionStatus="fully_protected", protectionCoveragePct=100.0,
+                         protectionSlTriggerPxType="unknown")
+        self.assertIn("止损触发价类型未上报", out)
+        self.assertNotIn("止损按标记价触发", out)
+
+    def test_missing_trigger_type_field_adds_nothing(self):
+        """字段缺（旧数据/无该类腿）⇒ 不提这一段，不编。"""
+        out = self._line(protectionStatus="fully_protected", protectionCoveragePct=100.0)
+        self.assertNotIn("触发", out)
+
     def test_unprotected_is_shouted_not_softened(self):
         out = self._line(protectionStatus="unprotected", protectionCoveragePct=0.0)
         self.assertIn("保护: ⚠️ 无活止损腿", out)
