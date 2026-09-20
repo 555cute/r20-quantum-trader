@@ -11,7 +11,7 @@ import time
 from r20_backend.dashboard_payload.market import _global_env_axis
 from r20_backend.exchanges.base import canonical_base
 
-__all__ = ["collect_cross_venue_positions", "_protection_verdict"]
+__all__ = ["collect_cross_venue_positions", "_protection_verdict", "_bj_time_str"]
 
 
 def _protection_triggers(algos, base_sym, opposite_side):
@@ -71,6 +71,20 @@ def _protection_triggers(algos, base_sym, opposite_side):
             tp_val = px
 
     return sl_val, tp_val
+
+
+def _bj_time_str(ms: int) -> str:
+    """毫秒时间戳 → 北京时间展示串（与 `order_view` 的 `c_time_str` **同格式**）。
+
+    取不到时间（`ms <= 0`）⇒ `"--"`。⚠️ 曾经这里写死 `"刚刚"`：
+    那是对"这笔委托刚挂上"的**无证据断言**，而真机两行 binance 挂单的 `cTime`
+    干脆是空的 —— 面板于是把任意年龄的委托都显示成"刚刚"。
+    """
+    if not ms or int(ms) <= 0:
+        return "--"
+    import datetime as _dt
+    tz = _dt.timezone(_dt.timedelta(hours=8))
+    return _dt.datetime.fromtimestamp(int(ms) / 1000.0, tz=tz).strftime("%m-%d %H:%M:%S")
 
 
 def _protection_verdict(algos, base_sym, pos_side, pos_size, *, readable,
@@ -303,7 +317,16 @@ def collect_cross_venue_positions(positions, pending_orders_list,
                         vo_sz = str(_raw_sz if _raw_sz is not None else "--")
                     vo_ord_id = str(vo.get("order_id") or vo.get("orderId") or vo.get("id") or "")
                     
-                    _created_ts = vo.get("create_time") or vo.get("time") or vo.get("cTime") or 0
+                    # ⚠️ 第一百二十四刀：Binance 适配器的归一挂单**没有顶层时间字段**
+                    # （只有 `raw` 里带交易所的 `time`/`updateTime`）⇒ 原来这里取不到，
+                    # `cTime` 留空，而展示用的 `time` 写死 `"刚刚"` ⇒ **面板对一笔可能
+                    # 已挂几小时的委托宣称"刚刚"**（真机实测：两行 binance 挂单
+                    # `time='刚刚'` 而 `cTime=''`）。Gate 侧 `_normalize_order_item`
+                    # 是 `dict(o)` 拷贝原始行，所以 `create_time` 本来就能取到。
+                    _raw_vo = vo.get("raw") if isinstance(vo.get("raw"), dict) else {}
+                    _created_ts = (vo.get("create_time") or vo.get("time") or vo.get("cTime")
+                                   or _raw_vo.get("time") or _raw_vo.get("createTime")
+                                   or _raw_vo.get("updateTime") or _raw_vo.get("create_time") or 0)
                     try:
                         _c_ts_f = float(_created_ts)
                         _c_time_ms = int(_c_ts_f * 1000) if (0 < _c_ts_f < 1e11) else int(_c_ts_f)
@@ -353,7 +376,9 @@ def collect_cross_venue_positions(positions, pending_orders_list,
                         "sz": vo_sz,
                         "margin_usdt": vo_margin_usdt,
                         "cTime": str(_c_time_ms) if _c_time_ms > 0 else "",
-                        "time": "刚刚",
+                        # 展示时间与 OKX 侧（`order_view` 的 `c_time_str`）**同格式**；
+                        # 取不到就 `"--"`（与 OKX 一致）——**不再宣称"刚刚"**。
+                        "time": _bj_time_str(_c_time_ms),
                         "state": "live",
                         "tp_px": f"{_vo_tp:g}" if _vo_tp else "--",
                         "sl_px": f"{_vo_sl:g}" if _vo_sl else "--",

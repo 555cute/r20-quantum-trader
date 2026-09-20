@@ -311,3 +311,69 @@ class CrossVenueProtectionVerdictTest(unittest.TestCase):
                          "别的币的腿把覆盖满足了 ⇒ 面板会说谎")
         self.assertEqual(row["protectionLegs"], 0)
         self.assertTrue(any("没有活止损腿" in e for e in errs))
+
+
+class PendingOrderTimeHonestyTest(unittest.TestCase):
+    """第一百二十四刀：挂单时间**不得谎报"刚刚"**，且与 OKX 侧同格式。
+
+    真机实测（改前）：两行 binance 挂单 `time='刚刚'` 而 `cTime=''` ——
+    根因是 Binance 适配器把时间只放在 `raw` 里（Gate 是 `dict(o)` 拷贝原始行，
+    所以 `create_time` 本来能取到），`multi_venue` 取不到就 `cTime=""` + 写死"刚刚"。
+    面板于是把任意年龄的委托显示成"刚刚"。
+    """
+
+    def _run(self, orders):
+        got: list = []
+        ad = _FakeAdapter(open_orders=orders, algos=[])
+        empty = _FakeAdapter(open_orders=[], algos=[])
+
+        def _pick(venue, *a, **k):
+            return ad if venue == "binance" else empty
+        with patch("r20_backend.exchanges.get_adapter", _pick), \
+             patch("r20_backend.dashboard_payload.multi_venue._global_env_axis", lambda: "demo"):
+            collect_cross_venue_positions([], got, 0, 0, 0.0, source_errors=[])
+        return got
+
+    _MS = 1789901235000          # 2026-09-20 18:47:15 (北京)
+
+    @staticmethod
+    def _order(**over):
+        row = {"base": "XRP", "symbol": "XRPUSDT", "order_id": "O1", "side": "sell",
+               "price": 1.383, "size": 826.5, "status": "NEW"}
+        row.update(over)
+        return row
+
+    def test_binance_raw_carries_the_timestamp(self):
+        """Binance 形状：时间只在 `raw` 里（真机就是这种）。"""
+        got = self._run([self._order(raw={"time": self._MS, "updateTime": self._MS})])
+        self.assertEqual(got[0]["cTime"], str(self._MS))
+        self.assertEqual(got[0]["time"], "09-20 18:47:15")
+
+    def test_gate_top_level_create_time_in_seconds(self):
+        """Gate 形状：顶层 `create_time` 是**秒** ⇒ 归一成毫秒。"""
+        got = self._run([self._order(create_time=self._MS // 1000)])
+        self.assertEqual(got[0]["cTime"], str(self._MS))
+        self.assertEqual(got[0]["time"], "09-20 18:47:15")
+
+    def test_missing_time_never_claims_just_now(self):
+        """取不到时间 ⇒ `--`（与 OKX 一致），**绝不**写"刚刚"。"""
+        got = self._run([self._order()])
+        self.assertEqual(got[0]["cTime"], "")
+        self.assertEqual(got[0]["time"], "--")
+        self.assertNotEqual(got[0]["time"], "刚刚")
+
+    def test_display_time_matches_okx_formatter(self):
+        """同格式契约：与 OKX 侧 `order_view` 的 `c_time_str` 对同一时间戳一致。"""
+        import datetime as _dt
+        from r20_backend.dashboard_payload.multi_venue import _bj_time_str
+        from r20_backend.dashboard_payload.order_view import collect_pending_order_rows
+        tz_bj = _dt.timezone(_dt.timedelta(hours=8))
+        okx_rows: list = []
+        collect_pending_order_rows(
+            [{"instId": "XRP-USDT-SWAP", "cTime": self._MS, "side": "sell",
+              "reduceOnly": "false", "ordType": "limit", "px": "1.383", "sz": "826.5",
+              "ordId": "O1"}],
+            okx_rows, tz_beijing=tz_bj, datetime=_dt)
+        self.assertEqual(okx_rows[0]["time"], _bj_time_str(self._MS),
+                         "两个生产者的展示时间格式必须一致")
+        self.assertEqual(okx_rows[0]["time"], "09-20 18:47:15")
