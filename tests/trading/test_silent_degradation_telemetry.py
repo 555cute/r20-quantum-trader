@@ -150,6 +150,66 @@ class TrackerTelemetryTest(unittest.TestCase):
         self.assertTrue(any("追踪状态未落盘" in m for m in msgs), msgs)
 
 
+class UnreadableTrackersMustNotClobberTest(unittest.TestCase):
+    """追踪状态"读不出来" ⇒ 标记身份 + **拒绝覆盖**（第一百三十七刀）。
+
+    缺陷形状（两个后果，都是"读不到当成没有"）：
+    ① `pyramiding_gate` 的「每仓最多加仓 N 次」判据是 `scale_count < max`；读失败
+       返回 `{}` ⇒ `scale_count=0` ⇒ **上限被静默绕过**（可反复加仓、过度集中）；
+    ② 加仓成功后会 `tracker["scale_count"] = 1` 再 `save_trackers(trackers)` ⇒
+       用这个**近乎空的字典覆盖整个文件** ⇒ 其它持仓的移动止损水位与挂单 tracker
+       归属依据**被永久抹掉**。
+
+    本刀堵②（破坏性那一半）；①仍只告警 —— 入场循环被入口门以**零归一 AST 逐字**
+    冻结，改它需先给那道门加"文档化差异"机制（独立一刀，已列入待办）。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="tracker-unreadable-")
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        self.path = os.path.join(self.tmp, "position_trackers.json")
+        self._patch = patch.object(aft, "POSITION_TRACKER_FILE", self.path)
+        self._patch.start()
+        self.addCleanup(self._patch.stop)
+
+    def test_unreadable_state_is_marked_but_still_a_dict(self):
+        with open(self.path, "w", encoding="utf-8") as h:
+            h.write("{半截 JSON")
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            got = aft.load_trackers()
+        self.assertIsInstance(got, aft.UnreadableTrackers, "必须带身份标记，供写入侧判定")
+        self.assertEqual(got, {}, "调用方语义不变（它就是个空 dict）")
+
+    def test_missing_file_is_a_legitimate_empty_state(self):
+        """文件**不存在**是合法空态（不是标记类型）⇒ 之后照常可落盘。"""
+        got = aft.load_trackers()
+        self.assertNotIsInstance(got, aft.UnreadableTrackers)
+        got["BTC-USDT-SWAP_long"] = {"scale_count": 1}
+        aft.save_trackers(got)
+        self.assertEqual(sorted(json.loads(Path(self.path).read_text(encoding="utf-8"))),
+                         ["BTC-USDT-SWAP_long"])
+
+    def test_save_refuses_to_clobber_when_state_unreadable(self):
+        # 现场：文件里有**别的持仓**的水位（此处用"半截 JSON"模拟读不出来的真实文件）
+        broken = '{"ETH-USDT-SWAP_long": {"trailingStopPx": 3000.0}}'[:-1]
+        with open(self.path, "w", encoding="utf-8") as h:
+            h.write(broken)
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            state = aft.load_trackers()
+        state["BTC-USDT-SWAP_long"] = {"scale_count": 1}      # 模拟加仓记账
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            aft.save_trackers(state)
+        self.assertEqual(Path(self.path).read_text(encoding="utf-8"), broken,
+                         "读不出来时**不得覆盖**（否则其它持仓水位/归属依据被永久抹掉）")
+        msgs = [str(w.message) for w in caught if issubclass(w.category, RuntimeWarning)]
+        self.assertTrue(any("拒绝落盘" in m for m in msgs), msgs)
+        self.assertEqual([n for n in os.listdir(self.tmp)
+                          if n != os.path.basename(self.path)], [],
+                         "拒绝路径不得留下临时文件")
+
 if __name__ == "__main__":
     unittest.main()
 

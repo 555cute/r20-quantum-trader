@@ -349,19 +349,47 @@ def fetch_candles_direct(inst_id: str, bar: str = "15m", limit: int = 45):
     """Direct fetch from OKX Official Market REST API with Keep-Alive connection pooling."""
     return fetch_candles(inst_id, bar=bar, limit=limit)
 
+class UnreadableTrackers(dict):
+    """**读不出来**的持仓追踪状态（与"文件不存在/真的是空"区分，第一百三十七刀）。
+
+    它就是个 `dict`（调用方语义不变），只多一个身份标记，供 `save_trackers` 判定：
+    **本轮状态不可信 ⇒ 拒绝落盘**。为什么必须有这个标记——
+
+    读失败时返回 `{}` 会被下游当成"没有任何在管持仓"，于是：
+    - `pyramiding_gate` 的「每仓最多加仓 N 次」判据 `scale_count < max` 拿到
+      `scale_count=0` ⇒ **上限被静默绕过**（可反复加仓，过度集中）；
+    - 一旦某笔加仓成功，调用方会 `tracker["scale_count"] = 1` 再 `save_trackers(trackers)`
+      ⇒ 用这个**近乎空的字典覆盖整个文件** ⇒ 其它持仓的移动止损水位与挂单归属依据
+      **被永久抹掉**（后者会让在场挂单失去 tracker 归属，只能靠意图文件兜底）。
+
+    本刀先堵**破坏性**那一半（拒绝覆盖）；"上限无法核验"那一半如实告警，
+    是否改成 fail-closed（禁本轮加仓）见 `load_trackers` 的 docstring。
+    """
+
+
 def load_trackers():
+    """读持仓追踪。**文件不存在 ⇒ `{}`**（合法空态）；**存在却读不出来 ⇒ `UnreadableTrackers()`**。
+
+    ⚠️ 第一百三十七刀：此前两种"空"都被压成 `{}`（只加了一条 RuntimeWarning）。
+    警告≠安全——返回空字典的**后果**是实打实的：加仓次数上限被静默绕过、
+    且下一笔加仓会把文件覆盖成近乎空 ⇒ 其它持仓水位/归属依据永久丢失
+    （见 `UnreadableTrackers`）。现在把"读不出来"标记出来，由写入侧拒绝覆盖。
+
+    ⚠️ 残留（待拍板）：加仓上限的"无法核验"这一半本刀**只告警不改行为** ——
+    `entry_execution` 的入场循环被 `test_trader_entry_execution_extraction` 以
+    **零归一 AST 逐字**冻结，改它需要先给那道门加"文档化差异"机制（独立一刀）。
+    """
     if os.path.exists(POSITION_TRACKER_FILE):
         try:
             with open(POSITION_TRACKER_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as _load_err:
-            # 2026-09-16：原先静默 pass —— 读失败会返回 {}，等于**忘掉全部在管持仓**
-            # （移动止损/高点水位全丢），却看不出任何异常。仍然返回 {}（保持调用方
-            # 语义），但必须吼出来：这是"数据缺失被当成没有持仓"的高危静默面。
             warnings.warn(
                 f"[trader] 持仓追踪文件读取失败，本轮按「无在管持仓」继续"
-                f"（高风险：移动止损/水位丢失）: {_load_err!r}",
+                f"（高风险：移动止损/水位丢失；**加仓次数上限无法核验**；"
+                f"且本轮拒绝覆盖该文件）: {_load_err!r}",
                 RuntimeWarning)
+            return UnreadableTrackers()
     return {}
 
 def save_trackers(trackers):
@@ -371,6 +399,14 @@ def save_trackers(trackers):
     可能读到半截 JSON，与本文件 `_atomic_write_json` 的既有审计结论相悖；
     ② 写失败原先静默 pass —— 追踪状态悄悄丢失。现改为原子写 + 失败告警。
     """
+    # ⚠️ 第一百三十七刀：状态**读不出来**时拒绝覆盖 —— 否则会把其它持仓的
+    # 移动止损水位与挂单归属依据永久抹掉（只为一笔记一笔加仓计数）。
+    if isinstance(trackers, UnreadableTrackers):
+        warnings.warn(
+            "[trader] 本轮持仓追踪状态不可读 ⇒ **拒绝落盘**（防止把其它持仓的水位/"
+            "加仓计数覆盖成空）；请检查 " + os.path.basename(POSITION_TRACKER_FILE),
+            RuntimeWarning)
+        return
     try:
         _atomic_write_json(POSITION_TRACKER_FILE, trackers)
     except Exception as _save_err:
