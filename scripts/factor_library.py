@@ -13,6 +13,8 @@ import os
 import sys
 from pathlib import Path
 
+from r20_backend.math_utils import safe_float as _shared_safe_float
+
 _THIS_DIR = Path(__file__).resolve().parent
 _PROJECT_ROOT = _THIS_DIR.parent
 if str(_PROJECT_ROOT) not in sys.path:
@@ -48,11 +50,13 @@ from market_data_service import fetch_orderbook_depth, fetch_indicators_batch, f
 TARGET_INSTRUMENTS = load_instruments()
 
 def safe_float(val: Any, default: float = 0.0) -> float:
-    try:
-        f = float(val)
-        return f if f == f and abs(f) != float("inf") else default
-    except (TypeError, ValueError):
-        return default
+    """薄壳：转调单一事实源（`r20_backend.math_utils.safe_float`，第一百五十刀）。
+
+    本函数与 `scripts/ai_brain_trader.safe_float`、`scripts/calculus/regime._safe_float`
+    原为**三份**逐条等价的实现（按 14 组输入行为对拍一致），现收敛到一处：
+    `nan`/`±inf`/不可转 ⇒ `default`；`bool` 按 `float()` 语义（`True→1.0`）。
+    """
+    return _shared_safe_float(val, default)
 
 def _resolve_calculate_calculus():
     """按需（并缓存）解析微积分引擎。

@@ -12,6 +12,8 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, List, Sequence
 
+from r20_backend.math_utils import safe_float as _shared_safe_float
+
 try:
     from scripts.calculus.primitives import _finite
 except ImportError:
@@ -53,13 +55,12 @@ _REGIME_PRESET_MAP = {
 
 
 def _safe_float(val: Any, default: float = 0.0) -> float:
-    if val is None:
-        return default
-    try:
-        f = float(val)
-        return f if math.isfinite(f) else default
-    except (ValueError, TypeError):
-        return default
+    """薄壳：转调单一事实源（`r20_backend.math_utils.safe_float`，第一百五十刀）。
+
+    私有名保留在本模块（调用点按局部名引用）。语义与原内联实现逐条等价：
+    `math.isfinite(f)` 与 `f == f and abs(f) != inf` 同判；`None` 提前返回同判。
+    """
+    return _shared_safe_float(val, default)
 
 
 def detect_macro_market_regime(packages: Sequence[Dict[str, Any]]) -> Dict[str, Any]:

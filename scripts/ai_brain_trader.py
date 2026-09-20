@@ -9,6 +9,8 @@ import os
 import sys
 from pathlib import Path
 
+from r20_backend.math_utils import safe_float as _shared_safe_float
+
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROOT = Path(PROJECT_ROOT)
 SCRIPTS_DIR = os.path.join(PROJECT_ROOT, "scripts")
@@ -235,11 +237,12 @@ def single_brain_cycle(func):
 
 
 def safe_float(value: Any, default: float = 0.0) -> float:
-    try:
-        result = float(value)
-        return result if result == result and abs(result) != float("inf") else default
-    except (TypeError, ValueError):
-        return default
+    """薄壳：转调单一事实源（`r20_backend.math_utils.safe_float`，第一百五十刀）。
+
+    语义与既有实现逐条一致（`nan`/`±inf`/不可转 ⇒ `default`；`bool` 按 `float()`）——
+    只是不再各写一份（三份等价实现的漂移代价是"因子与风控静默算出不同的数"）。
+    """
+    return _shared_safe_float(value, default)
 
 
 def is_same_direction_scale_request(position_side: str, action: str) -> bool:

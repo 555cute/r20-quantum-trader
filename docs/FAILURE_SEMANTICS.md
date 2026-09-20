@@ -65,6 +65,7 @@
 | 熔断判定**孪生对拍**（后端风控面 vs trader 活路径） | 两份实现只允许**形式差异**，抽取后的决策序列必须逐项相等（含 try 保护范围）；"加固只改一边" ⇒ 门翻红 | 防 | `r20_backend/execution/circuit_breaker.py` | `tests/audit/test_circuit_breaker_twin_parity.py::TwinParityTest` |
 | 止损冷却**写入路径** | 只有一处实现：损坏 ⇒ **拒绝写回保全现场**（读取侧按"仍在冷却"兜底），落盘失败 ⇒ 只告警；两个公开入口必须是**薄壳** | 防 | `r20_backend/execution/cooldowns.py` | `tests/audit/test_audit_batch3_persistence_atomic.py::StopCooldownWriterSingleSourceTest` |
 | 面板侧**读取器家族**（json / 文本 / 文本尾） | 三者统一失败语义：文件**不存在** ⇒ 静默默认/空；**读不出来** ⇒ 默认/空 + 一行 warn（点明"空不等于没有"）| 披露 | `r20_backend/dashboard_payload/readers.py` | `tests/ui/test_dashboard_payload_seam.py::ReaderFamilyFailureSemanticsTest` |
+| 数值强转 `safe_float`（**三处**：两公开 + 一私有） | 单一事实源在 `math_utils`；三入口必须是**薄壳**且 20 组边界输入**同判**（`nan`/`±inf`/`None`/空串/列表/bool…）；`nan`/`inf`⇒`default`、`True→1.0` 属既有语义，改动须有意识 | 防 | `r20_backend/math_utils.py` | `tests/core/test_numeric_coercion_single_source.py::SafeFloatSingleSourceTest` |
 <!-- anchors:end -->
 
 ## 3. 抽取门与"文档化差异"
