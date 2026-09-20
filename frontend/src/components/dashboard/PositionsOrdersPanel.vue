@@ -84,6 +84,11 @@ function slTriggerType(p: any): string {
   if (v === 'mark') return t('dash.matrix.positions.triggerMark');
   if (v === 'last') return t('dash.matrix.positions.triggerLast');
   if (v === 'index') return t('dash.matrix.positions.triggerIndex');
+  // Binance 的自描述字面量（MARK_PRICE / CONTRACT_PRICE）
+  if (v === 'mark_price') return t('dash.matrix.positions.triggerMarkPrice');
+  if (v === 'contract_price') return t('dash.matrix.positions.triggerContractPrice');
+  // Gate 的数字码：**原样显示**（本仓未核实官方映射 ⇒ 不翻译，避免编一个中文名）
+  if (v.startsWith('price_type:')) return v;
   if (v === 'unknown') return t('dash.matrix.positions.triggerUnknown');
   return '';
 }
@@ -93,6 +98,9 @@ function slTriggerTypeHint(p: any): string {
   if (v === 'mark') return t('dash.matrix.positions.triggerMarkHint');
   if (v === 'last') return t('dash.matrix.positions.triggerLastHint');
   if (v === 'index') return t('dash.matrix.positions.triggerIndexHint');
+  if (v === 'mark_price') return t('dash.matrix.positions.triggerMarkHint');
+  if (v === 'contract_price') return t('dash.matrix.positions.triggerLastHint');
+  if (v.startsWith('price_type:')) return t('dash.matrix.positions.triggerRawCodeHint');
   if (v === 'unknown') return t('dash.matrix.positions.triggerUnknownHint');
   return '';
 }

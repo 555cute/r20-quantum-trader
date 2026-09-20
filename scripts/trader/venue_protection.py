@@ -286,7 +286,21 @@ _TRIGGER_TYPE_KEYS = ("tpTriggerPxType", "slTriggerPxType", "triggerPxType", "tr
 
 
 def trigger_px_type(row: Dict[str, Any]) -> Optional[str]:
-    """保护腿的**触发价类型**（OKX：`tp/slTriggerPxType`；其它所可能没有这个概念）。
+    """保护腿的**触发价类型**（各所字段不同，逐一查证后原样透传）。
+
+    | 所 | 字段 | 本函数返回 |
+    |---|---|---|
+    | OKX | `tp/slTriggerPxType` | `mark` / `last` / `index`（**交易所自己的词**）|
+    | Binance | `workingType` | `mark_price` / `contract_price`（**交易所自己的字面量**，仅小写化）|
+    | Gate | `trigger.price_type`（**数字码**）| `price_type:<码>` —— **原样透传，不解释** |
+    | 其它/读不到 | — | `None`（未上报；调用方须披露成 `unknown`）|
+
+    为什么 Gate 的数字码**不翻译**：它的官方映射（0/1/2 各是什么价）本仓**未核实**
+    （开发环境无法联网核对官方文档）⇒ 凭记忆写死映射就是把"没核实的东西"当成事实，
+    正是本会话反复修的那类谎。原样带字段名给运营看，比猜一个中文名更有用也更诚实。
+
+    Binance 的 `CONTRACT_PRICE` / `MARK_PRICE` 是**自描述字面量**（字面量本身说明了按哪种价），
+    故只做小写化、不额外推断。
 
     读不到 ⇒ `None`（表示"未上报"），调用方必须把它**披露**成未知 ——
     **不得**用"我们期望的类型"顶替：读不到 ≠ 按标记价触发（读不到 ≠ 没有）。
@@ -297,6 +311,15 @@ def trigger_px_type(row: Dict[str, Any]) -> Optional[str]:
             val = container.get(key)
             if isinstance(val, str) and val.strip():
                 return val.strip().lower()
+        # Binance：自描述字面量
+        wt = container.get("workingType")
+        if isinstance(wt, str) and wt.strip():
+            return wt.strip().lower()
+    # Gate：`trigger.price_type` 是数字码 ⇒ 原样带字段名，不做映射
+    for container in (row, raw):
+        trig = container.get("trigger")
+        if isinstance(trig, dict) and trig.get("price_type") is not None:
+            return f"price_type:{trig.get('price_type')}"
     return None
 
 

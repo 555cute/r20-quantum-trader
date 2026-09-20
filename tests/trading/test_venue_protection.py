@@ -1031,3 +1031,44 @@ class CancelOrphanAttributedLegsTest(unittest.TestCase):
     def test_function_is_exported(self):
         import scripts.trader.venue_protection as vp
         self.assertIn("cancel_orphan_attributed_legs", vp.__all__)
+
+class TriggerPxTypePerVenueTest(unittest.TestCase):
+    """第一百七十三刀：触发价类型取数点扩到三所 —— **原样透传，不猜映射**。"""
+
+    def test_okx_words_are_passed_through(self):
+        from scripts.trader.venue_protection import trigger_px_type
+        self.assertEqual(trigger_px_type({"slTriggerPxType": "MARK"}), "mark")
+        self.assertEqual(trigger_px_type({"raw": {"tpTriggerPxType": "index"}}), "index")
+
+    def test_binance_working_type_is_passed_through_as_its_own_literal(self):
+        from scripts.trader.venue_protection import trigger_px_type
+        self.assertEqual(trigger_px_type({"raw": {"workingType": "CONTRACT_PRICE"}}), "contract_price")
+        self.assertEqual(trigger_px_type({"workingType": "MARK_PRICE"}), "mark_price")
+
+    def test_gate_numeric_code_is_disclosed_verbatim_not_translated(self):
+        """Gate 的 `trigger.price_type` 是**数字码**：本仓未核实官方映射 ⇒ 原样带字段名。
+
+        若哪天有人按记忆把它翻成 `mark`/`last`，本用例会翻红 —— 那正是"用没核实的东西
+        当事实"的入口。
+        """
+        from scripts.trader.venue_protection import trigger_px_type
+        self.assertEqual(trigger_px_type({"trigger": {"price_type": 0}}), "price_type:0")
+        self.assertEqual(trigger_px_type({"trigger": {"price_type": 2}}), "price_type:2")
+        self.assertNotIn("mark", str(trigger_px_type({"trigger": {"price_type": 1}})))
+
+    def test_missing_type_is_none_not_a_guess(self):
+        from scripts.trader.venue_protection import trigger_px_type
+        self.assertIsNone(trigger_px_type({"raw": {"orderType": "STOP_MARKET"}}))
+        self.assertIsNone(trigger_px_type({}))
+
+    def test_normalized_leg_carries_the_type(self):
+        """归一化腿必须带上类型（跨所路径的展示依赖它）。"""
+        from scripts.trader.venue_protection import scan_protective_orders
+        rows = [{"symbol": "DOGE_USDT", "type": "CONDITIONAL",
+                 "initial": {"contract": "DOGE_USDT", "size": 0, "text": "t-r20sl1",
+                             "is_close": True},
+                 "trigger": {"price_type": 0, "price": "0.08"}}]
+        v = scan_protective_orders(rows, symbol="DOGE", pos_side="long", position_size=1.0,
+                                   now_s=1_700_000_000.0)
+        self.assertTrue(v.get("ours"), "夹具没被判为本方腿")
+        self.assertEqual(v["ours"][0].get("trigger_px_type"), "price_type:0")
