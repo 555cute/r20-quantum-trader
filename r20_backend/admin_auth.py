@@ -10,10 +10,12 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 ROOT = Path(__file__).resolve().parents[1]
-DB_PATH = ROOT / "data" / "r20_admin.db"
+#: 可选环境覆盖 `R20_ADMIN_DB`（生产从不设置 ⇒ 行为逐位不变；测试会话指向临时目录，
+#: 因为 `r20_backend/dependencies.py` 在 **import 期**就建 `AdminAuthStore()`）。
+DB_PATH = Path(os.environ["R20_ADMIN_DB"]) if os.environ.get("R20_ADMIN_DB") else ROOT / "data" / "r20_admin.db"
 BJ_TZ = timezone(timedelta(hours=8))
 PBKDF2_ITERATIONS = 600_000
 SESSION_SECONDS = 12 * 60 * 60
@@ -66,8 +68,13 @@ def _password_valid(password: str) -> bool:
 
 
 class AdminAuthStore:
-    def __init__(self, path: Path = DB_PATH):
-        self.path = path
+    def __init__(self, path: Optional[Path] = None):
+        # ⚠️ 默认值**不能**写成 `path: Path = DB_PATH`：默认参数在**类定义（import）期**
+        # 求值并永久绑定，于是测试沙箱重定向 `admin_auth.DB_PATH` 对它**完全无效**
+        # ——`r20_backend/dependencies.py:30` 的 import 期 `AdminAuthStore()` 会照样
+        # 连生产 `data/r20_admin.db`（本刀实测：一次全量 pytest 连 6 次）。
+        # 改成调用期读模块常量：生产语义逐位不变（默认仍是 DB_PATH），沙箱可重定向。
+        self.path = path if path is not None else DB_PATH
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as connection:
             connection.executescript(SCHEMA)

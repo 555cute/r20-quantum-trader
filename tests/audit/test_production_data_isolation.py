@@ -48,6 +48,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -365,6 +366,84 @@ def _strip_docstrings_and_comments(src: str) -> str:
         out.append(ch)
         i += 1
     return "".join(out)
+
+
+class ProductionDbConnectBlockedTest(unittest.TestCase):
+    """第一百一十四刀：**测试连接生产 sqlite 库**必须失败（新增的一类泄漏）。
+
+    ## 为什么单开一类
+
+    上面那套 `_assert_not_production` 管 `open()/replace/unlink` 等**文件级**写；
+    sqlite 库的连接走 `sqlite3.connect`（文件只开一次，之后全在 fd 上写）——
+    完全绕开那套闸。实测一次全量 `pytest tests` 会对生产 `data/*.db` 发起
+    **18 次连接**（admin 6 / quant 4 / reservation 6 / gateway 2），并且**真的**
+    在生产 `data/risk_reservation.db` 里留下一行
+    `environment=<MagicMock name='current_environment().mode'>` 的垃圾预留
+    （id=225，created_at 2026-09-20 04:59:03）。
+    """
+
+    def test_connect_to_production_db_is_blocked(self):
+        import sqlite3
+        target = ROOT / "data" / "risk_reservation.db"
+        with self.assertRaises(AssertionError) as ctx:
+            sqlite3.connect(str(target))
+        self.assertIn("禁止连接生产数据库", str(ctx.exception))
+
+    def test_memory_and_temp_connections_still_work(self):
+        """闸门只管生产目录——`:memory:` 与临时文件必须照常可用（否则测试没法活）。"""
+        import sqlite3
+        import tempfile
+        with sqlite3.connect(":memory:") as c:
+            c.execute("SELECT 1")
+        with tempfile.TemporaryDirectory() as d:
+            with sqlite3.connect(str(Path(d) / "x.db")) as c:
+                c.execute("CREATE TABLE t(a)")
+
+    def test_all_four_production_dbs_are_redirected_for_the_session(self):
+        """会话级默认重定向：四个库都指向临时目录，且不在生产 data/ 之下。"""
+        from r20_backend import admin_auth, risk_reservation
+        from r20_gateway import publisher
+        import scripts.db_manager as db_manager
+        prod = (ROOT / "data").resolve()
+        for name, value in (("admin_auth.DB_PATH", admin_auth.DB_PATH),
+                            ("risk_reservation.DEFAULT_DB_PATH", risk_reservation.DEFAULT_DB_PATH),
+                            ("db_manager.DB_PATH", db_manager.DB_PATH),
+                            ("publisher.DB_PATH", publisher.DB_PATH)):
+            with self.subTest(module=name):
+                resolved = Path(value).resolve()
+                self.assertFalse(str(resolved).startswith(str(prod) + os.sep),
+                                 f"{name} 仍指向生产 data/：{resolved}")
+
+    def test_default_manager_resolves_outside_production(self):
+        """`get_manager()` 的**缓存实例**也必须跟着走（常量改了、缓存没清=照样连生产）。"""
+        from r20_backend import risk_reservation
+        mgr = risk_reservation.get_manager()
+        self.assertFalse(str(Path(mgr.db_path).resolve()).startswith(
+            str((ROOT / "data").resolve()) + os.sep), f"默认管理器仍钉生产库：{mgr.db_path}")
+
+    def test_dashboard_render_does_not_touch_production_reservation_db(self):
+        """行为判据（本文件的一贯做法）：渲染仪表盘 stale 注入后，生产库哈希不变。"""
+        before = _hash_or_absent("data/risk_reservation.db")
+        import r20_backend.dashboard_cache as dashboard
+        dashboard._inject_local_data_into_stale({}, [], "2026-09-02 22:00:00 (北京时间)")
+        self.assertEqual(_hash_or_absent("data/risk_reservation.db"), before,
+                         "测试渲染仪表盘不得改动生产风控预留库")
+
+    def test_admin_auth_default_arg_reads_module_constant_at_call_time(self):
+        """回归：`def __init__(self, path=DB_PATH)` 的**定义期绑定**会让沙箱重定向失效。
+
+        实测那次泄漏就是它：`r20_backend/dependencies.py:30` 在 import 期
+        `AdminAuthStore()` 走的是定义期绑定的生产路径，`isolate_config` 改常量无效。
+        """
+        import tempfile
+        from r20_backend import admin_auth
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d) / "admin.db"
+            with patch.object(admin_auth, "DB_PATH", tmp):
+                store = admin_auth.AdminAuthStore()      # 不传 path ⇒ 必须用**当前**常量
+                self.assertEqual(Path(store.path), tmp,
+                                 "默认参数仍在定义期绑定 ⇒ 沙箱重定向对 dependencies 无效")
+            self.assertTrue(tmp.exists(), "构造 store 应在（临时）路径上建表")
 
 
 if __name__ == "__main__":

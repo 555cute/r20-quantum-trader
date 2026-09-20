@@ -6,7 +6,11 @@ import datetime
 
 WORKSPACE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(WORKSPACE_DIR, "data")
-DB_PATH = os.path.join(DATA_DIR, "r20_quant.db")
+#: 库路径。可选环境覆盖 `R20_QUANT_DB`：生产**从不设置**它 ⇒ 行为逐位不变；
+#: 测试会话把它指向临时目录即可覆盖**两种拼写**（`scripts.db_manager` 与
+#: 顶层 `db_manager` 是两个模块实例——`ai_factor_trader` 走的是 `from db_manager import`，
+#: 只 patch 其中一个会漏另一个，实测漏了 2 次生产连接）。
+DB_PATH = os.environ.get("R20_QUANT_DB") or os.path.join(DATA_DIR, "r20_quant.db")
 LEDGER_JSON_FILE = os.path.join(DATA_DIR, "trading_ledger.json")
 
 # ---- US-003 台账身份轴 -------------------------------------------------------

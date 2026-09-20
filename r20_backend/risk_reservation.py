@@ -322,12 +322,28 @@ class RiskReservationManager:
 
 # ---- 模块级默认实例（对齐 db_manager 的模块级 DB_PATH 用法）----
 #: 默认落点跟随 data/（生产）；测试一律自建 manager 传临时路径，绝不写 data/**
-DEFAULT_DB_PATH = os.path.join(
+#: 可选环境覆盖 `R20_RISK_RESERVATION_DB`（生产从不设置 ⇒ 行为逐位不变；
+#: 测试会话指向临时目录，避免"忘加沙箱就写生产风控台账"）。
+DEFAULT_DB_PATH = os.environ.get("R20_RISK_RESERVATION_DB") or os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "data", "risk_reservation.db")
 
 _default_manager: Optional[RiskReservationManager] = None
 _default_manager_lock = threading.Lock()
+
+
+def reset_default_manager() -> None:
+    """清掉进程级默认管理器缓存（测试沙箱用）。
+
+    为什么必须有它：`get_manager()` 缓存 `_default_manager`，而**第一次**创建时
+    `DEFAULT_DB_PATH` 早已被求值。沙箱（`tests/config_sandbox.isolate_config`）只重定向
+    **模块常量**，改不动已缓存实例 ⇒ 之前任何一次未沙箱的调用都会把实例**永久钉在
+    生产库**上，之后所有测试都复用这条生产连接（实测：生产 `data/risk_reservation.db`
+    里留有一行 `environment=<MagicMock …>` 的垃圾预留，created_at 2026-09-20 04:59）。
+    """
+    global _default_manager
+    with _default_manager_lock:
+        _default_manager = None
 
 
 def get_manager(db_path: Optional[str] = None,

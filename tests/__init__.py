@@ -21,6 +21,19 @@ from pathlib import Path
 # 此类落盘副作用（律①：测试不触生产文件）。
 _TEST_SANDBOX = tempfile.mkdtemp(prefix="r20-tests-")
 
+# ⚠️ 四个生产 sqlite 库的**环境覆盖**必须在这里就设好 —— 这是文件最早的可执行点，
+# 早于任何 `r20_backend.*` import（`r20_backend/dependencies.py` 在 import 期就建
+# `AdminAuthStore()`）。生产**从不设置**这四个变量 ⇒ 生产行为逐位不变；
+# 测试里它们指向会话临时目录，于是"忘加沙箱"的测试也连不到生产库。
+# 为什么要用 env 而不是只 patch 常量：`db_manager` 存在**双拼写**两个模块实例
+# （`scripts.db_manager` 与顶层 `db_manager`），只 patch 常量会漏掉另一个
+# —— 本刀实测正是它漏了 2 次生产连接（`ai_factor_trader` 走 `from db_manager import`）。
+os.environ.setdefault("R20_QUANT_DB", os.path.join(_TEST_SANDBOX, "r20_quant.db"))
+os.environ.setdefault("R20_RISK_RESERVATION_DB",
+                      os.path.join(_TEST_SANDBOX, "risk_reservation.db"))
+os.environ.setdefault("R20_ADMIN_DB", os.path.join(_TEST_SANDBOX, "r20_admin.db"))
+os.environ.setdefault("R20_GATEWAY_DB", os.path.join(_TEST_SANDBOX, "r20_gateway.db"))
+
 # 会话级沙箱必须在进程退出时清掉。
 #
 # 2026-09-14 实测：本会话反复运行全量套件后，/tmp（256M tmpfs）里积了 **6000+ 个**
@@ -206,3 +219,103 @@ try:
     del _dashboard_app
 except Exception:      # pragma: no cover — 导入失败不阻断测试收集
     pass
+
+
+# ── 生产 sqlite 库的**连接**硬闸（第一百一十四刀，2026-09-20）──────────────
+# 为什么单独有这条：上面那套 `_assert_not_production` 管的是 `open()/replace/unlink`
+# 这类**文件级**写操作，而 sqlite 库的连接走 `sqlite3.connect`（文件只开一次，
+# 之后全在 fd 上写）——**完全绕开**了那套闸。
+#
+# 实测证据（本刀用 `sys.addaudithook` 全量扫了一遍）：一次完整 `pytest tests`
+# 会对**生产** `data/*.db` 发起 **18 次连接**：
+#
+# | 库 | 次数 | 入口 |
+# |---|---|---|
+# | `r20_admin.db` | 6 | `r20_backend/dependencies.py` **import 期**建 `AdminAuthStore()` |
+# | `r20_quant.db` | 4 | `aft.record_trade` → `ledger_writer` → `db_manager.init_database()` |
+# | `risk_reservation.db` | 6 | 仪表盘 stale 注入 → `dashboard_payload.market.get_manager()` |
+# | `r20_gateway.db` | 2 | `metrics.build_snapshot` → `GatewayStore(DB_PATH)` |
+#
+# 后果不是理论：生产 `data/risk_reservation.db` 里**真的**留下一行
+# `environment=<MagicMock name='current_environment().mode'>` 的垃圾预留
+# （id=225，created_at 2026-09-20 04:59:03）——某个测试把 MagicMock 当环境
+# 写进了生产风控台账。
+#
+# 所以缺省必须安全：**测试进程内连接生产 data/*.db 直接失败**，逼调用方沙箱化
+# （`tests.config_sandbox.isolate_config`，或把库路径 patch 到 tmp）。
+# 逃生口与上面一致：`R20_TESTS_ALLOW_REAL_DATA=1`。
+if not _ALLOW_REAL_WRITES:
+    import sqlite3 as _sqlite3
+    import traceback as _traceback
+
+    _PROD_DB_DIR = str(_DATA_DIR) + os.sep
+
+    def _guard_production_sqlite(event, args):
+        if event != "sqlite3.connect":
+            return
+        target = args[0] if args else ""
+        try:
+            text = os.path.abspath(os.fspath(target))
+        except (TypeError, ValueError):
+            return
+        if not text.startswith(_PROD_DB_DIR):
+            return
+        stack = "".join(_traceback.format_stack()[-7:-1])
+        raise AssertionError(
+            f"测试禁止连接生产数据库 {text}\n"
+            "请用 tests.config_sandbox.isolate_config 的沙箱根，或把该库路径 "
+            "patch 到临时文件（临时目录不受管辖）。\n"
+            f"调用栈：\n{stack}")
+
+    import sys as _sys
+    _sys.addaudithook(_guard_production_sqlite)
+
+
+# ── 四个生产 sqlite 库：测试会话级**默认**重定向（第一百一十四刀）──────────
+# 上面那条 `sqlite3.connect` 硬闸负责"发现"，这里负责"默认就该是安全的"：
+# 会话开始就把四个库指向临时目录，此后任何测试（哪怕忘了 `isolate_config`）
+# 都不会连到生产库；需要特定库内容的测试照旧自己 patch 到临时文件。
+#
+# 覆盖到的四个（全量实测的 18 次连接全部来自它们）：
+#   `r20_admin.db`（`dependencies` import 期建 AdminAuthStore）、
+#   `r20_quant.db`（`db_manager.get_db`）、
+#   `risk_reservation.db`（`get_manager`）、
+#   `r20_gateway.db`（`publisher.DB_PATH`，走 `R20_GATEWAY_DB` 环境变量）。
+#
+# ⚠️ 必须在**任何** `r20_backend.dependencies` import 之前完成 ——
+# 它 import 期就 `AdminAuthStore()` 建表（本刀实测的 6 次连接来源）。
+if not _ALLOW_REAL_WRITES:
+    import tempfile as _tempfile
+    _DB_SANDBOX = _tempfile.mkdtemp(prefix="r20-tests-dbs-")
+    os.environ.setdefault("R20_GATEWAY_DB", os.path.join(_DB_SANDBOX, "r20_gateway.db"))
+
+    def _redirect_db_paths():
+        """把这四个库的模块常量指到会话临时目录（调用期读取，故改常量即生效）。
+
+        `db_manager` **两种拼写都要补**（律②：patch 每个已绑定别名）——
+        `scripts.db_manager` 与顶层 `db_manager` 是两个模块实例。
+        """
+        try:
+            import r20_backend.admin_auth as _aa
+            _aa.DB_PATH = Path(os.environ["R20_ADMIN_DB"])
+        except Exception:
+            pass
+        try:
+            import r20_backend.risk_reservation as _rr
+            _rr.DEFAULT_DB_PATH = os.environ["R20_RISK_RESERVATION_DB"]
+            _rr.reset_default_manager()
+        except Exception:
+            pass
+        for _name in ("scripts.db_manager", "db_manager"):
+            try:
+                _mod = __import__(_name, fromlist=["DB_PATH"])
+                _mod.DB_PATH = os.environ["R20_QUANT_DB"]
+            except Exception:
+                pass
+        try:
+            import r20_gateway.publisher as _pub
+            _pub.DB_PATH = Path(os.environ["R20_GATEWAY_DB"])
+        except Exception:
+            pass
+
+    _redirect_db_paths()
