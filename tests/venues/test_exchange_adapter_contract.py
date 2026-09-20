@@ -286,5 +286,64 @@ class TestNoPhantomModuleAttributes(unittest.TestCase):
         self.assertEqual(missing, [], "幻影属性调用（D4 族）:\n" + "\n".join(missing))
 
 
+class TestCloseCannotOpenOppositeTest(unittest.TestCase):
+    """平仓路径**结构上不可能反向开仓**（第一百三十三刀审计的契约化）。
+
+    三所三种机制，各自钉住 —— 任一处被"顺手改统一"都会出事：
+
+    | 场所/路径 | 机制 | 后果若有误 |
+    |---|---|---|
+    | OKX 整仓平 | 专用端点 `/api/v5/trade/close-position`（语义即平仓，**不经** place_order）| 若改走 place_order 且漏 `reduceOnly` ⇒ 反手开新仓 |
+    | Binance 对冲模式平 | 只发 `positionSide`、**绝不发** `reduceOnly` | 发了会被交易所 -1106 拒单（平不掉） |
+    | Binance 单仓模式平 | `reduceOnly=true` 且**不带** positionSide | 漏了 ⇒ 反手开新仓 |
+    | 两者同时传 | 参数构建器**前置抛 ValueError** | 把矛盾参数发给交易所 = 语义不清 |
+    """
+
+    def test_okx_whole_close_uses_dedicated_endpoint(self):
+        from scripts import okx_rest
+        seen = []
+
+        def _rec(method, path, body=None, **kw):
+            seen.append((method, path, dict(body or {})))
+            return []
+
+        with patch.object(okx_rest, "request", _rec), \
+                patch.object(okx_rest, "place_order",
+                             lambda *a, **k: (_ for _ in ()).throw(
+                                 AssertionError("整仓平不得走 place_order"))):
+            okx_rest.close_position("BTC-USDT-SWAP", "long", td_mode="cross")
+
+        self.assertEqual(len(seen), 1)
+        _m, _p, _body = seen[0]
+        self.assertEqual(_p, "/api/v5/trade/close-position", "整仓平必须走专用平仓端点")
+        self.assertEqual((_body.get("instId"), _body.get("posSide")),
+                         ("BTC-USDT-SWAP", "long"))
+
+    def _spec(self):
+        import types
+        return types.SimpleNamespace(step_size=0.1, tick_size=0.1)
+
+    def _params(self, **over):
+        from r20_backend.exchanges.binance_orders import build_order_params
+        kw = dict(inst="BTCUSDT", position_side=None, price=None, qty=1.0,
+                  reduce_only=False, s="SELL", spec=self._spec(), text="", tif="gtc")
+        kw.update(over)
+        return build_order_params(**kw)
+
+    def test_binance_hedge_close_never_sends_reduce_only(self):
+        p = self._params(position_side="LONG", reduce_only=False)
+        self.assertEqual(p.get("positionSide"), "LONG")
+        self.assertNotIn("reduceOnly", p,
+                         "对冲模式发 reduceOnly 会被交易所 -1106 拒单（平不掉仓）")
+
+    def test_binance_one_way_close_sets_reduce_only(self):
+        p = self._params(reduce_only=True)
+        self.assertEqual(p.get("reduceOnly"), "true")
+        self.assertNotIn("positionSide", p)
+
+    def test_binance_contradictory_combination_fails_fast(self):
+        with self.assertRaises(ValueError):
+            self._params(position_side="LONG", reduce_only=True)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
