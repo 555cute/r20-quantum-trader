@@ -32,13 +32,25 @@ def _sync_status_path():
     return DATA_DIR / "ledger_sync_status.json"
 
 
-def _ledger_sync_failed_venues(max_age_seconds: float = 2700.0) -> list[str]:
-    """读台账同步旁车：返回最近一次同步 failed 的所列表。旁车缺失/过旧/损坏
-    一律返回空（过旧场景由 ledger 文件 file_health 的 STALE 通道兜底）。"""
+def _ledger_sync_sidecar_state(max_age_seconds: float = 2700.0) -> tuple[list[str], str]:
+    """读台账同步旁车，返回 `(failed_venues, unknown_reason)`（第一百四十四刀）。
+
+    - `unknown_reason == ""` ⇒ 判定有效；
+    - 非空 ⇒ **不可判定**：旁车**损坏**或**过旧**（> `max_age_seconds`）——
+      此时"跨所同步是否完整"无从得知，当日亏损求和**可能不完整**。
+
+    ⚠️ **修正一处不实陈述**：旧 docstring 写"过旧场景由 ledger 文件 file_health 的
+    STALE 通道兜底"，但两个调用方（本模块 `is_circuit_breaker_active` 与 trader 侧
+    `circuit_guard`）**都没有**任何 STALE/file_health 检查（全仓 grep 仅命中那句注释本身）
+    ⇒ 该补偿**并不存在**。本刀先把"不可判定"**如实暴露**（调用方打印 warn），
+    **行为保持不变**（仍不据此禁开仓）——方向是否改为 fail-closed 需人工拍板。
+
+    缺失旁车仍是 `([], "")`（全新环境尚未同步过，不应把开仓全停）。
+    """
     try:
         path = _sync_status_path()
         if not path.exists():
-            return []
+            return [], ""
         with open(path, "r", encoding="utf-8") as f:
             payload = json.load(f)
         generated_at = str(payload.get("generated_at") or "")
@@ -46,7 +58,7 @@ def _ledger_sync_failed_venues(max_age_seconds: float = 2700.0) -> list[str]:
             ts = datetime.datetime.fromisoformat(generated_at)
             age = (datetime.datetime.now(ts.tzinfo) - ts).total_seconds()
             if age > max_age_seconds:
-                return []
+                return [], f"旁车过旧（{age:.0f}s > {max_age_seconds:.0f}s）"
         failed = []
         for v, d in (payload.get("venues") or {}).items():
             if not (isinstance(d, dict) and d.get("status") == "failed"):
@@ -69,9 +81,18 @@ def _ledger_sync_failed_venues(max_age_seconds: float = 2700.0) -> list[str]:
                 except Exception:
                     pass
             failed.append(str(v))
-        return failed
-    except Exception:
-        return []
+        return failed, ""
+    except Exception as exc:
+        return [], f"旁车损坏/不可读（{exc!r}）"
+
+
+def _ledger_sync_failed_venues(max_age_seconds: float = 2700.0) -> list[str]:
+    """**兼容壳**：只返回 failed 列表（调用方签名与既有测试契约不变）。
+
+    ⚠️ 注意它的盲区：**不可判定的情形不会体现在这个列表里**（旁车损坏/过旧都返回 `[]`）。
+    需要区分"没有失败所"与"不知道"的调用方，请用 `_ledger_sync_sidecar_state`。
+    """
+    return _ledger_sync_sidecar_state(max_age_seconds)[0]
 # 审计③(2026-09-13)：文件名分裂修复——旧值（复数 .json）与 trader 活文件
 # stop_cooldown.json（单数）互不可见；若后端接平仓写复数而 trader 消费单数，冷却
 # 静默失效。归一到既成事实文件名（两边 key/schema 本就同构）。
@@ -265,7 +286,11 @@ def is_circuit_breaker_active(usdt_available: Optional[float] = None, fetch_cand
             return True, f"熔断状态文件损坏，安全暂停开仓: {e}"
 
     if LEDGER_JSON_FILE.exists():
-        _failed_venues = _ledger_sync_failed_venues()
+        _failed_venues, _sidecar_unknown = _ledger_sync_sidecar_state()
+        if _sidecar_unknown:
+            # ⚠️ 如实披露：不可判定 ≠ 安全，但**当前不据此禁开仓**（待人工拍板方向）
+            print(f"[熔断] warn 台账跨所同步状态不可判定（{_sidecar_unknown}）——"
+                  "本轮当日亏损求和可能不完整；**当前不据此禁开仓**（已知缺口，待拍板）")
         if _failed_venues:
             return True, ("台账跨所同步不完整（失败所: " + ",".join(_failed_venues) +
                           "），当日亏损求和不可判全，安全暂停开仓")
