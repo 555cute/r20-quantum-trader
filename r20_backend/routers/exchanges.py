@@ -51,7 +51,9 @@ def _venue_account_unknown(status: str, reason: str) -> dict[str, Any]:
     out: dict[str, Any] = {"status": status, "reason": reason}
     for f in _VENUE_ACCOUNT_FIELDS:
         out[f] = None
-    out["last_sync_ts"] = None
+    # 第一百六十九刀：`last_sync_ts` → **`last_sync_ms`**（值一直是毫秒，名字在说谎）。
+    # 本字段只出现在本接口的响应里（不落盘），仓库内无旧名读者；前端 store 已同步改名。
+    out["last_sync_ms"] = None
     return out
 
 
@@ -100,7 +102,7 @@ def _venue_accounts_okx(environment: str) -> dict[str, Any]:
         out["available"] = avail_val
         out["positions_count"] = sum(1 for p in (pos or []) if abs(float(p.get("pos") or 0)) > 1e-12)
         out["open_orders_count"] = len(pend or [])
-        out["last_sync_ts"] = int(time.time() * 1000)
+        out["last_sync_ms"] = int(time.time() * 1000)
     except Exception as exc:
         return _venue_account_unknown("degraded", f"OKX 返回解析失败: {type(exc).__name__}: {exc}")
     return out
@@ -133,7 +135,7 @@ def _venue_accounts_gate(environment: str) -> dict[str, Any]:
             "available": float(acct.get("available_usdt") or 0),
             "positions_count": len(positions),
             "open_orders_count": len(open_rows if isinstance(open_rows, list) else []),
-            "last_sync_ts": int(time.time() * 1000),
+            "last_sync_ms": int(time.time() * 1000),
             "reason": f"Gate {gate_env} 档适配器直读",
         }
     except Exception as exc:
@@ -174,7 +176,7 @@ def _venue_accounts_binance(environment: str = "demo") -> dict[str, Any]:
             "available": float(acct.get("available_usdt") or 0.0),
             "positions_count": len(positions),
             "open_orders_count": len(open_rows if isinstance(open_rows, list) else []),
-            "last_sync_ts": int(time.time() * 1000),
+            "last_sync_ms": int(time.time() * 1000),
             "reason": f"Binance {bn_env} 档适配器直读",
         }
     except Exception as exc:

@@ -47,7 +47,7 @@ import scripts.okx_runtime as okx_runtime
 import r20_backend.exchanges as exchanges_pkg
 
 CONTRACT_KEYS = {"status", "equity", "available", "positions_count",
-                 "open_orders_count", "last_sync_ts", "reason"}
+                 "open_orders_count", "last_sync_ms", "reason"}
 
 
 class _StubGateAdapter:
@@ -176,7 +176,7 @@ class VenueAccountsEndpointTests(unittest.TestCase):
         self.net_sentry.assert_not_called()
         for key in ("okx", "gate", "binance"):
             self.assertEqual(v[key]["status"], "unavailable", key)
-            for f in ("equity", "available", "positions_count", "open_orders_count", "last_sync_ts"):
+            for f in ("equity", "available", "positions_count", "open_orders_count", "last_sync_ms"):
                 self.assertIsNone(v[key][f], f"{key}.{f} 未知必须为 None 不填 0")
             self.assertTrue(len(v[key]["reason"]) > 4, f"{key} 缺人话 reason")
 
