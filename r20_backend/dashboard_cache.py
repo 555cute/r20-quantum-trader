@@ -329,7 +329,8 @@ def update_cache_cycle():
     # 2.5 Multi-Venue Parity: Aggregate active positions & open orders from Binance & Gate
     # （阶段 2·B2 第七刀：整段迁至 dashboard_payload/multi_venue.py）
     long_count, short_count, total_pos_upl = _core_collect_cross_venue_positions(
-        positions, pending_orders_list, long_count, short_count, total_pos_upl)
+        positions, pending_orders_list, long_count, short_count, total_pos_upl,
+        source_errors=source_errors)
     # 3. Read Reset Initial State（阶段 2·B2 第九刀：迁至 dashboard_payload/reset_state.py）
     reset_time_str, initial_capital_val = _core_read_reset_initial_state(DATA_DIR)
     # 4. Load Bills and Real Order-Level Ledger

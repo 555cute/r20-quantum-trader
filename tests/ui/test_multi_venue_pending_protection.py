@@ -17,6 +17,7 @@ Binance/Gate 的 TP/SL **不在挂单对象里**（只有 OKX 有 `attachAlgoOrd
 from __future__ import annotations
 
 import sys
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -157,3 +158,156 @@ class PendingOrderProtectionDisplayTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CrossVenueProtectionVerdictTest(unittest.TestCase):
+    """第一百一十八刀：外所持仓也要有**保护度判据**（此前只有 OKX 有）。
+
+    实测的缺口：`collect_algo_protection` 给 OKX 持仓写 `protectionStatus`，
+    而外所持仓只有 `exchangeSl`/`exchangeTp` —— 面板上**看不出**"这笔 binance 空仓
+    到底有没有活止损"。而在 `R20_VENUE_PROTECTION_WATCHDOG` 默认关闭的当下
+    （唯一会复核外所腿的周期巡检），这个字段就是运营唯一的可见面。
+
+    判据直接复用已有专测的 `venue_protection.scan_protective_orders`
+    （腿**已经取回**，零新增交易所调用）。
+    """
+
+    def _run(self, algos, positions, *, readable=True, errors=None):
+        # ⚠️ 第一个入参是 **positions**（外所持仓会被 append 进去），
+        # 第二个是 pending_orders_list —— 别把两者写反（本门第一版就写反了，
+        # 于是持仓行全落进了被丢弃的列表里）。
+        got_positions: list = []
+        pending: list = []
+        ad = _FakeAdapter(open_orders=[], algos=algos, positions=positions)
+        if not readable:
+            ad.list_protective_orders = None       # 适配器不支持 ⇒ 读不到 ≠ 没保护
+        empty = _FakeAdapter(open_orders=[], algos=[])
+
+        def _pick(venue, *a, **k):
+            return ad if venue == "binance" else empty
+        errs = errors if errors is not None else []
+        with patch("r20_backend.exchanges.get_adapter", _pick), \
+             patch("r20_backend.dashboard_payload.multi_venue._global_env_axis",
+                   lambda: "demo"):
+            collect_cross_venue_positions(got_positions, pending, 0, 0, 0.0,
+                                          source_errors=errs)
+        return got_positions, errs
+
+    @staticmethod
+    def _pos(base="UNI", size=-82.0, entry=9.0, mark=8.9):
+        return [{"base": base, "symbol": f"{base}USDT", "size_signed": size,
+                 "side": "short" if size < 0 else "long",
+                 "entry_price": entry, "mark_price": mark, "leverage": 5}]
+
+    def test_unprotected_position_is_labelled_and_warned(self):
+        """有仓、零腿 ⇒ `unprotected` + `source_errors` 告警（这是最该吼的情形）。"""
+        pending, errs = self._run([], self._pos())
+        self.assertEqual(len(pending), 1)
+        row = pending[0]
+        self.assertEqual(row["protectionStatus"], "unprotected")
+        self.assertEqual(row["protectionCoveragePct"], 0.0)
+        self.assertEqual(row["protectionLegs"], 0)
+        self.assertTrue(any("没有活止损腿" in e for e in errs),
+                        f"无活止损必须有告警，实际 {errs}")
+
+    def test_fully_covered_position_is_labelled_without_warning(self):
+        algos = [_leg("UNIUSDT", "buy", "STOP_MARKET", 9.5, {"quantity": "82"}),
+                 _leg("UNIUSDT", "buy", "TAKE_PROFIT_MARKET", 8.4, {"quantity": "82"})]
+        pending, errs = self._run(algos, self._pos())
+        row = pending[0]
+        self.assertEqual(row["protectionStatus"], "fully_protected")
+        self.assertEqual(row["protectionCoveragePct"], 100.0)
+        self.assertEqual(row["protectionLegs"], 2)
+        self.assertEqual(errs, [], "已保护不得告警（永远在响的告警等于没有告警）")
+
+    def test_stale_wrong_size_leg_is_not_full_coverage(self):
+        """**旧量腿**（上一仓遗留，量不符）不得被算成满覆盖 —— 这正是实测隐患。"""
+        algos = [_leg("UNIUSDT", "buy", "STOP_MARKET", 9.5, {"quantity": "51"})]
+        pending, _ = self._run(algos, self._pos(size=-82.0))
+        row = pending[0]
+        self.assertNotEqual(row["protectionStatus"], "fully_protected")
+        self.assertLess(row["protectionCoveragePct"], 100.0)
+        self.assertGreater(row["protectionCoveragePct"], 0.0)
+
+    def test_unreadable_legs_are_unknown_not_unprotected(self):
+        """适配器不支持读腿 ⇒ `unknown` 且**不告警**（没有证据就不下结论）。"""
+        pending, errs = self._run([], self._pos(), readable=False)
+        row = pending[0]
+        self.assertEqual(row["protectionStatus"], "unknown")
+        self.assertEqual(errs, [], "读不到 ≠ 没保护，不得谎报缺口")
+
+    def test_expired_leg_does_not_count_as_live_stop(self):
+        """过期腿不算"有活止损"（Gate 腿带 7 天 `expiration`）。"""
+        past = int(time.time()) - 3600
+        algos = [_leg("UNIUSDT", "buy", "STOP_MARKET", 9.5,
+                      {"quantity": "82", "expiration": str(past)})]
+        pending, errs = self._run(algos, self._pos())
+        row = pending[0]
+        self.assertEqual(row["protectionExpiry"], "expired")
+        self.assertNotEqual(row["protectionStatus"], "fully_protected",
+                            "腿已过期 ⇒ 不得报'完全保护'")
+        self.assertTrue(any("没有活止损腿" in e for e in errs), "过期即缺口，必须告警")
+
+    def test_no_position_no_verdict_no_noise(self):
+        """空仓：不得凭空产生保护告警（否则每轮都在响）。"""
+        pending, errs = self._run([], [])
+        self.assertEqual(pending, [])
+        self.assertEqual(errs, [])
+
+    def test_leg_read_failure_keeps_position_visible_and_marks_unknown(self):
+        """⭐ 连带伤害修复：读腿抛错**不得**让该所的持仓从面板消失。
+
+        旧实现把 positions / open_orders / legs 挤在同一个 try 里 ⇒ 读腿失败会让
+        该所**整段跳过**（持仓也一起没了）——"读不到"被渲染成"没有仓位"。
+        """
+        class _Raising(_FakeAdapter):
+            def list_protective_orders(self, *a, **k):
+                raise RuntimeError("legs endpoint 500")
+
+        ad = _Raising(open_orders=[], algos=[], positions=self._pos())
+        empty = _FakeAdapter(open_orders=[], algos=[])
+        got_positions: list = []
+        errs: list = []
+        with patch("r20_backend.exchanges.get_adapter",
+                   lambda v, *a, **k: ad if v == "binance" else empty), \
+             patch("r20_backend.dashboard_payload.multi_venue._global_env_axis",
+                   lambda: "demo"):
+            collect_cross_venue_positions(got_positions, [], 0, 0, 0.0, source_errors=errs)
+        self.assertEqual(len(got_positions), 1, "读腿失败不得吞掉持仓行")
+        self.assertEqual(got_positions[0]["protectionStatus"], "unknown",
+                         "读不到腿 ⇒ 不可判定（不得宣称已保护，也不得宣称缺口）")
+        self.assertTrue(any("保护腿 binance" in e and "读取失败" in e for e in errs),
+                        f"读腿失败必须留痕，实际 {errs}")
+
+    def test_venue_read_failure_is_recorded_not_silent(self):
+        """某所持仓读取失败 ⇒ 面板要说明"这所本轮没并入"，而不是看起来什么都没发生。"""
+        class _Broken:
+            def positions(self):
+                raise RuntimeError("positions timeout")
+
+        empty = _FakeAdapter(open_orders=[], algos=[])
+        got_positions: list = []
+        errs: list = []
+        with patch("r20_backend.exchanges.get_adapter",
+                   lambda v, *a, **k: _Broken() if v == "binance" else empty), \
+             patch("r20_backend.dashboard_payload.multi_venue._global_env_axis",
+                   lambda: "demo"):
+            collect_cross_venue_positions(got_positions, [], 0, 0, 0.0, source_errors=errs)
+        self.assertEqual(got_positions, [])
+        self.assertTrue(any("跨所 binance" in e and "读取失败" in e for e in errs),
+                        f"该所读取失败必须留痕，实际 {errs}")
+
+    def test_other_symbol_legs_do_not_satisfy_coverage(self):
+        """⭐ 别的币的腿不得被算成本仓的保护（本刀真机实测踩到：UNI 一度算到 11 张腿）。
+
+        `_protection_verdict` 拿的是**该所全量腿**，所以必须开
+        `scan_protective_orders(require_symbol_match=True)`。
+        """
+        algos = [_leg("ETHUSDT", "buy", "STOP_MARKET", 3000.0, {"quantity": "82"}),
+                 _leg("SOLUSDT", "buy", "STOP_MARKET", 100.0, {"quantity": "82"})]
+        pending, errs = self._run(algos, self._pos(base="UNI", size=-82.0))
+        row = pending[0]
+        self.assertEqual(row["protectionStatus"], "unprotected",
+                         "别的币的腿把覆盖满足了 ⇒ 面板会说谎")
+        self.assertEqual(row["protectionLegs"], 0)
+        self.assertTrue(any("没有活止损腿" in e for e in errs))

@@ -6,10 +6,12 @@
 """
 from __future__ import annotations
 
+import time
+
 from r20_backend.dashboard_payload.market import _global_env_axis
 from r20_backend.exchanges.base import canonical_base
 
-__all__ = ["collect_cross_venue_positions"]
+__all__ = ["collect_cross_venue_positions", "_protection_verdict"]
 
 
 def _protection_triggers(algos, base_sym, opposite_side):
@@ -71,8 +73,70 @@ def _protection_triggers(algos, base_sym, opposite_side):
     return sl_val, tp_val
 
 
+def _protection_verdict(algos, base_sym, pos_side, pos_size, *, readable,
+                       source_errors=None, venue="", inst_id=""):
+    """外所持仓的保护判据 → 面板字段（复用纯判定，不新增交易所调用）。
+
+    诚实边界见 `collect_cross_venue_positions` docstring：不可判定/读不到 ⇒ `unknown`
+    且**不告警**（没有证据就不下结论）；过期腿不计入"有活止损"。
+    """
+    out = {"protectionStatus": "unknown", "protectionCoveragePct": None,
+           "protectionExpiry": "unknown", "protectionLegs": 0}
+    if not readable:
+        return out
+    try:
+        from scripts.trader.venue_protection import scan_protective_orders
+        # ⚠️ 传进来的是**该所全量腿**（positions 一次拉全量）⇒ 必须开
+        # `require_symbol_match`，否则**别的币的腿也会被算进覆盖**
+        # （本刀真机实测：UNI 空仓一度算到 11 张腿，其中大部分是 ETH/SOL/XRP 的）。
+        # `scan_protective_orders` 的 docstring 明确：该开关正是给"一次拉全量"的调用方。
+        v = scan_protective_orders(algos, symbol=base_sym, pos_side=pos_side,
+                                   position_size=pos_size, now_s=time.time(),
+                                   require_symbol_match=True)
+    except Exception:
+        return out
+    ours = list(v.get("ours") or [])
+    live = [l for l in ours
+            if not (isinstance(l.get("remaining_s"), (int, float))
+                    and float(l["remaining_s"]) <= 0)]
+    has_live_sl = any(l.get("kind") == "sl" for l in live)
+    coverage_ok = v.get("coverage_ok")
+    covered = v.get("covered_size")
+    size = max(0.0, float(pos_size or 0.0))
+    if coverage_ok is None:
+        status = "unknown"
+    elif coverage_ok and has_live_sl:
+        status = "fully_protected"
+    elif live:
+        status = "partially_protected"
+    else:
+        status = "unprotected"
+    if covered is not None and size > 0:
+        pct = round(min(100.0, max(0.0, float(covered) / size * 100.0)), 1)
+    else:
+        pct = None
+    if v.get("expired"):
+        expiry = "expired"
+    elif v.get("expiring"):
+        expiry = "expiring"
+    elif ours and all(l.get("expiry_state") == "never" for l in ours):
+        expiry = "never"
+    elif v.get("expiry_unknown"):
+        expiry = "unknown"
+    else:
+        expiry = "unknown"
+    out.update({"protectionStatus": status, "protectionCoveragePct": pct,
+                "protectionExpiry": expiry, "protectionLegs": len(ours)})
+    if source_errors is not None and not has_live_sl and status != "unknown":
+        source_errors.append(
+            f"保护缺口 {venue} {inst_id}: 该持仓**没有活止损腿**"
+            f"（云端腿缺失/被外部撤销/已到期；保护巡检 R20_VENUE_PROTECTION_WATCHDOG 默认关闭）")
+    return out
+
+
 def collect_cross_venue_positions(positions, pending_orders_list,
-                                  long_count, short_count, total_pos_upl):
+                                  long_count, short_count, total_pos_upl,
+                                  *, source_errors=None):
     """把 Binance/Gate 的持仓与挂单并入 OKX 主视野（就地追加，返回累计计数）。
 
     原样搬自 update_cache_cycle 的「2.5 Multi-Venue Parity」段：
@@ -81,6 +145,23 @@ def collect_cross_venue_positions(positions, pending_orders_list,
     - 整段被 try/except Exception: pass 包裹（跨所接口不可用时静默降级，
       绝不影响主缓存）—— 包括那句**函数内**的 `from r20_backend.exchanges import`，
       保持惰性导入：exchanges 导入期若出错，也落在同一个 except 里。
+
+    ## 第一百一十八刀：外所持仓也带**保护度判据**（此前只有 OKX 有）
+
+    `collect_algo_protection` 会给 **OKX** 持仓写 `protectionStatus` /
+    `protectionCoveragePct`，而本函数此前只写 `exchangeSl`/`exchangeTp`
+    —— 面板上外所持仓**没有保护状态**，运营看不出"这笔 binance 空仓到底有没有活止损"。
+    现在复用**已经取回**的 `v_algos`（零新增交易所调用）跑
+    `venue_protection.scan_protective_orders`（纯判定、已有专测），得到：
+    `protectionStatus`（fully/partially/unprotected/unknown）、
+    `protectionCoveragePct`、`protectionExpiry`（never/expiring/expired/unknown）、
+    `protectionLegs`。并在"读到了腿但**没有活止损**"时把告警 append 进 `source_errors`
+    （入参原地改，与 `collect_algo_protection` 同一套）。
+
+    ⚠️ 三条诚实边界：
+    - **不可判定 ≠ 安全**：`coverage_ok is None`（腿量读不出）⇒ `unknown`，不写"已保护"；
+    - **没读成 ≠ 没保护**：适配器没有 `list_protective_orders` ⇒ `unknown` + 不告警；
+    - **过期腿不算保护**：`remaining_s <= 0` 的腿不计入"有活止损"（Gate 腿 7 天到期）。
     """
     try:
         from r20_backend.exchanges import get_adapter, is_registered
@@ -90,7 +171,19 @@ def collect_cross_venue_positions(positions, pending_orders_list,
                 ad = get_adapter(v_name, environment=env_axis)
                 v_positions = ad.positions() if hasattr(ad, "positions") else []
                 v_open_orders = ad.open_orders() if hasattr(ad, "open_orders") else []
-                v_algos = ad.list_protective_orders() if hasattr(ad, "list_protective_orders") else []
+                # ⚠️ 保护腿读取**必须单独兜底**（第一百一十八刀实测的连带伤害）：
+                # 它原本跟 positions/open_orders 挤在同一个 try 里 ⇒ 只要读腿抛错，
+                # **该所的持仓与挂单会一起从面板消失**（"读不到"被渲染成"没有仓位"）。
+                # 分开兜底后：腿读不到 ⇒ 保护判据 `unknown`（不宣称已保护），
+                # 持仓/挂单照旧展示。
+                _legs_readable = callable(getattr(ad, "list_protective_orders", None))
+                try:
+                    v_algos = ad.list_protective_orders() if _legs_readable else []
+                except Exception as _leg_exc:
+                    v_algos, _legs_readable = [], False
+                    if source_errors is not None:
+                        source_errors.append(
+                            f"保护腿 {v_name}: 读取失败（保护状态不可判定）: {str(_leg_exc)[:80]}")
 
                 for vp in (v_positions or []):
                     amt = float(vp.get("size_signed", 0) or 0)
@@ -133,7 +226,15 @@ def collect_cross_venue_positions(positions, pending_orders_list,
                     # Check cloud OCO protective orders (Binance & Gate unified)
                     _opp_side = "sell" if "long" in v_pos_side else "buy"
                     v_sl, v_tp = _protection_triggers(v_algos, base_sym, _opp_side)
+                    # 保护度判据（复用已取回的腿，零新增调用）——见函数 docstring
+                    _prot = _protection_verdict(
+                        v_algos, base_sym, v_pos_side, v_sz,
+                        readable=_legs_readable, source_errors=source_errors,
+                        venue=v_name, inst_id=v_inst_id)
 
+                    #: 保护判据字段（与 OKX 路径同名，面板/AI 可统一读）
+                    for _k, _v in _prot.items():
+                        vp[_k] = _v
                     positions.append({
                         "venue": v_name,
                         "exchange": v_name,
@@ -156,13 +257,26 @@ def collect_cross_venue_positions(positions, pending_orders_list,
                         "liqPx": vp.get("liq_price", "--"),
                         "bePx": "--",
                         "trailingSl": v_sl,
-                        "stageDesc": "云端双腿防护中" if (v_sl and v_tp) else "持有监控中",
+                        "stageDesc": ("云端双腿防护中" if _prot["protectionStatus"] == "fully_protected"
+                                      else "⚠️ 无活止损腿" if _prot["protectionStatus"] == "unprotected"
+                                      else "保护待核验" if _prot["protectionStatus"] == "unknown"
+                                      else "持有监控中"),
                         "strategyTag": f"🏛️ {v_name.capitalize()}",
                         "exchangeSl": v_sl,
                         "exchangeTp": v_tp,
-                        "protectionStatus": "fully_protected" if (v_sl and v_tp) else ("partially_protected" if (v_sl or v_tp) else "unprotected"),
-                        "protectionCoveragePct": 100.0 if (v_sl and v_tp) else (50.0 if (v_sl or v_tp) else 0.0),
-                        "cloud_oco_verified": bool(v_sl and v_tp),
+                        # ⚠️ 第一百一十八刀改判：此前是
+                        # `"fully_protected" if (v_sl and v_tp)` —— 只看"有没有腿"，
+                        # **不看量、不看是否 live、不看是否过期** ⇒ 一张**旧量/过期**腿
+                        # 也会被面板报成"完全保护"（实测隐患：Binance 13 张腿里只有 2 张
+                        # 对得上活动仓）。现在用 `_protection_verdict`（复用
+                        # `scan_protective_orders` 的**量+存活+到期**判据）。
+                        "protectionStatus": _prot["protectionStatus"],
+                        "protectionCoveragePct": _prot["protectionCoveragePct"],
+                        "protectionExpiry": _prot["protectionExpiry"],
+                        "protectionLegs": _prot["protectionLegs"],
+                        #: `exchangeSl`/`exchangeTp` 仍是"首个匹配腿的触发价"（供展示与
+                        #: 因子取用）；它**不代表覆盖有效** —— 是否有效看 `protectionStatus`。
+                        "cloud_oco_verified": _prot["protectionStatus"] == "fully_protected",
                         "account_mode": env_axis.upper(),
                         "environment": env_axis.lower(),
                     })
@@ -246,8 +360,13 @@ def collect_cross_venue_positions(positions, pending_orders_list,
                         "account_mode": env_axis.upper(),
                         "environment": env_axis.lower(),
                     })
-            except Exception:
-                pass
+            except Exception as _v_exc:
+                # 第一百一十八刀：此前这里是**裸 pass** —— 某所持仓读取失败时
+                # 面板只是"少了几行"，看不出"这所根本没读到"（读不到 ≠ 没有仓）。
+                # 现在如实进 source_errors（不改降级行为：主缓存照旧不受影响）。
+                if source_errors is not None:
+                    source_errors.append(
+                        f"跨所 {v_name}: 持仓/挂单读取失败（该所本轮未并入面板）: {str(_v_exc)[:80]}")
     except Exception:
         pass
     return long_count, short_count, total_pos_upl
