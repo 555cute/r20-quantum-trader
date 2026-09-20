@@ -128,9 +128,9 @@ def is_circuit_breaker_active(usdt_available: float = None, *, circuit_breaker_f
                 _ledger_sync_sidecar_state as _sidecar_state)
             _failed_venues, _sidecar_unknown = _sidecar_state()
             if _sidecar_unknown:
-                # 与模块版同源披露（第一百四十四刀）：不可判定 ≠ 安全，但当前不禁开仓
-                print(f"[熔断] warn 台账跨所同步状态不可判定（{_sidecar_unknown}）——"
-                      "本轮当日亏损求和可能不完整；**当前不据此禁开仓**（已知缺口，待拍板）")
+                # 与模块版同源（第一百四十四刀，用户拍板 fail-closed）：不可判定 ⇒ 禁开仓
+                return True, (f"台账同步状态不可判定（{_sidecar_unknown}）⇒ "
+                              "当日亏损求和不可判全，安全暂停开仓")
             if _failed_venues:
                 return True, ("台账跨所同步不完整（失败所: " + ",".join(_failed_venues) +
                               "），当日亏损求和不可判全，安全暂停开仓")

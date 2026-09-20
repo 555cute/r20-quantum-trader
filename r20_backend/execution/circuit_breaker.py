@@ -288,9 +288,11 @@ def is_circuit_breaker_active(usdt_available: Optional[float] = None, fetch_cand
     if LEDGER_JSON_FILE.exists():
         _failed_venues, _sidecar_unknown = _ledger_sync_sidecar_state()
         if _sidecar_unknown:
-            # ⚠️ 如实披露：不可判定 ≠ 安全，但**当前不据此禁开仓**（待人工拍板方向）
-            print(f"[熔断] warn 台账跨所同步状态不可判定（{_sidecar_unknown}）——"
-                  "本轮当日亏损求和可能不完整；**当前不据此禁开仓**（已知缺口，待拍板）")
+            # ⚠️ 用户拍板 fail-closed（第一百四十四刀）：**不可判定 ≠ 安全** ——
+            # 旁车损坏/过旧 ⇒ "跨所同步是否完整"无从得知 ⇒ 当日亏损求和可能不完整，
+            # 此时必须禁开仓（仓位管理与既有保护不受影响）。
+            return True, (f"台账同步状态不可判定（{_sidecar_unknown}）⇒ 当日亏损求和不可判全，"
+                          "安全暂停开仓")
         if _failed_venues:
             return True, ("台账跨所同步不完整（失败所: " + ",".join(_failed_venues) +
                           "），当日亏损求和不可判全，安全暂停开仓")

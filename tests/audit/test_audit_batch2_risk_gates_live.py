@@ -110,12 +110,19 @@ class TestTraderBreakerLiveWiring(unittest.TestCase):
         self.assertFalse(active)
 
     def test_corrupt_sidecar_fails_closed_in_trader(self):
+        """旁车**损坏** ⇒ trader 侧熔断判定必须 **fail-closed（禁开仓）**。
+
+        ⚠️ 契约变更（2026-09-20，第一百四十四刀，**用户拍板**）：此前本用例断言
+        `assertFalse(active)`（与旧注释"损坏→[]（不误停）"一致）—— 而"损坏"其实是
+        **不可判定**（跨所同步是否完整无从得知），把它读成"各所正常"正是
+        "不可判定 ≠ 安全"要禁止的。名字本来就写着 `fails_closed`，现在行为与名字一致。
+        """
         os.makedirs(self.tmp, exist_ok=True)
         with open(os.path.join(self.tmp, "ledger_sync_status.json"), "w") as f:
             f.write("{half")
-        # 模块版语义：损坏→读不到 failed→[]（不误停）；但 JSONDecodeError 亦被吞——与 A2 设计一致
-        active, _ = self._run([_closed_row(-10.0, "demo")])
-        self.assertFalse(active)
+        active, reason = self._run([_closed_row(-10.0, "demo")])
+        self.assertTrue(active, "不可判定 ⇒ fail-closed（用户拍板）")
+        self.assertIn("不可判定", reason)
 
 
 class TestRoutingPolicySingleSource(unittest.TestCase):

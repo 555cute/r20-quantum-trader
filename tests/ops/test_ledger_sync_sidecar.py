@@ -116,16 +116,17 @@ class BreakerSidecarTests(unittest.TestCase):
             self.assertFalse(active, f"未配置凭证的免密行情所导致了误熔断: {reason}")
 
 
-class SidecarUnknownIsDisclosedTest(unittest.TestCase):
-    """旁车"不可判定"必须**暴露**出来（第一百四十四刀）。
+class SidecarUnknownIsFailClosedTest(unittest.TestCase):
+    """旁车"不可判定" ⇒ **禁开仓**（第一百四十四刀，用户拍板 fail-closed）。
 
-    背景（本刀修正的一处不实陈述）：旧 docstring 声称"过旧由 ledger 文件
-    file_health 的 STALE 通道兜底"，但**两个调用方都没有**任何 STALE 检查
-    （全仓 grep 只命中那句注释本身）⇒ 该补偿不存在，`[]` 会被读成"各所同步都正常"。
+    背景：旧 docstring 声称"过旧由 ledger 的 file_health STALE 通道兜底"，但两个调用方
+    都没有该检查 ⇒ 旁车损坏/过旧会被读成"各所同步正常"，当日亏损求和可能不完整却**不熔断**。
 
-    本刀**不改行为**（仍不禁开仓），只把"不可判定"变成**可见**：
-    调用方打印 warn，并留待人工决定是否改为 fail-closed。契约保持兼容：
-    `_ledger_sync_failed_venues()` 与既有测试（缺失/过旧 ⇒ 不熔断）原样成立。
+    用户拍板方向：**不可判定 ≠ 安全** ⇒ 旁车损坏/过旧一律安全暂停开仓
+    （仓位管理与既有保护单不受影响；旁车恢复后自动解除）。
+
+    兼容契约保留：`_ledger_sync_failed_venues()`（壳）与既有"缺失/过旧 ⇒ 不列出"的用例不变；
+    方向体现在**调用方**而不是这个壳上。
     """
 
     def setUp(self):
@@ -154,40 +155,42 @@ class SidecarUnknownIsDisclosedTest(unittest.TestCase):
                         "venues": venues}), encoding="utf-8")
 
     def test_missing_sidecar_is_known_empty_not_unknown(self):
+        """全新环境尚未同步过 ⇒ 不算不可判定（否则会把开仓全停）。"""
         failed, unknown = cb._ledger_sync_sidecar_state()
-        self.assertEqual((failed, unknown), ([], ""),
-                         "全新环境尚未同步过 ⇒ 不算不可判定（否则会把开仓全停）")
+        self.assertEqual((failed, unknown), ([], ""))
+        active, reason = cb.is_circuit_breaker_active(usdt_available=1000.0)
+        self.assertFalse(active, reason)
 
-    def test_stale_sidecar_is_flagged_unknown_but_keeps_old_behaviour(self):
+    def test_stale_sidecar_blocks_new_entries(self):
         self._write_sidecar({"binance": {"status": "failed"}}, minutes_ago=60)
         failed, unknown = cb._ledger_sync_sidecar_state()
-        self.assertEqual(failed, [], "兼容：既有契约仍不列出（过旧场景）")
+        self.assertEqual(failed, [], "兼容：壳仍不列出（过旧场景）")
         self.assertIn("过旧", unknown)
-        self.assertEqual(cb._ledger_sync_failed_venues(), [],
-                         "兼容壳与既有测试契约不变")
         active, reason = cb.is_circuit_breaker_active(usdt_available=1000.0)
-        self.assertFalse(active, "本刀**不改行为**（是否改 fail-closed 待拍板）")
+        self.assertTrue(active, "不可判定 ⇒ fail-closed（用户拍板）")
+        self.assertIn("不可判定", reason)
+        self.assertIn("暂停开仓", reason)
 
-    def test_corrupt_sidecar_is_flagged_unknown(self):
+    def test_corrupt_sidecar_blocks_new_entries(self):
         (self.root / "ledger_sync_status.json").write_text("{ 半截", encoding="utf-8")
         failed, unknown = cb._ledger_sync_sidecar_state()
         self.assertEqual(failed, [])
         self.assertIn("损坏", unknown)
+        active, reason = cb.is_circuit_breaker_active(usdt_available=1000.0)
+        self.assertTrue(active)
+        self.assertIn("不可判定", reason)
 
-    def test_callers_disclose_the_unknown_state(self):
-        """两个调用方（模块版 + trader 孪生版）都必须**打印**这一不可判定。"""
-        import io
-        from contextlib import redirect_stdout
-        self._write_sidecar({"binance": {"status": "failed"}}, minutes_ago=60)
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            cb.is_circuit_breaker_active(usdt_available=1000.0)
-        self.assertIn("不可判定", buf.getvalue())
-        self.assertIn("不据此禁开仓", buf.getvalue(), "披露必须说清当前方向（否则读者不知道挡没挡）")
+    def test_fresh_healthy_sidecar_still_does_not_trip(self):
+        """回归护栏：健康旁车不得被新逻辑误伤。"""
+        self._write_sidecar({"okx": {"status": "ok"}, "binance": {"status": "ok"}})
+        active, reason = cb.is_circuit_breaker_active(usdt_available=1000.0)
+        self.assertFalse(active, reason)
+
+    def test_twin_caller_shares_the_same_direction(self):
+        """trader 孪生版必须同源（防孪生漂移：一处禁、一处不禁）。"""
         twin = (Path(__file__).resolve().parents[2] / "scripts" / "trader"
                 / "circuit_guard.py").read_text(encoding="utf-8")
-        self.assertIn("_ledger_sync_sidecar_state", twin, "孪生调用方漏了（孪生漂移）")
-        self.assertIn("不据此禁开仓", twin)
-
-if __name__ == "__main__":
-    unittest.main()
+        self.assertIn("_ledger_sync_sidecar_state", twin)
+        self.assertIn("不可判定", twin)
+        self.assertIn('return True, (f"台账同步状态不可判定', twin,
+                      "孪生版必须同样 fail-closed（返回 True），而不是只打印")

@@ -68,15 +68,15 @@ def _normalize(node: ast.AST) -> str:
 #: 本刀唯一一条：`is_circuit_breaker_active` 里把"台账同步旁车**不可判定**"
 #: （旁车损坏/过旧）**如实披露**出来。旧 docstring 声称这类场景由 ledger 的
 #: file_health STALE 通道兜底，但两个调用方都没有该检查（全仓 grep 只命中那句注释）
-#: ⇒ 补偿不存在。本刀**不改行为**（仍不禁开仓），只让它可见。
+#: ⇒ 补偿不存在。用户拍板 **fail-closed**：不可判定 ⇒ 禁开仓（可见 + 有行为）。
 DELTA_REWRITES = (
     ("""            from r20_backend.execution.circuit_breaker import (
                 _ledger_sync_sidecar_state as _sidecar_state)
             _failed_venues, _sidecar_unknown = _sidecar_state()
             if _sidecar_unknown:
-                # 与模块版同源披露（第一百四十四刀）：不可判定 ≠ 安全，但当前不禁开仓
-                print(f"[熔断] warn 台账跨所同步状态不可判定（{_sidecar_unknown}）——"
-                      "本轮当日亏损求和可能不完整；**当前不据此禁开仓**（已知缺口，待拍板）")
+                # 与模块版同源（第一百四十四刀，用户拍板 fail-closed）：不可判定 ⇒ 禁开仓
+                return True, (f"台账同步状态不可判定（{_sidecar_unknown}）⇒ "
+                              "当日亏损求和不可判全，安全暂停开仓")
 """,
      """            _failed_venues = _ledger_sync_failed_venues()
 """),
