@@ -116,6 +116,42 @@ class EntryExecutionVerbatimTest(unittest.TestCase):
         self.assertEqual(up.count("追踪器缺失"), 2,
                          "两处都要把'未知'说清楚（不许让 gate 的'已达上限'文案冒充事实）")
 
+    def test_factor_schema_covers_entry_path_subscripts(self):
+        """因子基座必须覆盖入场路径**无条件下标**的键（第一百三十九刀）。
+
+        为什么：入场循环与它的上游 `fetch_universe_and_manage_positions` 用的是
+        `f["position"]` / `f["price"]` / `f["atr"]` / `f["ctVal"]` **直接下标**（不是 `.get`）。
+        这些键只由 `factors.fetch_single_instrument_data` 的**一个字面量基座**提供：
+        基座少一个键、或将来出现第二个生产者，就会在**周期中途**抛 KeyError
+        ⇒ 入场循环之后的相位（落盘/台账/面板）整段被跳过 —— 而门禁此前只钉"代码搬运逐字"，
+        不钉"输入形状"。
+
+        判据从 AST 推导（入场路径新读一个键 ⇒ 本门自动跟进），并自带失效自检。
+        """
+        builder_src = (ROOT / "scripts/trader/factors.py").read_text(encoding="utf-8")
+        builder = next(n for n in ast.parse(builder_src).body
+                       if isinstance(n, ast.FunctionDef)
+                       and n.name == "fetch_single_instrument_data")
+        provided = {k.value for d in ast.walk(builder) if isinstance(d, ast.Dict)
+                    for k in d.keys
+                    if isinstance(k, ast.Constant) and isinstance(k.value, str)}
+
+        def _subs(node):
+            return {n.slice.value for n in ast.walk(node)
+                    if isinstance(n, ast.Subscript) and isinstance(n.value, ast.Name)
+                    and n.value.id == "f" and isinstance(n.ctx, ast.Load)
+                    and isinstance(n.slice, ast.Constant)
+                    and isinstance(n.slice.value, str)}
+
+        needed = _subs(_impl_fn().body[0])          # 提取后的入场循环
+        needed |= _subs(ast.parse(                    # 上游相位（同一批因子）
+            (ROOT / "scripts/trader/cycle_stages.py").read_text(encoding="utf-8")))
+        self.assertTrue({"position", "ctVal", "price", "atr"} <= needed,
+                        f"判据失效：没抓到预期下标（实际抓到 {sorted(needed)}）")
+        self.assertEqual(sorted(needed - provided), [],
+                         "因子基座缺这些键 ⇒ 入场路径会在**周期中途** KeyError："
+                         f"{sorted(needed - provided)}")
+
     def test_facade_call_passes_every_parameter_once_same_name(self):
         params = [a.arg for a in _impl_fn().args.kwonlyargs]
         self.assertEqual(len(params), 41, "参数个数变了？")
