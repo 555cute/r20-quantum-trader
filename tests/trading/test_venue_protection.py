@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 import tempfile
+import re
 import unittest
 from unittest.mock import MagicMock, call
 
@@ -807,6 +808,111 @@ class WatchdogStageDebounceTest(unittest.TestCase):
         self.assertEqual(calls, [True], "预演下绝不出现真写轮")
         self.assertTrue(any("预演" in a for a in actions))
         self.assertFalse(any("续期完成" in a for a in actions))
+
+
+class WatchdogReportShapeContractTest(unittest.TestCase):
+    """跨所保护**报告形状**契约（第一百四十刀，为 G8 开闸做准备）。
+
+    背景：`venue_protection_watchdog_stage` 渲染 `report["actions"]` / `report["critical"]`
+    时用的是**直接下标**（`item['venue']`/`['inst']`/`['detail']`/`['side']`），而这两个列表
+    由 `venue_protection.py` 的巡检在**多条路径**上 append（扫描路径 / ensure 路径）。
+    一旦某条路径的 item 少一个键，渲染处就 **KeyError** —— 该异常发生在**周期中途**
+    （保护巡检之后还有落盘/台账/面板相位），且只在 watchdog **开闸后**才会走到
+    （G8 正待开闸），属"开闸才炸"的隐患。
+
+    本门从 AST 推导两边的形状并逐个 append 站点核对（含"`item = {...}` 后再 append"的
+    数据流：取该 append **之前最近一次**赋值），判据随代码演进自动跟进。
+    """
+
+    _CONSUMER = ("scripts/trader/cycle_stages.py", "venue_protection_watchdog_stage")
+    _PRODUCER = ("scripts/trader/venue_protection.py", "audit_cross_venue_protection")
+
+    def _consumer_needs(self, key):
+        import ast as _ast
+        from pathlib import Path as _P
+        rel, fn = self._CONSUMER
+        src_text = (_P(__file__).resolve().parents[2] / rel).read_text(encoding="utf-8")
+        tree = _ast.parse(src_text)
+        node = next(n for n in _ast.walk(tree)
+                    if isinstance(n, _ast.FunctionDef) and n.name == fn)
+        for_loops = [n for n in _ast.walk(node)
+                     if isinstance(n, _ast.For)
+                     and isinstance(n.iter, _ast.BoolOp)
+                     and any(isinstance(v, _ast.Call) and isinstance(v.func, _ast.Attribute)
+                             and v.func.attr == "get"
+                             and v.args and isinstance(v.args[0], _ast.Constant)
+                             and v.args[0].value == key
+                             for v in n.iter.values)]
+        needs = set()
+        for loop in for_loops:
+            var = loop.target.id if isinstance(loop.target, _ast.Name) else None
+            for n in _ast.walk(loop):
+                if (isinstance(n, _ast.Subscript) and isinstance(n.ctx, _ast.Load)
+                        and isinstance(n.value, _ast.Name) and n.value.id == var
+                        and isinstance(n.slice, _ast.Constant)
+                        and isinstance(n.slice.value, str)):
+                    needs.add(n.slice.value)
+            # ⚠️ 本仓是 Python 3.11：**f-string 内的表达式不是 AST 节点**（3.12 起才是），
+            # 而这两处渲染正好写在 f-string 里 ⇒ 必须补一次源码文本扫描，否则
+            # "啥都没抓到 ⇒ 空集恒过"（本门自检会翻红，此处即为该自检抓到的一次）。
+            seg = _ast.get_source_segment(src_text, loop) or ""
+            needs |= {m.group(1) for m in re.finditer(
+                rf"\b{var}\[['\"]([A-Za-z_][A-Za-z0-9_]*)['\"]\]", seg)}
+        return needs
+
+    def _producer_sites(self, key):
+        import ast as _ast
+        from pathlib import Path as _P
+        rel, fn = self._PRODUCER
+        tree = _ast.parse((_P(__file__).resolve().parents[2] / rel).read_text(encoding="utf-8"))
+        node = next(n for n in _ast.walk(tree)
+                    if isinstance(n, _ast.FunctionDef) and n.name == fn)
+        assigns = [(n.lineno, n.targets[0].id, {k.value for k in n.value.keys
+                                                if isinstance(k, _ast.Constant)})
+                   for n in _ast.walk(node)
+                   if isinstance(n, _ast.Assign) and isinstance(n.value, _ast.Dict)
+                   and len(n.targets) == 1 and isinstance(n.targets[0], _ast.Name)]
+        out = []
+        for call in _ast.walk(node):
+            if not (isinstance(call, _ast.Call) and isinstance(call.func, _ast.Attribute)
+                    and call.func.attr == "append"):
+                continue
+            sub = call.func.value
+            if not (isinstance(sub, _ast.Subscript) and isinstance(sub.value, _ast.Name)
+                    and sub.value.id == "report"
+                    and isinstance(sub.slice, _ast.Constant) and sub.slice.value == key):
+                continue
+            arg = call.args[0] if call.args else None
+            if isinstance(arg, _ast.Dict):
+                keys = {k.value for k in arg.keys if isinstance(k, _ast.Constant)}
+            elif isinstance(arg, _ast.Name):
+                prior = [a for a in assigns if a[0] < call.lineno and a[1] == arg.id]
+                # ⚠️ 必须按**行号**取最近一次赋值：ast.walk 是 BFS，顺序不等于行序
+                # （同一函数里 `item` 被赋值两次：扫描路径 / ensure 路径）
+                keys = max(prior, key=lambda a: a[0])[2] if prior else None
+            else:
+                keys = None
+            out.append((call.lineno, keys))
+        return out, {a[1] for a in assigns}
+
+    def test_actions_and_critical_items_carry_every_key_the_renderer_derefs(self):
+        for key, must_have in (("actions", {"venue", "inst", "detail"}),
+                               ("critical", {"venue", "inst", "side"})):
+            with self.subTest(report_key=key):
+                needs = self._consumer_needs(key)
+                self.assertTrue(must_have <= needs,
+                                f"判据失效：没抓到 {key} 渲染处的下标（实际 {sorted(needs)}）")
+                sites, _names = self._producer_sites(key)
+                self.assertTrue(sites, f"判据失效：没找到 report['{key}'].append(...) 站点")
+                for lineno, keys in sites:
+                    self.assertIsNotNone(
+                        keys, f"{self._PRODUCER[0]}:{lineno} 的 append 参数解析不出键集"
+                              "（新增了别的形态？请扩展本门）")
+                    self.assertEqual(
+                        sorted(needs - keys), [],
+                        f"{self._PRODUCER[0]}:{lineno} 这条路径的 item 缺 "
+                        f"{sorted(needs - keys)} ⇒ 渲染处会在**周期中途** KeyError"
+                        f"（且只在 watchdog 开闸后才会走到）")
 
 if __name__ == "__main__":
     unittest.main()
