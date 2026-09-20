@@ -10,7 +10,7 @@ OKX 的算法单触发价可以按三种价格类型触发：`last`（最新成�
 
 | 事实 | 证据 |
 |---|---|
-| **入场附着路径不发送** `tpTriggerPxType`/`slTriggerPxType` | `okx_rest.place_order` 的 `attach_tp/attach_sl` 只写触发价与委托价（既有用例逐字钉住 payload）|
+| **入场附着路径显式发送 `mark`**（第一百六十六刀用户拍板）| `place_order(attach_tp/attach_sl)` 写入 `tp/slTriggerPxType = attach_trigger_px_type`（默认 `mark`，可覆盖）|
 | **修正路径支持并校验**该类型 | `amend_algo_sl` 透传 `new_tp/sl_trigger_px_type`；`_validate_payload` 只接受 `last/index/mark` |
 | 全仓**没有任何**地方读写该字段的"当前生效值" | 面板/提示词均不显示 ⇒ 操作员无法分辨某条腿按什么价触发 |
 | 仓内**未核实**交易所默认值 | 本环境 web 搜索不可用 ⇒ 不凭记忆写死（已登记 `docs/FAILURE_SEMANTICS.md` §6）|
@@ -71,15 +71,25 @@ class TriggerPriceTypeSemanticsTest(unittest.TestCase):
     def _body(self):
         return _body(self.urlopen)
 
-    def test_attach_path_does_not_silently_add_a_trigger_type(self):
+    def test_attach_path_sends_mark_explicitly(self):
+        """用户拍板：入场保护腿按**标记价**触发（不再依赖未核实的交易所默认）。"""
         okx.place_order("BTC-USDT-SWAP", "buy", "1", td_mode="cross", pos_side="long",
                         ord_type="limit", px="100", attach_tp="120", attach_sl="90")
         leg = self._body()["attachAlgoOrds"][0]
-        self.assertEqual(set(leg), {"tpTriggerPx", "tpOrdPx", "slTriggerPx", "slOrdPx"},
-                         "附着路径的字段集变了 ⇒ 触发语义可能随之改变（需有意识地更新本门）")
-        for forbidden in ("tpTriggerPxType", "slTriggerPxType"):
-            self.assertNotIn(forbidden, leg,
-                             f"{forbidden} 被隐式加入 ⇒ 触发价类型不再由交易所默认决定")
+        self.assertEqual(leg["tpTriggerPxType"], "mark")
+        self.assertEqual(leg["slTriggerPxType"], "mark")
+        # 只给 SL 时不得凭空塞 TP 类型（类型只跟着各自的触发价走）
+        okx.place_order("BTC-USDT-SWAP", "buy", "1", td_mode="cross", pos_side="long",
+                        ord_type="limit", px="100", attach_sl="90")
+        leg2 = self._body()["attachAlgoOrds"][0]
+        self.assertEqual(set(leg2), {"slTriggerPx", "slOrdPx", "slTriggerPxType"})
+
+    def test_type_can_be_overridden_by_caller(self):
+        """可显式覆盖（例如 `last`），但必须是**有意**传参。"""
+        okx.place_order("BTC-USDT-SWAP", "buy", "1", td_mode="cross", pos_side="long",
+                        ord_type="limit", px="100", attach_sl="90",
+                        attach_trigger_px_type="last")
+        self.assertEqual(self._body()["attachAlgoOrds"][0]["slTriggerPxType"], "last")
 
     def test_caller_may_specify_the_type_and_domain_is_validated(self):
         leg = {"tpTriggerPx": "120", "tpOrdPx": "-1", "tpTriggerPxType": "mark",

@@ -259,6 +259,7 @@ def place_order(
     attach_sl: Any = None,
     attach_tp_ord_px: Any = "-1",
     attach_sl_ord_px: Any = "-1",
+    attach_trigger_px_type: str = "mark",
     attach_algo_ords: Sequence[Mapping[str, Any]] | None = None,
     extra: Mapping[str, Any] | None = None,
     env: OKXEnvironment | None = None,
@@ -287,18 +288,20 @@ def place_order(
         params["targetAdj"] = target_adj
     legs = list(attach_algo_ords or [])
     if attach_tp is not None or attach_sl is not None:
-        # ⚠️ 触发价类型（`tpTriggerPxType`/`slTriggerPxType`）**本路径不发送** ⇒ 由交易所默认决定。
-        # 本仓**未核实**该默认值（无法联网核对官方文档时，不凭记忆写死"默认 last"）；
-        # 修正路径（`amend_algo_sl` 的 `newTp/SlTriggerPxType`）支持并校验 last/index/mark，
-        # 故**同一条保护腿可能在修正后改变触发语义**。谁要显式指定，走 `attach_algo_ords`/`extra`
-        # 逐字传参（`_validate_payload` 已校验取值域）。已登记在 `docs/FAILURE_SEMANTICS.md` §6。
+        # 触发价类型**显式发送**（第一百六十六刀，用户拍板：`mark` = 标记价触发）。
+        # 旧实现不发送 ⇒ 依赖交易所默认值（本仓从未核实过那个默认，而它决定"止损会不会
+        # 被一根插针打掉"）。`mark` 比"最新成交价"抗插针；要 `last`/`index` 可显式传
+        # （`_validate_payload` 校验取值域）。修正路径 `amend_algo_sl(new_*_trigger_px_type=...)`
+        # 仍可改类型 —— 那会**改变触发语义**，改的人要清楚。
         leg: dict[str, Any] = {}
         if attach_tp is not None:
             leg["tpTriggerPx"] = attach_tp
             leg["tpOrdPx"] = attach_tp_ord_px
+            leg["tpTriggerPxType"] = attach_trigger_px_type
         if attach_sl is not None:
             leg["slTriggerPx"] = attach_sl
             leg["slOrdPx"] = attach_sl_ord_px
+            leg["slTriggerPxType"] = attach_trigger_px_type
         legs.append(leg)
     if legs:
         params["attachAlgoOrds"] = legs
@@ -468,6 +471,7 @@ def place_algo_oco(
     sl_ord_px: Any = "-1",
     reduce_only: bool = True,
     cxl_on_close_pos: bool = True,
+    trigger_px_type: str = "mark",
     extra: Mapping[str, Any] | None = None,
     env: OKXEnvironment | None = None,
 ) -> list[dict[str, Any]]:
@@ -477,7 +481,11 @@ def place_algo_oco(
         "instId": inst_id, "tdMode": td_mode, "side": side, "posSide": pos_side,
         "ordType": "oco", "sz": size,
         "tpTriggerPx": tp_trigger_px, "tpOrdPx": tp_ord_px,
+        # 与入场附着腿同口径（第一百六十六刀，用户拍板 mark）：云端棘轮腿也按标记价触发，
+        # 否则"入场腿按 mark、云端腿按交易所默认"会让同一条保护在不同阶段表现不一致。
+        "tpTriggerPxType": trigger_px_type,
         "slTriggerPx": sl_trigger_px, "slOrdPx": sl_ord_px,
+        "slTriggerPxType": trigger_px_type,
         "reduceOnly": reduce_only, "cxlOnClosePos": cxl_on_close_pos,
     }
     if extra:

@@ -72,7 +72,7 @@
 | 原子写辅助与敏感状态文件 | 凡 `_atomic_write*` 必须**临时文件 + fsync + 原子替换**（否则 rename 后断电可留空/截断）；`circuit_breaker.json` 等**读者按默认值降级**的文件**不得**被直写 | 防 | `r20_backend/policy/io.py` | `tests/core/test_atomic_write_invariant.py::AtomicWriteInvariantTest` |
 | 文档引用 ⇒ 必须已提交 | 失败语义手册与**全仓文档**引用的**源码树**路径，"磁盘上存在即必须被 git 跟踪"（`data/`、`plan_local/` 等运行态不在范围）——防 `.gitignore` 过宽造成"磁盘有、仓库无"而本地测试照常绿 | 防 | `tests/audit/test_doc_paths_are_committed.py` | `tests/audit/test_doc_paths_are_committed.py::BroadDocReferencesTest` |
 | `.gitignore` 裸词 vs 源码目录 | 裸词模式（无 `/`、无 `.`、无 `*`）按**路径组件**匹配，会静默吞掉同名源码目录（`core` 吞掉 `tests/core/` 的事故根因）——与源码树里真实存在的目录同名即翻红 | 防 | `tests/audit/test_gitignore_bare_word_collisions.py` | `tests/audit/test_gitignore_bare_word_collisions.py::GitignoreBareWordCollisionTest` |
-| 保护腿触发价类型（`tp/slTriggerPxType`）| 入场附着路径**不发送**该字段（类型由交易所默认决定，仓内**未核实**该默认值 ⇒ 不写死）；调用方可用 `attach_algo_ords` 显式指定并被取值域校验；修正路径 `amend_algo_sl` 透传类型 ⇒ **同一条腿可能被修正改变触发语义**，而面板不显示当前类型 | 披露 | `scripts/okx_rest.py` | `tests/venues/test_okx_trigger_price_type_semantics.py::TriggerPriceTypeSemanticsTest` |
+| 保护腿触发价类型（`tp/slTriggerPxType`）| **显式发送 `mark`（标记价触发）**：入场附着腿与云端棘轮腿（`place_algo_oco`）同一口径，不再依赖未核实的交易所默认值；`last`/`index` 可显式覆盖，修正路径仍可改类型（会改变触发语义）| 防 | `scripts/okx_rest.py` | `tests/venues/test_okx_trigger_price_type_semantics.py::TriggerPriceTypeSemanticsTest` |
 <!-- anchors:end -->
 
 ## 3. 抽取门与"文档化差异"
@@ -135,4 +135,4 @@
 | 跨所保护 watchdog（G8）开闸 | 代码就绪（预演 + 防抖 + 形状已钉），**默认关闭** | 属实盘行为变更，需人工置 env 并重启 worker |
 | 意图文件**被删**且仍有在场挂单 | 仍按"没有意图"处理 | 需独立的"挂单在场 + 文件缺失"判定，未开刀 |
 | 允许名单外的实盘持仓是否进风险视图 | 现状保留 | 属风控口径变更，需人工拍板 |
-| 入场保护腿的**触发价类型**（`tp/slTriggerPxType`）| attach 路径**不发送**该字段 ⇒ 类型由交易所默认决定；修正路径（amend）**支持并校验** `last/index/mark`；面板不显示当前类型 ⇒ 操作员无法分辨 | ⚠️ 本仓**未核实**交易所默认值（本环境 web 搜索不可用，不凭记忆写死）⇒ 先登记；改 `mark`/显式钉 `last` 都属**实盘行为变更**，需人工拍板 |
+

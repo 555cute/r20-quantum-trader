@@ -366,9 +366,12 @@ class AiFactorTraderPositionProtectionTest(unittest.TestCase):
         self.assertTrue(ok); self.assertIn("repaired and verified", detail)
         method, body = self.http.calls('/api/v5/trade/order-algo')[0]
         self.assertEqual(method, 'POST')
+        # 第一百六十六刀（用户拍板 mark）：云端棘轮腿显式带触发价类型，
+        # 与入场附着腿同口径（旧断言无这两个字段）
         self.assertEqual(body, dict(instId='SOL-USDT-SWAP', side='sell', sz='4', posSide='long',
             tdMode='cross', ordType='oco', tpTriggerPx='106', slTriggerPx='101', tpOrdPx='-1',
-            slOrdPx='-1', reduceOnly=True, cxlOnClosePos=True))
+            slOrdPx='-1', tpTriggerPxType='mark', slTriggerPxType='mark',
+            reduceOnly=True, cxlOnClosePos=True))
         self.assertEqual(len(self.http.calls('/api/v5/trade/orders-algo-pending')), 2)
 
     def test_stale_order_query_failure_aborts_cleanup(self):

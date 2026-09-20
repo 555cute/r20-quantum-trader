@@ -166,9 +166,11 @@ class OKXRestHttpBoundaryTests(unittest.TestCase):
         self.assertEqual(body["sz"], "0.02")
         self.assertEqual(body["px"], "27181.5")
         self.assertEqual(body["posSide"], "long")
+        # 第一百六十六刀（用户拍板 mark）：附着腿**显式**带触发价类型，
+        # 不再依赖交易所默认值（旧断言只有 4 个字段）
         self.assertEqual(body["attachAlgoOrds"], [{
-            "tpTriggerPx": "28000", "tpOrdPx": "-1",
-            "slTriggerPx": "26500", "slOrdPx": "-1",
+            "tpTriggerPx": "28000", "tpOrdPx": "-1", "tpTriggerPxType": "mark",
+            "slTriggerPx": "26500", "slOrdPx": "-1", "slTriggerPxType": "mark",
         }])
 
     # -- US-001 复审修复回归：_fmt 无损十进制、纯记法 --------------------------
@@ -253,6 +255,9 @@ class OKXRestHttpBoundaryTests(unittest.TestCase):
         self.assertEqual(body["cxlOnClosePos"], True)
         self.assertEqual(body["slOrdPx"], "-1")
         self.assertEqual(body["tpOrdPx"], "-1")
+        # 第一百六十六刀：云端棘轮腿与入场腿同口径（mark）
+        self.assertEqual(body["tpTriggerPxType"], "mark")
+        self.assertEqual(body["slTriggerPxType"], "mark")
         self.assertEqual(headers["content-type"], "application/json")
 
     def test_cancel_algo_orders_uses_array_body(self):

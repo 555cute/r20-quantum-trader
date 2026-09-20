@@ -87,8 +87,11 @@ class OfficialContractTests(unittest.TestCase):
     def test_regular_attach_and_amend_leg_ids_are_not_standalone_algo_ids(self):
         r.place_order(INST, "buy", 1, px="100", attach_tp=120, attach_sl=90)
         body = self.captured("/api/v5/trade/order")
+        # 第一百六十六刀：附着腿显式带 mark 触发价类型（用户拍板）
         self.assertEqual(body["attachAlgoOrds"], [{"tpTriggerPx": "120", "tpOrdPx": "-1",
-                                                   "slTriggerPx": "90", "slOrdPx": "-1"}])
+                                                   "tpTriggerPxType": "mark",
+                                                   "slTriggerPx": "90", "slOrdPx": "-1",
+                                                   "slTriggerPxType": "mark"}])
         self.assertNotIn("tdMode", body["attachAlgoOrds"][0])
         leg = {"attachAlgoId": "attached1", "newSlTriggerPx": "91", "newSlOrdPx": "-1",
                "newSlTriggerPxType": "mark"}
