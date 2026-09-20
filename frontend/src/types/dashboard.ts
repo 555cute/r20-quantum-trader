@@ -74,6 +74,8 @@ export interface PendingOrderItem {
   venue?: string
   environment?: string
   account_mode?: string
+  margin_usdt?: number
+  notional_usdt?: number
 }
 
 export interface InstrumentFactor {

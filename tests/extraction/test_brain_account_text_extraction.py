@@ -108,7 +108,14 @@ def _legacy_pending(pending_orders_detail, tz_bj):
                 side_str = "限价买多" if (side_raw == "buy" and ord_type != "market") else ("市价买多" if side_raw == "buy" else ("限价卖空" if ord_type != "market" else "市价卖空"))
             raw_px = str(o.get("px") or "").strip()
             px_val = raw_px if raw_px and raw_px != "0" else ("市价" if ord_type == "market" else "--")
-            sz_val = str(o.get("sz", "--"))
+            # aa6d4e0 归一（张数取绝对值 + 缺值给 `--`）：参照实现同步补齐，
+            # 否则差分在 `sz=None` / 负张数上失去意义。既有取数口径未改。
+            raw_sz = o.get("sz")
+            try:
+                sz_float = float(raw_sz or 0)
+                sz_val = f"{abs(sz_float):g}" if sz_float != 0 else str(raw_sz if raw_sz is not None else "--")
+            except (TypeError, ValueError):
+                sz_val = str(raw_sz if raw_sz is not None else "--")
             ord_id = str(o.get("ordId", ""))
             attach_list = o.get("attachAlgoOrds", [])
             tp_sl_info = ""
@@ -392,9 +399,27 @@ class PendingPriceDisplayTest(unittest.TestCase):
         out = build_pending_order_lines([o], tz_bj=TZ_BJ, datetime=datetime)
         self.assertIn("--张", out)
 
-    def test_sz_none_renders_literal_none(self):
-        """既有行为：`sz=None` 渲染成字面 `None`（不是 `--`）—— 钉住它。"""
-        self.assertIn("None张", self._line(sz=None))
+    def test_sz_none_renders_dash(self):
+        """`sz=None` 渲染成 `--`（**旧行为是字面 `None`**，见下）。
+
+        aa6d4e0（修复负数张数泄漏）把 sz 归一为：能转数 → `abs()` 后 `:g`；
+        否则 `--`。因此 `sz=None`（键存在但值为空）与「键缺失」现在**同解**，
+        而旧实现走 `str(o.get("sz", "--"))` 得到字面 `"None"` —— 那是渲染 bug，
+        会让主脑看到 "None张" 这种噪音。本用例的方向是**钉住修复后行为**。
+        """
+        self.assertIn("--张", self._line(sz=None))
+        self.assertNotIn("None张", self._line(sz=None))
+
+    def test_sz_negative_renders_absolute(self):
+        """带符号张数必须取绝对值：Gate 用「正多负空」，负号泄漏到提示词会让
+        主脑把「3 张空」读成「-3 张多」。这是 aa6d4e0 修的真雷，补钉。"""
+        self.assertIn("3张", self._line(sz="-3"))
+        self.assertIn("2.5张", self._line(sz=-2.5))
+        self.assertIn("3张", self._line(sz="3"))
+        # 非数字保持原样（不臆造 `--`，也不必抛）
+        self.assertIn("abc张", self._line(sz="abc"))
+        # 零是"确实 0 张"，不是缺值
+        self.assertIn("0张", self._line(sz="0"))
 
     def test_ord_id_default_empty(self):
         self.assertIn("[挂单ID: ]", self._line())

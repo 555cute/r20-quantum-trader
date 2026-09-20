@@ -132,7 +132,7 @@ export const zhAdminSecurity = {
   positionsWord: '持仓',
   ordersWord: '挂单',
   colPosition: '仓位标的',
-  colContracts: '张数',
+  colContracts: '保证金',
   colMode: '模式',
   colUpl: '未实现盈亏',
   quickClose: '快速平仓',

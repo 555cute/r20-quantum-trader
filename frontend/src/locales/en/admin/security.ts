@@ -131,7 +131,7 @@ export const enAdminSecurity = {
   positionsWord: 'positions',
   ordersWord: 'orders',
   colPosition: 'Position',
-  colContracts: 'Contracts',
+  colContracts: 'Margin',
   colMode: 'Mode',
   colUpl: 'Unrealised P&L',
   quickClose: 'Close now',

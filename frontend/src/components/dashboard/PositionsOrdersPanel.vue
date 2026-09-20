@@ -102,9 +102,39 @@ function orderQtyText(o: any): string {
   return fmtNum(n, 0);
 }
 
-function orderUnitText(o: any): string {
+function orderNativeUnit(o: any): string {
   const v = getVenueOf(o);
-  return v === 'binance' ? symOf(o) : t('dash.matrix.orders.col.qty');
+  return v === 'binance' ? symOf(o) : t('dash.matrix.orders.contractsUnit');
+}
+
+/**
+ * 挂单保证金（USDT）——**唯一权威是后端**。
+ *
+ * 后端按各所合约面值（`instrument_pool.ctVal`）与杠杆算好后放进 `margin_usdt`
+ * （见 `dashboard_payload/order_view.py` 与 `multi_venue.py`）。前端**绝不**自己
+ * 维护面值表：那种表一旦与池子漂移，屏幕上就会显示一个凭空捏造的保证金数字，
+ * 而保证金正是交易员判断仓位大小的依据 —— 宁可显示原生张数，也不给假数字。
+ *
+ * 返回 0 表示"后端没给"（旧数据/字段缺失）→ 调用方回落到原生张数展示。
+ */
+function orderMargin(o: any): number {
+  const m = Number(o?.margin_usdt);
+  return Number.isFinite(m) && m > 0 ? m : 0;
+}
+
+function orderMarginText(o: any): string {
+  const m = orderMargin(o);
+  if (m > 0) {
+    return `${fmtNum(m, 2)}U`;
+  }
+  const raw = orderQtyText(o);
+  return raw !== '--' ? `${raw} ${orderNativeUnit(o)}` : '--';
+}
+
+function orderTooltipText(o: any): string {
+  const m = orderMargin(o);
+  const native = `${orderQtyText(o)} ${orderNativeUnit(o)}`;
+  return m > 0 ? `${t('dash.matrix.orders.col.qty')} ${fmtNum(m, 2)}U (${native})` : native;
 }
 </script>
 
@@ -294,8 +324,8 @@ function orderUnitText(o: any): string {
               {{ fmtPrice(o.px) }}
             </td>
             <td class="col-num font-mono">
-              <span class="block text-xs font-medium text-[var(--ink-strong)]" :title="`${orderQtyText(o)} ${orderUnitText(o)}`">
-                {{ orderQtyText(o) }}<span class="text-4xs text-[var(--ink-3)] ml-0.5">{{ orderUnitText(o) }}</span>
+              <span class="block text-xs font-medium text-[var(--ink-strong)]" :title="orderTooltipText(o)">
+                {{ orderMarginText(o) }}
               </span>
               <span class="block text-3xs text-[var(--ink-2)]">{{ o.lever || '3x' }}</span>
             </td>

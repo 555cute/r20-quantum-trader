@@ -90,6 +90,17 @@ def _legacy(pos_data, positions, trackers, *, load_instruments):
             if lever_val <= 0:
                 lever_val = 3.0
             margin_usdt_val = round(okx_imr if okx_imr > 0 else (notional_usdt / lever_val), 2)
+            # US-003 环境轴贯通（后来补的纯附加字段）：持仓行必须标明 DEMO/LIVE，
+            # 否则前端会把模拟仓当实盘展示。参照实现同步补齐 —— 只加键、不改
+            # 任何既有取数口径，故差分的意义不受影响。
+            try:
+                from scripts.okx_runtime import current_environment
+                _okx_env = current_environment()
+                _acc_mode = "DEMO" if _okx_env.simulated else "LIVE"
+                _env_mode = _okx_env.mode.lower()
+            except Exception:
+                _acc_mode = "DEMO"
+                _env_mode = "demo"
             positions.append({
                 "venue": "okx", "exchange": "okx",
                 "instId": p.get("instId"),
@@ -99,6 +110,7 @@ def _legacy(pos_data, positions, trackers, *, load_instruments):
                 "notional_usdt": notional_usdt, "margin_usdt": margin_usdt_val,
                 "marginSource": "exchange_imr" if okx_imr > 0 else "notional_div_leverage",
                 "imr": okx_imr or None, "lever": p.get("lever", "3"),
+                "account_mode": _acc_mode, "environment": _env_mode,
                 "avgPx": avg_px, "markPx": mark_px, "upl": upl,
                 "uplRatio": real_roi_pct, "roi_pct": real_roi_pct,
                 "price_change_pct": price_chg,

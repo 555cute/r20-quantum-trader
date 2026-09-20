@@ -1110,7 +1110,9 @@ onMounted(() => { loadAll(); loadMx() })
                   {{ (p.posSide || 'net').toUpperCase() }}
                 </span>
               </span>
-              <span class="sc-contracts num">{{ p.pos || '0' }}</span>
+              <span class="sc-contracts num" :title="p.pos ? `${p.pos}` : undefined">
+                {{ p.margin ? `${Number(p.margin).toFixed(2)} U` : (p.pos || '0') }}
+              </span>
               <span class="sc-mode mono">{{ p.mgnMode || '--' }}</span>
               <span class="sc-upl num" :class="Number(p.upl || 0) >= 0 ? 'is-up' : 'is-down'">
                 {{ Number(p.upl || 0).toFixed(4) }}

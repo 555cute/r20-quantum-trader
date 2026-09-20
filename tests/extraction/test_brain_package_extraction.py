@@ -51,18 +51,30 @@ class MoveIsLosslessTest(unittest.TestCase):
     #   ② 恰为 `note_failure("<小写名>", exc)` 的**新增**行
     # 其余任何一行差异仍然会红；并另有 `test_failure_counters_are_actually_wired`
     # 正向钉住这 6 处接线确实存在 —— 白名单不能被用来掩盖真正的搬运错误。
+    #
+    # v8.1.0（66279f1）又给 OKX ticker 加了**取数延时观测**（纯可观测性，同样
+    # 不改任何取值口径），故再放行第三条极窄差异：
+    #   ③ `t_okx0 = time.time()` 起点采样行 + 恰为
+    #      `pkg["okx_latency_ms"] = max(1, int(round((time.time() - t_okx0) * 1000)))`
+    #      的**新增**行（整行丢弃，两侧对齐后再逐行比对）
+    # 同样由 `test_okx_latency_instrumentation_is_actually_wired` 正向钉住。
     _NOTE_RE = re.compile(r'^note_failure\("[a-z_0-9]+", exc\)$')
+    _LATENCY_START_RE = re.compile(r"^t_okx0 = time\.time\(\)$")
+    _LATENCY_PUBLISH_RE = re.compile(
+        r'^pkg\["okx_latency_ms"\] = max\(1, int\(round\(\(time\.time\(\) - t_okx0\) \* 1000\)\)\)$')
 
     def _normalise(self, lines):
-        """把第 137 刀的接线**还原**成搬运时的样子，再逐行比对。
+        """把第 137 刀与 v8.1.0 的接线**还原**成搬运时的样子，再逐行比对。
 
         接线是"把 `pass` 换成 `note_failure(...)`"（不增行），故还原时把调用行
         还原为 `pass`，而不是删掉它 —— 删掉会让两侧行数错位（我第一版就写错了，
-        靠打印真实 diff 才发现）。
+        靠打印真实 diff 才发现）。延时观测则是**净增行**，故这里必须整行丢弃。
         """
         out = []
         for ln in lines:
             stripped = ln.strip()
+            if self._LATENCY_START_RE.match(stripped) or self._LATENCY_PUBLISH_RE.match(stripped):
+                continue
             if self._NOTE_RE.match(stripped):
                 indent = ln[:len(ln) - len(ln.lstrip())]
                 ln = f"{indent}pass"
@@ -92,6 +104,23 @@ class MoveIsLosslessTest(unittest.TestCase):
                          "6 处取数失败的可观测性接线缺失或被改名")
         # 6 处新接入 + 4 处搬运时就带 `as exc` 的（K线 15m/1H/4H 与 calculus）
         self.assertEqual(src.count("except Exception as exc:"), 10)
+
+    def test_okx_latency_instrumentation_is_actually_wired(self):
+        """正向断言：v8.1.0 的 OKX 取数延时观测必须真的在算（防止上一条的
+        丢弃规则被滥用成"把这段删掉也不会红"）。"""
+        src = "\n".join(_submodule_function_lines())
+        self.assertIn("t_okx0 = time.time()", src,
+                      "OKX ticker 延时起点采样丢失 ⇒ 白名单规则③在掩盖删除")
+        self.assertIn('pkg["okx_latency_ms"] = max(1, int(round((time.time() - t_okx0) * 1000)))', src,
+                      "okx_latency_ms 落包丢失 ⇒ 白名单规则③在掩盖删除")
+        # 延时必须落进包（ast.unparse 用单引号，故两侧都归一后再比）
+        tree = ast.parse(SUBMODULE.read_text(encoding="utf-8"))
+        fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef)
+                  and n.name == "fetch_single_instrument_package")
+        targets = [ast.unparse(n.targets[0]).replace("'", '"')
+                   for n in ast.walk(fn) if isinstance(n, ast.Assign)]
+        self.assertIn('pkg["okx_latency_ms"]', targets,
+                      "okx_latency_ms 不是对 pkg 的落包赋值")
 
     def test_submodule_takes_the_two_market_functions_as_parameters(self):
         fn = next(n for n in ast.parse(SUBMODULE.read_text(encoding="utf-8")).body

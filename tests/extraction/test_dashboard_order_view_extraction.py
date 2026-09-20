@@ -81,6 +81,34 @@ def _legacy(orders_data, pending_orders_list, *, tz_beijing, datetime):
                 att = attach_list[0]
                 tp_px = str(att.get("tpTriggerPx") or "--")
                 sl_px = str(att.get("slTriggerPx") or "--")
+            try:
+                from scripts.okx_runtime import current_environment
+                _okx_env = current_environment()
+                _acc_mode = "DEMO" if _okx_env.simulated else "LIVE"
+                _env_mode = _okx_env.mode.lower()
+            except Exception:
+                _acc_mode = "DEMO"
+                _env_mode = "demo"
+
+            _margin_usdt = None
+            try:
+                from scripts.instrument_pool import load_instruments
+                # 面值只认池子（单一事实源）；查不到就不给数字（前端回落原生张数）。
+                ct_val = 0.0
+                for target_item in load_instruments():
+                    if target_item.get("instId") == inst_id or target_item.get("name") == inst_clean:
+                        ct_val = float(target_item.get("ctVal", 0.0) or 0.0)
+                        break
+                _px_float = float(raw_px) if (raw_px and raw_px != "0") else 0.0
+                _sz_float = abs(float(o.get("sz", 0) or 0))
+                _lev_num = float(str(o.get("lever", "3")).replace("x", "") or 3.0)
+                if _lev_num <= 0:
+                    _lev_num = 3.0
+                if _px_float > 0 and _sz_float > 0 and ct_val > 0:
+                    _margin_usdt = round((_sz_float * ct_val * _px_float) / _lev_num, 2)
+            except Exception:
+                _margin_usdt = None
+
             pending_orders_list.append({
                 "venue": "okx", "exchange": "okx",
                 "ordId": str(o.get("ordId", "")),
@@ -90,9 +118,12 @@ def _legacy(orders_data, pending_orders_list, *, tz_beijing, datetime):
                 "posSide": pos_side, "is_long": is_long, "side_color": side_color,
                 "ord_type": ord_type, "lever": f"{o.get('lever', '3')}x",
                 "px": px_display, "sz": str(o.get("sz", "--")),
+                "margin_usdt": _margin_usdt,
                 "cTime": str(o.get("cTime", "")), "time": c_time_str,
                 "state": str(o.get("state", "live")),
-                "tp_px": tp_px, "sl_px": sl_px
+                "tp_px": tp_px, "sl_px": sl_px,
+                "account_mode": _acc_mode,
+                "environment": _env_mode,
             })
     return None
 

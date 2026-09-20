@@ -198,6 +198,28 @@ def collect_cross_venue_positions(positions, pending_orders_list,
 
                     _opp_side = "sell" if vo_is_long else "buy"
                     _vo_sl, _vo_tp = _protection_triggers(v_algos, base_sym, _opp_side)
+                    _vo_lever = float(vo.get("leverage") or 3.0)
+                    if _vo_lever <= 0:
+                        _vo_lever = 3.0
+                    # 保证金 = 名义额 / 杠杆。名义额只按**该所适配器的合约面值**折算：
+                    # 面值不可得时一律给 None（前端回落成原生张数），**绝不**按币名猜
+                    # 一个面值 —— 保证金是交易员判断仓位大小的依据，猜出来的数字
+                    # 比"没有数字"危险得多。
+                    vo_margin_usdt = None
+                    try:
+                        if vo_px_float > 0 and abs(_sz_num) > 0:
+                            cap = getattr(ad, "capabilities", None)
+                            if getattr(cap, "quantity_unit", "") == "base_asset" or v_name == "binance":
+                                _vo_notional = abs(_sz_num) * vo_px_float
+                            else:
+                                spec = ad.fetch_instrument_spec(base_sym) if hasattr(ad, "fetch_instrument_spec") else None
+                                ct_val = float(getattr(spec, "ct_val", 0) or 0) if spec is not None else 0.0
+                                _vo_notional = abs(_sz_num) * ct_val * vo_px_float if ct_val > 0 else 0.0
+                            if _vo_notional > 0:
+                                vo_margin_usdt = round(_vo_notional / max(1.0, _vo_lever), 2)
+                    except Exception:
+                        vo_margin_usdt = None
+
                     pending_orders_list.append({
                         "venue": v_name,
                         "exchange": v_name,
@@ -212,9 +234,10 @@ def collect_cross_venue_positions(positions, pending_orders_list,
                         "is_long": vo_is_long,
                         "side_color": "emerald" if vo_is_long else "rose",
                         "ord_type": "limit",
-                        "lever": "3x",
+                        "lever": f"{_vo_lever:g}x",
                         "px": f"{vo_px_float:g}" if vo_px_float > 0 else "--",
                         "sz": vo_sz,
+                        "margin_usdt": vo_margin_usdt,
                         "cTime": str(_c_time_ms) if _c_time_ms > 0 else "",
                         "time": "刚刚",
                         "state": "live",

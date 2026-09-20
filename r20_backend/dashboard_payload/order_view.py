@@ -111,6 +111,26 @@ def collect_pending_order_rows(orders_data, pending_orders_list, *, tz_beijing, 
                 _acc_mode = "DEMO"
                 _env_mode = "demo"
 
+            _margin_usdt = None
+            try:
+                from scripts.instrument_pool import load_instruments
+                # 面值只认池子（单一事实源）。池子里没有该标的 ⇒ 不猜 1.0/其它面值，
+                # 直接给 None（前端回落成原生张数）—— 捏造的保证金比没有更危险。
+                ct_val = 0.0
+                for target_item in load_instruments():
+                    if target_item.get("instId") == inst_id or target_item.get("name") == inst_clean:
+                        ct_val = float(target_item.get("ctVal", 0.0) or 0.0)
+                        break
+                _px_float = float(raw_px) if (raw_px and raw_px != "0") else 0.0
+                _sz_float = abs(float(o.get("sz", 0) or 0))
+                _lev_num = float(str(o.get("lever", "3")).replace("x", "") or 3.0)
+                if _lev_num <= 0:
+                    _lev_num = 3.0
+                if _px_float > 0 and _sz_float > 0 and ct_val > 0:
+                    _margin_usdt = round((_sz_float * ct_val * _px_float) / _lev_num, 2)
+            except Exception:
+                _margin_usdt = None
+
             pending_orders_list.append({
                 "venue": "okx",
                 "exchange": "okx",
@@ -128,6 +148,7 @@ def collect_pending_order_rows(orders_data, pending_orders_list, *, tz_beijing, 
                 "lever": f"{o.get('lever', '3')}x",
                 "px": px_display,
                 "sz": str(o.get("sz", "--")),
+                "margin_usdt": _margin_usdt,
                 "cTime": str(o.get("cTime", "")),
                 "time": c_time_str,
                 "state": str(o.get("state", "live")),

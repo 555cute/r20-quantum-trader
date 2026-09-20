@@ -416,6 +416,10 @@ def admin_okx_account_snapshot(
         for p in (okx_snap.get("positions") or []):
             p_copy = dict(p)
             p_copy.setdefault("venue", "okx")
+            imr = float(p.get("imr", 0) or p.get("margin", 0) or 0)
+            if imr <= 0 and float(p.get("notionalUsd", 0) or 0) > 0 and float(p.get("lever", 0) or 0) > 0:
+                imr = round(float(p.get("notionalUsd")) / float(p.get("lever")), 2)
+            p_copy["margin"] = imr
             combined_positions.append(p_copy)
         for o in (okx_snap.get("orders") or []):
             o_copy = dict(o)
@@ -450,12 +454,22 @@ def admin_okx_account_snapshot(
                         venue=venue, environment=env.mode, display_inst=inst_display,
                         symbol=sym, pos_side=pos_side, expected_size=abs(amt),
                         credential_fingerprint=cred_fp)
+                    # 保证金口径与 OKX 段对齐：优先交易所给的 margin，缺失时用
+                    # 名义额/杠杆推（两者都来自交易所实况）；都拿不到就是 0，
+                    # 前端据此回落显示原生张数，不显示捏造的数字。
+                    _pos_margin = float(p.get("margin") or 0.0)
+                    if _pos_margin <= 0:
+                        _pos_lev = float(p.get("leverage") or 0.0)
+                        _pos_notional = float(p.get("notional") or 0.0)
+                        if _pos_lev > 0 and _pos_notional > 0:
+                            _pos_margin = round(_pos_notional / _pos_lev, 2)
                     combined_positions.append({
                         "venue": venue,
                         "exchange": venue,
                         "instId": inst_display,
                         "posSide": pos_side,
                         "pos": str(abs(amt)),
+                        "margin": _pos_margin,
                         "mgnMode": "cross",
                         "upl": float(p.get("unrealized_pnl", 0) or 0),
                         "close_confirmation": close_confirmation,
