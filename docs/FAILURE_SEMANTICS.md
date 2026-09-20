@@ -68,6 +68,7 @@
 | 数值强转 `safe_float`（**三处**：两公开 + 一私有） | 单一事实源在 `math_utils`；三入口必须是**薄壳**且 20 组边界输入**同判**（`nan`/`±inf`/`None`/空串/列表/bool…）；`nan`/`inf`⇒`default`、`True→1.0` 属既有语义，改动须有意识 | 防 | `r20_backend/math_utils.py` | `tests/core/test_numeric_coercion_single_source.py::SafeFloatSingleSourceTest` |
 | 日切键（`strftime("%Y-%m-%d")`）| 基座必须**可证明**是 +08:00：无参 `now()`／`utcnow()`／`timezone.utc`／本地时区一律翻红（日切错了不报错，只在 00:00–08:00 静默偏一天）| 防 | `scripts/trader/circuit_guard.py` | `tests/core/test_day_key_uses_beijing_tz.py::DayKeyUsesBeijingTzTest` |
 | 时间戳字段单位（`_ms`=毫秒 / `_ts`=秒）| 生产与消费两侧都必须自洽；`_ms` 字段写 `*1000`、`_ts` 字段写秒；已知例外（`last_sync_ts`）必须有**伴生不变式**（写入者全为毫秒或 None，绝不混入秒）| 防 | `tests/core/test_timestamp_unit_convention.py` | `tests/core/test_timestamp_unit_convention.py::TimestampUnitConventionTest` |
+| 下单量换算的方向（币数 / 张数）| **币数**分支 `ROUND_DOWN` 永不超买；**张数**分支四舍五入、最坏**向上多买半张**（大面值标的最坏 +33%）—— 注释/文档不得再写"一律截断"；上层要求"绝不超出"须自行复核或走十进制 amount 通道 | 披露 | `r20_backend/exchanges/base.py` | `tests/venues/test_exchanges_adapter.py::ContractsRoundingBoundTest` |
 <!-- anchors:end -->
 
 ## 3. 抽取门与"文档化差异"
