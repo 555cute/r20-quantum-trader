@@ -255,9 +255,11 @@ class BehaviourPreservedTest(unittest.TestCase):
     #: ⚠️ **文档化差异**（第一百一十五刀，2026-09-20）：本函数体除"搬迁改名"外，
     #: 只允许下面这一处**有意的行为修复**——挂单保留判据补上"各所拼写归一的挂单基名"。
     #:
-    #: 原判据 `(venue == "okx" and inst_id in pending)` 只看 OKX，而且拿意图里的
-    #: OKX 拼写（`XRP-USDT-SWAP`）去比 `pending_inst_ids` 里混装的各所拼写
-    #: （币安 `XRPUSDT`、Gate `DOGE_USDT`）。后果：派往 gate/binance 的**未成交挂单**，
+    #: 原判据 `(venue == "okx" and inst_id in pending)` 把外所整体排除在"有挂单则保留"
+    #: 之外。⚠️ 校正（第一百一十六刀）：我上一刀把成因写成"拼写混装"是**错的** ——
+    #: 生产侧 `collect_pending_inst_ids` 统一归一成 OKX 拼写；真正的成因只有那条
+    #: `venue == "okx"`。基名归一这一 delta 现按**防御性**保留（注入集合可能给原生
+    #: 拼写，且基名匹配对非 USDT 报价更稳）。后果：派往 gate/binance 的**未成交挂单**，
     #: 其预留一过 TTL(2h) 就被释放，而单还挂在场内 —— 成交后这笔占用不在台账上
     #: （预算/敞口少算）。方向纪律：**保留是保守的**（多占只压缩额度），
     #: 释放不可逆（活单失去登记）⇒ 按基名匹配、不要求方向一致。

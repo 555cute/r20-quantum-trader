@@ -125,9 +125,13 @@ def reconcile_reservation_ledger(
             base = str(_p.get("base") or str(_p.get("inst_id", "")).split("_")[0]).upper()
             live_by_venue.setdefault(v, set()).add(f"{base}:{_p.get('side', 'net')}")
     pending = {str(x) for x in (pending_inst_ids or set())}
-    # 第一百一十五刀：挂单基名集合（**各所拼写归一**）——见下面 `still_live` 的说明。
-    # `pending_inst_ids` 混装三种拼写：OKX `XRP-USDT-SWAP`、币安 `XRPUSDT`、
-    # Gate `DOGE_USDT` ⇒ 必须归一到基名才能与意图里的 `inst_id` 对齐。
+    # 第一百一十五刀：挂单基名集合（**按基名归一**）——见下面 `still_live` 的说明。
+    # ⚠️ 校正（第一百一十六刀，我上一刀的说法有误）：生产侧 `pending_inst_ids` 由
+    # `cycle_snapshot.collect_pending_inst_ids` **统一归一成 OKX 拼写**
+    # （`f"{base}-USDT-SWAP"`，见该函数末段），并不混装原生拼写
+    # —— 真正的缺陷只是下面那条 `venue == "okx"` 把外所排除了。
+    # 这里仍按基名归一，是**防御性**的（`pending_inst_ids` 是注入集合，测试或未来
+    # 调用方可能给原生拼写），且基名匹配对非 USDT 报价合约更稳（见 `QUOTE_ASSUMPTION`）。
     pending_bases = set()
     for _p_inst in pending:
         _p_base = str(_p_inst).split("-")[0].split("_")[0].upper()
@@ -147,10 +151,9 @@ def reconcile_reservation_ledger(
             base = inst_id.split("-")[0].upper()
             venue = str(row.get("venue") or "").lower()
             # ⚠️ 挂单保留判据必须**跨所**（第一百一十五刀修）：原判据
-            # `venue == "okx" and inst_id in pending` 只看 OKX，且用的是意图里的
-            # OKX 拼写（`XRP-USDT-SWAP`）与 `pending_inst_ids` 里的各所拼写混比。
-            # 后果：派往 gate/binance 的**未成交挂单**，其预留一过 TTL(2h) 就被释放
-            # ——而单还挂在场内，成交后这笔占用已经不在台账上（预算/敞口少算）。
+            # `venue == "okx" and inst_id in pending` 把外所整体排除在"有挂单则保留"
+            # 之外。后果：派往 gate/binance 的**未成交挂单**，其预留一过 TTL(2h) 就被
+            # 释放——而单还挂在场内，成交后这笔占用已经不在台账上（预算/敞口少算）。
             # 方向纪律：**保留是保守的**（多占只压缩可用额度），释放是不可逆的
             # （活单失去登记）⇒ 按基名匹配、不要求方向一致（宁多留不漏放）。
             still_live = (f"{base}:{pos_side}" in live_by_venue.get(venue, set())
