@@ -104,6 +104,22 @@ SEGMENT_DELTAS = {
          "reconcile_reservation_ledger(real_pos_dict, pending_inst_ids, _xv_env, "
          "venue_snapshot=xv_positions_by_venue, "
          "venue_snapshot_verified=xv_ok and (not _pending_enum_errors))"),
+        # ---- 第一百三十一刀：凭证已死场所**每周期明说"未计入"** ----------------
+        # 此类所被 `venue_execution_ready` 否决 ⇒ `fetch_other_venue_positions` 也跳过，
+        # 且返回 ok=True **无错误** ⇒ 其持仓/挂单不进配额与敞口，而跨所笔数看似完整。
+        # 判据抽成纯函数 `broken_execution_venues`（可单元测试），此处只接线 + 告警。
+        ("_gv_mode = ''",
+         "_gv_mode = ''\n"
+         "try:\n"
+         "    _xv_broken = list(broken_execution_venues(('gate', 'binance'), _gv_mode, "
+         "venue_registry=venue_registry, venue_execution_ready=venue_execution_ready))\n"
+         "except Exception as _bv_exc:\n"
+         "    _xv_broken = []\n"
+         "    print(f'[跨所封顶] warn 坏所探测异常（不影响本周期）: {_bv_exc}')\n"
+         "if _xv_broken:\n"
+         "    print(f\"[跨所封顶] warn {'/'.join(_xv_broken)} 凭证已死（执行闸开着却不可就绪）"
+         "——该所持仓/挂单**未计入**本周期配额与敞口（跨所笔数不含该所），"
+         "修好密钥后自动恢复；请勿据面板跨所笔数当作全景\")"),
         # ---- 第一百二十八刀：槽位计数**少算**时的如实告知（零行为变更） ---------
         # 外所挂单枚举失败 ⇒ `reserved_*_count` 少算该所在场单，而执行层开仓闸用的
         # 正是它们 ⇒ 可能超发槽位。本行只把后果讲明（是否改 fail-closed 待人工拍板）。
@@ -302,8 +318,45 @@ class CycleStagesVerbatimTest(unittest.TestCase):
                 query_positions=lambda: (False, [], "no creds"),
                 reconcile_reservation_ledger=lambda *a, **k: None,
                 venue_execution_ready=lambda v, e: False,
+                broken_execution_venues=lambda *a, **k: [],
                 venue_registry=types.SimpleNamespace())
         self.assertIsNone(got, "查持仓失败必须中止（返回 None）")
+
+    def test_dead_credential_venue_is_disclosed_as_excluded(self):
+        """凭证已死的所必须**每周期明说"未计入"**（第一百三十一刀）。
+
+        该所被 `venue_execution_ready` 否决 ⇒ 跨所取数也跳过它，且返回 `ok=True`
+        无任何错误 ⇒ 它的持仓/挂单不进配额与敞口，而"跨所笔数"看起来完整。
+        方向纪律：它**读不出来**（不是没有仓），所以只能说"未计入"，绝不装作干净。
+        本用例用**真的** `broken_execution_venues`（不是桩），把判据也一并跑到。
+        """
+        import contextlib
+        import io
+        from scripts.trader import cycle_stages as cs
+        from scripts.trader.cycle_snapshot import broken_execution_venues as real_broken
+        okx = types.SimpleNamespace(balances=lambda: None, positions=lambda: None,
+                                    pending_orders=lambda *a: [])
+        reg = types.SimpleNamespace(execution_open=lambda v, e: True,     # 闸开着…
+                                    get_adapter=lambda v, environment=None: None,
+                                    is_registered=lambda k: True)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            got = cs.fetch_positions_and_reconcile(
+                entries_blocked=False,
+                _BROKEN_VENUES={"binance"}, collect_pending_inst_ids=lambda **k: (set(), 0, 0),
+                current_environment=lambda: types.SimpleNamespace(mode="demo", simulated=False),
+                fetch_other_venue_positions=lambda env: (True, {}, ""),
+                load_instruments=lambda: [], okx_rest=okx,
+                query_positions=lambda: (True, [], ""),
+                reconcile_reservation_ledger=lambda *a, **k: None,
+                venue_execution_ready=lambda v, e: v != "binance",   # …却不可就绪
+                broken_execution_venues=real_broken, venue_registry=reg)
+        out = buf.getvalue()
+        self.assertIsNotNone(got, "坏所不得中断周期（跳过 + 明说即可）")
+        self.assertEqual(len(got), 13)
+        self.assertIn("binance 凭证已死", out)
+        self.assertIn("未计入", out)
+        self.assertNotIn("gate 凭证已死", out, "就绪的所不得被误报")
 
     def test_positions_empty_world_returns_thirteen_outputs(self):
         """空世界 smoke：10 项注入全活 ⇒ 必须产出 13 项输出（含持仓/额度/预留计数）。"""
@@ -321,7 +374,8 @@ class CycleStagesVerbatimTest(unittest.TestCase):
             load_instruments=lambda: [], okx_rest=okx,
             query_positions=lambda: (True, [], ""),
             reconcile_reservation_ledger=lambda *a, **k: None,
-            venue_execution_ready=lambda v, e: False, venue_registry=reg)
+            venue_execution_ready=lambda v, e: False,
+            broken_execution_venues=lambda *a, **k: [], venue_registry=reg)
         self.assertIsNotNone(got)
         self.assertEqual(len(got), 13, "13 项输出必须齐（调用点按序解包）")
         self.assertEqual(got[2], [], "all_positions 应为空")

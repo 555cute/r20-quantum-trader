@@ -185,7 +185,15 @@ class SubprocessDataWritesRedirectedTest(unittest.TestCase):
         import scripts.instrument_pool as pool
         from r20_backend import spawn as spawn_mod
 
+        # ⚠️ 第一百三十二刀去 flaky（本用例第三次红）：**按线程归属收敛判定**。
+        # patch 装在**模块属性**上 ⇒ 前序测试漏下的后台线程只要在此期间调
+        # `run_script` 也会被记进来（实测整包跑偶发 3/2 —— 方向是**多**，不是少，
+        # 故"等满 30s/结构变了"这个死因描述本身也是错的）。
+        # 本用例的真实性质是"**本用例自己 spawn 的那个线程**用的是线程创建前的 env
+        # 快照"，与"全场恰好 N 次"无关 ⇒ 只对"快照之后新出现的线程"断言。
+        _threads_before = {t.name for t in threading.enumerate()}
         seen: list[dict] = []
+        new_thread_calls: list[dict] = []
         real_run_script = spawn_mod.run_script
         _done = threading.Event()
         #: 期望的 spawn 次数**按实际存在的脚本算**（别写死 2：脚本缺席时用例会假红）。
@@ -195,9 +203,12 @@ class SubprocessDataWritesRedirectedTest(unittest.TestCase):
 
         def _fake_run_script(script, *, timeout=20, label=None, env=None):
             # 记录**实际传给子进程的 env**（None = 继承 = 竞态未修）
-            seen.append(dict(env) if env is not None else None)
-            if len(seen) >= _expected:
-                _done.set()
+            _snap = dict(env) if env is not None else None
+            seen.append(_snap)
+            if threading.current_thread().name not in _threads_before:
+                new_thread_calls.append(_snap)
+                if len(new_thread_calls) >= _expected:
+                    _done.set()
 
             class _R:
                 returncode = 0
@@ -224,10 +235,11 @@ class SubprocessDataWritesRedirectedTest(unittest.TestCase):
             self.doCleanups()          # 提前还原 env 与常量（幂等）
 
         self.assertGreaterEqual(_expected, 1, "两个脚本都不在？本用例已失去意义")
-        self.assertEqual(len(seen), _expected,
-                         f"后台线程没走完 spawn（只见 {len(seen)}/{_expected} 次，等满 30s）"
-                         " —— 结构变了或卡死，本用例失去意义")
-        bad = [i for i, env in enumerate(seen) if env is None
+        self.assertGreaterEqual(
+            len(new_thread_calls), _expected,
+            f"本用例 spawn 的线程没走完（只见 {len(new_thread_calls)}/{_expected} 次，等满 30s）"
+            f"；同期全场共 {len(seen)} 次（含无关线程）")
+        bad = [i for i, env in enumerate(new_thread_calls) if env is None
                or env.get("R20_DATA_DIR") != str(Path(sandbox) / "data")]
         self.assertEqual(
             bad, [],

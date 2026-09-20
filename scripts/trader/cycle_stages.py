@@ -163,6 +163,7 @@ def fetch_positions_and_reconcile(*,
         query_positions,
         reconcile_reservation_ledger,
         venue_execution_ready,
+        broken_execution_venues,
         venue_registry):
     """相位 1：取真实持仓 + 合约对账 + 跨所汇总 + 挂单盲区守卫 + 预留对账。
 
@@ -183,7 +184,12 @@ def fetch_positions_and_reconcile(*,
     | OKX 挂单对账（preflight `reconcile_pending_orders`） | `entries_blocked=True`（禁新开仓） | 日志 |
     | 跨所**持仓** `fetch_other_venue_positions` | `entries_blocked=True` + 预留对账**不释放** + 提示词写"未知(拉取失败)" | 日志/提示词 |
     | 跨所**挂单** `collect_pending_inst_ids` | 预留对账**不释放**（第一百二十七刀）；⚠️ **不拦新开仓**，且槽位/同向占用**少算** | 仅 warn |
-    | 凭证已死场所 `broken_venues` | 跳过该所枚举（不报错、不拦） | 收侧另有 CRITICAL |
+    | 凭证已死场所 `broken_venues` | 跳过该所枚举（不报错、不拦）；其持仓/挂单**不进配额与敞口** | 收侧 CRITICAL + **每周期"未计入"告警**（第一百三十一刀）|
+
+    ⚠️ **凭证已死场所**（执行闸开着但密钥失效）另有一条边界：该所**读不出来**（不是没有仓），
+    其仓位/挂单不进配额与敞口；现状是"跳过 + 每周期明确告知未计入"，
+    而非 fail-closed 拦新开仓 —— 后者与既有审计#4教训（"拿凭证错误拦全链=交易停摆"）冲突，
+    故列为**待人工拍板**（面板/提示词的跨所笔数仍不含该所）。
 
     唯一**残留缺口**是"跨所挂单枚举失败不拦新开仓"：计数少算是**仓位数口径**
     （槽位/同向上限），不涉及 USDT 预算（预算由预留台账与敞口闸把关）。
@@ -253,6 +259,26 @@ def fetch_positions_and_reconcile(*,
     # 入场单（还没有持仓），对账器的"无仓无挂"判据就会成立并把它的预留按超 TTL 释放
     # （释放不可逆 ⇒ 预算台账少算在场活单）。持仓侧已由 `venue_snapshot_verified`
     # 把关；这里把**挂单侧**一并纳入同一个"实况是否核验"标志。
+    # ⚠️ 第一百三十一刀：**凭证已死场所必须每周期明说"未计入"**。
+    # 此前只有回收侧一次性 CRITICAL，之后本函数静默 `continue` —— 而
+    # `venue_execution_ready` 见 `_BROKEN_VENUES` 即否决，`fetch_other_venue_positions`
+    # 也随之跳过该所（返回 ok=True 且**无错误**）⇒ 该所的持仓/挂单**不进**配额与敞口，
+    # 且跨所笔数看起来"完整"。口径：凭证死的所**读不出来**（不是没有仓），
+    # 所以这里如实登记"未计入"，绝不假装干净。
+    # 判据精确到"执行闸开着（本该能交易）却不可就绪" ⇒ 只可能是凭证已死：
+    # registry 未登记/闸没开属于"结构性无该所"，不是本告警的范围。
+    try:
+        _xv_broken = list(broken_execution_venues(
+            ("gate", "binance"), _gv_mode, venue_registry=venue_registry,
+            venue_execution_ready=venue_execution_ready))
+    except Exception as _bv_exc:
+        _xv_broken = []
+        print(f"[跨所封顶] warn 坏所探测异常（不影响本周期）: {_bv_exc}")
+    if _xv_broken:
+        print(f"[跨所封顶] warn {'/'.join(_xv_broken)} 凭证已死（执行闸开着却不可就绪）——"
+              "该所持仓/挂单**未计入**本周期配额与敞口（跨所笔数不含该所），"
+              "修好密钥后自动恢复；请勿据面板跨所笔数当作全景")
+
     _pending_enum_errors: list = []
 
     def _pending_warn(_msg):

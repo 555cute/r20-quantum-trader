@@ -34,6 +34,33 @@
 """
 from __future__ import annotations
 
+from typing import List
+
+
+def broken_execution_venues(venues, environment, *, venue_registry,
+                            venue_execution_ready) -> List[str]:
+    """**执行闸开着却不可就绪**的所 ⇒ 凭证已死（第一百三十一刀）。
+
+    为什么单独成函数：这类所会被 `venue_execution_ready` 否决，于是
+    `fetch_other_venue_positions` 也跳过它，且返回 `ok=True` **无任何错误**
+    ⇒ 它的持仓/挂单**不进**配额与敞口，而跨所笔数看起来完整。
+    口径是"**读不出来**（不是没有仓）"，所以必须能**逐周期明说"未计入"**，
+    且这条判据要能单元测试（此前内联在逐字门保护的段体里，改一处就要动差异表）。
+
+    判据精确到"闸开着（本该能交易）却不可就绪"：registry 未登记 / 闸没开属于
+    "结构性无该所"，不是本函数的范围。任何异常都**不猜**（跳过该所，不误报）。
+    """
+    out: List[str] = []
+    for v in venues or ():
+        try:
+            _flag_on = bool(venue_registry.execution_open(v, environment))
+            _ready = bool(venue_execution_ready(v, environment))
+        except Exception:
+            continue
+        if _flag_on and not _ready:
+            out.append(str(v))
+    return out
+
 
 def collect_pending_inst_ids(*, venues, venue_mode, broken_venues, venue_registry,
                              load_instruments, auth_markers, warn=None):

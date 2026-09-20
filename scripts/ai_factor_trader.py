@@ -112,6 +112,7 @@ from scripts.trader.circuit_guard import (
     is_circuit_breaker_active as _circuit_guard_breaker,
 )
 from scripts.trader.cycle_snapshot import (
+    broken_execution_venues,
     build_state_payload,
     collect_pending_inst_ids,
 )
@@ -1075,6 +1076,7 @@ def execute_portfolio():
         query_positions=query_positions,
         reconcile_reservation_ledger=reconcile_reservation_ledger,
         venue_execution_ready=venue_execution_ready,
+        broken_execution_venues=broken_execution_venues,
         venue_registry=venue_registry    )
     if _phase1 is None:
         return None

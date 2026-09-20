@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import ast
+import types
 import unittest
 from pathlib import Path
 
@@ -436,6 +437,53 @@ class WiringTest(unittest.TestCase):
             checked += 1
         self.assertEqual(checked, 2, f"应有 2 处调用，实际 {checked}")
 
+
+class BrokenExecutionVenuesTest(unittest.TestCase):
+    """凭证已死场所的判据（第一百三十一刀）：**闸开着却不可就绪** ⇒ 未计入。
+
+    这条判据存在的理由：此类所被 `venue_execution_ready` 否决 ⇒ 跨所取数也跳过它，
+    且返回 `ok=True` **无任何错误** ⇒ 它的持仓/挂单不进配额与敞口，而"跨所笔数"
+    看起来完整。所以判据必须精确（不误报结构性的"没这个所"），且异常时**不猜**。
+    """
+
+    def _reg(self, *, open_flags):
+        return types.SimpleNamespace(
+            execution_open=lambda v, e: bool(open_flags.get(v, False)))
+
+    def test_flag_on_but_not_ready_is_reported(self):
+        got = cycle_snapshot.broken_execution_venues(
+            ("gate", "binance"), "demo",
+            venue_registry=self._reg(open_flags={"gate": True, "binance": True}),
+            venue_execution_ready=lambda v, e: v != "binance")
+        self.assertEqual(got, ["binance"])
+
+    def test_flag_off_is_not_reported(self):
+        """闸没开 = 结构性无该所（不是"凭证已死"），不得误报。"""
+        got = cycle_snapshot.broken_execution_venues(
+            ("gate", "binance"), "demo",
+            venue_registry=self._reg(open_flags={"gate": False, "binance": False}),
+            venue_execution_ready=lambda v, e: False)
+        self.assertEqual(got, [])
+
+    def test_all_ready_reports_nothing(self):
+        got = cycle_snapshot.broken_execution_venues(
+            ("gate", "binance"), "demo",
+            venue_registry=self._reg(open_flags={"gate": True, "binance": True}),
+            venue_execution_ready=lambda v, e: True)
+        self.assertEqual(got, [])
+
+    def test_exception_on_one_venue_does_not_misreport_or_crash(self):
+        """判据异常时**不猜**：跳过该所，也不影响其余所的判定。"""
+        def _ready(v, e):
+            if v == "gate":
+                raise RuntimeError("能力表读取失败")
+            return False
+
+        got = cycle_snapshot.broken_execution_venues(
+            ("gate", "binance"), "demo",
+            venue_registry=self._reg(open_flags={"gate": True, "binance": True}),
+            venue_execution_ready=_ready)
+        self.assertEqual(got, ["binance"], "异常所不得被当成'已死'，其余所照常判定")
 
 if __name__ == "__main__":
     unittest.main()
