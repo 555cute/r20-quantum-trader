@@ -38,6 +38,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 __all__ = [
     "DEFAULT_RENEW_WITHIN_S",
+    "attribute_protective_orders",
     "audit_cross_venue_protection",
     "ensure_venue_protection",
     "scan_protective_orders",
@@ -164,6 +165,55 @@ def _trigger_price(row: Dict[str, Any]) -> Optional[float]:
         num = _as_float(candidate)
         if num is not None and num > 0:
             return num
+    return None
+
+
+def _leg_symbol(row: Dict[str, Any]) -> str:
+    """该腿的**币种基名**（各所字段位置不同，本机真单核对）。
+
+    - Gate `price_orders`：`initial.contract` = `BTC_USDT`（顶层没有 `symbol`）；
+    - Binance `algoOrder`：`symbol` / `raw.symbol` = `BTCUSDT`。
+    """
+    initial = row.get("initial") if isinstance(row.get("initial"), dict) else {}
+    raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
+    for candidate in (initial.get("contract"), row.get("contract"), row.get("symbol"),
+                      row.get("base"), row.get("inst_id"), row.get("instId"),
+                      raw.get("symbol"), raw.get("contract")):
+        text = str(candidate or "").strip()
+        if text:
+            base = text.split("-")[0].split("_")[0].upper()
+            for q in ("USDT", "USDC", "USD"):
+                if base.endswith(q) and len(base) > len(q):
+                    base = base[: -len(q)]
+            return base
+    return ""
+
+
+def _leg_position_side(row: Dict[str, Any]) -> Optional[str]:
+    """该腿保护的**持仓方向**（`long`/`short`）；判不出 → `None`（不猜）。
+
+    各所语义不同（本机真单核对）：
+    - Gate：`initial.auto_size = close_short` ⇒ 保护的是**空仓**；`close_long` ⇒ 多仓；
+      无 auto_size 时退回 `direction`（Gate 的 `direction` 是**平仓方向**：long=买平 ⇒ 原仓空）；
+    - Binance：腿的 `side` 是**平仓方向**（BUY 平空 ⇒ 原仓 short）。
+    """
+    initial = row.get("initial") if isinstance(row.get("initial"), dict) else {}
+    raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
+    for container in (initial, row, raw):
+        auto = str(container.get("auto_size") or container.get("autoSize") or "").lower()
+        if "close_long" in auto:
+            return "long"
+        if "close_short" in auto:
+            return "short"
+    for container in (initial, row, raw):
+        direction = str(container.get("direction") or "").lower()
+        if direction in ("long", "short") and container is not row:
+            return "short" if direction == "long" else "long"
+    close_side = _row_close_side(row)
+    if close_side == "buy":
+        return "short"
+    if close_side == "sell":
+        return "long"
     return None
 
 
@@ -444,6 +494,146 @@ def ensure_venue_protection(ad: Any, *, symbol: str, pos_side: str, position_siz
     return result
 
 
+def attribute_protective_orders(positions: Optional[Sequence[Dict[str, Any]]],
+                               legs: Optional[Sequence[Dict[str, Any]]],
+                               ledger_rows: Optional[Sequence[Dict[str, Any]]] = None,
+                               *, tolerance_ratio: float = DEFAULT_TOLERANCE_RATIO
+                               ) -> Dict[str, Any]:
+    """逐腿归属：这条保护腿是**给当前哪个仓**挂的？纯判定，无 IO。
+
+    为什么必须做（2026-09-20 实盘实测）：Binance 账户 13 张腿里只有 2 张对得上唯一活动仓
+    （UNI 82 张），另有 2 张是 UNI 的**旧量**（51/55，来自更早的仓）、3 张可归因孤儿
+    （ARB/XRP/ETH，台账有同向同量已平记录）、6 张**归属不可判定**（ETH 0.537 / SOL 10.45…）。
+    Gate 侧 3 张腿则全部带我们的 `t-r20sl/t-r20tp` 标签、`auto_size=close_*`（整仓平，无张数）。
+
+    危害（判据，不是"要不要撤"）：
+    1. **虚假安全感**：`scan_protective_orders` 按币种+平仓方向+数量算覆盖 ⇒ 给新仓算覆盖时，
+       旧仓遗留的腿会被算成"已有保护"；
+    2. **会减新仓**：这些腿是 `reduceOnly` 条件单 ⇒ 同币再开仓后，价格触及**旧触发价**时
+       会**真的减掉新仓**的一部分。
+
+    ## 归属证据分三档（诚实区分"证明是我们的"与"看起来像我们的"）
+
+    | evidence | 含义 | 可否自动清理 |
+    |---|---|---|
+    | `tag` | 带本系统标签（Gate `t-r20sl/t-r20tp`）⇒ **可证明**是我们的 | ✅ |
+    | `ledger` | 无标签，但台账有**同向同量**记录 ⇒ 高度可能 | ✅ |
+    | `None` | 两者都没有 ⇒ **归属不可判定** | ❌ 绝不自动撤（可能是用户手单） |
+
+    ## 分桶
+
+    | state | 含义 |
+    |---|---|
+    | `matched` | 有活动仓，腿保护它（整仓平腿 或 张数与仓量相符） |
+    | `size_mismatch` | 有活动仓，但张数不符（且非整仓平）⇒ 多半旧仓遗留 |
+    | `side_mismatch` | 有活动仓，但腿保护的是**另一个方向** ⇒ 来自已反手的旧仓 |
+    | `orphan_attributed` | 无活动仓，但证据为 `tag`/`ledger` |
+    | `orphan_unattributed` | 无活动仓且无证据 ⇒ 不可判定 |
+    | `unparsed` | 连币种都读不出的行 ⇒ 单独登记（**不得**伪装成"不可判定孤儿"） |
+    | `foreign` | 无本系统保护腿特征（标签/类型名都不匹配） |
+
+    ⚠️ 本函数**不做任何撤销**；`cleanup_candidates` 只是"若要清理，这些是可归因项"。
+    """
+    tol = max(0.0, float(tolerance_ratio or 0.0))
+    pos_by_base: Dict[str, Dict[str, Any]] = {}
+    for p in (positions or []):
+        if not isinstance(p, dict):
+            continue
+        base = _leg_symbol({"symbol": p.get("base") or p.get("symbol") or "",
+                            "inst_id": p.get("inst_id") or p.get("instId") or ""})
+        if base:
+            pos_by_base.setdefault(base, p)
+
+    def _ledger_evidence(base: str, want_pos_side: Optional[str], size: float) -> Optional[Dict[str, Any]]:
+        """台账里同币、同向、同量的记录（含已平）→ 证据（可能为 None）。"""
+        for r in reversed(list(ledger_rows or [])):
+            if not isinstance(r, dict):
+                continue
+            r_base = _leg_symbol({"symbol": r.get("inst") or r.get("symbol") or r.get("name") or ""})
+            if r_base != base:
+                continue
+            r_side = str(r.get("side") or "").strip().lower()
+            r_side = {"空": "short", "多": "long"}.get(r_side, r_side)
+            if r_side in ("sell",):
+                r_side = "short"
+            elif r_side in ("buy",):
+                r_side = "long"
+            if want_pos_side and r_side and r_side != want_pos_side:
+                continue
+            r_sz = _as_float(r.get("sz") if r.get("sz") is not None else r.get("size"))
+            if r_sz is None or size <= 0:
+                continue
+            if abs(abs(r_sz) - size) <= max(1e-6, size * tol):
+                return {"id": r.get("id"), "status": r.get("status"), "sz": r_sz,
+                        "side": r.get("side")}
+        return None
+
+    buckets: Dict[str, List[Dict[str, Any]]] = {
+        "matched": [], "size_mismatch": [], "side_mismatch": [],
+        "orphan_attributed": [], "orphan_unattributed": [], "unparsed": [], "foreign": []}
+
+    for row in (legs or []):
+        if not isinstance(row, dict):
+            continue
+        if _leg_kind(row) is None:
+            buckets["foreign"].append({"reason": "无本系统保护腿特征（标签/类型名都不匹配）"})
+            continue
+        base = _leg_symbol(row)
+        if not base:
+            buckets["unparsed"].append({"reason": "读不出币种（各所字段位置不同）",
+                                        "id": str(row.get("id") or row.get("algo_id") or "")})
+            continue
+        kind = _leg_kind(row)
+        full_close = _is_full_close(row)
+        size = abs(_as_float(_leg_size(row)) or 0.0)
+        leg_side = _leg_position_side(row)
+        tagged = ("r20sl" in _row_text(row)) or ("r20tp" in _row_text(row))
+        entry = {"symbol": base, "kind": kind, "protects": leg_side,
+                 "size": size, "full_close": bool(full_close),
+                 "trigger_price": _trigger_price(row),
+                 "id": str(row.get("id") or row.get("algo_id") or row.get("algoId")
+                           or row.get("order_id") or "")}
+
+        pos = pos_by_base.get(base)
+        if pos is not None:
+            pos_side = str(pos.get("side") or "").lower() or None
+            pos_size = abs(_as_float(pos.get("size_signed") or pos.get("pos")) or 0.0)
+            if leg_side and pos_side and leg_side != pos_side:
+                buckets["side_mismatch"].append(dict(entry, position_side=pos_side,
+                                                     position_size=pos_size))
+                continue
+            if full_close:
+                buckets["matched"].append(dict(entry, position_size=pos_size))
+                continue
+            same = size > 0 and pos_size > 0 and abs(size - pos_size) <= max(1e-6, pos_size * tol)
+            (buckets["matched"] if same else buckets["size_mismatch"]).append(
+                dict(entry, position_size=pos_size))
+            continue
+
+        # 无活动仓 → 孤儿；证据优先级 tag > ledger > 无
+        if tagged:
+            buckets["orphan_attributed"].append(dict(entry, evidence="tag"))
+            continue
+        ev = _ledger_evidence(base, leg_side, size)
+        if ev is not None:
+            buckets["orphan_attributed"].append(dict(entry, evidence="ledger", ledger=ev))
+        else:
+            buckets["orphan_unattributed"].append(entry)
+
+    cleanup = (buckets["orphan_attributed"] + buckets["size_mismatch"]
+               + buckets["side_mismatch"])
+    return {
+        **buckets,
+        "counts": {k: len(v) for k, v in buckets.items()},
+        #: 可安全清理的候选（**仅当**调用方要清理时）：可归因孤儿 + 旧量/旧向腿
+        "cleanup_candidates": cleanup,
+        #: 需要人看但不能自动动的（归属不可判定 / 读不出的行）
+        "needs_human": buckets["orphan_unattributed"] + buckets["unparsed"],
+        "legs_total": sum(len(v) for v in buckets.values()),
+        "orphan_total": len(buckets["orphan_attributed"]) + len(buckets["orphan_unattributed"]),
+    }
+
+
 def audit_cross_venue_protection(xv_positions_by_venue: Optional[Dict[str, Any]], *,
                                  venue_registry: Any,
                                  environment: str,
@@ -452,6 +642,7 @@ def audit_cross_venue_protection(xv_positions_by_venue: Optional[Dict[str, Any]]
                                  renew_within_s: float = DEFAULT_RENEW_WITHIN_S,
                                  expiration_s: int = 604800,
                                  dry_run: bool = False,
+                                 ledger_rows: Optional[Sequence[Dict[str, Any]]] = None,
                                  log: Any = print) -> Dict[str, Any]:
     """对**已冻结的**跨所持仓快照做一遍保护巡检（每周期调用一次）。
 
@@ -467,7 +658,10 @@ def audit_cross_venue_protection(xv_positions_by_venue: Optional[Dict[str, Any]]
     - `critical`：**完全没有止损腿**的仓位 —— 这是必须吼出来的（本函数**不**替它
       定价补挂，因为那种价位是策略决定，不该由巡检层臆造）；
     - `errors`：逐所隔离的失败（一个所挂了不影响另一个所）；
-    - `skipped`：所不可用/行缺字段等未处理项（如实登记，不装作巡检过）。
+    - `skipped`：所不可用/行缺字段等未处理项（如实登记，不装作巡检过）；
+    - `attribution`：逐所**逐腿归属**（matched / size_mismatch / orphan_attributed /
+      orphan_unattributed）——只报告不撤销；`ledger_rows` 传入本方台账行用于归因，
+      不传则该所腿多为"归属不可判定"（如实，不猜）。
 
     读的是**调用方传入的快照**（`fetch_other_venue_positions` 的返回值），
     故本函数不额外出网取持仓；每仓一次 `list_protective_orders` 是必要的核验成本。
@@ -475,7 +669,7 @@ def audit_cross_venue_protection(xv_positions_by_venue: Optional[Dict[str, Any]]
     now = float(now_s if now_s is not None else time.time())
     report: Dict[str, Any] = {"venues": {}, "actions": [], "critical": [],
                               "errors": [], "skipped": [], "would": [],
-                              "dry_run": bool(dry_run)}
+                              "attribution": {}, "dry_run": bool(dry_run)}
     snapshot = xv_positions_by_venue or {}
     for venue in venues:
         rows = snapshot.get(venue)
@@ -560,5 +754,18 @@ def audit_cross_venue_protection(xv_positions_by_venue: Optional[Dict[str, Any]]
             else:
                 venue_stat["errors"] += 1
                 report["errors"].append(item)
+        # 逐腿归属（只读）：回答"这些腿是给当前哪个仓的"。实测 Binance 13 张腿里
+        # 只有 2 张对得上唯一活动仓，其余是历史遗留 ⇒ 必须让运营看得见
+        # （旧量腿会**虚假满足**覆盖判定，且是 reduceOnly 有量条件单，日后可能减到新仓）。
+        # ⚠️ 本段**只报告不撤销**：归属不可判定的腿可能是用户手单，撤错不可逆；
+        # 真要清理必须由调用方显式发起，且只处理 `cleanup_candidates`。
+        try:
+            all_legs = ad.list_protective_orders(None) or []
+            report["attribution"][venue] = attribute_protective_orders(
+                rows, all_legs, ledger_rows,
+                tolerance_ratio=DEFAULT_TOLERANCE_RATIO)
+        except Exception as exc:
+            report["errors"].append({"venue": venue, "stage": "attribution",
+                                     "detail": f"{type(exc).__name__}: {str(exc)[:120]}"})
         report["venues"][venue] = venue_stat
     return report

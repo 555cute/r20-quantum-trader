@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 from scripts.trader.venue_protection import (
     DEFAULT_RENEW_WITHIN_S,
@@ -444,6 +444,14 @@ class AuditCrossVenueTest(unittest.TestCase):
         self.assertIn("binance", report["skipped"][0]["venue"])
 
     def test_bad_rows_are_skipped_not_crashed(self):
+        """字段不足的行必须只登记跳过，**不得**按该行去查保护腿。
+
+        第一百一十二刀调整：本巡检新增"逐腿归属"（只读，用于暴露历史遗留腿），
+        它会**每所一次** `list_protective_orders(None)` —— 这是场所级调用，
+        与"照着坏行去查"是两件事。故断言改为：
+        ① 该所只被调用一次、且参数是 `None`（场所级，不是坏行的 symbol）；
+        ② 坏行照旧进 `skipped`。
+        """
         gate = MagicMock()
         gate.list_protective_orders.return_value = [gate_sl_row()]
         reg = self._registry({"gate": gate, "binance": MagicMock()})
@@ -451,7 +459,8 @@ class AuditCrossVenueTest(unittest.TestCase):
             {"gate": [{"inst_id": "BTC_USDT"}]},   # 缺 side/size
             venue_registry=reg, environment="demo", now_s=NOW)
         self.assertTrue(report["skipped"])
-        gate.list_protective_orders.assert_not_called()
+        self.assertEqual(gate.list_protective_orders.call_args_list, [call(None)],
+                         "只允许一次场所级归属读取，绝不允许照着坏行查 symbol")
 
 
 class WatchdogStageTest(unittest.TestCase):
