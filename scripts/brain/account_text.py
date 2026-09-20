@@ -63,8 +63,16 @@ def build_position_lines(active_positions_detail: Optional[List[Dict[str, Any]]]
             cur_px = safe_float(p.get('markPx') or p.get('lastPx') or entry_px)
             hwm = safe_float(p.get('highWaterMark', 0))
             lwm = safe_float(p.get('lowWaterMark', 0))
-            tp_px = p.get('takeProfitPx', '--')
-            stage_desc = p.get('stage_desc', '持有监控中')
+            # ⚠️ 第一百一十九刀：原写法是 `p.get(k, 默认)` —— **键存在但值为 None 时
+            # 回退不生效**，于是把字面量 `None` / 假的 `--` 喂给模型。
+            # 真机实测（`data/dashboard_last_good.json` 里的 binance UNI 行）：
+            #   `trailingStopPx: None` 而 `trailingSl: 9.025`、`exchangeTp: 8.365`、
+            #   `stage_desc: None` 而 `stageDesc: '云端双腿防护中'`
+            # ⇒ 模型被告知"动态止损线: -- / 目标止盈: -- / 状态: None"，
+            # 而交易所那笔空仓**确实挂着** SL 9.025 + TP 8.365（云端双腿）。
+            # 一律改成 `or` 链：空值继续往真实来源回退，最后才给 `--`。
+            tp_px = p.get('takeProfitPx') or p.get('exchangeTp') or '--'
+            stage_desc = p.get('stage_desc') or p.get('stageDesc') or '持有监控中'
 
             profit_desc = ""
             if is_long and hwm > entry_px and entry_px > 0:
@@ -77,13 +85,52 @@ def build_position_lines(active_positions_detail: Optional[List[Dict[str, Any]]]
                 profit_desc = f" | 曾最低到: {lwm} (极值浮盈 +{peak_gain_pct}%, 现已从极值回撤 {dd_from_peak}%)"
 
             v_badge = f"[{str(p.get('venue', 'OKX')).upper()}] "
+            # 止损线同样走 `or` 链（trailingStopPx → trailingSl → exchangeSl → `--`）
+            sl_px = (p.get('trailingStopPx') or p.get('trailingSl')
+                     or p.get('exchangeSl') or '--')
+            # 保护判据（第一百一十八刀起面板/外所持仓都带）：让模型的态势认知
+            # 与交易所事实一致 —— 缺口要显式说出来，不可判定**不得**含糊成"已保护"。
+            _prot_txt = _protection_text(p)
             pos_lines.append(
-                f"- {v_badge}标的: {inst_name} | 方向: {side} {p.get('lever', p.get('leverage', '3'))}x | 开仓均价: {p.get('avgPx')} | 当前价: {cur_px} | 浮盈: {p.get('upl')} U (ROI: {round(safe_float(p.get('uplRatio')) * 100, 2)}%){profit_desc} | 动态止损线: {p.get('trailingStopPx', p.get('trailingSl', '--'))} | 目标止盈: {tp_px} | 状态: {stage_desc}"
+                f"- {v_badge}标的: {inst_name} | 方向: {side} {p.get('lever', p.get('leverage', '3'))}x | 开仓均价: {p.get('avgPx')} | 当前价: {cur_px} | 浮盈: {p.get('upl')} U (ROI: {round(safe_float(p.get('uplRatio')) * 100, 2)}%){profit_desc} | 动态止损线: {sl_px} | 目标止盈: {tp_px} | 状态: {stage_desc}{_prot_txt}"
             )
     else:
         pos_lines.append("[MISSING_CONTEXT:account_positions]" if active_positions_detail is None else "当前无任何在途持仓敞口 (100% 现金空仓状态)")
 
     return "\n".join(pos_lines)
+
+
+_PROTECTION_TEXT = {
+    "fully_protected": "完全保护",
+    "partially_protected": "部分保护（覆盖不足）",
+    "unprotected": "⚠️ 无活止损腿",
+    "unknown": "保护状态不可判定",
+}
+
+
+def _protection_text(p: Dict[str, Any]) -> str:
+    """把保护判据渲染成提示词里的一段（没有判据就**不写**，不假装）。
+
+    判据由面板侧算出（`dashboard_payload.multi_venue` / `algo_protection`）：
+    `protectionStatus` + `cloud_oco_verified` + `protectionCoveragePct` +
+    `protectionExpiry`。模型据此知道"这笔到底有没有活止损"——
+    在此之前它只能看到一个可能说谎的止损价。
+    """
+    status = str(p.get("protectionStatus") or "").strip()
+    if not status:
+        return ""
+    txt = _PROTECTION_TEXT.get(status, status)
+    pct = p.get("protectionCoveragePct")
+    if isinstance(pct, (int, float)) and status != "unprotected":
+        txt += f" {float(pct):g}%"
+    expiry = str(p.get("protectionExpiry") or "").strip()
+    if expiry == "expired":
+        txt += "（腿已过期）"
+    elif expiry == "expiring":
+        txt += "（腿临期）"
+    elif expiry == "unknown" and status != "unprotected":
+        txt += "（到期未知）"
+    return f" | 保护: {txt}"
 
 
 def build_pending_order_lines(pending_orders_detail: Optional[List[Dict[str, Any]]],

@@ -495,13 +495,30 @@ class RandomParityTest(unittest.TestCase):
     PX = ["", "0", "0.0", "100", "  100  ", None, "abc"]
     POS_SIDES = ["long", "short", "LONG", "buy", "sell", "", None]
 
+    #: ⚠️ **文档化差异**（第一百一十九刀，2026-09-20）：对拍前把"键存在但值为 None"
+    #: 按**缺失**处理。
+    #:
+    #: 搬到前的实现用 `p.get(k, 默认)` —— 键存在但值为 None 时**回退不生效**，
+    #: 于是提示词把字面量 `None` 喂给模型（真机实测 `data/dashboard_last_good.json`
+    #: 的 binance UNI 行：`trailingStopPx: None` 而 `trailingSl: 9.025`、
+    #: `takeProfitPx: None` 而 `exchangeTp: 8.365`、`stage_desc: None` 而
+    #: `stageDesc: '云端双腿防护中'` ⇒ 模型被告知"无止损/无止盈/状态 None"，
+    #: 而交易所那笔空仓**确实挂着**云端双腿）。
+    #:
+    #: 新实现一律走 `or` 链回退到真实来源，并追加 `保护:` 判据段。本差异**只**落在
+    #: "值为 None"这一点上（且新行为更正确），故对拍时把 None 值键删掉、两边吃同一份
+    #: 输入；新行为另由 `NoneFallbackTest` / `ProtectionVerdictPromptTest` 正向钉住。
+    @staticmethod
+    def _doc_delta_normalize(position):
+        return {k: v for k, v in position.items() if v is not None}
+
     def test_positions_random_parity(self):
         rng = random.Random(30301)
         for i in range(12000):
             n = rng.randint(0, 3)
             positions = []
             for _ in range(n):
-                positions.append({
+                positions.append(self._doc_delta_normalize({
                     "name": rng.choice(["BTC", None]), "instId": rng.choice(["B", "E"]),
                     "side": rng.choice(self.POS_SIDES),
                     "avgPx": rng.choice(["100", "0", None, "abc"]),
@@ -515,7 +532,7 @@ class RandomParityTest(unittest.TestCase):
                     "trailingStopPx": rng.choice(["95", None]),
                     "trailingSl": rng.choice(["94", None]),
                     "takeProfitPx": rng.choice(["130", None]),
-                })
+                }))
             arg = None if (n == 0 and rng.random() < 0.5) else positions
             got = build_position_lines(arg, safe_float=_sf)
             want = _legacy_positions(arg, _sf)
@@ -626,5 +643,85 @@ class WiringTest(unittest.TestCase):
                 self.assertFalse((node.module or "").startswith("scripts.ai_factor_trader"))
 
 
+class NoneFallbackTest(unittest.TestCase):
+    """第一百一十九刀：**键存在但值为 None** 时必须继续回退到真实来源。
+
+    真机形状（`data/dashboard_last_good.json` 的 binance UNI 行）：
+    `trailingStopPx=None` 而 `trailingSl=9.025`、`exchangeTp=8.365`、
+    `stage_desc=None` 而 `stageDesc='云端双腿防护中'`。
+    旧实现把 `None` / `--` 喂给模型 ⇒ 模型以为这笔空仓**没有止损止盈**。
+    """
+
+    LIVE_ROW = {"venue": "binance", "instId": "UNI-USDT-SWAP", "posSide": "short",
+                "avgPx": "8.825", "markPx": "8.774", "upl": "4.17", "uplRatio": "0.2",
+                "lever": "6", "trailingStopPx": None, "trailingSl": 9.025,
+                "takeProfitPx": None, "exchangeTp": 8.365, "stage_desc": None,
+                "stageDesc": "云端双腿防护中"}
+
+    def _line(self, **over):
+        row = dict(self.LIVE_ROW, **over)
+        return build_position_lines([row], safe_float=_sf)
+
+    def test_none_valued_stop_falls_back_to_real_stop(self):
+        out = self._line()
+        self.assertIn("动态止损线: 9.025", out)
+        self.assertIn("目标止盈: 8.365", out)
+
+    def test_none_valued_stage_falls_back_to_camel_key(self):
+        self.assertIn("状态: 云端双腿防护中", self._line())
+
+    def test_never_emits_the_literal_none(self):
+        """提示词里出现字面量 `None` 就是 bug（模型会当字符串读）。"""
+        self.assertNotIn("None", self._line())
+        self.assertNotIn("None", self._line(trailingSl=None, exchangeSl=None,
+                                           exchangeTp=None, stageDesc=None))
+
+    def test_absent_everything_still_shows_dashes(self):
+        out = self._line(trailingStopPx=None, trailingSl=None, takeProfitPx=None,
+                         exchangeTp=None, stageDesc=None)
+        self.assertIn("动态止损线: --", out)
+        self.assertIn("目标止盈: --", out)
+        self.assertIn("状态: 持有监控中", out)
+
+    def test_exchange_sl_is_the_last_fallback(self):
+        out = self._line(trailingStopPx=None, trailingSl=None, exchangeSl=9.5)
+        self.assertIn("动态止损线: 9.5", out)
+
+
+class ProtectionVerdictPromptTest(unittest.TestCase):
+    """第一百一十八/十九刀：把**保护判据**如实告诉模型（此前完全没有这个信息）。"""
+
+    def _line(self, **over):
+        row = {"venue": "binance", "instId": "UNI-USDT-SWAP", "posSide": "short",
+               "avgPx": "9", "markPx": "8.9", "upl": "1", "uplRatio": "0.1"}
+        row.update(over)
+        return build_position_lines([row], safe_float=_sf)
+
+    def test_fully_protected_is_stated(self):
+        out = self._line(protectionStatus="fully_protected",
+                         protectionCoveragePct=100.0, protectionExpiry="never")
+        self.assertIn("保护: 完全保护 100%", out)
+
+    def test_unprotected_is_shouted_not_softened(self):
+        out = self._line(protectionStatus="unprotected", protectionCoveragePct=0.0)
+        self.assertIn("保护: ⚠️ 无活止损腿", out)
+
+    def test_unknown_is_not_dressed_up_as_safe(self):
+        out = self._line(protectionStatus="unknown")
+        self.assertIn("保护状态不可判定", out)
+        self.assertNotIn("完全保护", out)
+
+    def test_expired_leg_is_marked(self):
+        out = self._line(protectionStatus="partially_protected",
+                         protectionCoveragePct=50.0, protectionExpiry="expired")
+        self.assertIn("腿已过期", out)
+
+    def test_no_verdict_no_segment(self):
+        """没有判据就不写这一段（不假装）。"""
+        self.assertNotIn("保护:", self._line())
+
+
 if __name__ == "__main__":
     unittest.main()
+
+# WRITE-PROBE
