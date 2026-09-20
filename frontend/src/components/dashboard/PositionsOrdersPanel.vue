@@ -78,6 +78,24 @@ function posRoi(p: any): number {
 function ocoOk(p: any): boolean {
   return p.cloud_oco_verified !== false && p.protectionStatus !== 'unprotected';
 }
+/** 保护腿触发价类型 → 短标签（`''` = 没有该类腿/后端未给 ⇒ **不显示**，不编）。 */
+function slTriggerType(p: any): string {
+  const v = String(p?.protectionSlTriggerPxType ?? '').toLowerCase();
+  if (v === 'mark') return t('dash.matrix.positions.triggerMark');
+  if (v === 'last') return t('dash.matrix.positions.triggerLast');
+  if (v === 'index') return t('dash.matrix.positions.triggerIndex');
+  if (v === 'unknown') return t('dash.matrix.positions.triggerUnknown');
+  return '';
+}
+/** 悬停说明：为什么这件事重要（`last` 一根插针就能提前打掉保护）。 */
+function slTriggerTypeHint(p: any): string {
+  const v = String(p?.protectionSlTriggerPxType ?? '').toLowerCase();
+  if (v === 'mark') return t('dash.matrix.positions.triggerMarkHint');
+  if (v === 'last') return t('dash.matrix.positions.triggerLastHint');
+  if (v === 'index') return t('dash.matrix.positions.triggerIndexHint');
+  if (v === 'unknown') return t('dash.matrix.positions.triggerUnknownHint');
+  return '';
+}
 function orderDir(o: any): 'long' | 'short' {
   return String(o.posSide || (o.side === 'buy' ? 'long' : 'short')).toLowerCase() as any;
 }
@@ -245,7 +263,14 @@ function orderTooltipText(o: any): string {
               <span class="text-3xs block" :class="posPnl(p) >= 0 ? 'text-[var(--up)]' : 'text-[var(--down)]'">{{ fmtPct(posRoi(p)) }}</span>
             </td>
             <td class="col-num font-mono text-3xs">
-              <span class="down block">SL {{ fmtPrice(p.exchangeSl ?? p.displayStop) }}</span>
+              <span class="down block">
+                SL {{ fmtPrice(p.exchangeSl ?? p.displayStop) }}
+                <span
+                  v-if="slTriggerType(p)"
+                  class="text-3xs text-[var(--ink-2)]"
+                  :title="slTriggerTypeHint(p)"
+                >· {{ slTriggerType(p) }}</span>
+              </span>
               <span v-if="getTp1(p)" class="up block font-medium" :title="p.stageDesc || t('dash.matrix.positions.scaleOutTitle')">
                 TP1 {{ fmtPrice(getTp1(p)) }}
               </span>

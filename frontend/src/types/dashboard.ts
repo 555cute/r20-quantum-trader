@@ -42,6 +42,10 @@ export interface PositionItem {
   cloud_oco_verified?: boolean
   protectionStatus?: string
   protectionCoveragePct?: number
+  //: 保护腿**触发价类型**（第一百六十七刀后端新增）：`mark`/`last`/`index`；
+  //: `'unknown'` = 腿在但该所未上报；`null`/缺省 = 没有该类腿（≠ 未上报）
+  protectionSlTriggerPxType?: string | null
+  protectionTpTriggerPxType?: string | null
   slTriggerPx?: number | string
   tpTriggerPx?: number | string
   stageDesc?: string
