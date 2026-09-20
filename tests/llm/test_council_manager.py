@@ -255,5 +255,60 @@ class TestCouncilManager(unittest.TestCase):
             self.assertEqual(brain_output["decisions"]["BTC-USDT-SWAP"]["adopted_role"], "REJECT_ALL")
 
 
+class SeatBindingWriteGateFailClosedTest(unittest.TestCase):
+    """席位绑定**写闸**：模型库读不出来 ⇒ 拒绝保存（第一百四十五刀）。
+
+    缺陷形状（同族 fail-open）：`validate_seat_model_bindings` 在模型库读不出来时
+    `return []`（= 无问题 ⇒ 放行）—— 一个**写闸**在无法判断时开门，与自身目的矛盾；
+    注释里"只读侧会标记"至多覆盖运行期回落，覆盖不了"把查不到的 id 写进配置、
+    管理页还显示成已绑定"。
+
+    用户既有方向（第 54 刀同类）：**不可判定 ⇒ 宁可不做**。
+    """
+
+    def test_unreadable_model_library_blocks_save(self):
+        from r20_backend.council import roster
+        with patch("r20_backend.llm_manager.load_llm_config",
+                   side_effect=OSError("模型库读不出来")):
+            problems = roster.validate_seat_model_bindings(
+                {"cio": {"model_id": "some-model"}}, {})
+        self.assertTrue(problems, "读闸在判断不了时必须**拒绝**，而不是放行")
+        self.assertIn("模型库读不出来", problems[0])
+        self.assertIn("拒绝保存", problems[0])
+
+    def test_save_council_config_raises_with_the_reason(self):
+        """行为闭环：问题列表被调用方转成 ValueError（管理页可见原因）。"""
+        from r20_backend import council_manager
+        with patch("r20_backend.llm_manager.load_llm_config",
+                   side_effect=OSError("模型库读不出来")), \
+             patch.object(council_manager, "COUNCIL_CONFIG_FILE", "/tmp/nonexistent-council.json"):
+            with self.assertRaises(ValueError) as ctx:
+                council_manager.save_council_config({"roles": {"cio": {"model_id": "x"}}},
+                                                    enforce_models=True)
+        self.assertIn("模型库读不出来", str(ctx.exception))
+
+    def test_empty_library_is_not_treated_as_unreadable(self):
+        """合法为空（全新环境）仍放行：没有任何绑定可能合法，堵死首次配置没有意义。"""
+        from r20_backend.council import roster
+        with patch("r20_backend.llm_manager.load_llm_config",
+                   return_value={"models": []}):
+            self.assertEqual(roster.validate_seat_model_bindings(
+                {"cio": {"model_id": "x"}}, {}), [])
+
+    def test_registered_ids_still_pass_and_unknown_ids_still_fail(self):
+        """回归护栏：正常路径语义不变。"""
+        from r20_backend.council import roster
+        cfg = {"models": [{"id": "deepseek-v4"}, {"id": "glm-4.6"}]}
+        with patch("r20_backend.llm_manager.load_llm_config", return_value=cfg):
+            self.assertEqual(roster.validate_seat_model_bindings(
+                {"cio": {"model_id": "deepseek-v4"}}, {}), [])
+            problems = roster.validate_seat_model_bindings(
+                {"cio": {"model_id": "not-registered"}}, {})
+            self.assertTrue(problems)
+            # 沿用旧绑定（未变化）不算新错
+            self.assertEqual(roster.validate_seat_model_bindings(
+                {"cio": {"model_id": "not-registered"}},
+                {"cio": {"model_id": "not-registered"}}), [])
+
 if __name__ == "__main__":
     unittest.main()

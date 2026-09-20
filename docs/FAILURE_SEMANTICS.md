@@ -60,6 +60,7 @@
 | 周期披露指标（`/metrics`） | worker 落盘快照、后端读取；**快照缺失只标 `source_ok=0`，绝不发零值计数**（读不到 ≠ 很干净；未开闸时也不发错误计数）| 披露 | `r20_backend/metrics.py` | `tests/ops/test_metrics_exposition.py::CycleDisclosureMetricsTest` |
 | 面板侧 JSON 读取（追踪器/多所组合） | 收敛到**共享披露读取器**：文件不存在⇒静默空态；读不出来/形状不对⇒返回空**但打印 warn 并点明"空不等于没有"** | 披露 | `r20_backend/dashboard_payload/readers.py` | `tests/ui/test_dashboard_payload_seam.py::DisclosedJsonReaderTest` |
 | 台账同步旁车（跨所同步完整性） | 旁车**缺失**⇒`([],"")`（全新环境）；**损坏/过旧**（>45min）⇒ 标记不可判定并**禁本周期开仓**（用户拍板 fail-closed），同时打印原因 | 不做（fail-closed）+ 披露 | `r20_backend/execution/circuit_breaker.py` | `tests/ops/test_ledger_sync_sidecar.py::SidecarUnknownIsFailClosedTest` |
+| 席位绑定**写闸**（模型库读取） | 模型库**读不出来** ⇒ 返回问题 ⇒ 调用方 `raise ValueError` **拒绝保存**；合法为空（全新环境）仍放行 | 不做（fail-closed）| `r20_backend/council/roster.py` | `tests/llm/test_council_manager.py::SeatBindingWriteGateFailClosedTest` |
 <!-- anchors:end -->
 
 ## 3. 抽取门与"文档化差异"

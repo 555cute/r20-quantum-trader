@@ -76,13 +76,30 @@ def validate_seat_model_bindings(roles: Any, previous_roles: Any = None) -> List
     """写闸：**新绑定**的未登记模型一律拒绝（沿用旧绑定的不算新错，避免堵死保存）。
 
     返回问题列表（空 = 通过）。只比对 model_id 变化过的席位，管理员点保存不会被历史遗留挡住。
+
+    ## 不可判定 ⇒ **拒绝保存**（第一百四十五刀）
+
+    本函数是**写闸**：它存在的意义就是"判断不了就不放行"。旧实现在模型库**读不出来**时
+    `return []`（= 无问题 ⇒ 放行）—— 写闸在**无法判断**时开门，与自身目的矛盾；
+    注释里那句"只读侧会标记"至多覆盖到运行期回落（主脑代答），覆盖不了"把一个查不到的
+    id 写进配置并在管理页显示为已绑定"。
+
+    现约定（对齐 `docs/FAILURE_SEMANTICS.md`）：
+
+    - 模型库**读不出来** ⇒ 返回一条问题 ⇒ 调用方（`council_manager.save_council_config`）
+      `raise ValueError` ⇒ **保存被拒**并带上原因；
+    - 模型库**合法为空**（全新环境尚未登记模型）⇒ 仍 `[]`（此时没有任何绑定可能合法，
+      把首次配置也堵死没有意义）；
+    - **导入/套用整包**路径（`enforce_models=False`）按既有语义继续（不整包拒绝），
+      本函数返回的问题在那里只作回报 —— 这是既有的、有意的区分。
     """
     from r20_backend.llm_manager import load_llm_config
     try:
         cfg = load_llm_config(mask_keys=False)
         registered = {str(i.get("id")) for i in (cfg.get("models") or []) if isinstance(i, dict) and i.get("id")}
-    except Exception:
-        return []  # 模型库读不到时不阻断保存（只读侧会标记）
+    except Exception as exc:      # noqa: BLE001 - 读闸失败要变成"拒绝保存"而不是"放行"
+        return [f"模型库读不出来（{exc!r}）⇒ 无法核验席位绑定，已拒绝保存"
+                "（不可判定 ≠ 安全：" + "读闸不该在判断不了时放行）"]
     if not registered:
         return []
     prev = previous_roles if isinstance(previous_roles, dict) else {}
