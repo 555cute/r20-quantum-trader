@@ -546,3 +546,54 @@ def listing_status(environment: str = Query(default="demo"),
         "venues": venues,
         "captured_at_ms": int(time.time() * 1000),
     }
+
+
+@router.get("/api/v1/admin/venue-protection/scan")
+def venue_protection_scan(
+    x_r20_admin_token: str | None = Header(default=None),
+    x_r20_session: str | None = Header(default=None, alias="X-R20-Session"),
+) -> dict[str, Any]:
+    """跨所保护单**只读预演**（roadmap G8）：开闸前先看"这一轮会做什么"。
+
+    - **绝不下单、绝不撤单**：走 `audit_cross_venue_protection(dry_run=True)`，
+      只读交易所的保护单列表并判定（缺口/临期/不可判定）；
+    - 需要 live 网络（每所一次持仓读取 + 每仓一次保护单列表），故需管理员鉴权；
+    - 输出 `would`（本该做什么：renew/repair/verify/noop）、`critical`（完全没有止损腿）、
+      `errors`（逐所隔离的失败）。`R20_VENUE_PROTECTION_WATCHDOG` 的开关状态一并回传，
+      便于区分"巡检没开"与"巡检开了但没发现问题"。
+    """
+    require_admin_header(x_r20_admin_token, x_r20_session)
+    from scripts.okx_runtime import current_environment
+    from r20_backend.close_intent import adapter_environment
+    from r20_backend.exchanges import get_adapter
+    from scripts.trader.venue_protection import audit_cross_venue_protection
+
+    env = current_environment()
+    snapshot: dict[str, Any] = {}
+    snapshot_errors: dict[str, str] = {}
+    for venue in ("gate", "binance"):
+        try:
+            ad = get_adapter(venue, environment=adapter_environment(venue, env.mode))
+            rows = [p for p in (ad.positions() or [])
+                    if abs(float(p.get("size_signed") or 0) or 0) > 0]
+            snapshot[venue] = rows
+        except Exception as exc:
+            # 与巡检同一纪律：读不到就如实登记，绝不假装"该所干净"
+            snapshot_errors[venue] = f"{type(exc).__name__}: {exc}"
+            snapshot[venue] = []
+
+    class _Registry:
+        @staticmethod
+        def get_adapter(v: str, environment: str | None = None):
+            return get_adapter(v, environment=environment or adapter_environment(v, env.mode))
+
+    report = audit_cross_venue_protection(snapshot, venue_registry=_Registry,
+                                          environment=env.mode, dry_run=True)
+    report["environment"] = env.mode
+    report["snapshot_errors"] = snapshot_errors
+    try:
+        from scripts import ai_factor_trader as _aft
+        report["watchdog_enabled"] = bool(getattr(_aft, "R20_VENUE_PROTECTION_WATCHDOG", False))
+    except Exception:
+        report["watchdog_enabled"] = None
+    return report

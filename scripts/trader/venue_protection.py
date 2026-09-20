@@ -451,12 +451,19 @@ def audit_cross_venue_protection(xv_positions_by_venue: Optional[Dict[str, Any]]
                                  venues: Sequence[str] = ("gate", "binance"),
                                  renew_within_s: float = DEFAULT_RENEW_WITHIN_S,
                                  expiration_s: int = 604800,
+                                 dry_run: bool = False,
                                  log: Any = print) -> Dict[str, Any]:
     """对**已冻结的**跨所持仓快照做一遍保护巡检（每周期调用一次）。
 
-    返回 `{venues, actions, critical, errors, skipped}`：
+    `dry_run=True` 时**只判定、不写单**：回答"如果开闸，这一轮会做哪些动作"
+    —— 这是运营在打开 `R20_VENUE_PROTECTION_WATCHDOG` 之前的预演视图，
+    也是线上排障时唯一安全的取证方式。
+
+    返回 `{venues, actions, critical, errors, skipped, would, dry_run}`：
 
     - `actions`：本次真的动了单的仓位（续期/补挂），供 `executed_actions` 展示；
+    - `would`：dry-run 下"**本来会做**"的动作（`stage` 为 `renew`/`repair`/`verify`/
+      `no_price`），开闸前先看它，能避免把一次误判变成一串真实订单；
     - `critical`：**完全没有止损腿**的仓位 —— 这是必须吼出来的（本函数**不**替它
       定价补挂，因为那种价位是策略决定，不该由巡检层臆造）；
     - `errors`：逐所隔离的失败（一个所挂了不影响另一个所）；
@@ -467,7 +474,8 @@ def audit_cross_venue_protection(xv_positions_by_venue: Optional[Dict[str, Any]]
     """
     now = float(now_s if now_s is not None else time.time())
     report: Dict[str, Any] = {"venues": {}, "actions": [], "critical": [],
-                              "errors": [], "skipped": []}
+                              "errors": [], "skipped": [], "would": [],
+                              "dry_run": bool(dry_run)}
     snapshot = xv_positions_by_venue or {}
     for venue in venues:
         rows = snapshot.get(venue)
@@ -491,6 +499,42 @@ def audit_cross_venue_protection(xv_positions_by_venue: Optional[Dict[str, Any]]
                 report["skipped"].append({"venue": venue, "why": f"行字段不足: {row!r}"[:160]})
                 continue
             venue_stat["checked"] += 1
+            if dry_run:
+                try:
+                    prows = ad.list_protective_orders(symbol) or []
+                except Exception as exc:
+                    venue_stat["errors"] += 1
+                    report["errors"].append({"venue": venue, "inst": symbol, "stage": "list",
+                                             "detail": f"{type(exc).__name__}: {exc}"})
+                    continue
+                scan = scan_protective_orders(prows, symbol=symbol, pos_side=pos_side,
+                                              position_size=size, now_s=now,
+                                              renew_within_s=renew_within_s)
+                would = "noop"
+                if not scan["has_live_sl"]:
+                    would = "repair"
+                elif scan["needs_renew"]:
+                    would = "renew"
+                elif scan["needs_verify"]:
+                    would = "verify"
+                item = {"venue": venue, "inst": symbol, "side": pos_side, "would": would,
+                        "covered_size": scan["covered_size"],
+                        "missing_size": scan["missing_size"],
+                        "coverage_ok": scan["coverage_ok"],
+                        "expiring": [leg["id"] for leg in scan["expiring"]],
+                        "expired": [leg["id"] for leg in scan["expired"]],
+                        "expiry_unknown": [leg["id"] for leg in scan["expiry_unknown"]],
+                        "foreign_count": scan["foreign_count"]}
+                if would == "repair":
+                    venue_stat["missing"] += 1
+                    report["critical"].append(item)
+                elif would in ("renew", "verify"):
+                    report["would"].append(item)
+                if would == "renew":
+                    venue_stat["renewed"] += 1
+                elif would == "repair":
+                    venue_stat["repaired"] += 1
+                continue
             try:
                 res = ensure_venue_protection(ad, symbol=symbol, pos_side=pos_side,
                                               position_size=size, now_s=now,

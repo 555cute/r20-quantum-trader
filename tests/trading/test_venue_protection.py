@@ -513,5 +513,125 @@ class WatchdogStageTest(unittest.TestCase):
                       "默认值必须显式为 0（否则巡检会在无人知情时开闸）")
 
 
+class DryRunTest(unittest.TestCase):
+    """开闸前的只读预演：只判定、绝不动单（这是线上唯一安全的取证方式）。"""
+
+    def _registry(self, adapters):
+        reg = MagicMock()
+        reg.get_adapter.side_effect = lambda v, environment=None: adapters[v]
+        return reg
+
+    def test_dry_run_reports_would_renew_without_writing(self):
+        gate = MagicMock()
+        gate.list_protective_orders.return_value = [
+            gate_sl_row("old-sl", created=NOW - (604800 - 60), trigger="77000")]
+        reg = self._registry({"gate": gate, "binance": MagicMock()})
+        report = audit_cross_venue_protection(
+            {"gate": [{"inst_id": "BTC_USDT", "side": "long", "size_signed": 1.0}]},
+            venue_registry=reg, environment="demo", now_s=NOW, dry_run=True)
+        self.assertTrue(report["dry_run"])
+        self.assertEqual([i["would"] for i in report["would"]], ["renew"])
+        self.assertEqual(report["actions"], [])
+        gate.attach_protective_orders.assert_not_called()
+        gate.cancel_price_order.assert_not_called()
+
+    def test_dry_run_flags_missing_leg_as_critical(self):
+        gate = MagicMock()
+        gate.list_protective_orders.return_value = []
+        reg = self._registry({"gate": gate, "binance": MagicMock()})
+        report = audit_cross_venue_protection(
+            {"gate": [{"inst_id": "BTC_USDT", "side": "long", "size_signed": 1.0}]},
+            venue_registry=reg, environment="demo", now_s=NOW, dry_run=True)
+        self.assertEqual([i["would"] for i in report["critical"]], ["repair"])
+        gate.attach_protective_orders.assert_not_called()
+
+    def test_dry_run_noop_when_healthy(self):
+        gate = MagicMock()
+        gate.list_protective_orders.return_value = [gate_sl_row()]
+        reg = self._registry({"gate": gate, "binance": MagicMock()})
+        report = audit_cross_venue_protection(
+            {"gate": [{"inst_id": "BTC_USDT", "side": "long", "size_signed": 10.0}]},
+            venue_registry=reg, environment="demo", now_s=NOW, dry_run=True)
+        self.assertEqual(report["would"], [])
+        self.assertEqual(report["critical"], [])
+        self.assertEqual(report["venues"]["gate"]["checked"], 1)
+
+    def test_non_dry_run_actually_writes(self):
+        """对照组：同一输入、dry_run=False 时必须真的动单（否则预演成了唯一行为）。"""
+        gate = MagicMock()
+        gate.list_protective_orders.return_value = [
+            gate_sl_row("old-sl", created=NOW - (604800 - 60), trigger="77000")]
+        gate.attach_protective_orders.return_value = {"sl": "new-sl"}
+        reg = self._registry({"gate": gate, "binance": MagicMock()})
+        report = audit_cross_venue_protection(
+            {"gate": [{"inst_id": "BTC_USDT", "side": "long", "size_signed": 1.0}]},
+            venue_registry=reg, environment="demo", now_s=NOW, dry_run=False)
+        self.assertEqual(len(report["actions"]), 1)
+        gate.attach_protective_orders.assert_called_once()
+
+    def test_dry_run_listing_failure_is_reported_not_faked(self):
+        gate = MagicMock()
+        gate.list_protective_orders.side_effect = RuntimeError("gate 502")
+        reg = self._registry({"gate": gate, "binance": MagicMock()})
+        report = audit_cross_venue_protection(
+            {"gate": [{"inst_id": "BTC_USDT", "side": "long", "size_signed": 1.0}]},
+            venue_registry=reg, environment="demo", now_s=NOW, dry_run=True)
+        self.assertEqual(report["errors"][0]["stage"], "list")
+        self.assertEqual(report["critical"], [], "读不到不等于没有止损腿，不许当成 critical")
+
+
+class PreflightEndpointTest(unittest.TestCase):
+    """管理员预演端点：必须鉴权、且**只读**（不下单/不撤单）。"""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        from fastapi.testclient import TestClient
+        from tests.config_sandbox import isolate_config
+        import r20_backend.app as app_module
+        from r20_backend.admin_auth import AdminAuthStore
+
+        isolate_config(self)
+        self.temp = tempfile.TemporaryDirectory()
+        self._orig = app_module.admin_auth
+        app_module.admin_auth = AdminAuthStore(Path(self.temp.name) / "admin.db")
+        app_module.admin_auth.initialize_from_legacy("InitialAdmin123456")
+        self.client = TestClient(app_module.app)
+
+    def tearDown(self):
+        import r20_backend.app as app_module
+        app_module.admin_auth = self._orig
+        self.temp.cleanup()
+
+    def _headers(self):
+        r = self.client.post("/api/v1/admin/auth/login",
+                             json={"username": "admin", "password": "InitialAdmin123456"})
+        self.assertEqual(r.status_code, 200, r.text)
+        return {"X-R20-Session": r.json()["session_token"]}
+
+    def test_requires_admin(self):
+        r = self.client.get("/api/v1/admin/venue-protection/scan")
+        self.assertIn(r.status_code, (401, 403))
+
+    def test_read_only_scan_never_writes(self):
+        """把适配器全打桩：端点返回结构，且**一次写单调用都没有**。"""
+        from unittest.mock import patch
+        ad = MagicMock()
+        ad.positions.return_value = [{"inst_id": "BTC_USDT", "base": "BTC", "side": "long",
+                                      "size_signed": 1.0, "leverage": 5.0}]
+        ad.list_protective_orders.return_value = [
+            gate_sl_row("old-sl", created=NOW - (604800 - 60), trigger="77000")]
+        with patch("r20_backend.exchanges.get_adapter", return_value=ad):
+            r = self.client.get("/api/v1/admin/venue-protection/scan", headers=self._headers())
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertTrue(body["dry_run"], "预演端点必须是 dry_run —— 否则面板点一下就会真下单")
+        for key in ("would", "critical", "errors", "venues", "snapshot_errors"):
+            self.assertIn(key, body)
+        ad.attach_protective_orders.assert_not_called()
+        ad.cancel_price_order.assert_not_called()
+        ad.cancel_algo_order.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
