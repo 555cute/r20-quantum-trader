@@ -184,7 +184,17 @@ def execute_entry_scan(*,
                 pos_avg_px = float(curr_pos.get("avgPx", 0.0) or 0.0)
                 curr_margin = float(curr_pos.get("margin", 0.0) or 0.0)
                 tracker = trackers.get(f"{inst_id}_long", {})
-                scale_count = int(tracker.get("scale_count", 0))
+                # ⚠️ 第一百三十八刀（用户拍板 fail-closed）：**追踪器拿不到该仓 ⇒ 视同已达上限**。
+                # 读失败时 `load_trackers()` 返回标记型空字典 ⇒ 此处必然命中。
+                # 为什么必须这样：`pyramiding_gate` 的「每仓最多加仓 N 次」判据是
+                # `scale_count < max`，缺省 0 会让上限**静默失效**（可反复加仓、过度集中）。
+                # ⚠️ 诚实说明：下一条 gate 文案会显示"已达最大加仓次数 (N/N)" ——
+                # 那是**保守假设**（真实情况是"未知"），本行先把这层说清楚。
+                if not tracker:
+                    print(f"[Pyramiding] {f['name']} 追踪器缺失 ⇒ 无法核验已加仓次数，"
+                          "按 fail-closed 视同已达上限（宁可不加，不可无限加）")
+                scale_count = (int(tracker.get("scale_count", 0)) if tracker
+                               else MAX_SCALE_IN_COUNT)
                 trailing_sl = float(tracker.get("trailingStopPx", 0.0) or 0.0)
 
                 # Ironclad Pyramiding Rules:
@@ -292,7 +302,17 @@ def execute_entry_scan(*,
                 pos_avg_px = float(curr_pos.get("avgPx", 0.0) or 0.0)
                 curr_margin = float(curr_pos.get("margin", 0.0) or 0.0)
                 tracker = trackers.get(f"{inst_id}_short", {})
-                scale_count = int(tracker.get("scale_count", 0))
+                # ⚠️ 第一百三十八刀（用户拍板 fail-closed）：**追踪器拿不到该仓 ⇒ 视同已达上限**。
+                # 读失败时 `load_trackers()` 返回标记型空字典 ⇒ 此处必然命中。
+                # 为什么必须这样：`pyramiding_gate` 的「每仓最多加仓 N 次」判据是
+                # `scale_count < max`，缺省 0 会让上限**静默失效**（可反复加仓、过度集中）。
+                # ⚠️ 诚实说明：下一条 gate 文案会显示"已达最大加仓次数 (N/N)" ——
+                # 那是**保守假设**（真实情况是"未知"），本行先把这层说清楚。
+                if not tracker:
+                    print(f"[Pyramiding] {f['name']} 追踪器缺失 ⇒ 无法核验已加仓次数，"
+                          "按 fail-closed 视同已达上限（宁可不加，不可无限加）")
+                scale_count = (int(tracker.get("scale_count", 0)) if tracker
+                               else MAX_SCALE_IN_COUNT)
                 trailing_sl = float(tracker.get("trailingStopPx", 0.0) or 0.0)
 
                 c_dyn = f.get("calculus", {})
