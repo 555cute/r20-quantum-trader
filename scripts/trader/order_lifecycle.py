@@ -79,11 +79,17 @@ def clean_stale_open_orders(keep_ord_ids: Optional[set] = None,
     except Exception:
         _env_mode = ""
     # 外所接管判定用活意图集（与 OKX 对账同一把尺：新鲜意图归属 → 保留）
+    # ⚠️ 第一百三十四刀：**读不到意图 ⇒ 不撤任何单 + fail-closed**。
+    # 旧写法 `except Exception: _live_intents = []` 把"文件坏了"当成"没有意图"
+    # ⇒ 每笔挂单都失去归属 ⇒ 按孤儿/陈旧**撤销**（撤旧挂新循环的另一种成因），
+    # 而调用方还会照常开新仓。撤单不可逆 ⇒ 未知必须保留。
     try:
         _live_intents = [i for i in load_open_intents()
                          if isinstance(i, dict) and now_ts - int(i.get("ts", 0) or 0) <= OPEN_INTENT_TTL_MS]
-    except Exception:
-        _live_intents = []
+    except Exception as _intents_exc:
+        print(f"[挂单生命周期] CRITICAL 本地意图不可读（{_intents_exc}）——本轮**不撤任何**"
+              "外所挂单，并 fail-closed 禁止本周期新增下单（读不到 ≠ 没有意图）")
+        return False, "本地意图不可读（不撤单，fail-closed）"
 
     def _intent_covers(venue_base: str, dir_word: str) -> bool:
         _tgt = f"{venue_base}-USDT-SWAP"
@@ -225,7 +231,13 @@ def reconcile_pending_orders(trackers: Dict[str, Any] = None, now_ms: int = None
         return False, set()
     if trackers is None:
         trackers = load_trackers()
-    intents = load_open_intents()
+    # ⚠️ 第一百三十四刀：读不到意图 ⇒ **fail-closed 且不撤任何单**（理由同上）。
+    try:
+        intents = load_open_intents()
+    except Exception as _intents_exc:
+        print(f"[挂单对账] CRITICAL 本地意图不可读（{_intents_exc}）→ fail-closed：本周期"
+              "禁止新增下单，且**不撤销任何挂单**（读不到 ≠ 没有意图）")
+        return False, set()
     kept: set = set()
 
     def _cancel_orphan(reason: str) -> bool:

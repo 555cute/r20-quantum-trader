@@ -61,6 +61,26 @@ _DELTA_BLOCKS = (
     '                _ro = o.get("is_reduce_only") if o.get("is_reduce_only") is not None else _raw.get("is_reduce_only")\n',
 )
 _DELTA_REWRITES = (
+    # ④ 第一百三十四刀：**"读不到意图"必须 fail-closed 且不撤单**（两处调用方）。
+    # 旧行为把"文件坏了"当成"没有意图" ⇒ 每笔挂单失去归属 ⇒ 按孤儿**撤销**，
+    # 且 `reconcile_ok` 仍为 True（不 fail-closed）。撤单不可逆 ⇒ 现为
+    # "不撤任何单 + 禁止本周期新增下单"；门面 `load_open_intents` 相应区分
+    # "文件不存在（合法空态 ⇒ []）"与"存在却读不出来（⇒ 抛 OpenIntentsUnreadable）"。
+    # 两处都是"整段替换"，故按源码文本还原（AST 比较不看注释）。
+    ('    except Exception as _intents_exc:\n'
+     '        print(f"[挂单生命周期] CRITICAL 本地意图不可读（{_intents_exc}）——本轮**不撤任何**"\n'
+     '              "外所挂单，并 fail-closed 禁止本周期新增下单（读不到 ≠ 没有意图）")\n'
+     '        return False, "本地意图不可读（不撤单，fail-closed）"\n',
+     '    except Exception:\n'
+     '        _live_intents = []\n'),
+    ('    try:\n'
+     '        intents = load_open_intents()\n'
+     '    except Exception as _intents_exc:\n'
+     '        print(f"[挂单对账] CRITICAL 本地意图不可读（{_intents_exc}）→ fail-closed：本周期"\n'
+     '              "禁止新增下单，且**不撤销任何挂单**（读不到 ≠ 没有意图）")\n'
+     '        return False, set()\n',
+     '    intents = load_open_intents()\n'),
+
     # ③ base 归一里剥掉 `_USDT` 后缀（Gate 合约名形如 `BTC_USDT`）
     ('            _b = str(o.get("base") or "").upper() or inst_disp.replace("_USDT", "").replace("USDT", "").split("-")[0].upper()\n',
      '            _b = str(o.get("base") or "").upper() or inst_disp.split("_")[0].split("-")[0].upper()\n'),
@@ -241,6 +261,95 @@ class OrderLifecycleVerbatimTest(unittest.TestCase):
         self.assertEqual(o, _body_dump(_get_func(ast.parse(base), "f")),
                          "自检：同文误报")
 
+
+class UnreadableIntentsFailClosedTest(unittest.TestCase):
+    """意图文件"读不出来" ⇒ **不撤任何单 + fail-closed**（第一百三十四刀）。
+
+    缺陷形状：门面 `load_open_intents()` 此前**任何异常都 `return []`**，两个调用方
+    于是把"文件坏了"当成"没有意图" ⇒ **每一笔**挂单失去归属 ⇒ 按孤儿/陈旧**撤销**
+    （"撤旧挂新"循环的另一种成因），而 `reconcile_ok` 仍为 True（不 fail-closed）
+    ⇒ 本周期照常开新仓。撤单不可逆 ⇒ **未知必须保留**。
+
+    方向纪律与既有先例一致：存量挂单**读取失败**本就 fail-closed；本刀把"**归属依据**
+    读取失败"也纳入同一把尺（持仓/挂单实况读不到时，宁可不撤、不新开）。
+    """
+
+    def test_loader_distinguishes_missing_from_unreadable(self):
+        import json as _json
+        import os
+        import tempfile
+
+        import scripts.ai_factor_trader as aft
+        with tempfile.TemporaryDirectory() as td:
+            f = os.path.join(td, "open_intents.json")
+            with patch.object(aft, "OPEN_INTENT_FILE", f):
+                self.assertEqual(aft.load_open_intents(), [],
+                                 "文件**不存在**是合法空态（尚未产生过决策）")
+                # 0 字节 = **可能**是写崩了的痕迹（写入方 `record_open_intent` 用的是
+                # 非原子 `open("w")`）⇒ 与"损坏"同侧：宁可不撤单，也不猜它"没有意图"。
+                open(f, "w", encoding="utf-8").close()
+                with self.assertRaises(aft.OpenIntentsUnreadable,
+                                       msg="0 字节文件必须报错（可能是写崩，不能当成'没有意图'）"):
+                    aft.load_open_intents()
+                with open(f, "w", encoding="utf-8") as fh:
+                    fh.write("{ 这不是 JSON")
+                with self.assertRaises(aft.OpenIntentsUnreadable,
+                                       msg="存在却读不出来必须报错，不得静默当成空"):
+                    aft.load_open_intents()
+                with open(f, "w", encoding="utf-8") as fh:
+                    _json.dump({"oops": "not a list"}, fh)
+                with self.assertRaises(aft.OpenIntentsUnreadable,
+                                       msg="结构不对同样属于'读不出来'"):
+                    aft.load_open_intents()
+                with open(f, "w", encoding="utf-8") as fh:
+                    _json.dump([{"instId": "BTC-USDT-SWAP"}, "junk", {"no_inst": 1}], fh)
+                self.assertEqual([i["instId"] for i in aft.load_open_intents()],
+                                 ["BTC-USDT-SWAP"], "合法内容仍按原语义过滤")
+
+    def test_reconcile_does_not_cancel_anything_when_intents_unreadable(self):
+        import scripts.ai_factor_trader as aft
+        calls = []
+        okx = types.SimpleNamespace(
+            pending_orders=lambda: [{"instId": "BTC-USDT-SWAP", "ordId": "o1",
+                                     "side": "buy", "state": "live"}],
+            cancel_order=lambda inst, oid: calls.append((inst, oid)))
+
+        def _boom():
+            raise aft.OpenIntentsUnreadable("坏文件")
+
+        with patch.object(aft, "okx_rest", okx), \
+             patch.object(aft, "load_trackers", lambda: {}), \
+             patch.object(aft, "load_open_intents", _boom), \
+             redirect_stdout(io.StringIO()) as buf:
+            ok, kept = aft.reconcile_pending_orders()
+        self.assertFalse(ok, "归属依据读不到 ⇒ 必须 fail-closed（禁本周期新增下单）")
+        self.assertEqual(calls, [], "读不到意图时**绝不允许**按孤儿撤单（撤单不可逆）")
+        self.assertEqual(kept, set())
+        self.assertIn("本地意图不可读", buf.getvalue())
+
+    def test_stale_cleanup_does_not_cancel_anything_when_intents_unreadable(self):
+        import scripts.ai_factor_trader as aft
+        calls = []
+
+        def _boom():
+            raise aft.OpenIntentsUnreadable("坏文件")
+
+        binance = types.SimpleNamespace(
+            open_orders=lambda: [{"inst_id": "BTCUSDT", "order_id": "b1", "side": "buy",
+                                  "size": 1.0, "status": "NEW"}],
+            cancel_order=lambda *a, **k: calls.append(a))
+        with patch.object(aft, "load_open_intents", _boom), \
+             patch.object(aft, "current_environment",
+                          lambda: types.SimpleNamespace(mode="demo")), \
+             patch.object(aft.venue_registry, "execution_open", lambda v, e: v == "binance"), \
+             patch.object(aft.venue_registry, "get_adapter",
+                          lambda v, environment=None: binance), \
+             patch.object(aft, "_BROKEN_VENUES", set()), \
+             redirect_stdout(io.StringIO()) as buf:
+            ok, msg = aft.clean_stale_open_orders()
+        self.assertFalse(ok, "回收侧读不到归属依据 ⇒ 必须 fail-closed")
+        self.assertEqual(calls, [], "读不到意图时绝不允许撤外所挂单")
+        self.assertIn("本地意图不可读", buf.getvalue() + str(msg))
 
 if __name__ == "__main__":
     unittest.main()

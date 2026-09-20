@@ -78,6 +78,12 @@ class _EnvFreezeMixin:
         self.addCleanup(unfreeze_environment)
         tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
         tmp.close()
+        # ⚠️ 第一百三十四刀：`NamedTemporaryFile` 关掉后是**0 字节**文件，而
+        # `json.load` 对 0 字节抛 JSONDecodeError ⇒ 门面 loader 现在会把"读不出来"
+        # 判为 fail-closed（不撤单 + 禁本周期新开仓）。本夹具的语义是"暂无意图"，
+        # 故显式写入合法空列表 `[]`（0 字节另有专测，见 UnreadableIntentsFailClosedTest）。
+        with open(tmp.name, "w", encoding="utf-8") as f:
+            json.dump([], f)
         self.intent_file = tmp.name
         self._patcher = patch.object(trader, "OPEN_INTENT_FILE", self.intent_file)
         self._patcher.start()

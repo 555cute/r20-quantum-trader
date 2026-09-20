@@ -517,17 +517,34 @@ def record_open_intent(inst_id: str, side: str, ts_ms: int = None) -> None:
                                  OPEN_INTENT_FILE=OPEN_INTENT_FILE,
                                  OPEN_INTENT_TTL_MS=OPEN_INTENT_TTL_MS)
 
+class OpenIntentsUnreadable(RuntimeError):
+    """本地开仓意图**存在却读不出来**（与"文件不存在/合法为空"区分，第一百三十四刀）。"""
+
+
 def load_open_intents() -> List[Dict[str, Any]]:
-    """读取原始本地开仓意图（不做 TTL 过滤，过期判定交给对账语义分层）。"""
+    """读取原始本地开仓意图（不做 TTL 过滤，过期判定交给对账语义分层）。
+
+    ⚠️ 第一百三十四刀：**"读不到"与"没有"必须分开**。此前任何异常都 `return []`，
+    而两个调用方（挂单对账 `reconcile_pending_orders` / 存量挂单回收
+    `clean_stale_open_orders`）拿 `[]` 会让**每一笔**挂单失去归属 ⇒ 按孤儿**撤销**
+    （"撤旧挂新"循环的另一种成因），且 `reconcile_ok` 仍为 True（不 fail-closed）。
+    撤单不可逆 ⇒ 现约定：文件**不存在** ⇒ `[]`（合法空态）；文件存在却
+    **读不出来/结构不对** ⇒ 抛 `OpenIntentsUnreadable`，调用方据此 fail-closed
+    （**不撤任何单** + 禁止本周期新增下单）。
+
+    ⚠️ 残留边界（如实记录）：文件**被删**而此时仍有在场挂单，仍按"没有意图"处理；
+    该场景留给"挂单在场 + 意图文件缺失"的独立判定，本刀不动。
+    """
+    if not os.path.exists(OPEN_INTENT_FILE):
+        return []
     try:
-        if os.path.exists(OPEN_INTENT_FILE):
-            with open(OPEN_INTENT_FILE, "r", encoding="utf-8") as f:
-                raw = json.load(f)
-            if isinstance(raw, list):
-                return [i for i in raw if isinstance(i, dict) and i.get("instId")]
+        with open(OPEN_INTENT_FILE, "r", encoding="utf-8") as f:
+            raw = json.load(f)
     except Exception as e:
-        print(f"[挂单对账] 读取本地意图失败: {e}")
-    return []
+        raise OpenIntentsUnreadable(f"读取本地意图失败: {e!r}") from e
+    if not isinstance(raw, list):
+        raise OpenIntentsUnreadable(f"意图文件结构应为 list，实为 {type(raw).__name__}")
+    return [i for i in raw if isinstance(i, dict) and i.get("instId")]
 
 
 def _order_pos_side(side: str) -> str:
