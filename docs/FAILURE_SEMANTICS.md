@@ -69,6 +69,7 @@
 | 日切键（`strftime("%Y-%m-%d")`）| 基座必须**可证明**是 +08:00：无参 `now()`／`utcnow()`／`timezone.utc`／本地时区一律翻红（日切错了不报错，只在 00:00–08:00 静默偏一天）| 防 | `scripts/trader/circuit_guard.py` | `tests/core/test_day_key_uses_beijing_tz.py::DayKeyUsesBeijingTzTest` |
 | 时间戳字段单位（`_ms`=毫秒 / `_ts`=秒）| 生产与消费两侧都必须自洽；`_ms` 字段写 `*1000`、`_ts` 字段写秒；已知例外（`last_sync_ts`）必须有**伴生不变式**（写入者全为毫秒或 None，绝不混入秒）| 防 | `tests/core/test_timestamp_unit_convention.py` | `tests/core/test_timestamp_unit_convention.py::TimestampUnitConventionTest` |
 | 下单量换算的方向（币数 / 张数）| **两条分支一律向下取整**（币数截断到 step、张数 `floor`）⇒ 换算名义**永不超出**目标；与实盘路径 `quantize_size` 同向。取整代价：可能更常低于最小张数而被拒（少下单，不超买）| 不做（fail-closed）| `r20_backend/exchanges/base.py` | `tests/venues/test_exchanges_adapter.py::ContractsRoundingBoundTest` |
+| 原子写辅助与敏感状态文件 | 凡 `_atomic_write*` 必须**临时文件 + fsync + 原子替换**（否则 rename 后断电可留空/截断）；`circuit_breaker.json` 等**读者按默认值降级**的文件**不得**被直写 | 防 | `r20_backend/policy/io.py` | `tests/core/test_atomic_write_invariant.py::AtomicWriteInvariantTest` |
 <!-- anchors:end -->
 
 ## 3. 抽取门与"文档化差异"

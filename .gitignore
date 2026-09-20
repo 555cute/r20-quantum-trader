@@ -148,8 +148,13 @@ data/*.sqlite3
 
 # 崩溃转储：本机 core_pattern=core + ulimit -c unlimited ⇒ 任何崩溃都会在仓库根丢一个
 # ~190M 的 core 文件，曾被我一次 git add -A 误提交。按后缀一概忽略。
-core
-core.*
+# ⚠️ 第一百五十五刀修正：原先写成裸 `core`（未锚定）⇒ git 的"路径组件"匹配会连带忽略
+# **任何**名为 core 的目录，包括 `tests/core/` —— 于是本会话新增的 5 个门文件
+# （live_artifact_shape / day_key / numeric_coercion / timestamp_unit / atomic_write_invariant）
+# 一直**没被提交**，而本地全量测试照常通过（测试跑的是工作树，不是提交树）。
+# 现锚定到仓库根，且只匹配崩溃转储的两种形态：
+/core
+/core.[0-9]*
 
 # 观测栈的令牌文件（内容 = R20_ADMIN_TOKEN）：绝不入库，只走文件挂载
 deploy/observability/metrics_token

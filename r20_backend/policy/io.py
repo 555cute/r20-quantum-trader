@@ -30,6 +30,9 @@ def _atomic_write_json(file_path: Path, data: Any) -> None:
     file_path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("w", dir=file_path.parent, delete=False, encoding="utf-8") as tf:
         json.dump(data, tf, ensure_ascii=False, indent=2)
+        # 第一百五十四刀：与其余原子写辅助统一（rename 前 fsync）
+        tf.flush()
+        os.fsync(tf.fileno())
         temp_name = tf.name
     os.replace(temp_name, file_path)
 
