@@ -228,12 +228,24 @@ def fetch_positions_and_reconcile(*,
         _gv_mode = str(current_environment().mode or "")
     except Exception:
         _gv_mode = ""
+    # ⚠️ 第一百二十七刀：**记录**挂单枚举的失败（仍然照原样打印，输出不变）。
+    # 该失败此前只 warn 就丢，而 `xv_ok` 只覆盖**持仓**读取 —— 于是存在这样一个组合：
+    # 某所持仓读成功（`xv_ok=True`）但**挂单读失败**，若该所恰好有一笔**未成交**的
+    # 入场单（还没有持仓），对账器的"无仓无挂"判据就会成立并把它的预留按超 TTL 释放
+    # （释放不可逆 ⇒ 预算台账少算在场活单）。持仓侧已由 `venue_snapshot_verified`
+    # 把关；这里把**挂单侧**一并纳入同一个"实况是否核验"标志。
+    _pending_enum_errors: list = []
+
+    def _pending_warn(_msg):
+        _pending_enum_errors.append(_msg)
+        print(_msg)
+
     pending_inst_ids, pending_long_count, pending_short_count = \
         collect_pending_inst_ids(
             venues=("gate", "binance"), venue_mode=_gv_mode,
             broken_venues=_BROKEN_VENUES, venue_registry=venue_registry,
             load_instruments=load_instruments, auth_markers=_auth_markers,
-            warn=print)
+            warn=_pending_warn)
     reserved_slot_count = active_pos_count + len(pending_inst_ids)
     reserved_long_count = long_count + pending_long_count
     reserved_short_count = short_count + pending_short_count
@@ -272,10 +284,12 @@ def fetch_positions_and_reconcile(*,
     try:
         reconcile_reservation_ledger(real_pos_dict, pending_inst_ids, _xv_env,
                                      venue_snapshot=xv_positions_by_venue,
-                                     # ⚠️ 第一百二十六刀：把"这次跨所实况到底核验成功没有"
-                                     # 一并交给对账器。此前只传快照 ⇒ 读取失败时传进去的是
-                                     # **空字典**，对账器据它判"外所无仓无挂"并误释放活仓预留。
-                                     venue_snapshot_verified=xv_ok)
+                                     # ⚠️ 第一百二十六/二十七刀：把"这次跨所**实况**到底
+                                     # 核验成功没有"一并交给对账器 —— 持仓（`xv_ok`）与
+                                     # 挂单枚举（`_pending_enum_errors`）**都要**成功。
+                                     # 此前只传快照 ⇒ 读取失败时传进去的是**空字典**，
+                                     # 对账器据它判"外所无仓无挂"并误释放活仓/在场活单的预留。
+                                     venue_snapshot_verified=(xv_ok and not _pending_enum_errors))
     except Exception as _rc_exc:
         print(f"[预留对账] warn 对账器异常（不影响本周期交易）: {_rc_exc}")
 

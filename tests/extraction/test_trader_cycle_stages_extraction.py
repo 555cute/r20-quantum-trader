@@ -81,13 +81,50 @@ def _seg_stmts(fn: ast.FunctionDef) -> list:
 #: （binance 726U）按超 TTL 释放成 `closed`（释放不可逆 ⇒ 台账少算活仓）。
 SEGMENT_DELTAS = {
     "fetch_positions_and_reconcile": [
+        # ---- 第一百二十七刀：挂单枚举失败也要进"实况是否核验" -------------------
+        # `xv_ok` 只覆盖**持仓**读取；只核验持仓时，某所一笔**未成交**的入场单
+        # （尚无持仓）会被对账器判"无仓无挂"并误释放（释放不可逆 ⇒ 台账少算在场活单）。
+        ("pending_inst_ids, pending_long_count, pending_short_count = "
+         "collect_pending_inst_ids(venues=('gate', 'binance'), venue_mode=_gv_mode, "
+         "broken_venues=_BROKEN_VENUES, venue_registry=venue_registry, "
+         "load_instruments=load_instruments, auth_markers=_auth_markers, warn=print)",
+         "_pending_enum_errors: list = []\n"
+         "\n"
+         "def _pending_warn(_msg):\n"
+         "    _pending_enum_errors.append(_msg)\n"
+         "    print(_msg)\n"
+         "pending_inst_ids, pending_long_count, pending_short_count = "
+         "collect_pending_inst_ids(venues=('gate', 'binance'), venue_mode=_gv_mode, "
+         "broken_venues=_BROKEN_VENUES, venue_registry=venue_registry, "
+         "load_instruments=load_instruments, auth_markers=_auth_markers, "
+         "warn=_pending_warn)"),
+        # ---- 第一百二十六/二十七刀：把"跨所实况是否核验成功"交给对账器 ----------
         ("reconcile_reservation_ledger(real_pos_dict, pending_inst_ids, _xv_env, "
          "venue_snapshot=xv_positions_by_venue)",
          "reconcile_reservation_ledger(real_pos_dict, pending_inst_ids, _xv_env, "
          "venue_snapshot=xv_positions_by_venue, "
-         "venue_snapshot_verified=xv_ok)"),
+         "venue_snapshot_verified=xv_ok and (not _pending_enum_errors))"),
     ],
 }
+
+
+class ReconcileCallContractTest(unittest.TestCase):
+    def test_release_requires_both_position_and_order_sides_verified(self):
+        """跨所实况的**持仓侧与挂单侧都核验成功**，才允许对账器释放预留。
+
+        只核验持仓时，一笔**未成交**的入场单（尚无持仓）会被判"无仓无挂"而误释放；
+        释放不可逆 ⇒ 预算台账少算在场活单。本断言把这条语义钉在**调用点**上，
+        防止有人改回只传 `xv_ok`。
+        """
+        fn = _func("fetch_positions_and_reconcile")
+        calls = [n for n in ast.walk(fn) if isinstance(n, ast.Call)
+                 and getattr(n.func, "id", None) == "reconcile_reservation_ledger"]
+        self.assertEqual(len(calls), 1, "对账调用点应恰 1 处")
+        kw = {k.arg: ast.unparse(k.value) for k in calls[0].keywords}
+        self.assertIn("venue_snapshot_verified", kw)
+        self.assertIn("xv_ok", kw["venue_snapshot_verified"], "持仓侧核验必须参与")
+        self.assertIn("_pending_enum_errors", kw["venue_snapshot_verified"],
+                      "挂单枚举失败也必须挡住释放（否则在场活单的预留会被误释放）")
 
 
 class CycleStagesVerbatimTest(unittest.TestCase):

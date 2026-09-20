@@ -76,6 +76,9 @@ def reconcile_reservation_ledger(
     ttl_s: Optional[float] = None,
     venue_snapshot: Optional[Dict[str, list]] = None,
     venue_snapshot_verified: bool = True,
+    #: 语义：**跨所实况（持仓 + 挂单枚举）本周期是否都核验成功**。
+    #: 调用方（`cycle_stages.fetch_positions_and_reconcile`）传
+    #: `xv_ok and not _pending_enum_errors` —— 两者任一失败即为假。
 ) -> int:
     """周期级预留对账（US-010）：账实相符原则回笼陈旧占用。
 
@@ -92,7 +95,9 @@ def reconcile_reservation_ledger(
     - 时间戳不可解析 / 环境不匹配 / account_key 异常 → 保守保留；
     - **跨所实况未核验**（`venue_snapshot_verified=False`，或自取失败）→
       **本周期一笔都不释放**：把"读不到"当"没有仓"会误释放**活仓**的预留
-      （第一百二十六刀实测：binance 726U 活仓预留被释放）；
+      （第一百二十六刀实测：binance 726U 活仓预留被释放）；⚠️ 该标志覆盖
+      **持仓与挂单两侧**（第一百二十七刀）：只核验持仓时，一笔**未成交**的入场单
+      （尚无持仓）仍会被判"无仓无挂"而误释放；
     - 单条释放失败不影响其余（下周期重试，幂等 UNIQUE 键）。
 
     返回释放条数。调用方必须传**本周期刚核验过的**持仓/挂单实况（fail-closed

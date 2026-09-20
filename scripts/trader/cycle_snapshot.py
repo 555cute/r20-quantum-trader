@@ -107,7 +107,8 @@ def collect_pending_inst_ids(*, venues, venue_mode, broken_venues, venue_registr
             if not any(m in str(_gexc) for m in auth_markers):
                 if warn is not None:
                     warn(f"[周期快照] warn 外所 {_gv} 挂单枚举失败"
-                         f"（去重计数从缺，回收侧已另行把关）: {str(_gexc)[:80]}")
+                         f"（去重计数从缺；对账器本期将据'实况未核验'**不释放任何预留**"
+                         f"——第一百二十七刀起挂单侧也进该标志）: {str(_gexc)[:80]}")
 
     return pending_inst_ids, pending_long_count, pending_short_count
 
