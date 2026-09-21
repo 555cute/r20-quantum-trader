@@ -130,3 +130,95 @@ class EnvKeysAreDocumentedTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+# ---------------------------------------------------------------------------
+# 反向：模板里声明的键必须**真的被消费**（第一百九十六刀）
+#
+# 方向一（上面）：代码会读 ⇒ 模板必须可发现。
+# 方向二（这里）：模板声明 ⇒ 代码必须真的用它。否则操作者拧了一个**什么都不做**的旋钮
+# （"配置假象"），比没有这个开关更坏。
+#
+# ⚠️ "被消费"的判据不能用"有没有 `os.environ.get("<字面量>")`"——本仓有三条真实通道：
+#   1. 直接读：`os.environ[...]` / `environ.get` / `os.getenv` / `_env_*` helper（方向一用的判据）；
+#   2. **键表**：`settings_store.MANAGED_KEYS` 这类表把键名当字符串存着，读写经由表
+#      （凭证键全走这条：`OKX_LIVE_API_KEY` 等）；
+#   3. **f-string 派生**：`env.get(f"R20_NOTIFY_{channel.upper()}_ENABLED")` 之类拼出键名
+#      （通知开关全走这条）。
+# 故判据 = 直接读 ∪ **非 docstring 的字面量出现** ∪ f-string 前后缀匹配。
+# 排除 docstring 很关键：把键名写进文档字符串不算"代码会用它"。
+# ---------------------------------------------------------------------------
+
+TEMPLATE_ALLOWLIST: dict[str, str] = {}   # 当前为空：模板 90 键全部真被消费
+
+
+def _literal_and_fstring_mechanisms() -> tuple:
+    """返回 (字面量出现表, f-string 前后缀表) —— 逐文件 AST，**排除 docstring**。"""
+    literal, fpatterns = {}, []
+    for root in SCAN_DIRS:
+        for path in sorted((ROOT / root).rglob("*.py")):
+            if "__pycache__" in path.parts:
+                continue
+            rel = str(path.relative_to(ROOT))
+            try:
+                tree = ast.parse(path.read_text(encoding="utf-8"))
+            except SyntaxError:
+                continue
+            docstrings = set()
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                    ds = ast.get_docstring(node, clean=False)
+                    if ds:
+                        docstrings.add(ds)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Constant) and isinstance(node.value, str) \
+                        and _looks_like_env_key(node.value) and node.value not in docstrings:
+                    literal.setdefault(node.value, f"{rel}:{node.lineno}")
+                elif isinstance(node, ast.JoinedStr):
+                    parts = [v.value if isinstance(v, ast.Constant) else None for v in node.values]
+                    if len(parts) >= 2 and isinstance(parts[0], str) and parts[0].startswith("R20_"):
+                        suffix = parts[-1] if isinstance(parts[-1], str) else ""
+                        fpatterns.append((parts[0], suffix, f"{rel}:{node.lineno}"))
+    return literal, fpatterns
+
+
+def template_keys() -> list:
+    return re.findall(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=",
+                      (ROOT / "env.example").read_text(encoding="utf-8"), re.M)
+
+
+def consumed_by(key: str, literal: dict, fpatterns: list):
+    if key in literal:
+        return f"字面量 {literal[key]}"
+    for prefix, suffix, where in fpatterns:
+        if key.startswith(prefix) and key.endswith(suffix) and len(key) > len(prefix) + len(suffix) - 1:
+            return f"f-string {prefix}…{suffix} @ {where}"
+    return None
+
+
+class TemplateKeysAreConsumedTest(unittest.TestCase):
+    def test_every_template_key_is_actually_consumed(self):
+        literal, fpatterns = _literal_and_fstring_mechanisms()
+        dead = [k for k in template_keys()
+                if not consumed_by(k, literal, fpatterns) and k not in TEMPLATE_ALLOWLIST]
+        self.assertEqual(dead, [], "这些键在 env.example 里声明、但代码从不消费 ⇒ 操作者拧的是"
+                                   "什么都不做的旋钮（配置假象）：\n  " + "\n  ".join(dead))
+
+    def test_reverse_scan_is_not_vacuous(self):
+        keys = template_keys()
+        literal, fpatterns = _literal_and_fstring_mechanisms()
+        self.assertGreaterEqual(len(keys), 80, f"模板只解析出 {len(keys)} 个键 ⇒ 门与实现脱节")
+        self.assertGreaterEqual(len(fpatterns), 2,
+                                "没扫到 f-string 派生键 ⇒ 判据少了一条真实通道（通知开关走它）")
+        consumed = [k for k in keys if consumed_by(k, literal, fpatterns)]
+        self.assertGreaterEqual(len(consumed), 80, f"只判定 {len(consumed)} 键被消费 ⇒ 扫描失效")
+
+    def test_teeth_on_a_knob_nobody_reads(self):
+        literal, fpatterns = {"SOMETHING_ELSE": "x:1"}, []
+        self.assertIsNone(consumed_by("R20_NOBODY_READS_THIS", literal, fpatterns),
+                          "没人消费的键必须判为未消费")
+        # docstring 里出现不算消费（合成）：字面量表里不该有它
+        src = 'def f():\n    """R20_DOC_ONLY_KNOB 只写在文档里"""\n    return 1\n'
+        import ast as _ast
+        ds = _ast.get_docstring(_ast.parse(src).body[0], clean=False)
+        self.assertIn("R20_DOC_ONLY_KNOB", ds, "样本本身要成立")
+        self.assertNotIn("R20_DOC_ONLY_KNOB", literal, "docstring 不得被当成消费点")
