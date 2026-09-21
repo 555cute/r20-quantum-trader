@@ -25,6 +25,30 @@ REAL_LIBRARY = (Path(__file__).resolve().parents[2] / "data" / "prompt_library.j
 BASE_TITLE = "系统角色定位与核心使命"
 
 
+_READ_SCOPE = None
+
+
+def setUpModule():
+    """显式声明生产读（第二百三十六刀）：
+    本文件把**线上**提示词库快照抄进沙箱后断言其 provenance 属性 —— 它的存在目的
+    就是「线上那份库是否健康」（含绝对金额/来源标注等），属**有意的线上守卫**。
+
+    只读、不改；声明在此是为了把「依赖线上配置内容」从**静默**变成**可审计**
+    （守卫见 `tests/__init__.py`；`R20_TESTS_STRICT_READS=1` 下未声明的读会报错）。
+    """
+    global _READ_SCOPE
+    from tests import allow_real_data_reads
+    _READ_SCOPE = allow_real_data_reads()
+    _READ_SCOPE.__enter__()
+
+
+def tearDownModule():
+    global _READ_SCOPE
+    if _READ_SCOPE is not None:
+        _READ_SCOPE.__exit__(None, None, None)
+        _READ_SCOPE = None
+
+
 class _PromptLibraryCase(unittest.TestCase):
     """每个用例都把方案库指到临时副本。
 

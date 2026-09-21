@@ -27,6 +27,29 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 
+_READ_SCOPE = None
+
+
+def setUpModule():
+    """显式声明生产读（第二百三十六刀）：
+    本文件把**线上**提示词库抄进沙箱，核对线上布局与契约对齐 —— 有意的线上守卫。
+
+    只读、不改；声明在此是为了把「依赖线上配置内容」从**静默**变成**可审计**
+    （守卫见 `tests/__init__.py`；`R20_TESTS_STRICT_READS=1` 下未声明的读会报错）。
+    """
+    global _READ_SCOPE
+    from tests import allow_real_data_reads
+    _READ_SCOPE = allow_real_data_reads()
+    _READ_SCOPE.__enter__()
+
+
+def tearDownModule():
+    global _READ_SCOPE
+    if _READ_SCOPE is not None:
+        _READ_SCOPE.__exit__(None, None, None)
+        _READ_SCOPE = None
+
+
 class _SandboxBase(unittest.TestCase):
     def setUp(self):
         # 先导入相关模块再隔离：isolate_config 只重定向**已导入**模块里的 data/ 路径，

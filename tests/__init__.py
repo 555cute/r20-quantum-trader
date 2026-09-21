@@ -432,6 +432,9 @@ def _install_session_config_sandbox() -> None:
         targets[name] = ("ROOT", root, False)
     for name in ("instrument_pool", "scripts.instrument_pool"):
         targets[name] = ("POOL_FILE", pool, False)
+    # `r20_backend/notifications.py` 用**内联** `ROOT / ".env"` 读配置（同 okx_runtime 型）
+    for name in ("r20_backend.notifications",):
+        targets[name] = ("ROOT", root, False)
     # 提示词库：指向沙箱里**不存在**的路径 ⇒ `load_library()` 走 `_default()` 确定性回退
     # （不读生产、也不随线上模板漂移）。要断言"线上模板内容"的用例必须自带夹具。
     for name in ("prompt_library", "scripts.prompt_library"):

@@ -30,6 +30,30 @@ from scripts.risk_constants import DEFAULTS, RISK_ENV_KEYS
 RISK_KEYS = set(RISK_ENV_KEYS)
 
 
+_READ_SCOPE = None
+
+
+def setUpModule():
+    """显式声明生产读（第二百三十六刀）：
+    本文件抄线上池/提示词库做对齐核对（如 `test_section_titles_match_live_layout`
+    「线上布局是否与契约一致」）—— 有意的线上守卫。
+
+    只读、不改；声明在此是为了把「依赖线上配置内容」从**静默**变成**可审计**
+    （守卫见 `tests/__init__.py`；`R20_TESTS_STRICT_READS=1` 下未声明的读会报错）。
+    """
+    global _READ_SCOPE
+    from tests import allow_real_data_reads
+    _READ_SCOPE = allow_real_data_reads()
+    _READ_SCOPE.__enter__()
+
+
+def tearDownModule():
+    global _READ_SCOPE
+    if _READ_SCOPE is not None:
+        _READ_SCOPE.__exit__(None, None, None)
+        _READ_SCOPE = None
+
+
 class RiskConfigApiTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

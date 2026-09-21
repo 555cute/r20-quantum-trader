@@ -74,6 +74,30 @@ PUBLIC_SURFACE = [
 ]
 
 
+_READ_SCOPE = None
+
+
+def setUpModule():
+    """显式声明生产读（第二百三十六刀）：
+    本文件对照**线上** llm_models.json 的字节/mtime，证明写入落在沙箱、**没碰生产**
+    —— 不读生产就无法证明这一点，属有意的线上守卫。
+
+    只读、不改；声明在此是为了把「依赖线上配置内容」从**静默**变成**可审计**
+    （守卫见 `tests/__init__.py`；`R20_TESTS_STRICT_READS=1` 下未声明的读会报错）。
+    """
+    global _READ_SCOPE
+    from tests import allow_real_data_reads
+    _READ_SCOPE = allow_real_data_reads()
+    _READ_SCOPE.__enter__()
+
+
+def tearDownModule():
+    global _READ_SCOPE
+    if _READ_SCOPE is not None:
+        _READ_SCOPE.__exit__(None, None, None)
+        _READ_SCOPE = None
+
+
 def _make_config(active_model_id: str = "m1") -> dict:
     """构造**自洽**配置：active_model_id 必须同时登记在 providers[].models 与顶层 models 里。
 
