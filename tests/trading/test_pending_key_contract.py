@@ -202,3 +202,39 @@ class QuoteAssumptionTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class SideInferenceTest(unittest.TestCase):
+    """在途挂单**没有 `side`** 时按数量符号推断方向；推不出来就**跳过**（不猜）。
+
+    外所归一形状里 `size` 是有符号的（正=买/开多，负=卖/开空）。少了这一步，
+    这些单会因 `_gs not in ("buy","sell")` 被静默跳过 ⇒ 槽位/同向占用少算。
+    """
+
+    def _rows(self, rows):
+        return collect_pending_inst_ids(venues=("gate",), venue_mode="demo",
+                                        broken_venues=set(),
+                                        venue_registry=_Reg({"gate": _Ad(rows)}),
+                                        load_instruments=lambda: [{"instId": "BTC-USDT-SWAP"}],
+                                        auth_markers=(), warn=None)
+
+    def test_positive_size_infers_buy(self):
+        """正数量 ⇒ 推断为买（开多），并计入多头。"""
+        ids, longs, shorts = self._rows([{"contract": "BTC_USDT", "base": "BTC", "size": 2}])
+        self.assertEqual(ids, {"BTC-USDT-SWAP"}, "数量为正 ⇒ 方向推得出来，不该被丢掉")
+        self.assertEqual((longs, shorts), (1, 0))
+
+    def test_negative_size_infers_sell(self):
+        ids, longs, shorts = self._rows([{"contract": "BTC_USDT", "base": "BTC", "size": -3}])
+        self.assertEqual(ids, {"BTC-USDT-SWAP"})
+        self.assertEqual((longs, shorts), (0, 1), "负数量 ⇒ 卖（开空）")
+
+    def test_non_numeric_size_is_tolerated_and_skipped(self):
+        """数量不是数字 ⇒ 容忍（不抛）但**跳过该单**：方向推不出来就不许硬猜。"""
+        ids, longs, shorts = self._rows([{"contract": "BTC_USDT", "base": "BTC", "size": "abc"}])
+        self.assertEqual((ids, longs, shorts), (set(), 0, 0),
+                         "方向不可判定 ⇒ 跳过，绝不当成买或卖")
+
+    def test_zero_size_is_skipped(self):
+        ids, _, _ = self._rows([{"contract": "BTC_USDT", "base": "BTC", "size": 0}])
+        self.assertEqual(ids, set(), "数量为 0 的挂单不占槽位")
+
