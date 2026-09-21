@@ -54,7 +54,7 @@ class _Base(unittest.TestCase):
         self.addCleanup(lambda: os.unlink(self.tmp.name))
 
     def _call(self, *, candles_15m=None, candles_1h=None, candles_4h=None,
-              positions=(), ctVal=1.0, adaptive=None):
+              positions=(), ctVal=1.0, adaptive=None, news_file=None):
         """返回装配好的因子字典 `f`。K 线按**由旧到新**传入，内部自动翻转成交易所的
         「最新在前」顺序（生产代码会 `reversed()`）。"""
         books = {"15m": list(reversed(candles_15m if candles_15m is not None else _rising(45))),
@@ -64,10 +64,121 @@ class _Base(unittest.TestCase):
                 "precision": 2, "ctVal": ctVal, "minSz": 0.01}
         return fetch_single_instrument_data(
             item, list(positions), 1000.0,
-            news_sentiment_file=self.tmp.name,
+            news_sentiment_file=news_file or self.tmp.name,
             fetch_candles_direct=lambda inst, bar, n: books.get(bar, []),
             instrument_profile=lambda f, asset_type: {"sl_atr_mult": 1.3},
             load_adaptive_config=lambda: (adaptive or {}))
+
+
+class BboTickerTest(_Base):
+    """盘口取价（BBO）：成功 ⇒ 用**真实 bid/ask**（限价精度靠它）。"""
+
+    class _Resp:
+        def __init__(self, payload):
+            self._body = json.dumps(payload).encode("utf-8")
+
+        def read(self):
+            return self._body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def test_successful_ticker_uses_real_bid_ask(self):
+        self._net.stop()          # 放开 setUp 的「不出网」桩，换成受控响应
+        payload = {"code": "0", "data": [{"bidPx": "79999.5", "askPx": "80000.5"}]}
+        with patch("urllib.request.urlopen", return_value=self._Resp(payload)):
+            f = self._call()
+        self.assertEqual(f["bidPx"], 79999.5, "盘口价取到就用它，而不是退回最新价")
+        self.assertEqual(f["askPx"], 80000.5)
+        self.assertGreaterEqual(f["askPx"], f["bidPx"], "行情有效性判定要求 ask ≥ bid")
+
+    def test_non_zero_code_keeps_fallback_prices(self):
+        """`code != "0"`（交易所侧异常）⇒ 退回最新价，**不抛**（降级但已留痕）。"""
+        self._net.stop()
+        payload = {"code": "51001", "data": []}
+        with patch("urllib.request.urlopen", return_value=self._Resp(payload)):
+            f = self._call()
+        self.assertEqual(f["bidPx"], f["price"])
+        self.assertEqual(f["askPx"], f["price"])
+
+
+class SentimentTest(_Base):
+    """舆情：**「情绪=0（真中性）」与「没读到」必须分开**（本仓红线「缺失 ≠ 0」）。"""
+
+    def _news_file(self, payload):
+        fh = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+        fh.write(payload)
+        fh.close()
+        self.addCleanup(lambda: os.unlink(fh.name))
+        return fh.name
+
+    def test_score_is_picked_up_and_marked_available(self):
+        path = self._news_file(json.dumps(
+            {"coins_sentiment": {"BTC": {"sentiment_factor_score": 0.7}}}))
+        f = self._call(news_file=path)
+        self.assertEqual(f["sentiment_score"], 0.7)
+        self.assertIs(f["sentiment_available"], True)
+
+    def test_true_neutral_is_available_not_missing(self):
+        """真的读到 0 分 ⇒ `available=True`（有数据、就是中性），不得与「没读到」混淆。"""
+        path = self._news_file(json.dumps(
+            {"coins_sentiment": {"BTC": {"sentiment_factor_score": 0.0}}}))
+        f = self._call(news_file=path)
+        self.assertEqual(f["sentiment_score"], 0.0)
+        self.assertIs(f["sentiment_available"], True, "0 分是**中性**，不是缺失")
+
+    def test_unreadable_file_marks_unavailable_and_warns(self):
+        """文件在、但读不出来 ⇒ `available=False` **且必须告警**（不许静默当 0）。"""
+        path = self._news_file("{不是 json")
+        import warnings as _w
+        with _w.catch_warnings(record=True) as caught:
+            _w.simplefilter("always")
+            f = self._call(news_file=path)
+        self.assertIs(f["sentiment_available"], False)
+        self.assertEqual(f["sentiment_score"], 0.0)
+        self.assertTrue(any(issubclass(w.category, RuntimeWarning) for w in caught),
+                        "读失败必须留痕（原先静默 pass 会把「没数据」当「中性」）")
+
+
+class CalculusTest(_Base):
+    """多周期动力学：**引擎成功时用它给的整包**（不是只挑几个字段抄）。"""
+
+    def test_engine_result_is_adopted_wholesale(self):
+        import types
+        fake = types.ModuleType("calculus_engine")
+        fake.calculate_multi_timeframe = lambda books: {
+            "valid": True, "regime": "BULL_ACCELERATING", "velocity": 0.4,
+            "acceleration": 0.3, "impulse": 0.2, "max_abs_jerk": 0.1, "quality": 0.9}
+        with patch.dict("sys.modules", {"calculus_engine": fake}):
+            f = self._call()
+        self.assertEqual(f["calculus"]["regime"], "BULL_ACCELERATING")
+        self.assertEqual(f["calculus"]["velocity"], 0.4)
+        self.assertTrue(f["calculus"]["valid"])
+
+    def test_engine_failure_keeps_honest_zero_shape_with_reason(self):
+        """引擎炸了 ⇒ 保留「零动力学」的**诚实形状**（`valid=False`）+ 原因 + 告警。
+
+        ⚠️ 关键：不许静默退化 —— 主脑会照着 v=a=0 推理，等于拿"没有动力学"当"动力学为零"。
+        """
+        import types
+        import warnings as _w
+
+        def _boom(books):
+            raise RuntimeError("引擎炸了")
+
+        fake = types.ModuleType("calculus_engine")
+        fake.calculate_multi_timeframe = _boom
+        with patch.dict("sys.modules", {"calculus_engine": fake}):
+            with _w.catch_warnings(record=True) as caught:
+                _w.simplefilter("always")
+                f = self._call()
+        self.assertFalse(f["calculus"]["valid"])
+        self.assertEqual(f["calculus"]["regime"], "RANGE_LOW_VELOCITY")
+        self.assertIn("引擎炸了", f["calculus"]["error"])
+        self.assertTrue(any(issubclass(w.category, RuntimeWarning) for w in caught))
 
 
 class PositionSnapshotTest(_Base):
