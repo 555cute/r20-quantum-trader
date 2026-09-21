@@ -168,5 +168,37 @@ class EarlyReturnsTest(_Base):
 
 
 
+
+class OkxPositionsTest(unittest.TestCase):
+    """`positions()` 属 **OKXAdapter**（需要凭证字段与 canonical）—— 上一轮用错了夹具。"""
+
+    def setUp(self):
+        from r20_backend.exchanges.okx import OKXAdapter
+        self.ad = OKXAdapter.__new__(OKXAdapter)
+        self.ad.environment = "demo"
+        self.ad.api_key, self.ad.secret_key, self.ad.passphrase = "K", "S", "P"
+        self.ad.canonical = lambda s: str(s).split("-")[0]
+
+    def test_zero_rows_are_skipped(self):
+        with patch("scripts.okx_rest.positions",
+                   return_value=[{"instId": "BTC-USDT-SWAP", "pos": "0"},
+                                 {"instId": "BTC-USDT-SWAP", "pos": "2.5"}]):
+            out = self.ad.positions()
+        self.assertEqual(len(out), 1, "零仓行跳过")
+        self.assertEqual(out[0]["size_signed"], 2.5)
+        self.assertEqual(out[0]["base"], "BTC")
+
+    def test_non_dict_row_crashes_because_there_is_no_type_guard(self):
+        """⚠️ **实测边界（列待议）**：`positions()` 直接对每行 `.get()`，**没有**元素类型守卫
+        ⇒ 非 dict 行抛 `AttributeError`，**整次持仓读取作废**。
+
+        这是本仓记录的**第四处**同形态缺口（Gate `positions()`、OKX `fetch_funding_rate`、
+        OKX `_load_spec`、此处）——族性问题，未擅自改。
+        """
+        with patch("scripts.okx_rest.positions", return_value=["not-a-dict"]):
+            with self.assertRaises(AttributeError):
+                self.ad.positions()
+
+
 if __name__ == "__main__":
     unittest.main()
