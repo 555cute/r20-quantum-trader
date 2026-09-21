@@ -770,3 +770,51 @@ if __name__ == "__main__":
     unittest.main()
 
 # WRITE-PROBE
+
+class OrphanLegsPromptTest(unittest.TestCase):
+    """第一百七十六刀：把"该所有会减新仓的遗留腿"如实告诉模型（**只报告**）。"""
+
+    _ORPH = {"readable": True, "attributed": [{"symbol": "XRP"}, {"symbol": "ARB"}],
+             "unattributed": [{"symbol": "SOL"}], "ledgerRows": "ok"}
+
+    def _line(self, rows):
+        return build_position_lines(rows, safe_float=_sf)
+
+    def _row(self, **over):
+        row = {"venue": "binance", "name": "XRP", "side": "short", "avgPx": "1.3",
+               "markPx": "1.32", "upl": "1", "uplRatio": "0.01",
+               "protectionStatus": "fully_protected", "protectionCoveragePct": 100.0}
+        row.update(over)
+        return row
+
+    def test_clause_states_candidates_and_the_reduce_risk(self):
+        out = self._line([self._row(protectionOrphans=self._ORPH)])
+        self.assertIn("该所孤儿腿: 可归因 2 条", out)
+        self.assertIn("ARB", out)
+        self.assertIn("可能按旧触发价减仓", out, "必须点明孤儿腿会减新仓")
+        self.assertIn("归属不可判定 1 条（一律不碰）", out)
+
+    def test_clause_appears_once_per_venue(self):
+        out = self._line([self._row(protectionOrphans=self._ORPH),
+                          self._row(name="ETH", protectionOrphans=self._ORPH)])
+        self.assertEqual(out.count("该所孤儿腿"), 1, "场所级事实不得每行刷一遍")
+
+    def test_unreadable_legs_say_undecidable(self):
+        out = self._line([self._row(protectionOrphans={"readable": False, "attributed": [],
+                                                       "unattributed": [], "ledgerRows": "unknown"})])
+        self.assertIn("该所孤儿腿: **不可判定**", out, "读不到不得含糊成'没有孤儿腿'")
+
+    def test_missing_ledger_is_disclosed(self):
+        orph = dict(self._ORPH, ledgerRows="unavailable")
+        out = self._line([self._row(protectionOrphans=orph)])
+        self.assertIn("台账未读到", out, "台账读不到 ⇒ 可归因数可能偏少，必须披露")
+
+    def test_no_clause_when_no_orphans_or_no_field(self):
+        clean = {"readable": True, "attributed": [], "unattributed": [], "ledgerRows": "ok"}
+        self.assertNotIn("该所孤儿腿", self._line([self._row(protectionOrphans=clean)]))
+        self.assertNotIn("该所孤儿腿", self._line([self._row()]), "旧数据无该字段 ⇒ 不提，不编")
+
+    def test_prompt_never_promises_cancellation(self):
+        out = self._line([self._row(protectionOrphans=self._ORPH)])
+        for forbidden in ("自动撤销", "已撤销", "系统会撤"):
+            self.assertNotIn(forbidden, out, f"提示词不得暗示会自动撤（出现 {forbidden}）")

@@ -522,3 +522,63 @@ class CycleDisclosureFileAgreementTest(unittest.TestCase):
                       facade, "worker 侧文件名变了？")
         self.assertIn('cd_base / "cycle_disclosure.json"', backend,
                       "后端读的文件名与 worker 写的不一致 ⇒ 指标永远读不到")
+
+class ProtectionOrphanMetricsTest(unittest.TestCase):
+    """第一百七十六刀：孤儿保护腿的**可观测**（且"读不到"绝不渲染成 0）。"""
+
+    def _text(self, **kw):
+        return M.render_prometheus(M.build_snapshot(**kw))
+
+    def _lines(self, text, needle):
+        return [ln for ln in text.splitlines() if needle in ln and not ln.startswith("#")]
+
+    def test_collector_dedupes_per_venue_and_reports_counts(self):
+        info = {"readable": True, "attributed": [{"id": "a"}, {"id": "b"}],
+                "unattributed": [{"id": "u"}], "ledgerRows": "ok"}
+        cache = {"positions": [{"venue": "binance", "protectionOrphans": info},
+                               {"venue": "binance", "protectionOrphans": info},
+                               {"venue": "okx"}]}
+        got = M.collect_protection_orphans(cache)
+        self.assertEqual(set(got), {"binance"}, "未按所去重（面板每行都带同一份汇总）")
+        self.assertEqual(got["binance"]["candidates"], 2)
+        self.assertEqual(got["binance"]["unattributed"], 1)
+        self.assertTrue(got["binance"]["ledger_evidence"])
+
+    def test_no_data_yields_none_not_zero(self):
+        self.assertIsNone(M.collect_protection_orphans(None))
+        self.assertIsNone(M.collect_protection_orphans({"positions": [{"venue": "okx"}]}),
+                          "缓存里还没有该字段 ⇒ 不可判定，不得当成 0 条孤儿腿")
+
+    def test_unreadable_venue_emits_readable_zero_and_no_counts(self):
+        summary = {"gate": {"readable": False, "candidates": None, "unattributed": None,
+                            "ledger_evidence": None}}
+        text = self._text(protection_orphans=summary)
+        self.assertTrue(self._lines(text, 'r20_protection_orphans_readable{venue="gate"} 0'),
+                        "读腿失败必须被看见（readable=0）")
+        self.assertEqual(self._lines(text, "r20_protection_orphan_candidates"), [],
+                         "读不到时**绝不能**发 candidates=0（会被读成'该所很干净'）")
+
+    def test_readable_venue_emits_counts(self):
+        summary = {"binance": {"readable": True, "candidates": 3, "unattributed": 1,
+                               "ledger_evidence": False}}
+        text = self._text(protection_orphans=summary)
+        self.assertTrue(self._lines(text, 'r20_protection_orphan_candidates{venue="binance"} 3'))
+        self.assertTrue(self._lines(text, 'r20_protection_orphan_unattributed{venue="binance"} 1'))
+        self.assertTrue(self._lines(text,
+                        'r20_protection_orphans_ledger_evidence{venue="binance"} 0'),
+                        "台账读不到必须如实披露（否则候选偏少会被当成'就是这么多'）")
+
+    def test_help_text_says_never_auto_cancel(self):
+        text = self._text(protection_orphans={"binance": {"readable": True, "candidates": 1,
+                                                         "unattributed": 0,
+                                                         "ledger_evidence": True}})
+        helps = [ln for ln in text.splitlines() if ln.startswith("# HELP r20_protection_orphan")]
+        self.assertTrue(any("绝不自动撤" in ln for ln in helps),
+                        "指标说明里必须写明'系统绝不自动撤'（否则读者会以为运维会自动清）")
+
+    def test_snapshot_marks_the_source(self):
+        snap = M.build_snapshot(protection_orphans={"binance": {"readable": True, "candidates": 0,
+                                                               "unattributed": 0,
+                                                               "ledger_evidence": True}})
+        self.assertTrue((snap.get("sources") or {}).get("protection_orphans"),
+                        "取到数据时 source_ok 必须为真")

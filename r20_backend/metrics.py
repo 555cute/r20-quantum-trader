@@ -236,6 +236,43 @@ def collect_market_stream_health(path: Path) -> Optional[Dict[str, Any]]:
     return payload or None
 
 
+def collect_protection_orphans(cache_payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """从**面板缓存**里汇总各所孤儿保护腿（第一百七十六刀）。
+
+    为什么要它：孤儿腿（归属明确但已无对应持仓）在同币再开仓时会**按旧触发价减掉新仓**，
+    属于"看得见才处理得了"的东西。面板已逐行带 `protectionOrphans`，这里按所去重成一份。
+
+    返回 `None` ⇒ 调用方**不发任何序列**（"读不到/还没算过"≠"没有孤儿腿"，与本文件既有先例一致）。
+    每所一项：`{"readable": bool, "candidates": int|None, "unattributed": int|None,
+    "ledger_evidence": bool|None}`；`readable=False` 时**计数为 None**（不可判定，不发计数）。
+    """
+    if not isinstance(cache_payload, dict):
+        return None
+    positions = cache_payload.get("positions")
+    if not isinstance(positions, list):
+        return None
+    out: Dict[str, Any] = {}
+    for row in positions:
+        if not isinstance(row, dict):
+            continue
+        info = row.get("protectionOrphans")
+        venue = str(row.get("venue") or "").strip().lower()
+        if not venue or not isinstance(info, dict):
+            continue
+        if info.get("readable") is False:
+            out.setdefault(venue, {"readable": False, "candidates": None,
+                                   "unattributed": None, "ledger_evidence": None})
+            continue
+        if info.get("readable") is not True:
+            continue
+        attributed = info.get("attributed") if isinstance(info.get("attributed"), list) else []
+        unattributed = info.get("unattributed") if isinstance(info.get("unattributed"), list) else []
+        out[venue] = {"readable": True, "candidates": len(attributed),
+                      "unattributed": len(unattributed),
+                      "ledger_evidence": info.get("ledgerRows") == "ok"}
+    return out or None
+
+
 def build_snapshot(*, data_dir: Optional[Path] = None,
                    venue_health: Optional[Dict[str, Any]] = None,
                    model_stats: Optional[Dict[str, Any]] = None,
@@ -243,6 +280,7 @@ def build_snapshot(*, data_dir: Optional[Path] = None,
                    market_data_health: Optional[Dict[str, Any]] = None,
                    market_stream_health: Optional[Dict[str, Any]] = None,
                    cycle_disclosure: Optional[Dict[str, Any]] = None,
+                   protection_orphans: Optional[Dict[str, Any]] = None,
                    now: Optional[float] = None) -> Dict[str, Any]:
     """取数（可注入）。每个源独立 try，失败只影响该源的 `source_ok`。"""
     sources: Dict[str, bool] = {}
@@ -295,6 +333,14 @@ def build_snapshot(*, data_dir: Optional[Path] = None,
             cd_base = Path(data_dir or "data")
         cycle_disclosure = collect_cycle_disclosure(cd_base / "cycle_disclosure.json")
     sources["cycle_disclosure"] = cycle_disclosure is not None
+    if protection_orphans is None:
+        # 面板缓存由后端进程持有；取不到 ⇒ 不发任何序列（不可判定≠0）
+        try:
+            import r20_backend.dashboard_cache as _dash
+            protection_orphans = collect_protection_orphans(getattr(_dash, "CACHE_DATA", None))
+        except Exception:
+            protection_orphans = None
+    sources["protection_orphans"] = protection_orphans is not None
 
     return {
         "generated_at": float(now if now is not None else time.time()),
@@ -305,6 +351,7 @@ def build_snapshot(*, data_dir: Optional[Path] = None,
         "market_data_health": market_data_health or {},
         "market_stream_health": market_stream_health or {},
         "cycle_disclosure": cycle_disclosure or {},
+        "protection_orphans": protection_orphans or {},
     }
 
 
@@ -452,6 +499,24 @@ def render_prometheus(snapshot: Dict[str, Any]) -> str:
                  help_text="跨所保护巡检本轮错误数")
             emit("r20_cycle_disclosure_watchdog_critical", cd.get("watchdog_critical"),
                  help_text="跨所保护巡检本轮严重缺口数（无止损腿/覆盖不可判定）")
+
+    po = snapshot.get("protection_orphans") or {}
+    if isinstance(po, dict):
+        for venue, info in po.items():
+            if not isinstance(info, dict):
+                continue
+            labels = [("venue", venue)]
+            emit("r20_protection_orphans_readable", 1 if info.get("readable") else 0, labels,
+                 help_text="该所孤儿腿情况是否可判定（0=腿读取失败 ⇒ 计数不发，读不到≠没有）")
+            if info.get("readable"):
+                emit("r20_protection_orphan_candidates", info.get("candidates"), labels,
+                     help_text="该所**可归因孤儿腿**条数（同币再开仓会被旧触发价减仓，"
+                               "须运营核对后显式撤销；系统绝不自动撤）")
+                emit("r20_protection_orphan_unattributed", info.get("unattributed"), labels,
+                     help_text="该所**归属不可判定**的孤儿腿条数（可能是用户手单，一律不碰）")
+                emit("r20_protection_orphans_ledger_evidence",
+                     1 if info.get("ledger_evidence") else 0, labels,
+                     help_text="归属取证是否用上台账（0=台账读不到 ⇒ 候选可能偏少）")
 
     out: List[str] = []
     for name, family in families.items():

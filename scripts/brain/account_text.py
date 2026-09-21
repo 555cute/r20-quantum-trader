@@ -46,6 +46,37 @@ from typing import Any, Dict, List, Optional
 __all__ = ["build_position_lines", "build_pending_order_lines"]
 
 
+def _orphan_legs_text(p: Dict[str, Any]) -> str:
+    """该所**孤儿保护腿**的提示词片段（第一百七十六刀）。
+
+    为什么值得告诉模型：孤儿腿是 `reduceOnly` 条件单 —— 同币**再开仓**后，价格触及
+    **旧触发价**时会真的减掉新仓。模型据此可以避开"在有旧触发价的币上开新仓"这类坑。
+
+    口径（与面板/指标一致）：
+    - **只报告**：可归因候选（证据=本方标签或台账同向同量已平）与"归属不可判定"分开说；
+    - 读腿失败 ⇒ 说"不可判定"（**不得**含糊成"没有孤儿腿"）；
+    - 不提"撤销"动作 —— 系统绝不自动撤，那是运营的事。
+    """
+    info = p.get("protectionOrphans")
+    if not isinstance(info, dict):
+        return ""
+    if info.get("readable") is False:
+        return " | 该所孤儿腿: **不可判定**（保护腿读取失败）"
+    attributed = info.get("attributed") if isinstance(info.get("attributed"), list) else []
+    unattributed = info.get("unattributed") if isinstance(info.get("unattributed"), list) else []
+    parts = []
+    if attributed:
+        syms = sorted({str(l.get("symbol") or "?") for l in attributed if isinstance(l, dict)})
+        parts.append(f"可归因 {len(attributed)} 条（{','.join(syms[:4])}）"
+                     "：同币再开仓时**可能按旧触发价减仓**，须人工核对")
+    if unattributed:
+        parts.append(f"归属不可判定 {len(unattributed)} 条（一律不碰）")
+    if not parts:
+        return ""
+    ledger = "" if info.get("ledgerRows") == "ok" else "（台账未读到 ⇒ 可归因数可能偏少）"
+    return " | 该所孤儿腿: " + "；".join(parts) + ledger
+
+
 def build_position_lines(active_positions_detail: Optional[List[Dict[str, Any]]],
                          *, safe_float) -> str:
     """在途持仓文本块。
@@ -54,6 +85,8 @@ def build_position_lines(active_positions_detail: Optional[List[Dict[str, Any]]]
     `[]` → 「当前无任何在途持仓敞口 (100% 现金空仓状态)」。
     """
     pos_lines = []
+    #: 孤儿腿是**场所级**事实（挂在每行上）⇒ 每个所只提示一次，避免同一句刷 N 遍
+    _orphan_seen: set = set()
     if active_positions_detail and len(active_positions_detail) > 0:
         for p in active_positions_detail:
             inst_name = p.get('name') or p.get('instId')
@@ -91,6 +124,10 @@ def build_position_lines(active_positions_detail: Optional[List[Dict[str, Any]]]
             # 保护判据（第一百一十八刀起面板/外所持仓都带）：让模型的态势认知
             # 与交易所事实一致 —— 缺口要显式说出来，不可判定**不得**含糊成"已保护"。
             _prot_txt = _protection_text(p)
+            _venue_key = str(p.get("venue") or "OKX").upper()
+            if _venue_key not in _orphan_seen:
+                _orphan_seen.add(_venue_key)
+                _prot_txt += _orphan_legs_text(p)
             pos_lines.append(
                 f"- {v_badge}标的: {inst_name} | 方向: {side} {p.get('lever', p.get('leverage', '3'))}x | 开仓均价: {p.get('avgPx')} | 当前价: {cur_px} | 浮盈: {p.get('upl')} U (ROI: {round(safe_float(p.get('uplRatio')) * 100, 2)}%){profit_desc} | 动态止损线: {sl_px} | 目标止盈: {tp_px} | 状态: {stage_desc}{_prot_txt}"
             )

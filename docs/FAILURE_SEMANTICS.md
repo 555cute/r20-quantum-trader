@@ -77,6 +77,7 @@
 | 孤儿保护腿的清理边界 | 只撤 `attribute_protective_orders` 的 `orphan_attributed`（证据 `tag`＝本方标签 / `ledger`＝台账同向同量已平）；`orphan_unattributed`/`side_mismatch`/`size_mismatch` **一律不碰**（可能是用户手单）；该合约**仍有活动持仓** ⇒ 整合约跳过；逐腿按 **id** 撤，绝不用「按合约撤全部」| 防 | `scripts/trader/venue_protection.py` | `tests/trading/test_venue_protection.py::CancelOrphanAttributedLegsTest` |
 | 台账取证（归属层的 `ledger` 档）| 只读台账行供归属取证：文件不存在 / JSON 坏 / 结构认不出 ⇒ **`None`＋告警**＝不产生证据（腿留在「归属不可判定」⇒ 绝不自动撤）；**绝不**把读失败当空台账（那会把可证明的腿降级，取反则可能撤掉用户手单）| 防 | `scripts/trader/venue_protection.py` | `tests/trading/test_venue_protection.py::LedgerEvidenceTest` |
 | 孤儿腿候选进面板（只报告）| 面板载荷 `protectionOrphans`：`attributed`（证据 tag/ledger ⇒ **可复核候选**）与 `unattributed`（一律不碰）分列；读腿失败 ⇒ `readable:false`＝**不可判定**（不是「没有孤儿腿」）；取证依据 `ledgerRows` 如实说明 ok/unavailable；面板**不得**出现任何撤销调用 | 披露 | `r20_backend/dashboard_payload/multi_venue.py` | `tests/ui/test_protection_contract.py::OrphanCandidatesPayloadTest` |
+| 孤儿腿的可观测与提示| `/metrics`：`r20_protection_orphans_readable{venue}` + 可判定时才发 `..._candidates`/`..._unattributed`/`..._ledger_evidence`（**读不到不发计数**，不可判定≠0）；提示词按所**只提示一次**并点明"同币再开仓可能按旧触发价减仓"；两处都只报告、**绝不**暗示会自动撤 | 披露 | `r20_backend/metrics.py` | `tests/ops/test_metrics_exposition.py::ProtectionOrphanMetricsTest` |
 <!-- anchors:end -->
 
 ## 3. 抽取门与"文档化差异"
