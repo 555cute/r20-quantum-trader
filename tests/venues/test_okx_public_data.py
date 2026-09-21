@@ -200,5 +200,57 @@ class OkxPositionsTest(unittest.TestCase):
                 self.ad.positions()
 
 
+
+class OkxOpenOrdersTest(unittest.TestCase):
+    def setUp(self):
+        from r20_backend.exchanges.okx import OKXAdapter
+        self.ad = OKXAdapter.__new__(OKXAdapter)
+        self.ad.environment = "demo"
+        self.ad.api_key, self.ad.secret_key, self.ad.passphrase = "K", "S", "P"
+        self.canonical = None
+        self.seen = []
+
+    def _stub(self, payload):
+        def _pend(inst_id=None, env=None):
+            self.seen.append(inst_id)
+            return payload
+        import scripts.okx_rest as rest
+        self._p = patch.object(rest, "pending_orders", side_effect=_pend)
+        self._p.start()
+        self.addCleanup(self._p.stop)
+        return self.ad
+
+    def test_rows_are_normalised_and_symbol_is_optional(self):
+        self._stub([{"instId": "BTC-USDT-SWAP", "ordId": 1, "clOrdId": "c", "side": "BUY",
+                     "posSide": "LONG", "px": "100.5", "sz": "2", "ordType": "LIMIT",
+                     "state": "live", "cTime": 1700000000000}])
+        out = self.ad.open_orders()
+        self.assertEqual(self.seen, [None], "不传标的 ⇒ 不过滤")
+        self.assertEqual(out[0]["order_id"], "1", "ID 一律字符串")
+        self.assertEqual(out[0]["side"], "buy")
+        self.assertEqual(out[0]["pos_side"], "long")
+        self.assertEqual(out[0]["price"], 100.5)
+        self.assertEqual(out[0]["state"], "live")
+        self.assertEqual(out[0]["created_time_ms"], 1700000000000)
+        self.ad.open_orders("BTC")
+        self.assertEqual(self.seen[-1], "BTC-USDT-SWAP", "传标的 ⇒ 用交易所原生符号过滤")
+
+    def test_missing_or_unusable_payload_is_empty(self):
+        for payload in (None, []):
+            with self.subTest(payload=payload):
+                self._stub(payload)
+                self.assertEqual(self.ad.open_orders(), [])
+
+    def test_non_dict_row_crashes_fifth_instance_of_the_family(self):
+        """⚠️ **实测边界（列待议）**：`open_orders` 也直接对每行 `.get()`，**无元素类型守卫**。
+
+        这是本仓登记的**第五处**同形态缺口（Gate positions / OKX funding / OKX _load_spec /
+        OKX positions / 此处）⇒ 族性问题确认，未擅自改。
+        """
+        self._stub(["not-a-dict"])
+        with self.assertRaises(AttributeError):
+            self.ad.open_orders()
+
+
 if __name__ == "__main__":
     unittest.main()
