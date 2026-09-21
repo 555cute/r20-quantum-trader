@@ -31,6 +31,29 @@ ROOT = Path(__file__).resolve().parents[2]
 MDS = ROOT / "scripts" / "market_data_service.py"
 
 
+def adhoc_normalization_offenders(src: str, helper_name: str = "_indicator_key") -> list:
+    """源码里"第二处指标名规范化"的位置（第一百八十四刀的判据，抽成函数以便**造牙齿**）。
+
+    规则：除了 `helper_name` 自身那几行，任何同时出现 `.upper()` 与 `.replace(` 的调用
+    都是同义异写的第二份实现 ⇒ 迟早漂移。
+    """
+    import ast as _ast
+    tree = _ast.parse(src)
+    helper = next((n for n in _ast.walk(tree)
+                   if isinstance(n, _ast.FunctionDef) and n.name == helper_name), None)
+    if helper is None:
+        return ["找不到 %s（门已过期）" % helper_name]
+    helper_lines = set(range(helper.lineno, (helper.end_lineno or helper.lineno) + 1))
+    offenders = []
+    for node in _ast.walk(tree):
+        if not isinstance(node, _ast.Call):
+            continue
+        text = _ast.unparse(node)
+        if ".upper()" in text and ".replace(" in text and getattr(node, "lineno", 0) not in helper_lines:
+            offenders.append("第 %d 行: %s" % (node.lineno, text[:80]))
+    return offenders
+
+
 class IndicatorKeySingleSpellingTest(unittest.TestCase):
     def setUp(self):
         from scripts import market_data_service as m
@@ -72,21 +95,37 @@ class IndicatorKeySingleSpellingTest(unittest.TestCase):
 
     def test_no_adhoc_normalization_outside_the_helper(self):
         """源码级：该模块里**只允许** `_indicator_key` 一处做规范化。"""
-        src = MDS.read_text(encoding="utf-8")
-        tree = ast.parse(src)
-        helper = next((n for n in ast.walk(tree)
-                       if isinstance(n, ast.FunctionDef) and n.name == "_indicator_key"), None)
-        self.assertIsNotNone(helper, "找不到 _indicator_key（门已过期）")
-        helper_lines = set(range(helper.lineno, (helper.end_lineno or helper.lineno) + 1))
-        offenders = []
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            text = ast.unparse(node)
-            if ".upper()" in text and ".replace(" in text and getattr(node, "lineno", 0) not in helper_lines:
-                offenders.append(f"第 {node.lineno} 行: {text[:80]}")
+        offenders = adhoc_normalization_offenders(MDS.read_text(encoding="utf-8"))
         self.assertEqual(offenders, [], "出现第二处指标名规范化（同义异写会漂移）：\n"
                                         + "\n".join(offenders))
+
+    def test_teeth_catch_a_second_normalization(self):
+        """牙齿（第二百零二刀）：**造一份第二处实现**，判据必须抓到它。
+
+        没有这一条，"判据能不能咬"就只能靠人读源码相信它 —— 而那正是本仓反复吃过的亏。
+        """
+        bad = (
+            "def _indicator_key(name):\n"
+            "    return str(name).upper().replace('-', '').replace('_', '')\n"
+            "\n"
+            "def other_place(ind):\n"
+            "    return ind.upper().replace('-', '')   # 第二处实现 ⇒ 必须被抓\n"
+        )
+        offenders = adhoc_normalization_offenders(bad)
+        self.assertEqual(len(offenders), 1, f"第二处规范化没被抓到：{offenders}")
+        # 断言**具体行号**：`bad` 里那处调用在第 5 行（第 4 行才进 other_place）。
+        # ⚠️ 第一版这里写的是 `assertIn("other_place", " ".join(offenders) + " other_place")`
+        # —— 自己把要断言的关键字拼进了被检查的字符串，**恒真**（假断言，本刀自查抓出）。
+        self.assertIn("第 5 行", offenders[0], f"抓到的不是那一行：{offenders[0]}")
+
+        clean = (
+            "def _indicator_key(name):\n"
+            "    return str(name).upper().replace('-', '').replace('_', '')\n"
+            "\n"
+            "def other_place(ind):\n"
+            "    return _indicator_key(ind)   # 委派给唯一实现 ⇒ 干净\n"
+        )
+        self.assertEqual(adhoc_normalization_offenders(clean), [], "干净源码被误报")
 
 
 if __name__ == "__main__":
