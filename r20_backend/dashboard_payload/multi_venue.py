@@ -401,7 +401,9 @@ def collect_cross_venue_positions(positions, pending_orders_list,
                                    or _raw_vo.get("updateTime") or _raw_vo.get("create_time") or 0)
                     try:
                         _c_ts_f = float(_created_ts)
-                        _c_time_ms = int(_c_ts_f * 1000) if (0 < _c_ts_f < 1e11) else int(_c_ts_f)
+                        # 第一百八十八刀：秒/毫秒分界委派给唯一实现（原为内联 `1e11` 判据）
+                        from r20_backend.time_utils import to_millis
+                        _c_time_ms = int(to_millis(_c_ts_f))
                     except (TypeError, ValueError):
                         _c_time_ms = 0
 

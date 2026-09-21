@@ -92,6 +92,7 @@
 | 币种基名只有一处实现 | `canonical_base` 违背自身 docstring（"任意写法→裸币种"）：合成 id 得 `GATE:BTC`、`BTC_USDC` 得 `BTCUSDC`；`_base_of`/`_leg_symbol` 各写一份 ⇒ 三处互相矛盾（按币种匹配静默失配）。修法：`canonical_base` 补前缀剥离与计价币剥离，两处**委派**给它；且池映射必须加"标准形态"闸，否则币本位 `BTC-USD-SWAP` 会因币种相同被换到池内 `BTC-USDT-SWAP`（换下单标的）| 防 | `r20_backend/exchanges/base.py` | `tests/audit/test_symbol_base_consistency.py::BaseNameConsistencyTest` |
 | posSide 比较必须净持仓容错 | OKX 净持仓（one-way）账户返回 `posSide="net"`，精确相等会**假阴性**：云端止损找不到活单 ⇒ 收紧静默失效（`cloud_protection`/`position_mgmt`）；平仓核验匹配不上 ⇒ `remaining` 保持 0 ⇒ **仓位还开着却宣称已平**（`venue_query`）。统一为 `in {pos_side, "net"}`；自洽站点（两侧都取自 OKX 自身）与"是否显式侧向"判断列入带理由的允许清单；门按 AST 扫描全仓 | 吼 | `scripts/trader/venue_query.py` | `tests/audit/test_posside_net_convention.py::PosSideNetConventionTest` |
 | posSide 缺失默认值必须一致 | 缺字段时默认 `"net"`（全仓 11 处），不得写 `""`：`""` 与 `"net"` 配不上 ⇒ 明明有仓位却"匹配不到"（净持仓模式更易触发）。回退链末端（`side → posSide → ""`）与展示文案（`"—"`/`"long"`）以及"上游模式闸已拦"的位置列入带理由的允许清单；另钉住 OKX **刻意**的端点字段差异（close-position 用 `mgnMode`、下单用 `tdMode`，统一则 400）| 防 | `r20_backend/okx_trade_service.py` | `tests/audit/test_posside_net_convention.py::PosSideDefaultConsistencyTest` |
+| 秒/毫秒分界只有一处实现 | 判据 `>= 1e11 ⇒ 毫秒` 此前有**四处**写法（`time_utils.parse_beijing`、`multi_venue`、`venue_protection` 的函数版与内联版）⇒ 改一处忘三处；且分界写成 `1e9` 会把 epoch 秒误判成毫秒再除 1000（"还剩 7 天"算成"已过期"，本仓真实踩过）。唯一实现＝`r20_backend/time_utils.py` 的 `EPOCH_MS_THRESHOLD`/`to_seconds`/`to_millis`，其余委派；门按 AST 钉住"数值常量 `1e11` 只许出现在该文件"| 防 | `r20_backend/time_utils.py` | `tests/audit/test_epoch_unit_converter.py::EpochUnitConverterTest` |
 <!-- anchors:end -->
 
 ## 3. 抽取门与"文档化差异"

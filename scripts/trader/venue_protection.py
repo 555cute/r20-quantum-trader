@@ -238,12 +238,15 @@ def _to_seconds(value: Optional[float]) -> Optional[float]:
 
     ⚠️ 判据必须是 `< 1e11`（秒）而不是 `< 1e9`：epoch 秒本身已经 ~1.79e9，
     用 1e9 当分界会把"秒"误判成"毫秒"、把时间除以 1000（本模块第一版就这么错过，
-    结果"还剩 7 天"被算成"已过期"）。本仓同一手法见
-    `dashboard_payload/multi_venue.py` 的 `0 < _c_ts_f < 1e11`。
+    结果"还剩 7 天"被算成"已过期"）。
+
+    第一百八十八刀：判据与换算**只有一处实现**（`r20_backend.time_utils` 的
+    `EPOCH_MS_THRESHOLD` / `to_seconds` / `to_millis`）；本函数与
+    `dashboard_payload/multi_venue.py` 都已改为委派（此前四处各写一遍）。
     """
-    if value is None:
-        return None
-    return value / 1000.0 if value >= 1e11 else value
+    # 第一百八十八刀：分界与换算**只有一处实现**（`r20_backend.time_utils`），此处委派。
+    from r20_backend.time_utils import to_seconds
+    return to_seconds(value)
 
 
 def _expiry(row: Dict[str, Any]) -> tuple:
@@ -272,7 +275,8 @@ def _expiry(row: Dict[str, Any]) -> tuple:
     if exp is not None:
         if exp <= 0:
             return None, "never"
-        if exp >= 1e11:                # 绝对时间戳（毫秒）
+        from r20_backend.time_utils import EPOCH_MS_THRESHOLD
+        if exp >= EPOCH_MS_THRESHOLD:  # 绝对时间戳（毫秒）；分界取自唯一实现
             return exp / 1000.0, "absolute"
         if exp > 1e9:                  # 绝对时间戳（秒）
             return exp, "absolute"
