@@ -51,6 +51,30 @@ from r20_backend.execution.risk_gates import (  # noqa: E402
 )
 
 
+_READ_SCOPE = None
+
+
+def setUpModule():
+    """显式声明生产读（第二百三十七刀）：
+    本文件把**线上 `.env`** 的 `R20_MAX_TOTAL_EXPOSURE_USDT` 与契约值对照，验证线上配置与
+    抽取后实现一致 —— 不读生产就无法成立，属**有意的线上守卫**。
+
+    只读、不改；声明在此把「依赖线上配置内容」从**静默**变成**可审计**
+    （未声明时 `R20_TESTS_STRICT_READS=1` 会报错）。
+    """
+    global _READ_SCOPE
+    from tests import allow_real_data_reads
+    _READ_SCOPE = allow_real_data_reads()
+    _READ_SCOPE.__enter__()
+
+
+def tearDownModule():
+    global _READ_SCOPE
+    if _READ_SCOPE is not None:
+        _READ_SCOPE.__exit__(None, None, None)
+        _READ_SCOPE = None
+
+
 def _fail(stage, detail, venue="gate", **extra):
     return {"ok": False, "stage": stage, "detail": detail, "venue": venue, **extra}
 

@@ -50,6 +50,30 @@ TRACKERS = ROOT / "data" / "position_trackers.json"
 
 
 
+_READ_SCOPE = None
+
+
+def setUpModule():
+    """显式声明生产读（第二百三十七刀）：
+    本文件的名字就是它的目的：核对**线上产物**（data/*.json）的**形状**是否符合契约
+    （只查结构，不断言具体内容/标的）—— 有意的线上守卫。
+
+    只读、不改；声明在此把「依赖线上配置内容」从**静默**变成**可审计**
+    （未声明时 `R20_TESTS_STRICT_READS=1` 会报错）。
+    """
+    global _READ_SCOPE
+    from tests import allow_real_data_reads
+    _READ_SCOPE = allow_real_data_reads()
+    _READ_SCOPE.__enter__()
+
+
+def tearDownModule():
+    global _READ_SCOPE
+    if _READ_SCOPE is not None:
+        _READ_SCOPE.__exit__(None, None, None)
+        _READ_SCOPE = None
+
+
 class LiveArtifactShapeTest(unittest.TestCase):
     """活体预检（只读）。文件不存在时跳过 —— 但校验器的自检始终执行。"""
 

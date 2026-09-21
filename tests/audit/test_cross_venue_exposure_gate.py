@@ -31,6 +31,30 @@ sys.path.insert(0, str(ROOT))
 from r20_backend.execution.risk_gates import check_total_exposure  # noqa: E402
 
 
+_READ_SCOPE = None
+
+
+def setUpModule():
+    """显式声明生产读（第二百三十七刀）：
+    本文件对照**线上 `.env`** 的跨所敞口上限配置，核对闸门语义与线上配置一致
+    —— 有意的线上守卫。
+
+    只读、不改；声明在此把「依赖线上配置内容」从**静默**变成**可审计**
+    （未声明时 `R20_TESTS_STRICT_READS=1` 会报错）。
+    """
+    global _READ_SCOPE
+    from tests import allow_real_data_reads
+    _READ_SCOPE = allow_real_data_reads()
+    _READ_SCOPE.__enter__()
+
+
+def tearDownModule():
+    global _READ_SCOPE
+    if _READ_SCOPE is not None:
+        _READ_SCOPE.__exit__(None, None, None)
+        _READ_SCOPE = None
+
+
 def _fail(stage, detail, venue="gate", **extra):
     return {"stage": stage, "detail": detail, "venue": venue, **extra}
 

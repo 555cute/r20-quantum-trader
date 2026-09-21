@@ -251,6 +251,11 @@ def _assert_not_reading_production(path: object) -> None:
                    f"（读取点 {_reader_frame()}）—— "
                    f"它的内容会塑造决策 ⇒ 结果随线上配置漂移。请 patch 到沙箱/临时文件"
                    f"（`tests.config_sandbox.isolate_config` 或 `patch.object(模块, \"XXX_FILE\", tmp)`）")
+            # ⚠️ 严格模式**先打印再抛**：生产代码里大量 fail-soft（`except Exception: pass`）
+            # 会把这里抛出的异常**吞掉**，于是测试只看到"下游断言莫名其妙地变了"
+            # （实测 `test_gate_execution_router.py` 13 个用例表现为 `venue_dry_run != protective`
+            # 这类 stage 漂移，读取点信息整个丢失）。打印后即便被吞也能在输出里找到真凶。
+            print(msg)
             if os.environ.get("R20_TESTS_STRICT_READS", "") == "1":
                 raise AssertionError(msg + "（当前为严格模式 R20_TESTS_STRICT_READS=1）")
             print(msg)
@@ -412,6 +417,8 @@ def _install_session_config_sandbox() -> None:
         "SOL": (1.0, 2, "0.01", "0.01"), "DOGE": (1000.0, 5, "0.00001", "0.01"),
         "SUI": (1.0, 4, "0.0001", "1"), "ADA": (100.0, 4, "0.0001", "0.1"),
         "XRP": (100.0, 4, "0.0001", "0.01"),
+        # UNI/ARB 也在路由夹具的 assets 里（池与路由要同形）
+        "UNI": (1.0, 1, "0.001", "0.1"), "ARB": (1.0, 1, "0.0001", "0.1"),
     }
     names = tuple(_meta)
     insts = [{"instId": f"{n}-USDT-SWAP", "name": n, "type": "crypto", "ccy": n,
@@ -435,6 +442,22 @@ def _install_session_config_sandbox() -> None:
     # `r20_backend/notifications.py` 用**内联** `ROOT / ".env"` 读配置（同 okx_runtime 型）
     for name in ("r20_backend.notifications",):
         targets[name] = ("ROOT", root, False)
+    # 场所路由：`routing_policy.py` 读 `data/venue_routing.json`（读取点 121，由守卫指出）。
+    # ⚠️ 缺键时 **gate 默认 dry_run=True** ⇒ 不钉住就会让"实盘闸"的用例漂到 `venue_dry_run`
+    # （实测 `test_gate_execution_router.py` 13 例：`venue_dry_run != protective/leverage/sizing`）。
+    # 夹具用**抄自线上一次的静态值**（含两所 assets 与 dry_run=false 的实盘姿态）。
+    routing = root / "venue_routing.json"
+    routing.write_text(json.dumps({
+        "preferred_venue": "auto", "routing_mode": "balanced",
+        "gate": {"assets": ["ADA", "BTC", "DOGE", "ETH", "SOL", "SUI", "UNI", "XRP"],
+                 "dry_run": False, "margin_per_trade_usdt": 500.0, "max_open": 5,
+                 "min_confidence": 72.0},
+        "binance": {"assets": ["ADA", "ARB", "BTC", "DOGE", "ETH", "SOL", "SUI", "UNI", "XRP"],
+                    "dry_run": False, "margin_per_trade_usdt": 500.0, "max_open": 5,
+                    "min_confidence": 72.0},
+    }, ensure_ascii=False), encoding="utf-8")
+    for name in ("r20_backend.exchanges.routing_policy",):
+        targets[name] = ("ROUTING_FILE", routing, False)
     # 提示词库：指向沙箱里**不存在**的路径 ⇒ `load_library()` 走 `_default()` 确定性回退
     # （不读生产、也不随线上模板漂移）。要断言"线上模板内容"的用例必须自带夹具。
     for name in ("prompt_library", "scripts.prompt_library"):

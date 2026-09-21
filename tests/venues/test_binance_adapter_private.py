@@ -29,9 +29,6 @@ from r20_backend.exchanges import (
 _AMBIENT: dict = {}
 
 
-_READ_SCOPE = None
-
-
 def setUpModule():
     """隔离宿主 .env 的执行/档位旗标（r20_backend.config 导入期会把它们载入
     os.environ）——执行路由用例的开闸语义只由本模块夹具决定。"""
@@ -39,23 +36,8 @@ def setUpModule():
     global _AMBIENT
     _AMBIENT = {k: os.environ.pop(k, None) for k in list(os.environ)
                 if k.startswith("R20_") and ("EXECUTION" in k or "TESTNET" in k)}
-    # ⚠️ 第二百三十三刀登记，第二百三十四刀**试改夹具池失败**（证据在此，免得后人重走）：
-    # 读线上 `data/instrument_pool.json`（读取点 `scripts/instrument_pool.py:239`，由生产读守卫指出）。
-    # 试过把 `ip.POOL_FILE` patch 成同形夹具池（含 tier/max_leverage/risk_per_trade_usd 全字段），
-    # 断言反而从 `protective` 变成 `venue_pool` ⇒ 说明这两条用例的分支**还取决于线上场所路由**
-    # （`data/venue_routing.json` 的 per-venue 准入），不止标的池 ⇒ 依赖比"换池"更深，
-    # 需单独一刀连场所路由一起沙箱化。故本刀仍显式声明：**已知的生产数据依赖**，不是"已经安全"。
-    from tests import allow_real_data_reads
-    global _READ_SCOPE
-    _READ_SCOPE = allow_real_data_reads()
-    _READ_SCOPE.__enter__()
 
 
-def tearDownModule():
-    global _READ_SCOPE
-    if _READ_SCOPE is not None:
-        _READ_SCOPE.__exit__(None, None, None)
-        _READ_SCOPE = None
     import os
     for k, v in _AMBIENT.items():
         if v is not None:
