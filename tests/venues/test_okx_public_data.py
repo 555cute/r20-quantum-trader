@@ -252,5 +252,83 @@ class OkxOpenOrdersTest(unittest.TestCase):
             self.ad.open_orders()
 
 
+
+class OkxOrderDelegationTest(unittest.TestCase):
+    def setUp(self):
+        from r20_backend.exchanges.okx import OKXAdapter
+        self.ad = OKXAdapter.__new__(OKXAdapter)
+        self.ad.environment = "demo"
+        self.ad.api_key, self.ad.secret_key, self.ad.passphrase = "K", "S", "P"
+        import scripts.okx_rest as rest
+        self.rest = rest
+        self.calls = []
+
+    def _stub(self, name, ret):
+        def _f(*a, **kw):          # 有的委托是位置参数（如 set_leverage），有的是关键字
+            self.calls.append((name, {"args": a, "kwargs": kw}))
+            return ret
+        p = patch.object(self.rest, name, side_effect=_f)
+        p.start()
+        self.addCleanup(p.stop)
+        return self.ad
+
+    def test_set_leverage_passes_integer_leverage_and_mode(self):
+        self._stub("set_leverage", {"ok": True})
+        self.ad.set_leverage("BTC", 3.7, margin_mode="isolated", pos_side="long")
+        name, call = self.calls[-1]
+        self.assertEqual(name, "set_leverage")
+        self.assertEqual(call["args"][0], "BTC-USDT-SWAP")
+        self.assertEqual(call["args"][1], 3, "杠杆必须被取整成 int")
+        self.assertEqual(call["kwargs"]["mgn_mode"], "isolated")
+        self.assertEqual(call["kwargs"]["pos_side"], "long")
+
+    def test_cancel_order_passes_both_id_kinds(self):
+        self._stub("cancel_order", {"ordId": "1"})
+        out = self.ad.cancel_order("BTC", "123", client_order_id="c-1")
+        kw = self.calls[-1][1]["kwargs"]
+        self.assertEqual(kw["ord_id"], "123")
+        self.assertEqual(kw["cl_ord_id"], "c-1")
+        self.assertEqual(out["venue"], "okx")
+        self.assertEqual(out["symbol"], "BTC-USDT-SWAP")
+        self.ad.cancel_order("BTC")
+        self.assertEqual(self.calls[-1][1]["kwargs"]["ord_id"], "", "缺 order_id ⇒ 空串")
+
+    def test_list_protective_orders_uses_the_real_api_name(self):
+        """审计 D4：真实 API 名是 `pending_algo_orders`（`list_algo_orders` 并不存在）。"""
+        self._stub("pending_algo_orders", [{"algoId": "a1"}])
+        out = self.ad.list_protective_orders("BTC")
+        self.assertEqual(out, [{"algoId": "a1"}])
+        self.assertEqual(self.calls[-1][1]["kwargs"]["inst_id"], "BTC-USDT-SWAP")
+        self.ad.list_protective_orders()
+        self.assertIsNone(self.calls[-1][1]["kwargs"]["inst_id"], "不传标的 ⇒ 不过滤")
+
+    def test_fast_close_raises_when_there_is_no_position(self):
+        """★ **没找到持仓 ⇒ 抛 `ValueError`**，不是返回一个假的「已平」（受理≠平掉的同族）。"""
+        self.ad.positions = lambda: []
+        with self.assertRaises(ValueError) as ctx:
+            self.ad.fast_close_position("BTC")
+        self.assertIn("未找到", str(ctx.exception))
+
+    def test_fast_close_uses_the_legs_pos_side(self):
+        self.ad.positions = lambda: [{"instId": "BTC-USDT-SWAP", "posSide": "long",
+                                      "pos": "2"}]
+        self._stub("close_position", {"ok": True})
+        out = self.ad.fast_close_position("BTC")
+        kw = self.calls[-1][1]["kwargs"]
+        self.assertEqual(kw["inst_id"], "BTC-USDT-SWAP")
+        self.assertEqual(kw["pos_side"], "long", "钉住具体腿，不猜")
+        self.assertEqual(out["venue"], "okx")
+
+    def test_position_without_pos_side_key_crashes(self):
+        """⚠️ **实测边界（列待议）**：`fast_close_position` 用 `target[posSide]` **直取键**，
+        缺该键 ⇒ `KeyError`（而不是「读不到方向 ⇒ 拒绝下平仓单」）。
+
+        这是本仓登记的**第六处**同形态缺口（缺键/类型守卫 ⇒ 单条坏负载把整次操作打成异常）。
+        """
+        self.ad.positions = lambda: [{"instId": "BTC-USDT-SWAP", "pos": "2"}]
+        with self.assertRaises(KeyError):
+            self.ad.fast_close_position("BTC")
+
+
 if __name__ == "__main__":
     unittest.main()
