@@ -9,7 +9,9 @@
 4) 再首次导入 risk_constants（此时得到代码默认基线），并断言静态键表与单一事实源一致。
 """
 import builtins
+import json
 import os
+import sys
 import tempfile
 from pathlib import Path
 
@@ -329,6 +331,96 @@ if not _ALLOW_REAL_WRITES:
     os.remove = _guarded_remove
     os.unlink = _guarded_remove
     _install_in_test_flag()
+
+
+# ── 会话级配置沙箱（第二百三十四刀）────────────────────────────────────────
+# 严格模式普查（`R20_TESTS_STRICT_READS=1 pytest tests`）实测 108 处用例读线上配置，
+# 按**读取点**排序：`scripts/okx_runtime.py` 43（读 `ROOT/.env`）、
+# `scripts/instrument_pool.py` 19（读池）、`scripts/prompt_library.py` 16（读提示词库）。
+# 这三处是"缺省不安全"的源头 ⇒ 本刀把前两处**会话级**钉进沙箱（其余仍逐处处理）。
+#
+# ⚠️ 双拼写铁律：本仓 `scripts/x.py` 与 `x.py`（sys.path 含 scripts/）是**两个模块对象**
+# （实测 `instrument_pool is not scripts.instrument_pool`）——只 patch 一个，另一个照旧读生产。
+# 这正是上一刀"夹具池已装却仍读线上池"的真因。
+_SESSION_SANDBOX: list = []
+
+
+class _ConfigSandboxFinder:
+    """给 `okx_runtime` / `instrument_pool` 的**两种拼写**在 import 时自动钉沙箱路径。
+
+    为什么不用简单的 `setattr`：① 裸拼写（`import okx_runtime`）在会话开始时往往还没导入；
+    ② `importlib.reload` 会**重新执行模块顶层**（`ROOT = Path(__file__)...`）把 setattr 冲掉
+    —— 实测过"单跑绿、全量红"。这里包住 loader 的 `exec_module`：任何一次导入/重载之后，
+    路径都会被重新钉到沙箱（`__spec__.loader` 就是本包装器 ⇒ reload 也走它）。
+    """
+
+    def __init__(self, targets):
+        self._targets = targets      # 模块名 -> (属性名, 沙箱值)
+
+    def find_spec(self, name, path=None, target=None):
+        if name not in self._targets:
+            return None
+        import importlib.machinery as _machinery
+
+        spec = _machinery.PathFinder.find_spec(name, path)
+        if spec is None or spec.loader is None:
+            return None
+        attr, value = self._targets[name]
+        inner = spec.loader
+
+        class _SandboxedLoader:
+            def create_module(self, spec):
+                create = getattr(inner, "create_module", None)
+                return create(spec) if create else None
+
+            def exec_module(self, module):
+                inner.exec_module(module)
+                setattr(module, attr, value)
+
+        spec.loader = _SandboxedLoader()
+        return spec
+
+
+def _install_session_config_sandbox() -> None:
+    """把 `okx_runtime.ROOT` 与 `instrument_pool.POOL_FILE` 钉到临时沙箱（缺省安全）。"""
+    if _ALLOW_REAL_WRITES:          # R20_TESTS_ALLOW_REAL_DATA=1：整进程放开，不沙箱
+        return
+    import tempfile
+
+    tmp = tempfile.TemporaryDirectory(prefix="r20_tests_config_")
+    _SESSION_SANDBOX.append(tmp)    # 保持引用，别被 GC 掉
+    root = Path(tmp.name)
+    # 池夹具：**同形且字段齐全**（少字段会把路由打进 `venue_pool` 分支），7 条 ≥ 本仓基线 6
+    names = ("BTC", "ETH", "SOL", "DOGE", "SUI", "ADA", "XRP")
+    insts = [{"instId": f"{n}-USDT-SWAP", "name": n, "type": "crypto", "ccy": n,
+              "tier": "tier_1_bluechip" if n in ("BTC", "ETH") else "tier_2_momentum",
+              "max_leverage": 5 if n in ("BTC", "ETH") else 3,
+              "sl_atr_mult": 2.0 if n in ("BTC", "ETH") else 2.2,
+              "base_sz": 1, "precision": 2, "ctVal": 1.0, "tickSz": "0.001", "minSz": "0.1",
+              "risk_per_trade_usd": 20.0 if n in ("BTC", "ETH") else 15.0}
+             for n in names]
+    pool = root / "instrument_pool.json"
+    pool.write_text(json.dumps({"version": 2, "instruments": insts}), encoding="utf-8")
+    # 注意：**故意不写** `.env` ⇒ `okx_runtime._load_dotenv()` / `config.load_dotenv()`
+    # 都直接返回（不读生产、不覆盖 os.environ；基线由 pin_baseline_risk_env 提供）。
+
+    targets = {}
+    for name in ("okx_runtime", "scripts.okx_runtime"):
+        targets[name] = ("ROOT", root)
+    for name in ("instrument_pool", "scripts.instrument_pool"):
+        targets[name] = ("POOL_FILE", pool)
+
+    # 已经导入过的：就地钉一次；之后所有（含 reload）由 finder 兜住
+    for name, (attr, value) in targets.items():
+        mod = sys.modules.get(name)
+        if mod is not None:
+            setattr(mod, attr, value)
+    sys.meta_path.insert(0, _ConfigSandboxFinder(targets))
+    print(f"[tests] 会话级配置沙箱已启用：okx_runtime.ROOT / instrument_pool.POOL_FILE → {root}"
+          f"（要读真实配置：R20_TESTS_ALLOW_REAL_DATA=1）")
+
+
+_install_session_config_sandbox()
 
 # ⚠️ 第八十刀：import 时机静默 dashboard 的 **2 秒缓存外呼循环**。
 # `r20_backend/dashboard_cache.py` 模块**顶层末尾**就 `start_dashboard_background_worker()`
