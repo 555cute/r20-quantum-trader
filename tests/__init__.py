@@ -345,6 +345,11 @@ if not _ALLOW_REAL_WRITES:
 _SESSION_SANDBOX: list = []
 
 
+def session_sandbox_roots() -> list:
+    """会话级配置沙箱的根目录（供 `tests.config_sandbox.isolate_config` 接管）。"""
+    return [Path(t.name) for t in _SESSION_SANDBOX]
+
+
 class _ConfigSandboxFinder:
     """给 `okx_runtime` / `instrument_pool` 的**两种拼写**在 import 时自动钉沙箱路径。
 
@@ -355,7 +360,8 @@ class _ConfigSandboxFinder:
     """
 
     def __init__(self, targets):
-        self._targets = targets      # 模块名 -> (属性名, 沙箱值)
+        # 模块名 -> (属性名, 沙箱值, 是否让位给 isolate_config)
+        self._targets = targets
 
     def find_spec(self, name, path=None, target=None):
         if name not in self._targets:
@@ -365,7 +371,7 @@ class _ConfigSandboxFinder:
         spec = _machinery.PathFinder.find_spec(name, path)
         if spec is None or spec.loader is None:
             return None
-        attr, value = self._targets[name]
+        attr, value, defer = self._targets[name]
         inner = spec.loader
 
         class _SandboxedLoader:
@@ -375,6 +381,12 @@ class _ConfigSandboxFinder:
 
             def exec_module(self, module):
                 inner.exec_module(module)
+                # `tests.config_sandbox.isolate_config` 会设 `R20_DATA_DIR` 并把
+                # 它白名单里的模块（含 prompt_library）重载进**更具体的**沙箱；
+                # 那种情况下让位（否则会把它的沙箱路径顶掉 —— 实测
+                # `test_config_sandbox.py::test_nested_policy_paths_share_one_sandbox` 就是这么红的）。
+                if defer and os.environ.get("R20_DATA_DIR"):
+                    return
                 setattr(module, attr, value)
 
         spec.loader = _SandboxedLoader()
@@ -390,13 +402,24 @@ def _install_session_config_sandbox() -> None:
     tmp = tempfile.TemporaryDirectory(prefix="r20_tests_config_")
     _SESSION_SANDBOX.append(tmp)    # 保持引用，别被 GC 掉
     root = Path(tmp.name)
-    # 池夹具：**同形且字段齐全**（少字段会把路由打进 `venue_pool` 分支），7 条 ≥ 本仓基线 6
-    names = ("BTC", "ETH", "SOL", "DOGE", "SUI", "ADA", "XRP")
+    # 池夹具：**同形且字段齐全**（少字段会把路由打进 `venue_pool` 分支），7 条 ≥ 本仓基线 6。
+    # ⚠️ `ctVal/precision/tickSz/minSz` 用**真实静态值**（抄自线上池一次，之后固定，**不是**读取）：
+    # 合约面值直接进保证金/名义额算式，写错会让断言按 10×/100× 漂移
+    # （实测 `test_dashboard_cache.py` 的 ETH 断言 711.6 → 7116.0 就是这么红的，
+    # 与 `REAL_HOLDING_UNI` 同一手法：**把形状/常量抄成固定夹具**，而不是每次去读生产）。
+    _meta = {   # name: (ctVal, precision, tickSz, minSz)
+        "BTC": (0.01, 1, "0.1", "0.01"), "ETH": (0.1, 2, "0.01", "0.01"),
+        "SOL": (1.0, 2, "0.01", "0.01"), "DOGE": (1000.0, 5, "0.00001", "0.01"),
+        "SUI": (1.0, 4, "0.0001", "1"), "ADA": (100.0, 4, "0.0001", "0.1"),
+        "XRP": (100.0, 4, "0.0001", "0.01"),
+    }
+    names = tuple(_meta)
     insts = [{"instId": f"{n}-USDT-SWAP", "name": n, "type": "crypto", "ccy": n,
               "tier": "tier_1_bluechip" if n in ("BTC", "ETH") else "tier_2_momentum",
               "max_leverage": 5 if n in ("BTC", "ETH") else 3,
               "sl_atr_mult": 2.0 if n in ("BTC", "ETH") else 2.2,
-              "base_sz": 1, "precision": 2, "ctVal": 1.0, "tickSz": "0.001", "minSz": "0.1",
+              "base_sz": 1, "precision": _meta[n][1], "ctVal": _meta[n][0],
+              "tickSz": _meta[n][2], "minSz": _meta[n][3],
               "risk_per_trade_usd": 20.0 if n in ("BTC", "ETH") else 15.0}
              for n in names]
     pool = root / "instrument_pool.json"
@@ -406,14 +429,18 @@ def _install_session_config_sandbox() -> None:
 
     targets = {}
     for name in ("okx_runtime", "scripts.okx_runtime"):
-        targets[name] = ("ROOT", root)
+        targets[name] = ("ROOT", root, False)
     for name in ("instrument_pool", "scripts.instrument_pool"):
-        targets[name] = ("POOL_FILE", pool)
+        targets[name] = ("POOL_FILE", pool, False)
+    # 提示词库：指向沙箱里**不存在**的路径 ⇒ `load_library()` 走 `_default()` 确定性回退
+    # （不读生产、也不随线上模板漂移）。要断言"线上模板内容"的用例必须自带夹具。
+    for name in ("prompt_library", "scripts.prompt_library"):
+        targets[name] = ("LIBRARY_FILE", root / "prompt_library.json", True)
 
     # 已经导入过的：就地钉一次；之后所有（含 reload）由 finder 兜住
-    for name, (attr, value) in targets.items():
+    for name, (attr, value, defer) in targets.items():
         mod = sys.modules.get(name)
-        if mod is not None:
+        if mod is not None and not (defer and os.environ.get("R20_DATA_DIR")):
             setattr(mod, attr, value)
     sys.meta_path.insert(0, _ConfigSandboxFinder(targets))
     print(f"[tests] 会话级配置沙箱已启用：okx_runtime.ROOT / instrument_pool.POOL_FILE → {root}"

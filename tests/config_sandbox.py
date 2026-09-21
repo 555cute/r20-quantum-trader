@@ -130,7 +130,22 @@ def isolate_config(test):
             try:
                 relative = Path(value).relative_to(project / 'data')
             except ValueError:
-                continue
+                # ⚠️ 第二百三十五刀：会话级配置沙箱（`tests/__init__.py`）会把
+                # `prompt_library.LIBRARY_FILE` 之类的常量挪到 /tmp 下 —— 那些值不在
+                # `project/data` 前缀里，按原规则会被**跳过**，于是本沙箱反而"管不到"它们
+                # （实测 `test_config_sandbox.py::test_nested_policy_paths_share_one_sandbox`
+                # 就是这么红的）。这里把会话沙箱下的常量**接管**进来：更具体的沙箱优先。
+                from tests import session_sandbox_roots
+
+                relative = None
+                for sroot in session_sandbox_roots():
+                    try:
+                        relative = Path(value).relative_to(sroot)
+                    except ValueError:
+                        continue
+                    break
+                if relative is None:
+                    continue
             target = root / 'data' / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             replacement = str(target) if isinstance(value, str) else target
