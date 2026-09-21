@@ -683,7 +683,11 @@ def cycle_disclosure_payload(*, broken_venues=(), entries_blocked=False,
     ⚠️ 绝不抛异常（非 dict 的 watchdog 报告、`None` 集合、含 `None` 的列表一律宽容）：
     报告器不得成为新的单点故障。
     """
-    venues = sorted({str(v) for v in (broken_venues or []) if str(v)})
+    # ⚠️ `str(None)` 是 `"None"`（真值！）—— 旧写法会把列表里的 `None` 渲染成
+    # "一所名叫 None 的坏所"，披露行里就多出一条假场所（"UI 不说谎"的反面）。
+    # 空串/纯空白同理：不是场所名，不该进披露。
+    venues = sorted({str(v).strip() for v in (broken_venues or [])
+                     if v is not None and str(v).strip()})
     bad = [str(b) for b in (shape_violations or [])]
     rep = watchdog_report if isinstance(watchdog_report, dict) else {}
     return {
