@@ -1259,3 +1259,90 @@ class ExpiredLegIsNotCoverageTest(unittest.TestCase):
         self.assertEqual(len(crit), 1, "裸奔仓位必须进 critical")
         self.assertEqual(crit[0]["would"], "repair")
         self.assertEqual(crit[0]["expired"], ["L1"])
+
+class LegDirectionIsCoverageTest(unittest.TestCase):
+    """第一百七十九刀：方向判据必须用**唯一来源** `_leg_position_side`。
+
+    真机反例：Gate 的 6 条腿**一条都读不出 `side`**（旧过滤只看 `side`/`order_side`）
+    ⇒ "方向过滤"对 Gate **完全失效**：一条平**空**腿会被算进**多**仓的覆盖。
+    （本仓 attribution 一直读得到 Gate 方向，所以它早就报得出 side_mismatch —— 只有覆盖这条链在瞎。）
+    """
+
+    @staticmethod
+    def _gate_leg(auto="close_long", *, tag="t-r20sl1", expired=False, size=0):
+        now = time.time()
+        return {"symbol": "BTC_USDT", "direction": "short",
+                "initial": {"contract": "BTC_USDT", "size": size, "text": tag, "is_close": False,
+                            "is_reduce_only": True, "auto_size": auto},
+                "trigger": {"price": "60000", "expiration": 0},
+                "create_time": (now - 7200 if expired else now - 60) * 1000}
+
+    def _scan(self, rows, pos_side="long", size=1.0):
+        return scan_protective_orders(rows, symbol="BTC", pos_side=pos_side,
+                                     position_size=size, now_s=time.time())
+
+    def test_same_direction_leg_covers(self):
+        v = self._scan([self._gate_leg("close_long")])
+        self.assertTrue(v["coverage_ok"])
+        self.assertEqual(v["covered_size"], 1.0)
+        self.assertTrue(v["has_live_sl"])
+
+    def test_opposite_direction_leg_does_not_cover(self):
+        """**本刀的核心**：保护空仓的腿不得算进多仓的覆盖（修复前 Gate 上必然发生）。"""
+        v = self._scan([self._gate_leg("close_long")], pos_side="short")
+        self.assertEqual(v["covered_size"], 0.0, "反向腿被算进覆盖 ⇒ 假安心")
+        self.assertFalse(v["has_live_sl"])
+        self.assertTrue(v["needs_repair"])
+        v2 = self._scan([self._gate_leg("close_short")], pos_side="long")
+        self.assertEqual(v2["covered_size"], 0.0)
+        self.assertFalse(v2["coverage_ok"])
+
+    def test_binance_close_side_still_works(self):
+        """Binance 走 `side`（平仓方向）：sell 平多 ⇒ 覆盖多仓；buy 平空 ⇒ 不覆盖多仓。"""
+        now = time.time()
+        def bn(side):
+            return {"symbol": "BTCUSDT", "side": side, "type": "STOP_MARKET",
+                    "raw": {"orderType": "STOP_MARKET", "quantity": "1", "reduceOnly": "true"}}
+        self.assertEqual(self._scan([bn("sell")], pos_side="long")["covered_size"], 1.0)
+        self.assertEqual(self._scan([bn("buy")], pos_side="long")["covered_size"], 0.0)
+
+    def test_undecidable_direction_keeps_the_historic_permissive_stance(self):
+        """方向读不出 ⇒ **照旧计入**覆盖（本仓一直以来的口径，6 个既有用例钉着它）。
+
+        ⚠️ 这是**有意的取舍**，也是一个已登记的残留口子：不报方向的所会留着
+        "反向腿被算成覆盖"的风险。今天不可达（真机 Gate 6/6、Binance 18/18 都读得出方向）；
+        将来若接入不报方向的所，必须改成 `coverage_unknown`。本用例把"当前口径"写死，
+        免得有人以为它是无意的。
+        """
+        now = time.time()
+        row = {"symbol": "BTC_USDT",
+               "initial": {"contract": "BTC_USDT", "size": 1, "text": "t-r20sl1", "is_close": False},
+               "trigger": {"price": "60000", "expiration": 0}, "create_time": (now - 60) * 1000}
+        v = self._scan([row])
+        self.assertEqual(v["covered_size"], 1.0, "方向不可判定时**仍计入**（既有口径）")
+        # 方向判据本身必须来自唯一来源，不能是第二次拼写
+        import pathlib as _p
+        src = (_p.Path(__file__).resolve().parents[2] / "scripts" / "trader"
+               / "venue_protection.py").read_text(encoding="utf-8")
+        fn = src[src.index("def scan_protective_orders("):]
+        fn = fn[:fn.index("\ndef ")]
+        self.assertIn("_leg_position_side(row)", fn)
+
+    def test_side_filter_uses_the_single_source_helper(self):
+        """源码级：覆盖链必须用 `_leg_position_side`（不是第二次拼写 `_row_close_side`）。"""
+        import pathlib as _p
+        src = (_p.Path(__file__).resolve().parents[2] / "scripts" / "trader"
+               / "venue_protection.py").read_text(encoding="utf-8")
+        fn = src[src.index("def scan_protective_orders("):]
+        fn = fn[:fn.index("\ndef ")]
+        self.assertIn("_leg_position_side(row)", fn)
+        self.assertNotIn("side != want_close_side", fn,
+                         "旧的不全方向判据又回来了（Gate 上会静默失效）")
+
+    def test_live_gate_legs_resolve_their_direction(self):
+        """真机轻量回归：Gate 腿的方向必须读得出（今天 100% 可读；读不出会让覆盖整体变不可判定）。"""
+        from scripts.trader.venue_protection import _leg_position_side
+        leg = {"initial": {"contract": "BTC_USDT", "auto_size": "close_long", "text": "t-r20sl1"}}
+        self.assertEqual(_leg_position_side(leg), "long")
+        leg2 = {"initial": {"contract": "BTC_USDT", "auto_size": "close_short"}}
+        self.assertEqual(_leg_position_side(leg2), "short")

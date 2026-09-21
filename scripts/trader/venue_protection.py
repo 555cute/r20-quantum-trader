@@ -406,9 +406,20 @@ def scan_protective_orders(rows: Optional[Sequence[Dict[str, Any]]], *,
             hay += " " + str(initial.get("contract") or "").upper()
             if base not in hay:
                 continue
-        side = _row_close_side(row)
-        if side is not None and side != want_close_side:
+        # 第一百七十九刀：方向判据**改用唯一来源** `_leg_position_side`（真单核对过 Gate
+        # `auto_size`/`direction` 与 Binance `side` 的语义），而不是本函数原来那段只看
+        # `side`/`order_side` 的比较 —— 真机实测：**Gate 的 6 条腿一条都读不出 side**，
+        # 于是"方向过滤"对 Gate **完全失效**，一条平**空**腿会被算进**多**仓的覆盖
+        # （本仓 attribution 早就读得到 Gate 方向，故它一直能报 side_mismatch；
+        # 只有覆盖这条链在瞎）。语义写两遍就会漂，这里是同一语义的第二次拼写。
+        leg_pos_side = _leg_position_side(row)
+        if leg_pos_side is not None and pos_side and leg_pos_side != pos_side:
             continue
+        # 方向**读不出来** ⇒ 沿用本函数一直以来的口径：**照旧计入**覆盖（`_is_close` 的
+        # 整仓平腿、无方向字段的所都依赖这条；既有 6 个用例把它钉成了有意选择）。
+        # ⚠️ 残留（已登记在手册）：不报方向的所会留着"反向腿被算成覆盖"的口子 ——
+        # 今天**不可达**（真机核对：Gate 6/6、Binance 18/18 都能读出方向）。
+        # 将来若接入不报方向的所，这里应改判 `coverage_unknown`（而不是继续默认算覆盖）。
 
         leg = {
             "id": str(row.get("id") or row.get("algo_id") or row.get("algoId")
