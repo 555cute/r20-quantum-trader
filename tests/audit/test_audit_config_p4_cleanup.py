@@ -209,6 +209,38 @@ class CrossVenueAggregationTests(_Base):
     def test_empty_is_empty(self):
         self.assertEqual(self.abt.canonical_position_inst_id(None), "")
 
+    def test_pool_choice_is_order_independent(self):
+        """第一百八十三刀：同币多合约时的选择**不得**依赖 TARGET_INSTRUMENTS 的顺序。
+
+        原来用 `setdefault`（首值优先）⇒ 增删一条配置就可能换掉下单标的（静默任意选择）。
+        现在按"USDT 永续优先，其次字典序"确定性优选。
+        """
+        # ⚠️ 必须挑**真的会归一到同一个 base** 的两条：`BTC-USD-SWAP`（币本位）归一后是
+        # `BTCUSDSWAP`，根本进不了同一个池位 ⇒ 我第一版用它造"重复"，反向验证时**没翻红**
+        # （等于没测到）。`BTC_USDT`/`BTC-USDT`/`BTCUSDT` 都归一到 `BTC`。
+        pool = [{"instId": "BTC_USDT"}, {"instId": "BTC-USDT-SWAP"}]
+        original = self.abt.TARGET_INSTRUMENTS
+        try:
+            got = []
+            for variant in (pool, list(reversed(pool))):
+                self.abt.TARGET_INSTRUMENTS = variant
+                got.append(self.abt.canonical_position_inst_id("BTCUSDT"))
+            self.assertEqual(got[0], "BTC-USDT-SWAP")
+            self.assertEqual(got[0], got[1], "同一池子的两种顺序给出了不同合约 ⇒ 顺序相关")
+        finally:
+            self.abt.TARGET_INSTRUMENTS = original
+
+    def test_no_duplicate_bases_in_the_real_pool(self):
+        """真机核对：当前目标合约**没有**同币重复 ⇒ 本刀的确定性优选不改变现行行为。"""
+        from collections import Counter
+        bases = Counter()
+        for item in (self.abt.TARGET_INSTRUMENTS or []):
+            iid = str((item or {}).get("instId") or "")
+            if iid:
+                bases[self.abt._canonical_base_name(iid)] += 1
+        self.assertEqual([b for b, n in bases.items() if n > 1], [],
+                         "池里出现同币多合约 ⇒ 请复核确定性优选是否符合预期")
+
     def test_guard_inputs_use_the_canonicalizer(self):
         src = (ROOT / "scripts" / "ai_brain_trader.py").read_text(encoding="utf-8")
         block = src[src.index("active_inst_ids = {"):src.index("active_position_sides.pop(")]

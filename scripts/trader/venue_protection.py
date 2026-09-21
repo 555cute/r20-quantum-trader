@@ -705,12 +705,17 @@ def attribute_protective_orders(positions: Optional[Sequence[Dict[str, Any]]],
     """
     tol = max(0.0, float(tolerance_ratio or 0.0))
     pos_by_base: Dict[str, Dict[str, Any]] = {}
+    pos_count_by_base: Dict[str, int] = {}
     for p in (positions or []):
         if not isinstance(p, dict):
             continue
         base = _leg_symbol({"symbol": p.get("base") or p.get("symbol") or "",
                             "inst_id": p.get("inst_id") or p.get("instId") or ""})
         if base:
+            # 第一百八十三刀：同币**多仓**（对冲模式 / 异常数据）时 `setdefault` 只留第一个
+            # ⇒ 归属会把腿全对到那一个仓位上，另一侧**静默消失**。改为"留首个 + 记数"，
+            # 并在报告里披露 `ambiguous_positions`（读得到却只用一个 ⇒ 必须说出来）。
+            pos_count_by_base[base] = pos_count_by_base.get(base, 0) + 1
             pos_by_base.setdefault(base, p)
 
     def _ledger_evidence(base: str, want_pos_side: Optional[str], size: float) -> Optional[Dict[str, Any]]:
@@ -793,6 +798,8 @@ def attribute_protective_orders(positions: Optional[Sequence[Dict[str, Any]]],
                + buckets["side_mismatch"])
     return {
         **buckets,
+        #: 同币多仓（>1 行）的币种：腿会被对到**首个**仓位上 ⇒ 可能张冠李戴，须人工复核
+        "ambiguous_positions": sorted(b for b, n in pos_count_by_base.items() if n > 1),
         "counts": {k: len(v) for k, v in buckets.items()},
         #: 可安全清理的候选（**仅当**调用方要清理时）：可归因孤儿 + 旧量/旧向腿
         "cleanup_candidates": cleanup,

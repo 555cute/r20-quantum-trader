@@ -278,6 +278,19 @@ def read_prompt_override() -> str:
 _SL_ATR_BY_ASSET_CLASS = {"commodity": 1.3, "index": 1.2, "stock": 1.3, "crypto": 1.4}
 
 
+def _prefer_pool_inst(candidate: str, current: str) -> bool:
+    """同币多合约时的**确定性**优选（顺序无关）：USDT 永续优先，其次字典序更小。
+
+    为什么需要它：`setdefault` 的"首值优先"会把选择权交给 `TARGET_INSTRUMENTS` 的排列顺序，
+    那是**静默的任意选择**（改一行配置就换了合约）。本函数让它可解释、可复现。
+    """
+    cand_swap = str(candidate).endswith("-USDT-SWAP")
+    curr_swap = str(current).endswith("-USDT-SWAP")
+    if cand_swap != curr_swap:
+        return cand_swap
+    return str(candidate) < str(current)
+
+
 def canonical_position_inst_id(raw: Any) -> str:
     """跨所持仓符号 → OKX 形态（审计 P2-12，模块级便于直接测试）。
 
@@ -288,11 +301,21 @@ def canonical_position_inst_id(raw: Any) -> str:
     if not text:
         return ""
     bare = text.split(":")[-1]
+    # 第一百八十三刀：这里原本是 `pool_by_base.setdefault(base, iid)` —— **首值优先**，
+    # 于是"同一个币有多个池内合约"时选哪个**取决于 TARGET_INSTRUMENTS 的顺序**（静默的
+    # 任意选择；增删一个条目就会换合约，进而换下单标的）。真机核对：当前 9 个目标合约
+    # **同币重复为 0**，所以这是潜在风险而非现行错误。改成**与顺序无关的确定性优选**：
+    #   1) 优先标准 USDT 永续（`BASE-USDT-SWAP`）；
+    #   2) 其余按字典序取最小。
     pool_by_base: Dict[str, str] = {}
     for item in (TARGET_INSTRUMENTS if isinstance(TARGET_INSTRUMENTS, list) else []):
         iid = str((item or {}).get("instId") or "").strip().upper()
-        if iid:
-            pool_by_base.setdefault(_canonical_base_name(iid), iid)
+        if not iid:
+            continue
+        base = _canonical_base_name(iid)
+        current = pool_by_base.get(base)
+        if current is None or _prefer_pool_inst(iid, current):
+            pool_by_base[base] = iid
     base = _canonical_base_name(bare)
     if base in pool_by_base:
         return pool_by_base[base]

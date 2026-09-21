@@ -19,6 +19,7 @@ from unittest.mock import MagicMock, call
 
 from scripts.trader.venue_protection import (
     DEFAULT_RENEW_WITHIN_S,
+    attribute_protective_orders,
     audit_cross_venue_protection,
     ensure_venue_protection,
     scan_protective_orders,
@@ -1446,3 +1447,36 @@ class ContractMatchRobustnessTest(unittest.TestCase):
         # 注意：docstring 里也提到该开关 ⇒ 只数**调用实参**那种写法（带右括号）
         self.assertEqual(src.count("require_symbol_match=True)"), 2,
                          "ensure 与 audit 两个站点都应显式开启合约匹配")
+
+class AmbiguousPositionsTest(unittest.TestCase):
+    """第一百八十三刀：同币多仓（对冲/异常数据）必须**披露**，不能静默只用一个。"""
+
+    def test_same_base_multiple_positions_are_disclosed(self):
+        rep = attribute_protective_orders(
+            [{"base": "BTC", "side": "long", "size_signed": 1.0},
+             {"base": "BTC", "side": "short", "size_signed": 1.0}], [], None)
+        self.assertEqual(rep["ambiguous_positions"], ["BTC"],
+                         "同币两仓只在报告里给一个仓位 ⇒ 另一侧静默消失")
+        self.assertIn("ambiguous_positions", rep)
+
+    def test_single_position_is_not_flagged(self):
+        rep = attribute_protective_orders([{"base": "BTC", "side": "long", "size_signed": 1.0}],
+                                          [], None)
+        self.assertEqual(rep["ambiguous_positions"], [])
+
+    def test_audit_report_carries_it_through(self):
+        """端到端：审计的 attribution 段也要带上该字段（运营看的正是这里）。"""
+        import time
+        now = time.time()
+        gate = MagicMock()
+        gate.list_protective_orders.return_value = []
+        reg = MagicMock()
+        reg.get_adapter.side_effect = lambda v, environment=None: {"gate": gate}[v]
+        rows = [{"venue": "gate", "inst_id": "BTC_USDT", "base": "BTC", "side": "long",
+                 "size_signed": 1.0},
+                {"venue": "gate", "inst_id": "BTC_USDT", "base": "BTC", "side": "short",
+                 "size_signed": 1.0}]
+        rep = audit_cross_venue_protection({"gate": rows}, venue_registry=reg,
+                                          environment="demo", now_s=now, dry_run=True)
+        self.assertEqual((rep.get("attribution") or {}).get("gate", {}).get("ambiguous_positions"),
+                         ["BTC"])
