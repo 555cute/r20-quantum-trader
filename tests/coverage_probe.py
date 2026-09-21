@@ -37,14 +37,23 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def executable_lines(path: Path) -> set:
-    """文件里"可执行语句"的行号（去掉函数/类定义、导入、纯 docstring 表达式）。"""
+    """文件里"可执行语句"的行号。
+
+    排除项分两类：
+    ① **不可能被计到**的：导入、纯 docstring 表达式、`global`/`nonlocal` 声明
+       —— 它们要么在探针启用前就执行完，要么根本不产生行事件（实测：`global X` 的
+       行号永远不进命中集，与 `def` 行同类，留着只会制造假象缺口）；
+    ② 语义上不属于"这一行的逻辑"的：函数/类定义行（**但 `def` 行仍计入分母** ——
+       导入期执行靠 `traced_import` 补，不能靠排除来掩盖）。
+    """
     tree = ast.parse(path.read_text(encoding="utf-8"))
     lines = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef):
             lines.add(node.lineno)
         elif isinstance(node, ast.stmt) and not isinstance(
-                node, (ast.AsyncFunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom, ast.Expr)):
+                node, (ast.AsyncFunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom,
+                       ast.Expr, ast.Global, ast.Nonlocal)):
             lines.add(node.lineno)
     return lines
 
