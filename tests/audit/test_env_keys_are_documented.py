@@ -43,13 +43,26 @@ def _looks_like_env_key(key: str) -> bool:
     return bool(re.fullmatch(r"[A-Z][A-Z0-9_]{2,}", key))
 
 
+#: 形参/局部变量里"装着环境变量"的名字（本仓习惯把 env dict 传进路由与通知层）
+ENV_DICT_RECEIVERS = {"env", "environment", "env_vars", "_env", "env_map"}
+
+
 def _is_env_accessor(call: ast.Call) -> bool:
+    """这次调用是不是在**读环境变量**。
+
+    ⚠️ 第一百九十九刀自查出的**假阴性**：第一版只认 `os.getenv` / `os.environ.get` /
+    `*environ*` / `_env_*` helper，而本仓大量代码把环境做成 dict 传参后写
+    `env.get("R20_XXX")`（`notifications.py`、`routers/gateway/*`）—— 那些读点**完全隐形**。
+    实测漏了 16 个键，其中 4 个（`OKX_BASE_URL`/`R20_TELEGRAM_API_BASE`/
+    `R20_DINGTALK_SECRET`/`R20_FEISHU_SECRET`）**连模板都没有** ⇒ 本门当时是绿的，却是假绿。
+    """
     name = ast.unparse(call.func)
     if name in ("os.getenv", "getenv", "os.environ.get", "environ.get"):
         return True
-    if isinstance(call.func, ast.Attribute) and call.func.attr == "get" \
-            and ast.unparse(call.func.value).endswith("environ"):
-        return True
+    if isinstance(call.func, ast.Attribute) and call.func.attr == "get":
+        receiver = ast.unparse(call.func.value)
+        if receiver.endswith("environ") or receiver.split(".")[-1] in ENV_DICT_RECEIVERS:
+            return True
     short = name.split(".")[-1]
     return short.startswith("_env") or short.startswith("env_") or short.endswith("_env")
 
@@ -101,7 +114,8 @@ class EnvKeysAreDocumentedTest(unittest.TestCase):
 
     def test_scan_is_not_vacuous(self):
         keys = all_consulted_keys()
-        self.assertGreaterEqual(len(keys), 40, f"只扫到 {len(keys)} 个环境键 ⇒ 门与实现脱节")
+        self.assertGreaterEqual(len(keys), 55,
+                                f"只扫到 {len(keys)} 个环境键 ⇒ 召回退化了（遗漏的读法会让门变假绿）")
         template = (ROOT / "env.example").read_text(encoding="utf-8")
         self.assertGreaterEqual(len(re.findall(r"^[A-Za-z_][A-Za-z0-9_]*\s*=", template, re.M)), 60,
                                 "模板赋值行太少 ⇒ 可能读错了文件")
@@ -112,6 +126,16 @@ class EnvKeysAreDocumentedTest(unittest.TestCase):
     def test_allowlist_entries_have_reasons(self):
         for key, reason in ALLOWLIST.items():
             self.assertTrue(str(reason).strip(), f"{key} 的放行理由不能为空")
+
+    def test_scanner_sees_env_dict_receivers(self):
+        """牙齿（第一百九十九刀）：`env.get("R20_X")` 这种**dict 传参**的读法必须被看见。
+
+        第一版看不见 ⇒ 4 个键在模板里缺席却门是绿的（假绿）。
+        """
+        for src in ('def f(env):\n    return env.get("R20_DICT_STYLE_KEY", "")\n',
+                    'def f(environment):\n    return environment.get("R20_DICT_STYLE_KEY")\n'):
+            self.assertEqual(consulted_env_keys(src), {"R20_DICT_STYLE_KEY"},
+                             "dict 风格的环境读取没被看见 ⇒ 门会假绿")
 
     def test_teeth_on_an_undocumented_key(self):
         src = 'import os\nX = os.environ.get("R20_BRAND_NEW_KNOB", "0")\n'
