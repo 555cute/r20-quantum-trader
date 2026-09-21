@@ -260,15 +260,21 @@ def collect_protection_orphans(cache_payload: Optional[Dict[str, Any]]) -> Optio
         if not venue or not isinstance(info, dict):
             continue
         if info.get("readable") is False:
-            out.setdefault(venue, {"readable": False, "candidates": None,
-                                   "unattributed": None, "ledger_evidence": None})
+            out.setdefault(venue, {"readable": False, "candidates": None, "unattributed": None,
+                                   "side_mismatch": None, "size_mismatch": None,
+                                   "ledger_evidence": None})
             continue
         if info.get("readable") is not True:
             continue
         attributed = info.get("attributed") if isinstance(info.get("attributed"), list) else []
         unattributed = info.get("unattributed") if isinstance(info.get("unattributed"), list) else []
+        side_mism = info.get("sideMismatch") if isinstance(info.get("sideMismatch"), list) else []
+        size_mism = info.get("sizeMismatch") if isinstance(info.get("sizeMismatch"), list) else []
         out[venue] = {"readable": True, "candidates": len(attributed),
                       "unattributed": len(unattributed),
+                      # 第一百八十一刀：方向/量与任何持仓都对不上的腿（此前面板/指标都没提）
+                      "side_mismatch": len(side_mism),
+                      "size_mismatch": len(size_mism),
                       "ledger_evidence": info.get("ledgerRows") == "ok"}
     return out or None
 
@@ -517,6 +523,14 @@ def render_prometheus(snapshot: Dict[str, Any]) -> str:
                 emit("r20_protection_orphans_ledger_evidence",
                      1 if info.get("ledger_evidence") else 0, labels,
                      help_text="归属取证是否用上台账（0=台账读不到 ⇒ 候选可能偏少）")
+                # 方向/量与任何持仓都对不上：**分开两种语义**（面板/提示词同口径）
+                # ⚠️ 两种 mismatch 的**语义不同** ⇒ 必须是两个指标名（同一名字只能有一个 HELP；
+                # "名字即语义"：共用名字会把"不计覆盖"和"仍计覆盖"混成一个数）。
+                emit("r20_protection_side_mismatch_legs", info.get("side_mismatch"), labels,
+                     help_text="方向与任何持仓都对不上的腿（**不计入覆盖**：反向腿保护不了本仓）")
+                emit("r20_protection_size_mismatch_legs", info.get("size_mismatch"), labels,
+                     help_text="量与任何持仓都对不上的腿（**正被计入覆盖**，但归属存疑，"
+                               "可能是旧仓遗留；价格触及仍会减仓）")
 
     out: List[str] = []
     for name, family in families.items():

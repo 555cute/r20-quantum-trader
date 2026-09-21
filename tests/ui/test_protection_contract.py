@@ -300,3 +300,36 @@ class OrphanCandidatesPayloadTest(unittest.TestCase):
         body = body[:body.index("\ndef ")]
         for forbidden in ("cancel_price_order", "cancel_protective_orders", "cancel_order"):
             self.assertNotIn(forbidden, body, f"面板载荷里出现了撤销调用 {forbidden}")
+
+class MismatchLegsDisclosureTest(unittest.TestCase):
+    """第一百八十一刀：方向/量与任何持仓都对不上的腿，面板也要看得见（两种语义分开）。"""
+
+    _MISM = {"symbol": "SOLUSDT", "side": "buy", "type": "TAKE_PROFIT_MARKET",
+             "raw": {"orderType": "TAKE_PROFIT_MARKET", "quantity": "10.55",
+                     "triggerPrice": "103.53"}}
+
+    def test_mismatch_legs_are_listed(self):
+        """⚠️ 要造出 `side_mismatch`，必须**同币有持仓**且腿方向相反 —— 只有别币持仓时
+        那条腿属于 `orphan_*`（我第一版就搞错了，用例当场纠正）。这里直接调汇总函数。"""
+        from r20_backend.dashboard_payload.multi_venue import _venue_orphan_summary
+        positions = [{"base": "SOL", "symbol": "SOLUSDT", "side": "long", "size_signed": 10.0}]
+        o = _venue_orphan_summary(positions, [self._MISM], None, readable=True)
+        self.assertTrue(o["readable"])
+        self.assertEqual(len(o["sideMismatch"]), 1)
+        self.assertEqual(o["sideMismatch"][0]["symbol"], "SOL")
+        self.assertEqual(o["sizeMismatch"], [])
+
+    def test_mismatch_legs_are_not_counted_in_coverage(self):
+        """方向不符的腿**不得**计入覆盖（本仓覆盖应视为 0，且要求修复）。"""
+        row = _xvenue_row([self._MISM])
+        self.assertEqual(row["protectionCoveragePct"], 0.0)
+        self.assertIn(row["protectionStatus"], ("unprotected", "unknown"))
+
+    def test_unreadable_legs_report_empty_mismatch_not_fake_zero(self):
+        import pathlib as _p
+        src = (_p.Path(__file__).resolve().parents[2] / "r20_backend" / "dashboard_payload"
+               / "multi_venue.py").read_text(encoding="utf-8")
+        body = src[src.index("def _venue_orphan_summary("):]
+        body = body[:body.index("\ndef ", 10)]
+        self.assertIn('"readable": False', body)
+        self.assertIn('"sideMismatch": []', body, "读腿失败时不得给出'0 条'的假精确")

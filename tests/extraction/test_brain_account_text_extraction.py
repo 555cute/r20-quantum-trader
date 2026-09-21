@@ -818,3 +818,31 @@ class OrphanLegsPromptTest(unittest.TestCase):
         out = self._line([self._row(protectionOrphans=self._ORPH)])
         for forbidden in ("自动撤销", "已撤销", "系统会撤"):
             self.assertNotIn(forbidden, out, f"提示词不得暗示会自动撤（出现 {forbidden}）")
+
+class OrphanMismatchPromptTest(unittest.TestCase):
+    """第一百八十一刀：提示词里两种 mismatch 的语义必须分开（同面板/指标口径）。"""
+
+    def _line(self, orph):
+        row = {"venue": "binance", "name": "SOL", "side": "long", "avgPx": "100", "markPx": "101",
+               "upl": "1", "uplRatio": "0.01", "protectionStatus": "fully_protected",
+               "protectionCoveragePct": 100.0, "protectionOrphans": orph}
+        return build_position_lines([row], safe_float=_sf)
+
+    def test_side_mismatch_says_not_counted(self):
+        out = self._line({"readable": True, "attributed": [], "unattributed": [],
+                          "sideMismatch": [{"symbol": "SOL"}], "sizeMismatch": [],
+                          "ledgerRows": "ok"})
+        self.assertIn("方向与本仓不符 1 条", out)
+        self.assertIn("不计入覆盖", out, "反向腿必须明说不计覆盖")
+
+    def test_size_mismatch_says_still_counted(self):
+        out = self._line({"readable": True, "attributed": [], "unattributed": [],
+                          "sideMismatch": [], "sizeMismatch": [{"symbol": "XRP"}],
+                          "ledgerRows": "ok"})
+        self.assertIn("量与任何持仓都不符 1 条", out)
+        self.assertIn("仍被计入覆盖", out, "量不符的腿必须明说仍计覆盖但归属存疑")
+
+    def test_no_mismatch_no_noise(self):
+        out = self._line({"readable": True, "attributed": [], "unattributed": [],
+                          "sideMismatch": [], "sizeMismatch": [], "ledgerRows": "ok"})
+        self.assertNotIn("该所孤儿腿", out)

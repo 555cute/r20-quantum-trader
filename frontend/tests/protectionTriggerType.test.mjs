@@ -145,3 +145,31 @@ test('面板不出现任何撤销调用（撤销只走显式运营动作）', ()
     assert.ok(!panel.includes(forbidden), `面板出现了撤销调用 ${forbidden}`);
   }
 });
+
+// ── 归属存疑腿（第一百八十一刀）────────────────────────────────────────────────
+
+test('归属存疑徽标：两种 mismatch 计数且受 readable 守卫', () => {
+  const fn = panel.slice(panel.indexOf('function orphanMismatch('));
+  assert.ok(fn.startsWith('function orphanMismatch('), '缺 orphanMismatch');
+  const body = fn.slice(0, fn.indexOf('\n}'));
+  // 接受两种等价写法（三元 `readable ?` 或早退 `if (!o.readable) return 0`），
+  // 但必须**真的**有 readable 参与判断 —— 只出现这个词不算（本会话踩过这个坑）
+  assert.match(body, /(readable\s*\?)|(!\s*o\.readable)/,
+               '归属存疑计数没有 readable 守卫 ⇒ 读腿失败会被算成 0 条');
+  assert.match(body, /sideMismatch/, '未统计方向不符的腿');
+  assert.match(body, /sizeMismatch/, '未统计量不符的腿');
+  assert.match(panel, /mismatchPill/, '面板没有渲染归属存疑徽标');
+  assert.match(panel, /mismatchHint/, '徽标缺少悬停说明');
+});
+
+test('归属存疑提示写明两种语义的差别', () => {
+  for (const [file, name] of [[zh, '中文'], [en, '英文']]) {
+    for (const key of ['mismatchPill', 'mismatchHint']) {
+      assert.match(file, new RegExp(`\\b${key}:`), `${name}缺键 ${key}`);
+    }
+  }
+  assert.match(zh, /不计入覆盖/, '中文提示未写明"方向不符的不计入覆盖"');
+  assert.match(zh, /仍被计入覆盖/, '中文提示未写明"量不符的仍计入覆盖"');
+  assert.match(en, /NOT counted as coverage/i, '英文提示未写明 side-mismatch 不计覆盖');
+  assert.match(en, /ARE counted as coverage/i, '英文提示未写明 size-mismatch 仍计覆盖');
+});

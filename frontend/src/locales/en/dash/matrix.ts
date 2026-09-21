@@ -62,6 +62,11 @@ export const enMatrix = {
     orphanHint: 'This venue has protective legs attributable to us with no matching position. '
       + 'They can reduce a NEW position on the same symbol, so an operator must review and '
       + 'cancel them explicitly (the system never cancels automatically).',
+    mismatchPill: 'legs unmatched',
+    mismatchHint: 'This venue has protective legs whose side or size matches no position: '
+      + 'side-mismatched legs are NOT counted as coverage (a reversed leg cannot protect this '
+      + 'position); size-mismatched legs ARE counted as coverage but their provenance is unclear '
+      + '(possibly left over from an old position; they can still reduce), so review them.',
     orphanUnknownPill: 'orphan legs unknown',
     orphanUnknownHint: 'This venue has unattributable protective legs (no tag, no matching ledger '
       + 'record) - possibly manual orders; by discipline they are never touched.',

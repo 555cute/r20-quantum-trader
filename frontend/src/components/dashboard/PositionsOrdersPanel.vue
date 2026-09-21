@@ -88,6 +88,12 @@ function orphanUnattributed(p: any): number {
   const o = p?.protectionOrphans;
   return o && o.readable ? (o.unattributed || []).length : 0;
 }
+/** 方向或量与任何持仓都对不上的腿数（方向不符的不计覆盖；量不符的仍计覆盖）。 */
+function orphanMismatch(p: any): number {
+  const o = p?.protectionOrphans;
+  if (!o || !o.readable) return 0;
+  return (o.sideMismatch || []).length + (o.sizeMismatch || []).length;
+}
 /** 读腿失败 ⇒ 不可判定（**不是**没有孤儿腿）。 */
 function orphanReadFailed(p: any): boolean {
   return !!p?.protectionOrphans && p.protectionOrphans.readable === false;
@@ -313,6 +319,11 @@ function orderTooltipText(o: any): string {
                   ? t('dash.matrix.positions.orphanReadFailHint')
                   : t('dash.matrix.positions.orphanUnknownHint')"
               >{{ t('dash.matrix.positions.orphanUnknownPill') }}</span>
+              <span
+                v-if="orphanMismatch(p) > 0"
+                class="inline-flex items-center gap-1 text-3xs text-[var(--ink-2)]"
+                :title="t('dash.matrix.positions.mismatchHint')"
+              >{{ t('dash.matrix.positions.mismatchPill') }} {{ orphanMismatch(p) }}</span>
               <span
                 v-if="ocoOk(p)"
                 class="inline-flex items-center gap-1 text-3xs text-[var(--up)]"

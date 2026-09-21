@@ -582,3 +582,39 @@ class ProtectionOrphanMetricsTest(unittest.TestCase):
                                                                "ledger_evidence": True}})
         self.assertTrue((snap.get("sources") or {}).get("protection_orphans"),
                         "取到数据时 source_ok 必须为真")
+
+class ProtectionMismatchMetricsTest(unittest.TestCase):
+    """第一百八十一刀：mismatch 腿按 kind 分开出指标（两种语义不同）。"""
+
+    def test_mismatch_kinds_are_emitted_separately(self):
+        cache = {"positions": [{"venue": "binance", "protectionOrphans": {
+            "readable": True, "attributed": [], "unattributed": [],
+            "sideMismatch": [{"id": "s1"}, {"id": "s2"}], "sizeMismatch": [{"id": "z1"}],
+            "ledgerRows": "ok"}}]}
+        summary = M.collect_protection_orphans(cache)
+        self.assertEqual(summary["binance"]["side_mismatch"], 2)
+        self.assertEqual(summary["binance"]["size_mismatch"], 1)
+        text = M.render_prometheus(M.build_snapshot(protection_orphans=summary))
+        self.assertIn('r20_protection_side_mismatch_legs{venue="binance"} 2', text)
+        self.assertIn('r20_protection_size_mismatch_legs{venue="binance"} 1', text)
+
+    def test_help_distinguishes_both_semantics(self):
+        text = M.render_prometheus(M.build_snapshot(protection_orphans={
+            "binance": {"readable": True, "candidates": 0, "unattributed": 0,
+                        "side_mismatch": 1, "size_mismatch": 1, "ledger_evidence": True}}))
+        # 一个指标名只能有一个 HELP ⇒ 两种语义**必须**是两个名字（否则"仍被计入覆盖"
+        # 这句永远发不出去；本用例第一版就是这么红的）
+        side_help = [ln for ln in text.splitlines()
+                     if ln.startswith("# HELP r20_protection_side_mismatch_legs")]
+        size_help = [ln for ln in text.splitlines()
+                     if ln.startswith("# HELP r20_protection_size_mismatch_legs")]
+        self.assertTrue(any("不计入覆盖" in ln for ln in side_help), "方向不符必须明说'不计入覆盖'")
+        self.assertTrue(any("正被计入覆盖" in ln for ln in size_help), "量不符必须明说'仍被计入覆盖'")
+
+    def test_unreadable_venue_emits_no_mismatch_counts(self):
+        text = M.render_prometheus(M.build_snapshot(protection_orphans={
+            "gate": {"readable": False, "candidates": None, "unattributed": None,
+                     "side_mismatch": None, "size_mismatch": None, "ledger_evidence": None}}))
+        self.assertEqual([ln for ln in text.splitlines()
+                          if ln.startswith("r20_protection_mismatch_legs")], [],
+                         "读不到 ⇒ 不发 mismatch 计数（不可判定≠0）")

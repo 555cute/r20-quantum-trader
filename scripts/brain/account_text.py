@@ -64,6 +64,8 @@ def _orphan_legs_text(p: Dict[str, Any]) -> str:
         return " | 该所孤儿腿: **不可判定**（保护腿读取失败）"
     attributed = info.get("attributed") if isinstance(info.get("attributed"), list) else []
     unattributed = info.get("unattributed") if isinstance(info.get("unattributed"), list) else []
+    side_mism = info.get("sideMismatch") if isinstance(info.get("sideMismatch"), list) else []
+    size_mism = info.get("sizeMismatch") if isinstance(info.get("sizeMismatch"), list) else []
     parts = []
     if attributed:
         syms = sorted({str(l.get("symbol") or "?") for l in attributed if isinstance(l, dict)})
@@ -71,6 +73,13 @@ def _orphan_legs_text(p: Dict[str, Any]) -> str:
                      "：同币再开仓时**可能按旧触发价减仓**，须人工核对")
     if unattributed:
         parts.append(f"归属不可判定 {len(unattributed)} 条（一律不碰）")
+    # 第一百八十一刀：与面板/指标同口径 —— 两种 mismatch 的**语义不同**，必须分开说：
+    # 反向腿保护不了本仓（不计覆盖），量不符的腿却**正在充当覆盖**（归属存疑）。
+    if side_mism:
+        parts.append(f"方向与本仓不符 {len(side_mism)} 条（**不计入覆盖**；可能是旧仓或手单）")
+    if size_mism:
+        parts.append(f"量与任何持仓都不符 {len(size_mism)} 条"
+                     "（**仍被计入覆盖**，归属存疑，须人工核对）")
     if not parts:
         return ""
     ledger = "" if info.get("ledgerRows") == "ok" else "（台账未读到 ⇒ 可归因数可能偏少）"

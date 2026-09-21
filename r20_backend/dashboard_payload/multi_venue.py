@@ -97,12 +97,14 @@ def _venue_orphan_summary(v_positions, v_algos, ledger_rows, *, readable):
     """
     if not readable:
         return {"readable": False, "attributed": [], "unattributed": [],
+                "sideMismatch": [], "sizeMismatch": [],
                 "matched": 0, "ledgerRows": "unknown"}
     from scripts.trader.venue_protection import attribute_protective_orders
     try:
         att = attribute_protective_orders(list(v_positions or []), v_algos, ledger_rows)
     except Exception as exc:
-        return {"readable": False, "attributed": [], "unattributed": [], "matched": 0,
+        return {"readable": False, "attributed": [], "unattributed": [],
+                "sideMismatch": [], "sizeMismatch": [], "matched": 0,
                 "ledgerRows": "unknown", "error": f"{type(exc).__name__}: {exc}"}
 
     def _brief(bucket):
@@ -116,6 +118,14 @@ def _venue_orphan_summary(v_positions, v_algos, ledger_rows, *, readable):
     return {"readable": True,
             "attributed": _brief("orphan_attributed"),
             "unattributed": _brief("orphan_unattributed"),
+            # 第一百八十一刀：**方向/量与任何持仓都对不上**的腿也要让运营看得见 ——
+            # 它们此前只在审计输出里，面板完全没提（真机 8 条：gate 1、binance 7）。
+            # 两者的语义**不同**，必须分开说：
+            #   - `sideMismatch`：反向腿 ⇒ **不计入本仓覆盖**（覆盖链已按唯一判据排除）；
+            #   - `sizeMismatch`：**正在计入覆盖**，但量与任何持仓都不吻合 ⇒ 归属存疑
+            #     （可能是旧仓遗留的 reduceOnly 单，日后价格触及就会减仓）。
+            "sideMismatch": _brief("side_mismatch"),
+            "sizeMismatch": _brief("size_mismatch"),
             "matched": len(att.get("matched") or []),
             "ledgerRows": "ok" if ledger_rows is not None else "unavailable"}
 
