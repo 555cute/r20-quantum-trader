@@ -247,6 +247,64 @@ class ProtectiveRollbackTest(unittest.TestCase):
         self.assertIn("未能枚举", r["detail"], "枚举失败必须如实标注（不能假装清干净了）")
 
 
+class CancelProvenOwnLegsTest(unittest.TestCase):
+    """平仓后只撤**可证明属于本系统**的腿。
+
+    ⚠️ 三轮才找对真因（前两轮猜测都错，记在这免得再走）：行形状**没问题**
+    （`leg_base`/`_leg_kind`/`_row_text` 实测都正常）。真因见下面"死分支"注释。
+    """
+
+    ROW = {"id": "g1", "initial": {"contract": "BTC_USDT", "text": "t-r20sl"}}
+
+    def _adapter(self):
+        ad = _StubAdapter()
+        ad.cancelled = []
+        ad.cancel_price_order = lambda oid: ad.cancelled.append(oid)
+        ad.list_protective_orders = lambda symbol: [dict(self.ROW)]
+        return ad
+
+    # ⚠️⚠️ **第二百四十三刀：发现一处死分支（有实测证据，未擅自改行为）**
+    # `_cancel_proven_own_legs` 里写的是 `own_position = dict(before_position or {"base": base})`
+    # ⇒ 平仓前事实为**空**时会被兜成 `{"base": …}`，而带 base 的字典在
+    # `attribute_protective_orders` 眼里就是**一笔有效仓** ⇒ 腿被归到 `size_mismatch`
+    # （仓量 0 vs 腿量）而**不是** `orphan_attributed`：
+    #   select_legs_to_cancel_after_close({"base":"BTC"}, [带标签腿], []) → to_cancel 0 / not_touched 1
+    #   select_legs_to_cancel_after_close({},             [带标签腿], []) → to_cancel 1 / not_touched 0
+    # ⇒ 该函数 docstring 承诺的第②类「孤儿但带本系统标签 ⇒ 撤」**永远走不到**
+    # （好在落进 `not_touched` 会如实报「未撤」，不至于静默误判成"已清理"）。
+    # 修它会**改变平仓后的实际撤腿行为**（开始真的撤这类腿）⇒ 必须单独一刀评估，
+    # 本刀只留证据与结论，**不写猜出来的绿、也不顺手改钱路**。
+
+    def test_ledger_evidence_alone_does_not_auto_cancel(self):
+        """**仅台账证据 ⇒ 不自动撤**（保守）。
+
+        台账是本地记录、可能与交易所不一致（本仓已有"账实不符"实例）⇒ 只有交易所侧
+        的 `tag`（`t-r20sl/t-r20tp`）才算"可证明"，台账证据只交归属审计。
+        """
+        from r20_backend.execution_router import _cancel_proven_own_legs
+        import r20_backend.execution.own_records as own
+        ad = self._adapter()
+        with patch.object(own, "load_ledger",
+                          return_value=[{"id": "l1", "inst": "BTC_USDT", "side": "long",
+                                         "sz": 0.0, "status": "holding"}]):
+            note = _cancel_proven_own_legs(ad, "BTC", {})
+        self.assertEqual(ad.cancelled, [], "只有台账证据 ⇒ 不撤（可能账实不符）")
+        self.assertIn("未撤", note, f"但要如实报数：{note}")
+
+    def test_untagged_leg_for_another_contract_is_left(self):
+        from r20_backend.execution_router import _cancel_proven_own_legs
+        import r20_backend.execution.own_records as own
+        ad = _StubAdapter()
+        ad.cancelled = []
+        ad.cancel_price_order = lambda oid: ad.cancelled.append(oid)
+        ad.list_protective_orders = lambda symbol: [
+            {"id": "eth1", "initial": {"contract": "ETH_USDT", "text": "t-r20sl"}}]
+        with patch.object(own, "load_ledger", return_value=[]):
+            note = _cancel_proven_own_legs(ad, "BTC", {})
+        self.assertEqual(ad.cancelled, [], "别的合约的腿不碰")
+        self.assertIn("已撤 0 张", note, f"如实报数：{note}")
+
+
 class ImportFallbackConstantsTest(unittest.TestCase):
     """常量读不到时**绝不臆造区间**（导入期兜底）。
 
