@@ -46,7 +46,7 @@ class _Rig:
 
     def __init__(self, *, hard_stop=False, protection=(True, "ok"), close=(True, "ok"),
                  floor=None, stage_desc="", entry_ts=None, high_water=None, old_sl=69000.0,
-                 protect_raises=False):
+                 protect_raises=False, side="long", low_water=None):
         self.actions = []
         self.trades = []
         self.notifies = []
@@ -61,7 +61,8 @@ class _Rig:
         self.high_water = high_water
         self.old_sl = old_sl
         self.protect_raises = protect_raises
-        self._pos = _pos()
+        self.low_water = low_water
+        self._pos = _pos(side=side, avgPx=70000.0)
 
     # ── 注入项 ────────────────────────────────────────────────────────
     def kwargs(self):
@@ -108,7 +109,7 @@ class _Rig:
                    "entryTime": "2026-09-21 10:00:00",
                    "initialSz": self._pos["pos"], "currentSz": self._pos["pos"],
                    "highWaterMark": self.high_water if self.high_water is not None else f["price"],
-                   "lowWaterMark": f["price"],
+                   "lowWaterMark": self.low_water if self.low_water is not None else f["price"],
                    "trailingStopPx": self.old_sl, "takeProfitPx": 74000.0,
                    "signal_snapshot": {}, "stage_desc": "持有监控中"}
         return key, {key: tracker}
@@ -249,6 +250,87 @@ class ExitFailureBranchTest(unittest.TestCase):
                                         rig.actions, **rig.kwargs())
         self.assertAlmostEqual(trackers[key]["entryTs"], int(time.time()), delta=5,
                                msg="缺 entryTs 的 tracker 必须补当前时间（否则时间止损算不出来）")
+
+
+
+    # ── 244-261 / 263-320：动能回撤止盈（多空对称）与空头整条链 ─────────────
+    def test_long_momentum_pullback_exit(self):
+        """峰值利润 >= 2*ATR 后从高点回撤 >= 0.75*ATR ⇒ 动能止盈（多）。"""
+        rig = _Rig(floor=69000.0, high_water=71750.0)   # 峰值 1750 = 2.5*ATR
+        ok, detail, trackers, key = self._run(rig, _f(price=71200.0))   # 回撤 550
+        self.assertTrue(ok)
+        self.assertEqual(detail, "已移动止盈")
+        self.assertNotIn(key, trackers, "平仓确认后要清 tracker")
+        self.assertEqual(len(rig.trades), 1)
+        self.assertTrue(rig.notifies, "动能止盈要通知")
+
+    def test_long_momentum_pullback_close_failure_keeps_the_position(self):
+        rig = _Rig(floor=69000.0, high_water=71750.0, close=(False, "交易所拒绝"))
+        ok, detail, trackers, key = self._run(rig, _f(price=71200.0))
+        self.assertFalse(ok)
+        self.assertEqual(detail, "平仓失败")
+        self.assertIn(key, trackers, "平仓失败 ⇒ 仓位还在 ⇒ tracker 必须保留")
+        self.assertEqual(rig.trades, [])
+
+    def test_short_ratchet_lock_exit(self):
+        """空头整条链：锁利线**向下**收紧并同步云端，触及即锁利平空。"""
+        rig = _Rig(floor=68000.0, side="short", low_water=68250.0, old_sl=71000.0)
+        rig._pos = _pos(side="short", avgPx=70000.0)
+        ok, detail, trackers, key = self._run(rig, _f(price=68000.0))
+        self.assertTrue(ok)
+        self.assertEqual(detail, "已阶梯锁利")
+        self.assertNotIn(key, trackers)
+        self.assertTrue(rig.synced, "空头的锁利线下移必须同步云端 OCO")
+        self.assertEqual(rig.synced[0][0][1], "short", f"方向必须是 short：{rig.synced}")
+        self.assertTrue(rig.notifies)
+
+    def test_short_momentum_rebound_exit(self):
+        """峰值利润 >= 2*ATR 后从低点反弹 ⇒ 动能止盈（空）。"""
+        rig = _Rig(floor=76000.0, side="short", low_water=67500.0, old_sl=71000.0)
+        rig._pos = _pos(side="short", avgPx=70000.0)
+        ok, detail, trackers, key = self._run(rig, _f(price=68100.0))   # 反弹 600
+        self.assertTrue(ok)
+        self.assertEqual(detail, "已移动止盈")
+        self.assertNotIn(key, trackers)
+
+
+
+    # ── 273 / 286-287 / 306-307 / 70-71：剩余三行与首次建仓 ────────────────
+    def test_short_ratchet_lock_close_failure_keeps_the_position(self):
+        rig = _Rig(floor=68000.0, side="short", low_water=68250.0, old_sl=71000.0,
+                   stage_desc="🔒 锁利一档", close=(False, "交易所拒绝"))
+        rig._pos = _pos(side="short", avgPx=70000.0)
+        ok, detail, trackers, key = self._run(rig, _f(price=68000.0))
+        self.assertFalse(ok)
+        self.assertEqual(detail, "平仓失败")
+        self.assertIn(key, trackers)
+        self.assertTrue(any("仓位仍保留" in a for a in rig.actions), rig.actions)
+
+    def test_short_momentum_rebound_close_failure_keeps_the_position(self):
+        rig = _Rig(floor=76000.0, side="short", low_water=67500.0, old_sl=71000.0,
+                   close=(False, "交易所拒绝"))
+        rig._pos = _pos(side="short", avgPx=70000.0)
+        ok, detail, trackers, key = self._run(rig, _f(price=68100.0))
+        self.assertFalse(ok)
+        self.assertEqual(detail, "平仓失败")
+        self.assertIn(key, trackers)
+        self.assertTrue(any("仓位仍保留" in a for a in rig.actions), rig.actions)
+
+    def test_first_time_position_is_registered_in_trackers(self):
+        """首次见到的持仓必须建 tracker（含入场价/水位/止盈止损），否则后续全都没得管。"""
+        rig = _Rig(floor=69000.0)
+        f = _f()
+        trackers = {}
+        ok, detail = manage_position_tp_and_trailing(
+            f, rig._pos, trackers, "2026-09-21 12:00:00", rig.actions, **rig.kwargs())
+        key = f"{f['instId']}_{rig._pos['side']}"
+        self.assertIn(key, trackers, "首次见到就该建 tracker")
+        t = trackers[key]
+        self.assertEqual(t["entryPx"], rig._pos["avgPx"])
+        self.assertEqual(t["initialSz"], rig._pos["pos"])
+        self.assertGreater(t["trailingStopPx"], 0, "建 tracker 时必须带止损线")
+        self.assertGreater(t["takeProfitPx"], 0, "建 tracker 时必须带止盈线")
+        self.assertEqual(t["entryTime"], "2026-09-21 12:00:00")
 
 
 if __name__ == "__main__":
