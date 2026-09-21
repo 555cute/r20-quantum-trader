@@ -112,6 +112,94 @@ class RefusalStageTest(unittest.TestCase):
         self.assertIn("入场委托提交失败", r["detail"])
         self.assertIn("leverage", [c[0] for c in ad.calls], "设档已发生 ⇒ 说明是止步在下单这一步")
 
+class OwnLedgerVerdictTest(unittest.TestCase):
+    """己仓归属：**读不到 ≠ 外部仓**（2026-09-20 实盘证据：UNI 是台账里的本方仓、
+    ARB 是账实不符，旧文案一律报成「外部仓连坐拒开」＝**说谎的诊断**，会把运维引去找
+    根本不存在的外部仓）。判定仍全部拒开，但**谁在持有/能不能判定必须说清楚**。"""
+
+    def _run(self, *, existing=None, own_position=None, verdict=None, ledger_raises=False,
+             classify_raises=False):
+        ad = _StubAdapter(positions_rows=existing or [])
+        patches = []
+        records = router.own_position_records
+        if ledger_raises:
+            patches.append(patch.object(records, "load_ledger",
+                                        side_effect=RuntimeError("台账读不了")))
+        if verdict is not None:
+            patches.append(patch.object(records, "classify_exchange_position",
+                                        return_value=verdict))
+        if classify_raises:
+            patches.append(patch.object(records, "classify_exchange_position",
+                                        side_effect=RuntimeError("判定件炸了")))
+        for _p in patches:
+            _p.start()
+        try:
+            with patch.dict(os.environ, {"R20_GATE_EXECUTION": "1"}):
+                r = router.open_protected_position(
+                    _decision(), adapter=ad, price_ref=79000.0,
+                    own_position=own_position)
+        finally:
+            for _p in patches:
+                _p.stop()
+        return r, ad
+
+    EXISTING = [{"base": "BTC", "side": "long", "size_signed": 1.0}]
+
+    def test_caller_record_mismatch_is_disclosed_as_such(self):
+        r, _ = self._run(existing=self.EXISTING,
+                         own_position={"size_signed": 2.0, "side": "long"})
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["stage"], "precheck")
+        self.assertEqual(r["own_verdict"], "mismatch")
+        self.assertIn("调用方在管记录", r["detail"])
+
+    def test_unreadable_ledger_says_undecidable_not_external(self):
+        """台账读不出来 ⇒ 判**不可判定**，绝不判「外部仓」。"""
+        r, _ = self._run(existing=self.EXISTING, ledger_raises=True)
+        self.assertFalse(r["ok"], "判定不确定仍然拒开（本刀不改交易行为）")
+        self.assertEqual(r["stage"], "precheck")
+        # ⚠️ 不能只断言「不含『外部仓』字样」：文案里**合法地**出现这三个字
+        # （「不得当成外部仓」「不宣称『外部仓』」）——那正是它在**否认**这件事。
+        # 故断言正向语义：说了「不可判定」，且明说**不宣称**外部仓。
+        self.assertIn("不可判定", r["detail"])
+        self.assertIn("不宣称", r["detail"])
+        self.assertIn("不得当成外部仓", r["detail"])
+
+    def test_verdict_engine_exception_is_ledger_unavailable(self):
+        """判定件自身炸了 ≠ 外部仓 ⇒ 记 `ledger_unavailable`（归属不可判定）。"""
+        r, _ = self._run(existing=self.EXISTING, classify_raises=True)
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["own_verdict"], "ledger_unavailable")
+        self.assertIn("不可判定", r["detail"])
+
+    def test_mismatch_verdict_is_disclosed(self):
+        r, _ = self._run(existing=self.EXISTING,
+                         verdict={"verdict": "mismatch", "reason": "台账行与实况不符"})
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["own_verdict"], "mismatch")
+        self.assertIn("本方记录与交易所不符", r["detail"])
+
+    def test_own_verdict_is_reported_and_still_refuses(self):
+        """本方已在管 ⇒ 拒开（重复开仓=敞口翻倍），并把判定放进入参供巡检消费。"""
+        r, _ = self._run(existing=self.EXISTING,
+                         verdict={"verdict": "own", "reason": "台账 holding 行归属本方"})
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["own_verdict"], "own")
+        self.assertIn("本方已在管该仓", r["detail"])
+
+
+class ClosePositionEnvironmentTest(unittest.TestCase):
+    def test_gate_sandbox_environment_is_normalised(self):
+        """Gate 的沙盒族（demo 等）在平仓前**归一为 sandbox**（适配器按 sandbox 走）。"""
+        ad = _StubAdapter()
+        ad.environment = "demo"
+        ad.fast_close_position = lambda symbol, **k: {"id": 7, "closed": True}
+        with patch.dict(os.environ, {"R20_GATE_EXECUTION": "1"}):
+            r = router.close_position("BTC", venue="gate", adapter=ad, environment="demo")
+        self.assertTrue(r["ok"], r.get("detail"))
+        self.assertEqual(getattr(ad, "environment", None), "demo",
+                         "归一的是 router 内部变量，不该改写适配器自身属性")
+
 
 if __name__ == "__main__":
     unittest.main()
