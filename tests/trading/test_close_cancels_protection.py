@@ -17,8 +17,10 @@
 from __future__ import annotations
 
 import sys
+import io
 import unittest
 from pathlib import Path
+from contextlib import redirect_stdout
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -217,3 +219,103 @@ class RouterCloseTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CancelFailureBranchesTest(unittest.TestCase):
+    """撤销链的**读失败 / 无撤单能力 / 缺 id** 分支（第二百零八刀，覆盖率探针发现从未执行）。
+
+    三条都是「宁可留腿，不可裸奔」的具体落点：
+
+    - 读腿失败 ⇒ 当作没有可撤的腿（**不**按合约全撤）；
+    - 交易所适配器**没有**撤单能力 ⇒ 记 `failed`，不许假装撤过（Gate 曾有此坑）；
+    - 腿**没有 id** ⇒ 逐腿撤无从下手 ⇒ 跳过（绝不退化成"按合约全撤"）。
+    """
+
+    def setUp(self):
+        from r20_backend import execution_router
+        self.er = execution_router
+        self._p1 = patch.object(self.er, "require_execution", lambda *a, **k: None)
+        self._p2 = patch.object(self.er, "CLOSE_FLAT_POLL_SLEEP", 0.0)
+        self._p1.start(); self._p2.start()
+        self.addCleanup(self._p1.stop); self.addCleanup(self._p2.stop)
+
+    class _NoCancel:
+        """能平仓、能读腿、但**没有**任何撤单方法（模拟能力缺失的适配器）。
+
+        ⚠️ 平仓**前**必须真有持仓：否则腿连「可撤」都算不上（归因不出 ⇒ 走「未撤」那条路），
+        根本到不了「无撤单能力」这一分支 —— 第一版桩返回 `[]` 就是这个错。
+        """
+
+        def __init__(self, legs, *, before=None):
+            self._legs = legs
+            self._before = before if before is not None else [
+                {"base": "UNI", "side": "short", "size_signed": -82.0}]
+            self._closed = False
+            self.cancelled = []
+
+        def native_symbol(self, s):
+            return f"{str(s).upper()}USDT"
+
+        def fast_close_position(self, asset, **kw):
+            self._closed = True
+            return {"status": "closed", "id": "c1"}
+
+        def positions(self):
+            return [] if self._closed else self._before
+
+        def list_protective_orders(self, symbol=None):
+            return self._legs
+
+    class _ListRaises(_NoCancel):
+        """读腿就炸。"""
+
+        def __init__(self, legs=None):
+            super().__init__(legs if legs is not None else LEGS)
+
+        def list_protective_orders(self, symbol=None):
+            raise RuntimeError("legs down")
+
+        def cancel_algo_order(self, **kw):
+            self.cancelled.append(kw.get("algo_id"))
+
+    def _close(self, ad):
+        return self.er.close_position("UNI", venue="binance", adapter=ad)
+
+    def test_read_legs_failure_cancels_nothing(self):
+        ad = self._ListRaises()
+        r = self._close(ad)
+        self.assertTrue(r["ok"], "平仓本身已受理 ⇒ 仍算成功")
+        self.assertEqual(ad.cancelled, [], "读不到腿 ⇒ 什么都不撤（不猜、不按合约全撤）")
+
+    def test_adapter_without_cancel_capability_records_failure(self):
+        ad = self._NoCancel(LEGS)
+        r = self._close(ad)
+        self.assertEqual(ad.cancelled, [])
+        self.assertIn("撤单失败", r["detail"], "无撤单能力必须如实报失败，不许假装撤过")
+
+    def test_leg_without_id_is_not_cancelled(self):
+        legs = [dict(x, algo_id="", id="") for x in LEGS]
+        ad = self._NoCancel(legs)
+        ad.cancel_algo_order = lambda **kw: ad.cancelled.append(kw.get("algo_id"))
+        r = self._close(ad)
+        self.assertEqual(ad.cancelled, [], "缺 id 的腿不能撤（按合约全撤会误伤别人的腿）")
+
+    def test_ledger_read_failure_still_cancels_matched_legs(self):
+        """台账读不到 ⇒ 退化成「只有 tag/持仓证据」，但**不因此放弃**已证明属于自己的腿。"""
+        ad = RouterCloseTest._Ad()
+        with patch("r20_backend.execution.own_records.read_ledger_rows",
+                   side_effect=RuntimeError("ledger boom")):
+            r = self._close(ad)
+        self.assertEqual(ad.cancelled, ["uni-sl", "uni-tp"],
+                         "台账读失败不该让可撤的腿变成不可撤")
+
+    def test_pool_read_failure_is_only_a_warning(self):
+        """所池读取失败：按无限制继续（不制造新的阻塞点），但**必须真的告警**。"""
+        with patch("r20_backend.exchanges.routing_policy.load_venue_pool",
+                   side_effect=RuntimeError("pool boom")):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                out = self.er._load_venue_pool_soft("binance")
+        self.assertEqual(out, {})
+        self.assertIn("池配置读取失败", buf.getvalue(),
+                      "告警式降级也必须真的发声，不许静默（否则『读不到』就变成了『没有』）")
