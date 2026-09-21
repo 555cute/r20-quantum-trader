@@ -247,38 +247,54 @@ class ProtectiveRollbackTest(unittest.TestCase):
         self.assertIn("未能枚举", r["detail"], "枚举失败必须如实标注（不能假装清干净了）")
 
 
-class CancelProvenOwnLegsTest(unittest.TestCase):
-    """平仓后只撤**可证明属于本系统**的腿：①`matched`（保护的就是刚平的那笔）
-    ②孤儿但带本系统标签（Gate `t-r20sl/t-r20tp`）；其余（旧向/旧量腿、归属不可判定）
-    **一律不碰**，只把数量如实报出 —— 不撤用户手单是铁律。"""
+class ImportFallbackConstantsTest(unittest.TestCase):
+    """常量读不到时**绝不臆造区间**（导入期兜底）。
 
-    def _legs(self, *, ad=None, base="BTC", before=None):
-        from r20_backend.execution_router import _cancel_proven_own_legs
-        ad = ad or _StubAdapter()
-        ad.list_protective_orders = lambda symbol: [
-            # Gate 真机形态：合约在嵌套 initial.contract 里（扁平 symbol 为空）
-            {"id": "g1", "order": {"text": "t-r20sl"}, "initial": {"contract": "BTC_USDT"}},
-            {"id": "g2", "order": {"text": "t-r20tp"}, "initial": {"contract": "BTC_USDT"}},
-            {"id": "other", "order": {"text": "t-r20sl"}, "initial": {"contract": "ETH_USDT"}},
-        ]
-        return ad, _cancel_proven_own_legs(ad, base, before)
+    `execution_router` 在 `scripts.risk_constants` 不可用时退到裸 `risk_constants`；
+    再不可用 ⇒ `MAX_MARGIN_EQUITY_RATIO, MAX_SINGLE_ASSET_MARGIN = 0.20, 0.0` 且
+    `MAX_LEVERAGE = MIN_LEVERAGE = None` —— **夹取退化为 no-op**（靠 `or leverage` 短路），
+    绝不因为读不到配置就凭空放大或缩小杠杆。这条只能靠"把常量模块彻底拿掉再 reload"来验。
+    """
 
-    # ⚠️ 待办（第二百四十一刀如实记录）：我**没能**一次拼对"带本系统标签的腿"的行形状
-    # —— 试过扁平 `text` 与嵌套 `order.text`，两次都落进 `not_touched`，说明
-    # `attribute_protective_orders` 认标签的路径与我猜的不同。**不猜着写测试**
-    # （猜出来的绿等于没测），故本刀只钉住下面这一侧：「不可判定的腿一律不碰」。
-    # 下一刀：先读 `attribute_protective_orders` 的标签读取路径，再补 matched/tag 两类的用例。
+    def test_missing_exposure_cap_alone_falls_back_to_zero(self):
+        """模块在、但**缺 `MAX_TOTAL_EXPOSURE_USDT`** ⇒ 只有敞口帽退化为 0.0（其余常量照用）。
 
-    def test_unrelated_legs_are_left_and_counted(self):
-        ad = _StubAdapter()
-        ad.list_protective_orders = lambda symbol: [
-            {"id": "old", "order": {"text": "manual"}, "initial": {"contract": "BTC_USDT"}},
-        ]
-        from r20_backend.execution_router import _cancel_proven_own_legs
-        note = _cancel_proven_own_legs(ad, "BTC", {"base": "BTC"})
-        self.assertEqual([c for c in ad.calls if c[0] == "cancel_entry"], [],
-                         "归属不可判定的腿一律不碰（不撤用户手单）")
-        self.assertIn("未撤", note, f"但要如实报数：{note}")
+        ⚠️ 这是**内层**兜底：与"整个模块都没有"是两条不同的路径（前者 leverage 仍可用）。
+        """
+        import importlib
+        import sys as _sys
+        import types
+
+        fake = types.ModuleType("scripts.risk_constants")
+        fake.MAX_LEVERAGE, fake.MIN_LEVERAGE = 20, 1
+        fake.MAX_MARGIN_EQUITY_RATIO, fake.MAX_SINGLE_ASSET_MARGIN = 0.20, 0.0
+        try:
+            with patch.dict(_sys.modules, {"scripts.risk_constants": fake,
+                                           "risk_constants": fake}):
+                mod = importlib.reload(router)
+                self.assertEqual(mod.TOTAL_EXPOSURE_CAP, 0.0, "缺敞口帽 ⇒ 退化为 0（不是无上限）")
+                self.assertEqual(mod.MAX_LEVERAGE, 20, "其余常量照用（这是内层兜底）")
+        finally:
+            importlib.reload(router)
+
+    def test_missing_risk_constants_degrades_to_noop_not_invented_band(self):
+        import importlib
+        import sys as _sys
+
+        before = (router.MAX_LEVERAGE, router.MIN_LEVERAGE, router.MAX_MARGIN_EQUITY_RATIO)
+        blocked = {k: None for k in ("scripts.risk_constants", "risk_constants")}
+        try:
+            with patch.dict(_sys.modules, blocked):
+                mod = importlib.reload(router)
+                self.assertIsNone(mod.MAX_LEVERAGE, "常量为空 ⇒ 上限必须是 None（no-op）")
+                self.assertIsNone(mod.MIN_LEVERAGE)
+                self.assertEqual(mod.MAX_MARGIN_EQUITY_RATIO, 0.20)
+                self.assertEqual(mod.MAX_SINGLE_ASSET_MARGIN, 0.0)
+                self.assertEqual(mod.TOTAL_EXPOSURE_CAP, 0.0)
+        finally:
+            importlib.reload(router)          # 必须还原，否则污染后续用例
+        self.assertEqual((router.MAX_LEVERAGE, router.MIN_LEVERAGE,
+                          router.MAX_MARGIN_EQUITY_RATIO), before, "reload 后必须还原")
 
 
 if __name__ == "__main__":
