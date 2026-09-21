@@ -55,6 +55,13 @@ _DELTA_BLOCKS = (
         '            text = (str(_order.get("text") or "") if isinstance(_order, dict) else "") \\\n'
         '                + str(row.get("text") or "") + str(row.get("type") or "")\n',
     ),
+    # 第一百八十六刀：`posSide` 归一为**净持仓容错**（`in {pos_side, "net"}`）。
+    # 净持仓账户的云端单 posSide 是 "net"，精确相等会永远找不到活止损单
+    # ⇒ 云端止损收紧静默失效（本文件另一处统计覆盖时早就是 net 容错）。
+    (
+        '        live_algo = next((o for o in algo_orders\n                          if str(o.get("state", "")).lower() == "live"\n                          and str(o.get("posSide", "net")).lower() in {pos_side, "net"}\n                          and o.get("slTriggerPx")), None)',
+        '        live_algo = next((o for o in algo_orders if o.get("state") == "live" and o.get("posSide") == pos_side and o.get("slTriggerPx")), None)',
+    ),
 )
 
 

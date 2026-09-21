@@ -216,7 +216,12 @@ def close_position_confirmed(inst_id: str, pos_side: str, before_size: float, ve
         saw_successful_query = True
         remaining = 0.0
         for position in positions:
-            if position.get("instId") == inst_id and str(position.get("posSide", "net")).lower() == pos_side:
+            # 第一百八十六刀：净持仓账户的仓位 `posSide` 是 `"net"`，精确相等匹配不上
+            # ⇒ `remaining` 保持 0.0 ⇒ **在仓位仍然开着的时候宣称"已平仓"**（假成功；
+            # 这是"读不到当成没有"里最危险的一档：调用方会以为已经空仓）。
+            # 与 `scale_out`/`cloud_protection` 同一 convention：`in {pos_side, "net"}`。
+            if (position.get("instId") == inst_id
+                    and str(position.get("posSide", "net")).lower() in {pos_side, "net"}):
                 remaining = abs(float(position.get("pos", 0) or 0))
                 break
         if remaining < max(1e-12, abs(before_size) * 0.001):

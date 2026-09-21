@@ -54,10 +54,35 @@ def _body_dump(fn: ast.FunctionDef) -> str:
     return ast.dump(ast.Module(body=fn.body, type_ignores=[]), include_attributes=False)
 
 
+# ---------------------------------------------------------------------------
+# 文档化差异（第一百八十六刀）：与 `test_trader_cloud_protection_extraction.py` 同款机制 ——
+# 把本刀的**有意改动**还原成搬运时的样子，再逐字比对；断言"恰好出现一次"，
+# 任何其他差异仍会红。
+#
+# 改动内容：平仓核验里的 `posSide` 比较改为**净持仓容错**（`in {pos_side, "net"}`）。
+# 原来精确相等，在净持仓（one-way）账户上匹配不上 ⇒ `remaining` 保持 0
+# ⇒ **仓位还开着却宣称"已平仓"**（假成功）。
+# ---------------------------------------------------------------------------
+_DELTA_BLOCKS = (
+    (
+        '            if (position.get("instId") == inst_id\n                    and str(position.get("posSide", "net")).lower() in {pos_side, "net"}):',
+        '            if position.get("instId") == inst_id and str(position.get("posSide", "net")).lower() == pos_side:',
+    ),
+)
+
+
+def _normalised_source() -> str:
+    src = (ROOT / "scripts/trader/venue_query.py").read_text(encoding="utf-8")
+    for new_block, old_block in _DELTA_BLOCKS:
+        assert src.count(new_block) == 1, f"放行块没找到或重复（白名单过期）：{new_block[:60]!r}"
+        src = src.replace(new_block, old_block)
+    return src
+
+
 class VenueQueryVerbatimTest(unittest.TestCase):
     def test_moved_bodies_match_pre_extraction_verbatim(self):
         old = _old_tree()
-        new = ast.parse((ROOT / "scripts/trader/venue_query.py").read_text(encoding="utf-8"))
+        new = ast.parse(_normalised_source())
         for fn in FNS:
             with self.subTest(fn=fn):
                 o, n = _get_func(old, fn), _get_func(new, fn)
@@ -134,3 +159,49 @@ class VenueQueryVerbatimTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class NetPosSideCloseVerifyTest(unittest.TestCase):
+    """第一百八十六刀：**净持仓**账户下平仓核验不得假报"已平"。
+
+    真机背景：线上是 long/short 模式（`posSide="long"`），但净持仓（one-way）模式返回
+    `posSide="net"`。核验原用精确相等 ⇒ 匹配不上 ⇒ `remaining` 保持 0
+    ⇒ **仓位还开着却宣称"已平仓"**（调用方会以为已空仓）。本用例把两种模式都钉住。
+    """
+
+    class _Env:
+        mode = "demo"
+
+    def _run(self, positions, *, pos_side="long"):
+        from scripts.trader import venue_query as vq
+        calls = {"closed": 0}
+        class _Rest:
+            def pending_orders(self, inst_id):
+                return []
+            def close_position(self, inst_id, pos_side, td_mode=None, auto_cxl=None):
+                calls["closed"] += 1
+        orig_sleep = vq.time.sleep
+        vq.time.sleep = lambda *_: None                     # 不真等 6×0.6s
+        try:
+            ok, detail = vq.close_position_confirmed(
+                "ADA-USDT-SWAP", pos_side, 5.0,
+                okx_rest=_Rest(), current_environment=lambda: self._Env(),
+                query_positions=lambda: (True, positions, ""),
+                fetch_other_venue_positions=lambda *a, **k: (True, {}, ""))
+        finally:
+            vq.time.sleep = orig_sleep
+        self.assertEqual(calls["closed"], 1, "应当真的发过一次平仓指令")
+        return ok, detail
+
+    def test_net_mode_position_still_open_is_not_reported_as_closed(self):
+        ok, detail = self._run([{"instId": "ADA-USDT-SWAP", "posSide": "net", "pos": "5"}])
+        self.assertFalse(ok, f"净持仓模式下仓位仍开着，却报了成功：{detail}")
+        self.assertIn("still reports an open position", detail)
+
+    def test_hedge_mode_position_still_open_is_not_reported_as_closed(self):
+        ok, detail = self._run([{"instId": "ADA-USDT-SWAP", "posSide": "long", "pos": "5"}])
+        self.assertFalse(ok, detail)
+
+    def test_gone_position_is_reported_as_closed(self):
+        ok, detail = self._run([])
+        self.assertTrue(ok, detail)
+        self.assertIn("closed", detail)

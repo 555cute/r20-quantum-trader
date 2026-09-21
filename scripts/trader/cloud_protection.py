@@ -167,7 +167,14 @@ def sync_cloud_algo_stop(inst_id: str, pos_side: str, new_sl: float, reason: str
     # 与 execute_ai_position_management 内联云端止损上移行为保持一致(演示盘与实盘同构)。
     try:
         algo_orders = okx_rest.pending_algo_orders(inst_id)
-        live_algo = next((o for o in algo_orders if o.get("state") == "live" and o.get("posSide") == pos_side and o.get("slTriggerPx")), None)
+        # 第一百八十六刀：本文件第 105 行统计覆盖时用的是 `posSide in {pos_side, "net"}`，
+        # 这里却只认精确相等 —— **同一文件里同一语义两种写法**。净持仓账户（OKX one-way）
+        # 的云端单 `posSide` 是 `"net"` ⇒ 这里永远找不到活止损单 ⇒ 返回 False
+        # ⇒ "云端止损收紧"静默失效（是真单也照旧不动）。统一为 net 容错。
+        live_algo = next((o for o in algo_orders
+                          if str(o.get("state", "")).lower() == "live"
+                          and str(o.get("posSide", "net")).lower() in {pos_side, "net"}
+                          and o.get("slTriggerPx")), None)
         if not live_algo:
             return False
         current_cloud_sl = float(live_algo.get("slTriggerPx") or 0.0)

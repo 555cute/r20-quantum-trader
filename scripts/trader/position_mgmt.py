@@ -130,7 +130,13 @@ def execute_ai_position_management(real_pos_dict, trackers, timestamp_full, exec
                 except Exception as exc:
                     executed_actions.append(f"[{name}] 云端止损收紧失败，原保护单保持不变（查询异常：{exc}）")
                     continue
-                live_algo = next((o for o in algo_orders if o.get("state") == "live" and o.get("posSide") == pos_side and o.get("slTriggerPx")), None)
+                # 第一百八十六刀：同 cloud_protection —— 净持仓账户的云端单 `posSide` 是
+                # `"net"`，精确相等会永远找不到 ⇒ 只会打印"未找到真实云端止损单"，
+                # 云端止损上移静默不生效。统一为 net 容错。
+                live_algo = next((o for o in algo_orders
+                                  if str(o.get("state", "")).lower() == "live"
+                                  and str(o.get("posSide", "net")).lower() in {pos_side, "net"}
+                                  and o.get("slTriggerPx")), None)
                 if not live_algo:
                     executed_actions.append(f"[{name}] 未找到真实云端止损单，无法更新")
                     continue
