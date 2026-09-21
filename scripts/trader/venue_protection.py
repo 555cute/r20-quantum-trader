@@ -643,12 +643,8 @@ def ensure_venue_protection(ad: Any, *, symbol: str, pos_side: str, position_siz
         if oid in new_ids:
             continue
         try:
-            if hasattr(ad, "cancel_price_order"):
-                ad.cancel_price_order(oid)
-            elif hasattr(ad, "cancel_algo_order"):
-                ad.cancel_algo_order(algo_id=oid)
-            else:
-                ad.cancel_order(symbol, oid)
+            if not cancel_protective_leg(ad, oid, symbol=symbol):
+                raise RuntimeError("该所适配器没有可用的撤腿方法")
             cancelled.append(oid)
         except Exception as exc:
             # 宁可双、不可裸：撤旧失败不回滚新腿，只登记。
@@ -909,6 +905,33 @@ def read_ledger_rows(path: Any, *, log: Any = print) -> Optional[List[Dict[str, 
     return [r for r in data if isinstance(r, dict)]
 
 
+def cancel_protective_leg(ad: Any, leg_id: Any, *, symbol: Any = None) -> bool:
+    """按**能力探针**撤一条保护腿；撤不动返回 False（不抛）。
+
+    ⚠️ 为什么必须有这个探针（第一百九十一刀，真机核对）：三个适配器的撤腿能力**各不相同** ——
+    `cancel_price_order` 只有 **Gate** 有，`cancel_algo_order` 只有 **Binance** 有，
+    OKX 走 `okx_rest` 自己的路径。本模块的跨所孤儿腿清理此前直接 `ad.cancel_price_order(leg_id)`，
+    于是对 **Binance 恒失败**（`AttributeError` 被登记成 error、腿留着）——
+    而 Binance 恰恰是孤儿腿最多的那个所（真机：17 条腿）。本文件另一处早就用了
+    `hasattr` 阶梯 ⇒ 同一语义两种写法，这里统一成一个探针。
+
+    顺序与既有实现一致：`cancel_price_order` → `cancel_algo_order` → `cancel_order(symbol, id)`。
+    """
+    leg_id = str(leg_id or "")
+    if not leg_id:
+        return False
+    if hasattr(ad, "cancel_price_order"):
+        ad.cancel_price_order(leg_id)
+        return True
+    if hasattr(ad, "cancel_algo_order"):
+        ad.cancel_algo_order(algo_id=leg_id)
+        return True
+    if symbol is not None and hasattr(ad, "cancel_order"):
+        ad.cancel_order(symbol, leg_id)
+        return True
+    return False
+
+
 def cancel_orphan_attributed_legs(ad: Any, *,
                                   positions: Optional[Sequence[Dict[str, Any]]],
                                   symbols: Sequence[str],
@@ -975,7 +998,9 @@ def cancel_orphan_attributed_legs(ad: Any, *,
                 report["would_cancel"].append(item)
                 continue
             try:
-                ad.cancel_price_order(leg_id)
+                if not cancel_protective_leg(ad, leg_id, symbol=symbol):
+                    raise RuntimeError("该所适配器没有可用的撤腿方法"
+                                       "（cancel_price_order/cancel_algo_order/cancel_order 均无）")
                 report["cancelled"].append(item)
                 log(f"[跨所保护清理] 已撤销孤儿腿 {base} {item['kind']} id={leg_id}")
             except Exception as exc:

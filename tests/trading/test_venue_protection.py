@@ -991,6 +991,72 @@ class CancelOrphanAttributedLegsTest(unittest.TestCase):
         self.assertEqual(rep["cancelled"], [])
         self.assertTrue(any(n["bucket"] == "orphan_unattributed" for n in rep["not_touched"]))
 
+    def test_binance_style_adapter_cancels_via_its_own_capability(self):
+        """第一百九十一刀：撤腿必须**按能力探针**（Binance 没有 `cancel_price_order`）。
+
+        真机核对：`cancel_price_order` 只有 Gate 有、`cancel_algo_order` 只有 Binance 有。
+        此前孤儿腿清理直接调 `cancel_price_order` ⇒ 对 **Binance 恒 AttributeError**
+        ⇒ 腿留在场内（而 Binance 恰是孤儿腿最多的所，真机 17 条）。
+        """
+        from scripts.trader.venue_protection import cancel_orphan_attributed_legs
+        calls = []
+
+        class _BinanceLike:
+            def list_protective_orders(self, symbol):
+                # 真机 Binance 腿**没有** `text` 字段（实测：raw 键里只有 clientAlgoId 等）；
+                # 标签的真实落点就是 `raw.clientAlgoId`（写入侧打标签方案用的也是它）。
+                return [{"id": "o-1", "symbol": "DOGEUSDT",
+                         "raw": {"algoId": "o-1", "orderType": "TAKE_PROFIT_MARKET",
+                                 "clientAlgoId": "t-r20tp261158", "quantity": "0"}}]
+
+            def cancel_algo_order(self, *, algo_id=None):
+                calls.append(algo_id)
+                return {"algoId": algo_id}
+
+        rep = cancel_orphan_attributed_legs(_BinanceLike(), positions=[],
+                                            symbols=["DOGE_USDT"], dry_run=False)
+        self.assertEqual(calls, ["o-1"], "Binance 只能走 cancel_algo_order；没撤 ⇒ 清理对该所是空转")
+        self.assertEqual([c["id"] for c in rep["cancelled"]], ["o-1"])
+        self.assertEqual(rep["errors"], [], "不该再报'没有该方法'的错")
+
+    def test_adapter_with_no_cancel_capability_is_reported_not_silent(self):
+        """三个撤腿方法都没有 ⇒ 必须**报错**（不许静默当作已撤）。"""
+        from scripts.trader.venue_protection import cancel_orphan_attributed_legs
+
+        class _NoCapability:
+            def list_protective_orders(self, symbol):
+                return [{"id": "o-1", "symbol": "DOGEUSDT",
+                         "raw": {"algoId": "o-1", "orderType": "TAKE_PROFIT_MARKET",
+                                 "clientAlgoId": "t-r20tp261158", "quantity": "0"}}]
+
+        rep = cancel_orphan_attributed_legs(_NoCapability(), positions=[],
+                                            symbols=["DOGE_USDT"], dry_run=False)
+        self.assertEqual(rep["cancelled"], [])
+        self.assertTrue(rep["errors"], "撤不动却不报错 ⇒ 静默失败")
+
+    def test_probe_prefers_the_first_available_capability(self):
+        from scripts.trader.venue_protection import cancel_protective_leg
+        seen = []
+
+        class _Gate:
+            def cancel_price_order(self, oid): seen.append(("price", oid)); return {}
+
+        class _Binance:
+            def cancel_algo_order(self, *, algo_id=None): seen.append(("algo", algo_id)); return {}
+
+        class _Legacy:
+            def cancel_order(self, symbol, oid): seen.append(("order", symbol, oid)); return {}
+
+        class _Nothing:
+            pass
+
+        self.assertTrue(cancel_protective_leg(_Gate(), "g1"))
+        self.assertTrue(cancel_protective_leg(_Binance(), "b1"))
+        self.assertTrue(cancel_protective_leg(_Legacy(), "l1", symbol="BTC_USDT"))
+        self.assertFalse(cancel_protective_leg(_Nothing(), "n1"))
+        self.assertFalse(cancel_protective_leg(_Gate(), ""), "空 id 不得撤")
+        self.assertEqual(seen, [("price", "g1"), ("algo", "b1"), ("order", "BTC_USDT", "l1")])
+
     def test_symbol_with_a_live_position_is_skipped_whole(self):
         """合约仍有活动持仓 ⇒ 整合约跳过（孤儿判定可能只是取数缺失，宁留腿不裸奔）。"""
         from scripts.trader.venue_protection import cancel_orphan_attributed_legs
