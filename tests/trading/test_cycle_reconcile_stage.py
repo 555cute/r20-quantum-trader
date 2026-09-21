@@ -50,7 +50,7 @@ class Rig:
     def __init__(self, *, positions=None, positions_ok=True, pending=(), xv=(True, {}, ""),
                  xv_broken=(), pending_enum_errors=(), balances=None, okx=None,
                  env_mode="demo", ready=True, pending_positions_raises=None,
-                 bal_raises=None):
+                 bal_raises=None, env_raises=False, broken_raises=False):
         self.printed = []
         self.reconciles: list = []
         self.positions = positions if positions is not None else [
@@ -61,8 +61,20 @@ class Rig:
                                    pending_raises=pending_positions_raises,
                                    bal_raises=bal_raises)
         self.ready = ready
+        self.env_raises = env_raises
+        self.broken_raises = broken_raises
 
     def run(self, *, entries_blocked=False):
+        def _env():
+            if self.env_raises:
+                raise RuntimeError("env down")
+            return _Env(self.env_mode)
+
+        def _broken(*a, **k):
+            if self.broken_raises:
+                raise RuntimeError("probe boom")
+            return list(self.xv_broken)
+
         def collect_pending_inst_ids(*, warn, **kw):
             for msg in (self._pending_errors if hasattr(self, "_pending_errors") else []):
                 warn(msg)
@@ -75,7 +87,7 @@ class Rig:
             entries_blocked=entries_blocked,
             _BROKEN_VENUES=("gate",),
             collect_pending_inst_ids=collect_pending_inst_ids,
-            current_environment=lambda: _Env(self.env_mode),
+            current_environment=_env,
             fetch_other_venue_positions=lambda env: self.xv,
             load_instruments=lambda: {},
             okx_rest=self.okx,
@@ -83,7 +95,7 @@ class Rig:
                 (True, self.positions, "") if self.positions_ok else (False, [], "持仓读不动")),
             reconcile_reservation_ledger=lambda *a, **k: self.reconciles.append((a, k)),
             venue_execution_ready=lambda v, env: self.ready,
-            broken_execution_venues=lambda venues, mode, **kw: list(self.xv_broken),
+            broken_execution_venues=_broken,
             venue_registry=object())
         self._pending_ids_out = None
         return out
@@ -215,6 +227,47 @@ class InputFailureSemanticsTest(unittest.TestCase):
     def test_usdt_available_is_read_from_the_balance_payload(self):
         out = self._rig().run()
         self.assertEqual(out[11], 1234.5, "USDT 可用余额要真的从 balances 里读出来")
+
+
+
+    def test_pending_orders_are_counted_and_non_live_orders_skipped(self):
+        """在途挂单：只数 live/partially_filled；已撤/已成的不算在场（否则槽位虚占）。"""
+        rig = Rig(env_mode=self.env_mode, pending=[
+            {"instId": "XRP-USDT-SWAP", "state": "live", "posSide": "long"},
+            {"instId": "SOL-USDT-SWAP", "state": "partially_filled", "posSide": "short"},
+            {"instId": "DOGE-USDT-SWAP", "state": "canceled", "posSide": "long"},
+            {"instId": "ADA-USDT-SWAP", "state": "filled", "posSide": "long"},
+            {"state": "live", "posSide": "short"},          # 无 instId：不进行程集合，但仍算同向
+        ])
+        rig.env_mode = self.env_mode
+        rig.xv_broken = []
+        rig.pending_enum_errors = []
+        rig.ready = self.ready
+        out = rig.run()
+        # OKX 在途：2 个 instId（XRP/SOL）⇒ 与外所桩给的 XRP **去重**后仍是 2
+        self.assertEqual(out[9], out[1] + 2,
+                         "槽位 = 持仓 + 在途挂单去重后的 instId 数（OKX 的在途单必须算进去）")
+        self.assertEqual(out[7], out[4] + 2, "多头 = OKX 持仓 + OKX 在途多头(1) + 外所在途多头(1)")
+        self.assertEqual(out[8], out[10] + 2,
+                         "空头 = OKX 持仓 + OKX 在途空头(partially_filled + 无 instId 各 1)")
+
+    def test_environment_read_failure_is_treated_as_untrustworthy(self):
+        """环境轴两次都读不到 ⇒ 一律按不可信处理（不是"当 demo 继续"）。"""
+        out = self._no_broken(env_raises=True, xv=(False, {}, "读不到"))
+        self.assertIsNotNone(out)
+        self.assertTrue(out[3], "环境不可得 + 跨所读失败 ⇒ fail-closed 禁新开仓")
+
+    def test_broken_venue_probe_failure_is_only_warned(self):
+        out = self._no_broken(broken_raises=True)
+        self.assertIsNotNone(out, "坏所探测异常不该中断周期（只 warn）")
+
+    def _no_broken(self, **kw):
+        rig = Rig(**kw)
+        rig.env_mode = self.env_mode
+        rig.xv_broken = []
+        rig.pending_enum_errors = []
+        rig.ready = self.ready
+        return rig.run()
 
 
 if __name__ == "__main__":

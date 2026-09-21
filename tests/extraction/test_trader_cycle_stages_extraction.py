@@ -129,6 +129,24 @@ SEGMENT_DELTAS = {
          "    print(f'[跨所封顶] warn 外所挂单未枚举成功（{len(_pending_enum_errors)} 所）"
          "——本周期槽位/同向占用**少算**该所在场单（{reserved_slot_count} 为下限），"
          "若照常放行新开仓可能突破仓位上限（仅仓位数口径；USDT 预算不受影响）')"),
+        # ---- 第二百二十刀：恢复 OKX 在途挂单进槽位/对账（**回归修复**）------------
+        # 抽取（bb6cb57）把原来「OKX loop 建基准 + 外所枚举 add 进来」写成了**整体赋值**
+        # ⇒ OKX 在途挂单被静默丢弃：① 槽位/同向少算 ⇒ 开仓闸可能超发；
+        # ② `reconcile_reservation_ledger` 拿不到 OKX 在场活单 ⇒ 据「无仓无挂」
+        # 当陈旧占用**释放**（释放不可逆）。此处恢复为并集。
+        ("pending_inst_ids, pending_long_count, pending_short_count = "
+         "collect_pending_inst_ids(venues=('gate', 'binance'), venue_mode=_gv_mode, "
+         "broken_venues=_BROKEN_VENUES, venue_registry=venue_registry, "
+         "load_instruments=load_instruments, auth_markers=_auth_markers, "
+         "warn=_pending_warn)",
+         "_xv_pending_ids, _xv_pending_long, _xv_pending_short = "
+         "collect_pending_inst_ids(venues=('gate', 'binance'), venue_mode=_gv_mode, "
+         "broken_venues=_BROKEN_VENUES, venue_registry=venue_registry, "
+         "load_instruments=load_instruments, auth_markers=_auth_markers, "
+         "warn=_pending_warn)\n"
+         "pending_inst_ids |= {str(_x) for _x in _xv_pending_ids or set() if _x}\n"
+         "pending_long_count += int(_xv_pending_long or 0)\n"
+         "pending_short_count += int(_xv_pending_short or 0)"),
     ],
 }
 

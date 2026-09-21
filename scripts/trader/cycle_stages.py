@@ -285,12 +285,24 @@ def fetch_positions_and_reconcile(*,
         _pending_enum_errors.append(_msg)
         print(_msg)
 
-    pending_inst_ids, pending_long_count, pending_short_count = \
+    # ⚠️ 第二百二十刀（**回归修复**，勿改回整体赋值）：上面刚从 OKX 挂单数出的
+    # `pending_inst_ids`/`pending_long_count`/`pending_short_count` 是**基准值**，
+    # 外所枚举（bb6cb57 抽出的 `collect_pending_inst_ids`）当年是**并进**它们；
+    # 抽取时写成了整体赋值 ⇒ OKX 在途挂单被**静默丢弃**，后果两条：
+    #   ① `reserved_slot_count`/同向计数少算 OKX 在途单 ⇒ 开仓闸可能**超发槽位**；
+    #   ② `reconcile_reservation_ledger` 拿到的集合里没有 OKX 在场活单 ⇒
+    #      对账器据「无仓无挂」把它当陈旧占用**释放**（释放不可逆，正是该函数
+    #      docstring 点名的第一类错误）。
+    # 恢复为**并集**：两处枚举各管一段（OKX 走本地 loop、外所走适配器），谁都不是对方的替代。
+    _xv_pending_ids, _xv_pending_long, _xv_pending_short = \
         collect_pending_inst_ids(
             venues=("gate", "binance"), venue_mode=_gv_mode,
             broken_venues=_BROKEN_VENUES, venue_registry=venue_registry,
             load_instruments=load_instruments, auth_markers=_auth_markers,
             warn=_pending_warn)
+    pending_inst_ids |= {str(_x) for _x in (_xv_pending_ids or set()) if _x}
+    pending_long_count += int(_xv_pending_long or 0)
+    pending_short_count += int(_xv_pending_short or 0)
     reserved_slot_count = active_pos_count + len(pending_inst_ids)
     reserved_long_count = long_count + pending_long_count
     reserved_short_count = short_count + pending_short_count
