@@ -23,7 +23,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 GITIGNORE = ROOT / ".gitignore"
 #: 源码树：这些目录下"磁盘上存在"的东西都属于项目资产，被静默忽略就是事故。
-SOURCE_ROOTS = ("tests", "scripts", "r20_backend", "docs", "frontend/src")
+SOURCE_ROOTS = ("tests", "scripts", "r20_backend", "r20_gateway", "plugins", "docs", "frontend/src")
 BARE_WORD = re.compile(r"^[A-Za-z0-9_-]+$")     # 无 /、无 .、无 *、无 ! ⇒ 裸词
 
 

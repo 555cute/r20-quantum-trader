@@ -37,7 +37,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SCAN_ROOTS = (ROOT / "scripts", ROOT / "r20_backend")
+SCAN_ROOTS = (ROOT / "scripts", ROOT / "r20_backend", ROOT / "r20_gateway", ROOT / "plugins")
 MS = re.compile(r"\*\s*1000")
 DIV_MS = re.compile(r"/\s*1000")
 

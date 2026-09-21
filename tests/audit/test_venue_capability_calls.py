@@ -41,7 +41,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-SCAN_DIRS = ("scripts", "r20_backend")
+SCAN_DIRS = ("scripts", "r20_backend", "r20_gateway", "plugins")
 VENUES = ("okx", "binance", "gate")
 VENUE_WORDS = set(VENUES)
 #: 形如 `_v` / `venue` / `_gv` 的"场所名变量"（用于结构化识别按所分流）

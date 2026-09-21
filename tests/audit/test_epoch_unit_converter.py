@@ -28,7 +28,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SCAN_DIRS = ("scripts", "r20_backend")
+SCAN_DIRS = ("scripts", "r20_backend", "r20_gateway", "plugins")
 CANONICAL = "r20_backend/time_utils.py"
 
 

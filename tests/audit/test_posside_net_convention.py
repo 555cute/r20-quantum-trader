@@ -46,7 +46,7 @@ ALLOWLIST = {
         "那是**判断侧向是否显式**（`in {long, short}`）的分支，不是与交易所 posSide 的兼容比较",
 }
 
-SCAN_DIRS = ("scripts", "r20_backend")
+SCAN_DIRS = ("scripts", "r20_backend", "r20_gateway", "plugins")
 
 
 def _enclosing(tree: ast.AST, lineno: int):

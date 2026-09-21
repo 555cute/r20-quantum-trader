@@ -35,7 +35,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SCAN_ROOTS = ("tests", "scripts", "r20_backend")
+SCAN_ROOTS = ("tests", "scripts", "r20_backend", "r20_gateway", "plugins")
 DEF_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 
 

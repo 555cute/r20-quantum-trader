@@ -96,7 +96,7 @@ ALL_DOCS = (ROOT / "docs", ROOT / "README.md", ROOT / "AGENTS.md")
 #: 运行态/本地目录（`data/`、`plan_local/`、`promo_local/`、`.archive/`）**不在范围内** ——
 #: 它们被有意忽略（审计确认：文档引用的 6 个未跟踪路径全属此类），
 #: 把它们算进来只会制造噪音，反而掩盖真正的信号。
-SOURCE_ROOTS = ("tests/", "scripts/", "r20_backend/", "frontend/src/", "docs/")
+SOURCE_ROOTS = ("tests/", "scripts/", "r20_backend/", "r20_gateway/", "plugins/", "frontend/src/", "docs/")
 
 
 def broad_source_references(doc_text: str) -> "list[str]":

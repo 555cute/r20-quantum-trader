@@ -31,7 +31,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SCAN_DIRS = ("scripts", "r20_backend")
+SCAN_DIRS = ("scripts", "r20_backend", "r20_gateway", "plugins")
 #: 零生产读者、但**行为另有出处**（或本就是人读说明）的字段 —— 每条都写明真正的落点。
 UNREAD_ALLOWLIST = {
     "bar_case": "K 线周期大小写由唯一归一函数承担：`scripts/market_data_service.py::normalize_bar`"
