@@ -49,6 +49,37 @@ def executable_lines(path: Path) -> set:
     return lines
 
 
+def traced_import(targets: list) -> list:
+    """在**探针启用之后**重新执行目标模块的导入期代码，返回失败清单。
+
+    ## 为什么必须有这一步（否则每个文件都带一个固定「假象地板」）
+
+    `executable_lines` 把模块级语句与 `def`/`class` 行也算作"可执行"——它们确实可执行，
+    但**执行时机是导入期**。而本探针只在 pytest 跑用例期间 `settrace`：若目标模块在探针
+    启用前就已被 `tests/__init__.py` 等导入过，这些行永远不可能被记到
+    ⇒ 表现为"未命中"，与有没有测试**无关**（实测：`binance.py` 的 `def` 行 34/68/124
+    与模块级/类体行 75/83-85/89 一直显示未命中，而其函数体行全部命中）。
+
+    ## 为什么是"真的重跑导入"而不是"静态豁免导入期行"
+
+    模块级代码里可能有**没走到**的分支（如 `except ImportError:` 兜底常量）。把它们一律
+    静态豁免，会把真实缺口一起藏掉（本仓恰好为这类兜底写过用例）。故这里**真的重新执行**
+    导入：走到的分支记命中、没走到的分支照旧显示未命中 —— 语义与用例覆盖一致。
+    """
+    import importlib
+    failed = []
+    for target in targets:
+        mod_name = str(target)[:-3].replace("/", ".") if str(target).endswith(".py") else str(target)
+        try:
+            if mod_name in sys.modules:
+                importlib.reload(sys.modules[mod_name])
+            else:
+                importlib.import_module(mod_name)
+        except Exception as exc:                      # 导入失败不拦探针：真失败由用例暴露
+            failed.append(f"{mod_name}: {type(exc).__name__}: {exc}")
+    return failed
+
+
 def run(targets: list, pytest_args: list) -> dict:
     """跑 pytest 并返回 {目标: {executable, hit, missing}}。"""
     hits: dict = {}
@@ -65,6 +96,11 @@ def run(targets: list, pytest_args: list) -> dict:
     sys.argv = ["pytest"] + list(pytest_args)
     sys.settrace(tracer)
     try:
+        _failed = traced_import(targets)
+        if _failed:
+            print("[coverage_probe] 目标模块重导失败（其导入期行仍会被记为未命中）:")
+            for item in _failed:
+                print(f"  - {item}")
         runpy.run_module("pytest", run_name="__main__")
     except SystemExit:
         pass
