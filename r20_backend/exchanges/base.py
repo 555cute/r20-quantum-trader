@@ -109,14 +109,33 @@ class InstrumentSpec:
     raw: Dict[str, Any] = field(default_factory=dict, repr=False)
 
 
+#: 计价币后缀（用于**无分隔符**写法：`BTCUSDT` → `BTC`）。顺序有意义：长的先试。
+_QUOTE_SUFFIXES = ("USDT", "USDC", "FDUSD", "BUSD", "TUSD", "USD")
+
+
 def canonical_base(symbol: str) -> str:
-    """任意写法（BTC / btc / BTC-USDT-SWAP / BTCUSDT / BTC_USDT）→ 裸币种 "BTC"。"""
-    s = str(symbol or "").strip().upper()
-    for marker in ("-USDT-SWAP", "USDT", "_USDT", "-USDT"):
-        if s.endswith(marker):
-            s = s[: -len(marker)]
+    """任意写法（BTC / btc / BTC-USDT-SWAP / BTCUSDT / BTC_USDT）→ 裸币种 "BTC"。
+
+    第一百八十五刀修好两处**违背本 docstring** 的输入（真机实测）：
+      - 合成 id：`GATE:BTC_USDT` 原样得到 `GATE:BTC`（场所前缀被当成币种）⇒ 先剥 `:` 前缀；
+      - 非 USDT 计价：`BTC_USDC` 得到 `BTCUSDC`、`BTC-USD-SWAP` 得到 `BTCUSDSWAP`
+        （计价币被并进币种）⇒ 先按分隔符取首段，再对无分隔符写法剥计价币后缀。
+
+    为什么值得修：它被面板/因子/符号归一等**多处共用**；返回 `GATE:BTC` 这种值会让
+    "按币种匹配"静默失配（本会话已多次遇到"同义异写"造成的静默）。
+    """
+    text = str(symbol or "").strip().upper()
+    if ":" in text:                                   # GATE:BTC_USDT → BTC_USDT
+        text = text.rsplit(":", 1)[1]
+    for sep in ("-", "_", "/"):                       # BTC-USDT-SWAP / BTC_USDT → BTC
+        if sep in text:
+            text = text.split(sep)[0]
             break
-    return s.replace("-", "").replace("_", "")
+    for quote in _QUOTE_SUFFIXES:                     # BTCUSDT / 1000PEPEUSDT → BTC / 1000PEPE
+        if text.endswith(quote) and len(text) > len(quote):
+            text = text[: -len(quote)]
+            break
+    return text
 
 
 class BaseExchangeAdapter:

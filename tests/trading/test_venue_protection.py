@@ -1370,7 +1370,10 @@ class ContractMatchRobustnessTest(unittest.TestCase):
     def test_base_of_strips_venue_prefix_and_normalizes_spelling(self):
         from scripts.trader.venue_protection import _base_of
         self.assertEqual(_base_of("GATE:BTC_USDT"), "BTC")
-        self.assertEqual(_base_of("BINANCE:XRPUSDT"), "XRPUSDT")
+        # 第一百八十五刀：本函数改为**委派**给 `canonical_base`（唯一实现），于是
+        # `BINANCE:XRPUSDT` 现在也剥掉计价币 → `XRP`（此前是 `XRPUSDT`，那是第二份拼写）
+        self.assertEqual(_base_of("BINANCE:XRPUSDT"), "XRP")
+        self.assertEqual(_base_of("BTCUSDT"), "BTC")
         self.assertEqual(_base_of("BTC_USDT"), "BTC")
         self.assertEqual(_base_of("ETH-USDT-SWAP"), "ETH")
         self.assertEqual(_base_of(""), "")

@@ -199,11 +199,9 @@ def _leg_symbol(row: Dict[str, Any]) -> str:
                       raw.get("symbol"), raw.get("contract")):
         text = str(candidate or "").strip()
         if text:
-            base = text.split("-")[0].split("_")[0].upper()
-            for q in ("USDT", "USDC", "USD"):
-                if base.endswith(q) and len(base) > len(q):
-                    base = base[: -len(q)]
-            return base
+            # 第一百八十五刀：不再自己拼一遍归一 —— 委派给唯一实现（见 `_base_of`）。
+            from r20_backend.exchanges.base import canonical_base
+            return canonical_base(text)
     return ""
 
 
@@ -373,18 +371,18 @@ def _norm_contract(text: Any) -> str:
 
 
 def _base_of(symbol: Any) -> str:
-    """从合约/合成 id 里取**币种**（归一形态，第一百八十刀）。
+    """从合约/合成 id 里取**币种**（第一百八十刀引入，第一百八十五刀改为**委派**）。
 
-    为什么单独成函数：本模块原来的写法是 `str(symbol).split("-")[0].split("_")[0].upper()` ——
-    对合成 id `GATE:BTC_USDT` 会得到 `"GATE:BTC"`，于是"要求合约匹配"时**一条腿都匹配不上**：
-    `covered=0`、`coverage_ok=False` ⇒ 报出一个**假缺口**（线上会因此重复挂腿；本刀实测确认）。
+    为什么委派：本仓"任意写法 → 裸币种"的语义**已经有唯一实现**
+    （`r20_backend.exchanges.base.canonical_base`，面板/因子/符号归一都在用；
+    `scripts/ai_brain_trader.py` 也早就在 import 它）。本函数此前又写了一份，于是两者在
+    `GATE:BTC_USDT`（前缀）与 `BTC_USDC`（非 USDT 计价）上**给出不同答案** ——
+    同一语义写两遍必然漂移，这里改为直接调用那一处。
+
+    惰性导入：避免后端包在 import 期反向拉起本模块（本模块被面板导入）。
     """
-    text = str(symbol or "").strip()
-    if ":" in text:
-        text = text.rsplit(":", 1)[1]          # 剥场所前缀：GATE:BTC_USDT → BTC_USDT
-    for sep in ("-", "_", "/"):
-        text = text.split(sep)[0]              # 取币种段：BTC_USDT → BTC
-    return _norm_contract(text)
+    from r20_backend.exchanges.base import canonical_base
+    return canonical_base(str(symbol or ""))
 
 
 def _leg_contracts(row: Dict[str, Any]) -> List[str]:

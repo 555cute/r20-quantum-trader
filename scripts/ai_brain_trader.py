@@ -317,9 +317,16 @@ def canonical_position_inst_id(raw: Any) -> str:
         if current is None or _prefer_pool_inst(iid, current):
             pool_by_base[base] = iid
     base = _canonical_base_name(bare)
-    if base in pool_by_base:
+    # 第一百八十五刀：`canonical_base` 修好"非 USDT 计价"的提取后（`BTC-USDC` → `BTC`、
+    # `BTC-USD-SWAP` → `BTC`），**池查找必须加一道"标准形态"闸**，否则币本位/日期合约
+    # 会因为币种相同而被映射到池内的 **USDT 永续**（`BTC-USD-SWAP` → `BTC-USDT-SWAP`）——
+    # 那是**换了下单标的**，直接违背本函数"其余原样保留，绝不假装认识"的契约
+    # （既有用例 `test_unknown_forms_are_preserved_verbatim` 当场判红，救回一刀）。
+    standard = bool(base) and bare in (base, f"{base}USDT", f"{base}_USDT",
+                                       f"{base}-USDT", f"{base}-USDT-SWAP")
+    if standard and base in pool_by_base:
         return pool_by_base[base]
-    if base and bare in (base, f"{base}USDT", f"{base}_USDT", f"{base}-USDT", f"{base}-USDT-SWAP"):
+    if standard:
         return f"{base}-USDT-SWAP"
     return text
 

@@ -89,6 +89,7 @@
 | 首值优先的登记表不得静默任意 | 同币多合约时 `pool_by_base.setdefault(base, iid)` 让「选哪个合约」取决于配置**排列顺序**（改一行配置就换下单标的）⇒ 改为与顺序无关的确定性优选（USDT 永续优先，其次字典序）；真机核对当前 9 个目标合约同币重复为 0（潜在风险，非现行错误）| 防 | `scripts/ai_brain_trader.py` | `tests/audit/test_audit_config_p4_cleanup.py::InstrumentPoolTrustTests` |
 | 同币多仓必须披露 | 归属层 `pos_by_base.setdefault(base, p)` 在同币**多仓**（对冲模式/异常数据）时只留首个 ⇒ 腿会全对到那一个仓位上、另一侧**静默消失**；现披露为 `ambiguous_positions`（审计 attribution 段返回，运营可在预演接口看到）| 披露 | `scripts/trader/venue_protection.py` | `tests/trading/test_venue_protection.py::AmbiguousPositionsTest` |
 | 指标名的键只能有一种拼法 | `market_data_service` 原有**三种**规范化（MCP 去横杠、REST 保留横杠、本地计算去横杠与下划线）⇒ 同一指标可能有两个键：读者按一种取值而生产者按另一种存（读不到≠没有），且 `missing` 判定失明 ⇒ 每轮白算本地指标。现统一到`_indicator_key`（唯一一处，源码扫描门钉住）| 防 | `scripts/market_data_service.py` | `tests/audit/test_indicator_key_single_spelling.py::IndicatorKeySingleSpellingTest` |
+| 币种基名只有一处实现 | `canonical_base` 违背自身 docstring（"任意写法→裸币种"）：合成 id 得 `GATE:BTC`、`BTC_USDC` 得 `BTCUSDC`；`_base_of`/`_leg_symbol` 各写一份 ⇒ 三处互相矛盾（按币种匹配静默失配）。修法：`canonical_base` 补前缀剥离与计价币剥离，两处**委派**给它；且池映射必须加"标准形态"闸，否则币本位 `BTC-USD-SWAP` 会因币种相同被换到池内 `BTC-USDT-SWAP`（换下单标的）| 防 | `r20_backend/exchanges/base.py` | `tests/audit/test_symbol_base_consistency.py::BaseNameConsistencyTest` |
 <!-- anchors:end -->
 
 ## 3. 抽取门与"文档化差异"
