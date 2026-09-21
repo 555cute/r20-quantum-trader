@@ -363,6 +363,57 @@ def protection_trigger_type_fields(legs: Optional[Sequence[Dict[str, Any]]],
     return out
 
 
+def _norm_contract(text: Any) -> str:
+    """合约串归一：只留字母数字并大写（`BTC_USDT` / `BTCUSDT` / `BTC-USDT-SWAP` → `BTC…`）。
+
+    各所拼法不同（Gate 用 `BTC_USDT`、Binance 用 `BTCUSDT`、OKX 用 `BTC-USDT-SWAP`），
+    而跨所持仓的 `inst_id` 又是**合成 id**（`GATE:BTC_USDT`）。不归一就没法可靠比较。
+    """
+    return "".join(ch for ch in str(text or "").upper() if ch.isalnum())
+
+
+def _base_of(symbol: Any) -> str:
+    """从合约/合成 id 里取**币种**（归一形态，第一百八十刀）。
+
+    为什么单独成函数：本模块原来的写法是 `str(symbol).split("-")[0].split("_")[0].upper()` ——
+    对合成 id `GATE:BTC_USDT` 会得到 `"GATE:BTC"`，于是"要求合约匹配"时**一条腿都匹配不上**：
+    `covered=0`、`coverage_ok=False` ⇒ 报出一个**假缺口**（线上会因此重复挂腿；本刀实测确认）。
+    """
+    text = str(symbol or "").strip()
+    if ":" in text:
+        text = text.rsplit(":", 1)[1]          # 剥场所前缀：GATE:BTC_USDT → BTC_USDT
+    for sep in ("-", "_", "/"):
+        text = text.split(sep)[0]              # 取币种段：BTC_USDT → BTC
+    return _norm_contract(text)
+
+
+def _leg_contracts(row: Dict[str, Any]) -> List[str]:
+    """该腿行里所有**可能表示合约**的串（归一后）。用于"这腿是不是本仓合约"的判断。"""
+    initial = row.get("initial") if isinstance(row.get("initial"), dict) else {}
+    out = []
+    for value in (row.get("contract"), row.get("symbol"), row.get("inst_id"), row.get("instId"),
+                  initial.get("contract"), initial.get("symbol")):
+        norm = _norm_contract(value)
+        if norm:
+            out.append(norm)
+    return out
+
+
+def _leg_matches_base(row: Dict[str, Any], base: str) -> bool:
+    """这条腿是否属于 `base` 这个币种。
+
+    ⚠️ 用"归一后 **前缀相等**"而不是原来的"原始串子串包含"：
+    子串包含会把 `WBTCUSDT`（包装币）当成 `BTC` 的腿；前缀相等不会。
+    两种常见形态都覆盖：`base="BTC"` ↔ `BTCUSDT`；`base="BTCUSDT"` ↔ `BTC_USDT`。
+    """
+    if not base:
+        return True
+    for norm in _leg_contracts(row):
+        if norm == base or norm.startswith(base) or base.startswith(norm):
+            return True
+    return False
+
+
 def scan_protective_orders(rows: Optional[Sequence[Dict[str, Any]]], *,
                            symbol: str,
                            pos_side: str,
@@ -378,7 +429,7 @@ def scan_protective_orders(rows: Optional[Sequence[Dict[str, Any]]], *,
     - `symbol` 默认不参与过滤（调用方通常已按合约查询）；`require_symbol_match=True`
       时才要求行内合约串包含币种，供"一次拉全量"的调用方使用。
     """
-    base = str(symbol or "").split("-")[0].split("_")[0].upper()
+    base = _base_of(symbol)
     want_close_side = _close_side_of(pos_side)
     size = max(0.0, float(position_size or 0.0))
 
@@ -399,13 +450,8 @@ def scan_protective_orders(rows: Optional[Sequence[Dict[str, Any]]], *,
         if kind is None:
             foreign += 1
             continue
-        if require_symbol_match and base:
-            initial = row.get("initial") if isinstance(row.get("initial"), dict) else {}
-            hay = " ".join(str(row.get(k) or "") for k in
-                           ("contract", "symbol", "inst_id", "instId")).upper()
-            hay += " " + str(initial.get("contract") or "").upper()
-            if base not in hay:
-                continue
+        if require_symbol_match and base and not _leg_matches_base(row, base):
+            continue
         # 第一百七十九刀：方向判据**改用唯一来源** `_leg_position_side`（真单核对过 Gate
         # `auto_size`/`direction` 与 Binance `side` 的语义），而不是本函数原来那段只看
         # `side`/`order_side` 的比较 —— 真机实测：**Gate 的 6 条腿一条都读不出 side**，
@@ -529,10 +575,14 @@ def ensure_venue_protection(ad: Any, *, symbol: str, pos_side: str, position_siz
                 "detail": f"保护单列表读取失败: {exc}",
                 "placed": {}, "cancelled": [], "kept_old": [], "scan": None}
 
+    # 第一百八十刀：**双保险** —— 本处虽已按合约取腿（`list_protective_orders(symbol)`），
+    # 但那是"信任适配器尊重参数"。开启 `require_symbol_match` 后，即使某所适配器忽略参数
+    # 返回全量腿，别的币的腿也不会被算进这个仓位的覆盖（`symbol` 常是合成 id，见 `_base_of`）。
     scan = scan_protective_orders(rows, symbol=symbol, pos_side=pos_side,
                                   position_size=position_size, now_s=now_s,
                                   renew_within_s=renew_within_s,
-                                  tolerance_ratio=tolerance_ratio)
+                                  tolerance_ratio=tolerance_ratio,
+                                  require_symbol_match=True)
     protected_now = bool(scan["has_live_sl"]) and scan["coverage_ok"] is not False
     result = {"ok": True, "protected_now": protected_now, "stage": "noop",
               "detail": "保护覆盖正常", "placed": {}, "cancelled": [], "kept_old": [],
@@ -997,11 +1047,17 @@ def audit_cross_venue_protection(xv_positions_by_venue: Optional[Dict[str, Any]]
                     report["errors"].append({"venue": venue, "inst": symbol, "stage": "list",
                                              "detail": f"{type(exc).__name__}: {exc}"})
                     continue
+                # 第一百八十刀：同 ensure 的双保险（本处 symbol 是合成 id `GATE:BTC_USDT`）。
                 scan = scan_protective_orders(prows, symbol=symbol, pos_side=pos_side,
                                               position_size=size, now_s=now,
-                                              renew_within_s=renew_within_s)
+                                              renew_within_s=renew_within_s,
+                                              require_symbol_match=True)
                 would = "noop"
-                if not scan["has_live_sl"]:
+                # 第一百八十刀：判据用 `needs_repair`（= 没有活止损 **或** 覆盖不足），
+                # 而不是只看 `has_live_sl`。此前"有活止损但量不够"（覆盖率 40% 这种）
+                # 会落成 `noop` ⇒ **既不进 critical 也不进 would**，运营完全看不到缺口
+                # （本刀的新用例当场把它抓出来）。
+                if scan["needs_repair"]:
                     would = "repair"
                 elif scan["needs_renew"]:
                     would = "renew"
@@ -1017,7 +1073,14 @@ def audit_cross_venue_protection(xv_positions_by_venue: Optional[Dict[str, Any]]
                         "foreign_count": scan["foreign_count"]}
                 if would == "repair":
                     venue_stat["missing"] += 1
-                    report["critical"].append(item)
+                    if scan["has_live_sl"]:
+                        # 有活止损、只是**量不够/方向不覆盖** ⇒ 需要补量。
+                        # 这不改 `critical` 的语义（docstring：critical = **完全没有**止损腿）。
+                        item["why"] = ("覆盖不足：有活止损但量不够（covered="
+                                       f"{scan.get('covered_size')}, missing={scan.get('missing_size')}）")
+                        report["would"].append(item)
+                    else:
+                        report["critical"].append(item)
                 elif would in ("renew", "verify"):
                     report["would"].append(item)
                 if would == "renew":

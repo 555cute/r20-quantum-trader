@@ -81,6 +81,8 @@
 | 触发价类型与保护判定**分开回答** | 类型回答「按什么价触发」；保护状态回答「腿在不在/量够不够/活不活」。类型**不得**进入任何判定条件：未上报 ⇒ 只 disclose `unknown`，**不**降级保护状态；类型是 `mark` 也**不**给覆盖背书（防过度保守与虚假安心两个方向）| 防 | `scripts/trader/venue_protection.py` | `tests/trading/test_trigger_type_verdict_boundary.py::TriggerTypeStaysOutOfVerdictsTest` |
 | 已过期 ≠ 覆盖 | 到期时间**确知已过**的腿不得计入 `covered_size`、不得算 `has_live_sl`、不得让整仓平腿补满覆盖（否则 `protected_now=True`、`needs_repair=False`，审计只报 renew 而**不进 critical** ⇒ 裸奔仓位被报成已保护）；`never`（显式 0/GTC）算活且不复验；到期**缺字段**算活但必须 `needs_verify`（不可判定≠安全，也不许过度报警）| 吼 | `scripts/trader/venue_protection.py` | `tests/trading/test_venue_protection.py::ExpiredLegIsNotCoverageTest` |
 | 覆盖链的方向判据只有一处 | 覆盖必须用 `_leg_position_side`（真单核对过 Gate `auto_size`/`direction` 与 Binance `side`），**不得**再写第二份只看 `side` 的比较：真机实测 Gate 6/6 条腿读不出 `side` ⇒ 旧过滤对 Gate **完全失效**，平空腿会被算进多仓覆盖（attribution 早在报 side_mismatch，只有覆盖链在瞎）；方向**读不出**时沿用既有"照旧计入"口径（残留口子已登记：接入不报方向的所须改判 `coverage_unknown`）| 防 | `scripts/trader/venue_protection.py` | `tests/trading/test_venue_protection.py::LegDirectionIsCoverageTest` |
+| 串币覆盖（合约匹配）| 覆盖必须**只**统计本仓合约的腿：`_base_of` 先剥合成 id 的场所前缀（`GATE:BTC_USDT` → `BTC`，否则一开过滤就全丢 ⇒ **假缺口** ⇒ 重复挂腿），再按**归一后前缀相等**比较（`WBTCUSDT` 不得当成 `BTC`）；`ensure`/审计两个写单相关站点都显式 `require_symbol_match=True`（不假定适配器会尊重 symbol 参数）| 防 | `scripts/trader/venue_protection.py` | `tests/trading/test_venue_protection.py::ContractMatchRobustnessTest` |
+| 覆盖不足必须被看见 | 有活止损但**量不够/方向不覆盖** ⇒ `would` 取 `repair` 且进 `would` 列表（此前只看 `has_live_sl` ⇒ 落成 `noop`，既不进 `critical` 也不进 `would` ⇒ 静默缺口）；`critical` 语义**不变**（＝完全没有止损腿）| 吼 | `scripts/trader/venue_protection.py` | `tests/trading/test_venue_protection.py::ContractMatchRobustnessTest` |
 <!-- anchors:end -->
 
 ## 3. 抽取门与"文档化差异"

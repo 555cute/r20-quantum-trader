@@ -1346,3 +1346,103 @@ class LegDirectionIsCoverageTest(unittest.TestCase):
         self.assertEqual(_leg_position_side(leg), "long")
         leg2 = {"initial": {"contract": "BTC_USDT", "auto_size": "close_short"}}
         self.assertEqual(_leg_position_side(leg2), "short")
+
+class ContractMatchRobustnessTest(unittest.TestCase):
+    """第一百八十刀：合约匹配的**双保险**（防"别的币的腿算进本仓覆盖"）。
+
+    背景：`scan_protective_orders` 的 `symbol` 默认**不参与过滤**（给"已按合约取腿"的调用方用）。
+    一旦调用方是"一次拉全量"，忘了开 `require_symbol_match` 就会串币 —— 本仓真机出过
+    （面板侧注释记着"UNI 空仓一度算到 11 张腿，其中大部分是 ETH/SOL/XRP 的"）。
+    本刀把审计/ensure 两处也开上该开关，并先修好**合成 id 的币种解析**，否则一开就会
+    全丢（`GATE:BTC_USDT` → `GATE:BTC` ⇒ 假缺口 ⇒ 线上重复挂腿）。
+    """
+
+    @staticmethod
+    def _leg(contract, *, auto="close_long", size=0, tag="t-r20sl1"):
+        now = time.time()
+        return {"symbol": contract, "direction": "short",
+                "initial": {"contract": contract, "size": size, "text": tag, "is_close": False,
+                            "is_reduce_only": True, "auto_size": auto},
+                "trigger": {"price": "60000", "expiration": 0},
+                "create_time": (now - 60) * 1000}
+
+    def test_base_of_strips_venue_prefix_and_normalizes_spelling(self):
+        from scripts.trader.venue_protection import _base_of
+        self.assertEqual(_base_of("GATE:BTC_USDT"), "BTC")
+        self.assertEqual(_base_of("BINANCE:XRPUSDT"), "XRPUSDT")
+        self.assertEqual(_base_of("BTC_USDT"), "BTC")
+        self.assertEqual(_base_of("ETH-USDT-SWAP"), "ETH")
+        self.assertEqual(_base_of(""), "")
+
+    def test_composite_id_still_matches_its_own_legs(self):
+        """回归：合成 id + 开启合约匹配**不得**把本仓自己的腿全丢掉（那会报假缺口）。"""
+        now = time.time()
+        for sym in ("GATE:BTC_USDT", "BINANCE:BTCUSDT", "GATE:BTC_USDT"):
+            with self.subTest(sym=sym):
+                v = scan_protective_orders([self._leg("BTC_USDT")], symbol=sym, pos_side="long",
+                                          position_size=1.0, now_s=now, require_symbol_match=True)
+                self.assertEqual(v["covered_size"], 1.0, f"{sym} 匹配不到自己的腿 ⇒ 假缺口")
+                self.assertTrue(v["coverage_ok"])
+
+    def test_other_symbol_is_not_counted(self):
+        now = time.time()
+        v = scan_protective_orders([self._leg("ETH_USDT")], symbol="GATE:BTC_USDT", pos_side="long",
+                                   position_size=1.0, now_s=now, require_symbol_match=True)
+        self.assertEqual(v["covered_size"], 0.0, "别的币的腿被算进本仓覆盖 ⇒ 假安心")
+        self.assertEqual(v["ours"], [])
+
+    def test_wrapped_coin_does_not_match_the_underlying(self):
+        """前缀相等（而非原始子串）：`WBTCUSDT` 不得被当成 `BTC` 的腿。"""
+        now = time.time()
+        v = scan_protective_orders([self._leg("WBTC_USDT")], symbol="GATE:BTC_USDT",
+                                   pos_side="long", position_size=1.0, now_s=now,
+                                   require_symbol_match=True)
+        self.assertEqual(v["covered_size"], 0.0)
+
+    def test_the_scan_default_still_ignores_symbol(self):
+        """默认口径不变（既有调用方依赖它），只有显式开启才过滤。"""
+        now = time.time()
+        v = scan_protective_orders([self._leg("ETH_USDT")], symbol="BTC", pos_side="long",
+                                   position_size=1.0, now_s=now)
+        self.assertEqual(v["covered_size"], 1.0)
+
+    def test_audit_is_robust_to_an_adapter_that_ignores_the_symbol_argument(self):
+        """**本刀重点**：适配器忽略 `symbol`（返回全量腿）时，审计也不得把别币的腿算进覆盖。"""
+        now = time.time()
+        # ⚠️ 夹具必须避开 `auto_size`/`is_close`：那表示"**平掉全部**仓位"（`_is_full_close`），
+        # 覆盖会正确地补满（我第一版用了 `auto_size=close_long` ⇒ 审计判"已保护"是对的，
+        # 是我的夹具错了）。这里要的是**部分量**腿 ⇒ 只用 `direction` 表方向。
+        def _partial(contract, size, tag):
+            return {"symbol": contract,
+                    "initial": {"contract": contract, "size": size, "text": tag,
+                                "is_close": False, "direction": "short"},
+                    "trigger": {"price": "60000", "expiration": 0},
+                    "create_time": (now - 60) * 1000}
+        partial = _partial("BTC_USDT", 4, "t-r20sl1")
+        eth_big = _partial("ETH_USDT", 90, "t-r20sl2")
+        gate = MagicMock()                      # 故意**无视** symbol 参数，返回全量腿
+        gate.list_protective_orders.return_value = [partial, eth_big]
+        reg = MagicMock()
+        reg.get_adapter.side_effect = lambda v, environment=None: {"gate": gate}[v]
+        rep = audit_cross_venue_protection(
+            {"gate": [{"venue": "gate", "inst_id": "GATE:BTC_USDT", "base": "BTC",
+                       "side": "long", "size_signed": 10.0}]},
+            venue_registry=reg, environment="demo", now_s=now, dry_run=True)
+        self.assertEqual(rep["critical"], [],
+                         "critical 的语义是'**完全没有**止损腿'；这里有活止损，不该进 critical")
+        items = rep["would"] or []
+        self.assertTrue(items, "覆盖不足必须被**看见**（此前落成 noop ⇒ 不在 critical/would 里，静默）")
+        item = items[0]
+        self.assertEqual(item["covered_size"], 4.0,
+                         "ETH 的 90 张腿被算进 BTC 仓位 ⇒ 串币假安心（本刀要防的正是它）")
+        self.assertFalse(item["coverage_ok"])
+        self.assertEqual(item["would"], "repair")
+        self.assertIn("覆盖不足", item.get("why") or "", "要让运营一眼看出是'量不够'而不是'没有腿'")
+
+    def test_both_writer_sites_pass_the_symbol_flag(self):
+        import pathlib as _p
+        src = (_p.Path(__file__).resolve().parents[2] / "scripts" / "trader"
+               / "venue_protection.py").read_text(encoding="utf-8")
+        # 注意：docstring 里也提到该开关 ⇒ 只数**调用实参**那种写法（带右括号）
+        self.assertEqual(src.count("require_symbol_match=True)"), 2,
+                         "ensure 与 audit 两个站点都应显式开启合约匹配")
