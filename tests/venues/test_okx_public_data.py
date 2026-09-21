@@ -107,5 +107,45 @@ class ScalarParseTest(_Base):
                 self.assertEqual(self.ad.fetch_top_trader_ratio("BTC"), want)
 
 
+class EarlyReturnsTest(_Base):
+    """各 `fetch_*` 的**早退**：没有数据 ⇒ `None`（不伪装成 0 或空结构）。"""
+
+    def _stub(self, payload):
+        self.ad._get = lambda path, params=None, **k: payload
+        return self.ad
+
+    def test_ticker_without_rows_is_none(self):
+        for payload in (None, [], {}):
+            with self.subTest(payload=payload):
+                self.assertIsNone(self._stub(payload).fetch_ticker("BTC"))
+
+    def test_candles_without_rows_is_none(self):
+        for payload in (None, [], {}):
+            with self.subTest(payload=payload):
+                self.assertIsNone(self._stub(payload).fetch_candles("BTC"))
+
+    def test_orderbook_without_data_is_none(self):
+        for payload in (None, [], {}):
+            with self.subTest(payload=payload):
+                self.assertIsNone(self._stub(payload).fetch_orderbook("BTC"))
+
+    def test_load_spec_without_match_is_none(self):
+        for payload in (None, []):
+            with self.subTest(payload=payload):
+                self.assertIsNone(self._stub(payload)._load_spec("BTC-USDT-SWAP"),
+                                  "查不到规格 ⇒ None（不编造）")
+
+    def test_load_spec_with_a_dict_payload_crashes(self):
+        """⚠️ **实测边界（列待议）**：`_load_spec` 对非列表回包直接下标取用 ⇒ 传 dict 时抛
+        `KeyError: 0`（而非「结构不对 ⇒ `None`」）。
+
+        这是本轮第三处**同类缺口**（Gate `positions()`、OKX `fetch_funding_rate`、此处）——
+        形态一致：**缺元素/结构守卫 ⇒ 单条坏负载把整次读取打成异常**。
+        本仓别处（Binance 各取数方法）都有守卫 ⇒ 记为待议、未擅自改。
+        """
+        with self.assertRaises(KeyError):
+            self._stub({"instId": "BTC-USDT-SWAP"})._load_spec("BTC-USDT-SWAP")
+
+
 if __name__ == "__main__":
     unittest.main()
