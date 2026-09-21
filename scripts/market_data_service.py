@@ -372,6 +372,21 @@ def fetch_orderbook_depth(inst_id: str, sz: int = 5, timeout: float = 3.5) -> Op
 # 3. Technical Indicators (ADX, KDJ, BBWIDTH, CMF, RSI, etc.)
 # ---------------------------------------------------------------------------
 
+def _indicator_key(name: Any) -> str:
+    """指标名的**唯一**规范化形态（大写、去掉 `-` 与 `_`）。
+
+    为什么必须只有一处（第一百八十四刀）：本模块原来有**三种**写法 ——
+    MCP 分支 `ind.upper().replace("-","")`、REST 兜底分支 `ind.upper()`（**保留横杠**）、
+    本地计算/单指标 `ind.upper().replace("-","").replace("_","")`。
+    ⇒ 同一个指标可能同时存在两种键（`"EMA20"` 与 `"EMA-20"`），后果有两个方向：
+      - **读者取不到**：消费方按一种拼法取值、生产者按另一种存 ⇒ 静默"没有"（读不到≠没有）；
+      - **`missing` 判定失明**：它按去横杠比较，于是 REST 已存 `"EMA-20"` 时仍判为缺失 ⇒
+        每轮都白算一遍本地指标（浪费算力，且可能把同一指标写成两个键）。
+    今天线上消费方用的名字（`adx`/`kdj`/`bbwidth`/`cmf`）都不带分隔符，所以没炸 —— 属**潜在**缺陷。
+    """
+    return str(name or "").upper().replace("-", "").replace("_", "")
+
+
 def _local_math_indicators(
     inst_id: str,
     indicators: List[str],
@@ -394,7 +409,7 @@ def _local_math_indicators(
 
     result: Dict[str, Dict[str, str]] = {}
     for ind in indicators:
-        key = ind.upper().replace("-", "").replace("_", "")
+        key = _indicator_key(ind)
         try:
             if key == "ADX" and len(closes) >= 30:
                 trs, pdms, ndms = [], [], []
@@ -477,7 +492,7 @@ def fetch_indicators_batch(
         try:
             tfs = data["data"][0].get("data", [{}])[0].get("timeframes", {}).get(bar, {}).get("indicators", {})
             for ind in indicators:
-                key = ind.upper().replace("-", "")
+                key = _indicator_key(ind)
                 items = tfs.get(key, [])
                 if items and isinstance(items[0], dict):
                     result[key] = items[0].get("values", {})
@@ -488,14 +503,14 @@ def fetch_indicators_batch(
     
     # If MCP endpoint failed, fallback to querying individual indicator via REST or local math
     for ind in indicators:
-        key = ind.upper()
+        key = _indicator_key(ind)
         if key not in result:
             val = fetch_single_indicator(inst_id, ind, bar=bar, timeout=timeout)
             if val:
                 result[key] = val
     
     # 末级兜底：MCP 批量接口与逐指标 REST 全灭 → 本地蜡烛纯 Python 计算
-    missing = [ind for ind in indicators if ind.upper().replace("-", "") not in result]
+    missing = [ind for ind in indicators if _indicator_key(ind) not in result]
     if missing:
         for k, v in _local_math_indicators(inst_id, missing, bar).items():
             result.setdefault(k, v)
@@ -510,7 +525,7 @@ def fetch_single_indicator(
     timeout: float = 3.5,
 ) -> Dict[str, Any]:
     """Fetch or compute a single indicator: MCP REST，失败落纯 Python 本地数学。"""
-    key = indicator.upper().replace("-", "").replace("_", "")
+    key = _indicator_key(indicator)
     bar = normalize_bar(bar)
     payload = {
         "instId": inst_id,
