@@ -91,6 +91,14 @@ class NormalizeOrderItemTest(_Base):
         bad = self._norm({"size": 1, "amount": "abc"})
         self.assertEqual(bad["amount"], "abc", "坏 amount ⇒ 原样保留（不炸）")
 
+    def test_unparseable_size_is_skipped_not_fatal(self):
+        """`size` 不是数字 ⇒ **跳过该来源**继续找（不炸、也不把方向猜成 sell）。"""
+        r = self._norm({"size": "abc", "amount": "-4"})
+        self.assertEqual(r["size_signed"], -4.0, "坏 size ⇒ 退到可解析的 amount")
+        r2 = self._norm({"size": "abc"})
+        self.assertEqual(r2["size_signed"], 0.0)
+        self.assertEqual(r2["side"], "", "两个来源都坏 ⇒ 没方向（空串），不猜")
+
 
 class OpenOrdersTest(_Base):
     def test_bad_rows_and_non_list_are_empty(self):
@@ -126,6 +134,11 @@ class OpenOrdersTest(_Base):
         self._req(GateAPIError("INVALID_KEY", "bad key"))
         with self.assertRaises(GateAPIError):
             self.ad.list_open_orders("BTC")
+
+    def test_non_list_payload_for_a_contract_is_empty(self):
+        """带 `contract` 查询返回非 list（网关 HTML 等）⇒ `[]`（结构不对不是「有挂单」）。"""
+        self._req({"detail": "upstream"})
+        self.assertEqual(self.ad.list_open_orders("BTC"), [])
 
 
 if __name__ == "__main__":
