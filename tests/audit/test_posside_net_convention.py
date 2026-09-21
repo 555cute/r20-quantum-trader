@@ -149,8 +149,6 @@ class PosSideNetConventionTest(unittest.TestCase):
                          "允许清单里的自洽站点被误判")
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
 
 def find_posside_defaults(source: str):
     """返回 `get("posSide", <默认值>)` 的 (行号, 默认值) 列表。"""
@@ -252,3 +250,7 @@ class OkxEndpointFieldNamesTest(unittest.TestCase):
     def test_order_payloads_use_td_mode(self):
         src = (ROOT / "scripts" / "okx_rest.py").read_text(encoding="utf-8")
         self.assertIn('"tdMode": td_mode', src, "下单/算法单载荷必须用 tdMode")
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

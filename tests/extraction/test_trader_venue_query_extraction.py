@@ -157,8 +157,6 @@ class VenueQueryVerbatimTest(unittest.TestCase):
         self.assertEqual(o, _body_dump(_get_func(ast.parse(base), "f")), "自检：同文误报")
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 class NetPosSideCloseVerifyTest(unittest.TestCase):
     """第一百八十六刀：**净持仓**账户下平仓核验不得假报"已平"。
@@ -205,3 +203,7 @@ class NetPosSideCloseVerifyTest(unittest.TestCase):
         ok, detail = self._run([])
         self.assertTrue(ok, detail)
         self.assertIn("closed", detail)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -94,6 +94,7 @@
 | posSide 缺失默认值必须一致 | 缺字段时默认 `"net"`（全仓 11 处），不得写 `""`：`""` 与 `"net"` 配不上 ⇒ 明明有仓位却"匹配不到"（净持仓模式更易触发）。回退链末端（`side → posSide → ""`）与展示文案（`"—"`/`"long"`）以及"上游模式闸已拦"的位置列入带理由的允许清单；另钉住 OKX **刻意**的端点字段差异（close-position 用 `mgnMode`、下单用 `tdMode`，统一则 400）| 防 | `r20_backend/okx_trade_service.py` | `tests/audit/test_posside_net_convention.py::PosSideDefaultConsistencyTest` |
 | 秒/毫秒分界只有一处实现 | 判据 `>= 1e11 ⇒ 毫秒` 此前有**四处**写法（`time_utils.parse_beijing`、`multi_venue`、`venue_protection` 的函数版与内联版）⇒ 改一处忘三处；且分界写成 `1e9` 会把 epoch 秒误判成毫秒再除 1000（"还剩 7 天"算成"已过期"，本仓真实踩过）。唯一实现＝`r20_backend/time_utils.py` 的 `EPOCH_MS_THRESHOLD`/`to_seconds`/`to_millis`，其余委派；门按 AST 钉住"数值常量 `1e11` 只许出现在该文件"| 防 | `r20_backend/time_utils.py` | `tests/audit/test_epoch_unit_converter.py::EpochUnitConverterTest` |
 | 腿的合约可能在嵌套字段，不许只读扁平键 | Gate 保护腿的合约在 `initial.contract`（真机核对：扁平 `symbol` 为空）⇒ 接线层只读 `l.get("symbol")` 会**静默排除全部 Gate 腿**，「平仓后撤掉可证明属于自己的腿」这条链从未覆盖 Gate（与线上遗留腿一致）。改用腿基名访问器（依次探 `initial.contract`/`contract`/`symbol`/`raw.*`）；同时 `canonical_inst` 补齐场所前缀剥离，与 `canonical_base` 同口径（一致性门含四个提取器）| 防 | `r20_backend/execution_router.py` | `tests/trading/test_close_cancels_protection.py::RouterCloseTest` |
+| 定义不得写在 `if __name__` 块内 | 粘在 `unittest.main()` 之后且保持缩进 ⇒ 该定义成为`if` 块体里的嵌套函数：语法合法、AST 正常、**pytest 永不收集**。第一百八十九刀真实发生：新用例一个都没跑，而"反向验证"依旧全绿（差点据此宣称验证通过）。门按 AST 钉住"块内不得有 def/class"，并以**真跑 pytest --collect-only** 证明块内用例收集数为 0（正常缩进者为 1）| 防 | `tests/trading/test_close_cancels_protection.py` | `tests/audit/test_defs_not_inside_main_block.py::DefsNotInsideMainBlockTest` |
 <!-- anchors:end -->
 
 ## 3. 抽取门与"文档化差异"
