@@ -155,5 +155,18 @@ class EarlyReturnsTest(_Base):
                 self.assertIsNone(self._stub(payload).fetch_candles("BTC"))
 
 
+
+    def test_ticker_with_unparsable_numbers_is_none(self):
+        """★ 数值字段解析失败 ⇒ **整个 ticker 记 `None`**（不是「部分字段缺失但照发」）。
+
+        半截的 ticker 比没有 ticker 更危险：价格/量能里缺一块，下游却按完整行情推理。
+        """
+        for payload in ([{"instId": "BTC-USDT-SWAP", "last": "abc"}],
+                        [{"instId": "BTC-USDT-SWAP", "last": "100", "volCcy24h": "x"}]):
+            with self.subTest(payload=payload):
+                self.assertIsNone(self._stub(payload).fetch_ticker("BTC"))
+
+
+
 if __name__ == "__main__":
     unittest.main()
