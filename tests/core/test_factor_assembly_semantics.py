@@ -7,7 +7,7 @@
 |---|---|
 | 动作派发 | `ai_dec.action` ＞ 状态文件 `ins.action` ＞ `WAIT`（**三级回退**）|
 | ★ 分数 | `BUY_LONG` ⇒ **2.5**；`SELL_SHORT` ⇒ **−2.5**；其余（含观望）⇒ **0.0** |
-| 价格 | 状态文件 `price`（且不得是 `None`/占位符）优先；两处都没有 ⇒ 占位符。⚠️「退到因子库」那一路**本轮未验证**（库文件的装载形状我还没读到）⇒ 不声称 |
+| 价格 | 状态文件 `price`（非 `None`/占位符）＞ 因子库 `price` ＞ 占位符 |
 | 24h 涨跌 | 实时 ticker 的 `chg24h` ＞ 因子库；★ 判据是 `is not None` ⇒ **0 不会被短路** |
 | 名称/类型 | `name`：池 ＞ 状态文件；`type` 缺省 `crypto` |
 | 持仓槽 | `position` = 该标的的持仓行（无持仓则为空）|
@@ -83,6 +83,41 @@ class AssemblySemanticsTest(unittest.TestCase):
         rows = self._run(decisions={"BTC-USDT-SWAP": {"raw_ticker": {"chg24h": 0}}},
                          lib={"BTC-USDT-SWAP": {"chg24h": 9.9}})
         self.assertEqual(rows[0]["chg24h"], 0, "0 是真实值（判 falsy 会把它当成「没有」）")
+
+    def test_price_falls_back_to_the_factor_library(self):
+        """★ 补上上一刀明确**未验证**的那一路（当时我把库文件的形状猜错了，见下条）。"""
+        rows = self._run(state={"instruments": [{"instId": "BTC-USDT-SWAP", "price": "--"}]},
+                         lib={"instruments": [{"instId": "BTC-USDT-SWAP", "price": 77.0}]})
+        self.assertEqual(rows[0]["price"], 77.0, "状态文件是占位符 ⇒ 退到因子库")
+
+    def test_factor_library_shape_is_instruments_list(self):
+        """★ **名字即语义 / 形状即契约**：因子库是 `{"instruments": [ {instId, ...} ]}`。
+
+        上一刀我用**扁平字典** `{instId: {...}}` 造夹具，于是"退到因子库"那一路断言失败 ——
+        **错的是我的夹具，不是代码**（本轮先读装载代码才定位）。本用例把这条形状契约钉住：
+        扁平形状**不被认领**，因此价格只能落到占位符。
+        """
+        rows = self._run(state={"instruments": [{"instId": "BTC-USDT-SWAP", "price": "--"}]},
+                         lib={"BTC-USDT-SWAP": {"price": 77.0}})
+        self.assertEqual(rows[0]["price"], "--",
+                         "扁平形状不被认领 ⇒ 占位符（这正是我上一刀夹具的错处）")
+
+    def test_24h_change_falls_back_to_the_library(self):
+        rows = self._run(lib={"instruments": [{"instId": "BTC-USDT-SWAP", "chg24h": 9.9}]})
+        self.assertEqual(rows[0]["chg24h"], 9.9, "没有实时 ticker ⇒ 用因子库")
+
+    def test_library_indicators_and_the_neutral_default(self):
+        """库里的 `trend_momentum` 指标；两处都没有时 `rsi` 落到 **50.0**。
+
+        ⚠️ 值得记一笔：`rsi` 读不到给 **50.0**（一个**看起来中性**的数值），而同行的 `adx`
+        读不到给占位符 —— 同一行里两种「读不到」表示法并存。本用例只钉现状；
+        「读不到是否该给中性数值」列为待议（与「读不到 ≠ 没有」相关）。
+        """
+        rows = self._run(lib={"instruments": [
+            {"instId": "BTC-USDT-SWAP", "trend_momentum": {"rsi_14": 61.5}}]})
+        self.assertEqual(rows[0]["rsi"], 61.5, "库里有指标就用库里的")
+        rows = self._run()
+        self.assertEqual(rows[0]["rsi"], 50.0, "两处都没有 ⇒ 中性默认值 50.0（现状，列待议）")
 
     def test_name_type_and_position_slot(self):
         rows = self._run()
