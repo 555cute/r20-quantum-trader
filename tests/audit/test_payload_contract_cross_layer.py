@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import re
 import unittest
 from pathlib import Path
@@ -147,3 +148,114 @@ class PayloadContractCrossLayerTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+# ---------------------------------------------------------------------------
+# 行契约（第一百九十八刀）：持仓/挂单/账户/因子等**行的字段**也要能被后端产出
+#
+# 与根级同理，只是"产出证据"更宽：字段可以出现在
+#   ① 真机缓存样本的对应行里（`data/dashboard_last_good.json`，真数据），或
+#   ② 后端/脚本代码里作为字符串字面量（生产者显式写出的键名），或
+#   ③ 匹配 f-string 派生的键名模式。
+# —— 三条都不满足 ⇒ 类型在承诺一个**永远不会出现**的字段（前端读到的是 undefined）。
+# ---------------------------------------------------------------------------
+
+CACHE_SAMPLE = ROOT / "data" / "dashboard_last_good.json"
+
+#: interface → 真机样本里对应的取值路径
+ROW_SAMPLE_PATHS = {
+    "AccountSummary": "account",
+    "PositionItem": "positions_summary.items",
+    "PendingOrderItem": "pending_orders",
+    "InstrumentFactor": "factors",
+    "PortfolioRiskRow": "portfolio_risk",
+    "LLMRuntime": "llm_runtime",
+    "MarketRegimeData": "market_regime",
+}
+
+#: 允许"类型声明、后端确实不产"的行字段（附理由）。本刀修完后为空。
+ROW_ALLOWLIST: dict[str, str] = {}
+
+
+def _interface_fields(iface: str) -> list:
+    src = TS_TYPES.read_text(encoding="utf-8")
+    m = re.search(rf"export interface {iface} \{{(.*?)\n\}}", src, re.S)
+    if not m:
+        raise AssertionError(f"TS 里找不到 interface {iface}（门已过期）")
+    fields, depth = [], 0
+    for line in m.group(1).splitlines():
+        stripped = line.strip()
+        if depth == 0:
+            mm = re.match(r"([A-Za-z_][A-Za-z0-9_]*)\??\s*:", stripped)
+            if mm:
+                fields.append(mm.group(1))
+        depth += stripped.count("{") - stripped.count("}")
+    return fields
+
+
+def _code_string_literals() -> set:
+    """后端/脚本里作为字符串字面量出现的名字（生产者显式写出的键名）。"""
+    names = set()
+    for root in ("r20_backend", "scripts"):
+        for path in (ROOT / root).rglob("*.py"):
+            if "__pycache__" in path.parts:
+                continue
+            try:
+                tree = ast.parse(path.read_text(encoding="utf-8"))
+            except SyntaxError:
+                continue
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Constant) and isinstance(node.value, str) \
+                        and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", node.value):
+                    names.add(node.value)
+    return names
+
+
+def _live_row(path: str) -> dict:
+    """真机缓存里的样例行；样本不在（干净 clone）⇒ 返回空字典，门靠代码证据。"""
+    if not CACHE_SAMPLE.exists():
+        return {}
+    try:
+        data = json.loads(CACHE_SAMPLE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    cur = data
+    for part in path.split("."):
+        if isinstance(cur, list):
+            cur = cur[0] if cur else {}
+        if not isinstance(cur, dict):
+            return {}
+        cur = cur.get(part, {})
+    if isinstance(cur, list):
+        cur = cur[0] if cur else {}
+    return cur if isinstance(cur, dict) else {}
+
+
+class RowContractCrossLayerTest(unittest.TestCase):
+    def test_every_declared_row_field_is_produced(self):
+        literals = _code_string_literals()
+        gaps = {}
+        for iface, path in ROW_SAMPLE_PATHS.items():
+            row = _live_row(path)
+            missing = [f for f in _interface_fields(iface)
+                       if f not in row and f not in literals and f not in ROW_ALLOWLIST]
+            if missing:
+                gaps[iface] = missing
+        self.assertEqual(gaps, {}, f"类型声明了、后端从不产出的行字段：{gaps}")
+
+    def test_row_scan_is_not_vacuous(self):
+        total = 0
+        for iface in ROW_SAMPLE_PATHS:
+            fields = _interface_fields(iface)
+            total += len(fields)
+            self.assertGreaterEqual(len(fields), 4, f"{iface} 只解析出 {len(fields)} 个字段")
+        self.assertGreaterEqual(total, 80, f"行契约字段总数只有 {total} ⇒ 门与实现脱节")
+        literals = _code_string_literals()
+        self.assertGreaterEqual(len(literals), 500, "代码字面量集合太小 ⇒ 扫描失效")
+        for must in ("instId", "upl", "posSide", "scaleOutPhase", "macro_assessment"):
+            self.assertIn(must, literals, f"生产者的键名 {must} 不在字面量集合里 ⇒ 判据漏了")
+
+    def test_teeth_on_a_field_nobody_produces(self):
+        literals = {"instId", "upl"}
+        declared = ["instId", "brand_new_row_field"]
+        gaps = [f for f in declared if f not in literals and f not in ROW_ALLOWLIST]
+        self.assertEqual(gaps, ["brand_new_row_field"], "无人产出的行字段没被抓到 ⇒ 门没有牙齿")

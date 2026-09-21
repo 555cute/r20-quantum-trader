@@ -1,11 +1,13 @@
 export interface AccountSummary {
+  // 第一百九十八刀删除：`margin_ratio` / `trend_direction` 全仓**无生产者**（后端从不发、
+  // 前端也没人读）⇒ 类型不该承诺不存在的东西（要恢复请先在后端真的发出来）。
+
   total_eq: number
   avail_eq: number
   cash_bal?: number
   upl?: number
   pos_upl_total?: number
   margin_usage_pct?: number
-  margin_ratio?: number
   risk_level?: string
   currency?: string
   initial_capital?: number
@@ -24,7 +26,8 @@ export interface PositionItem {
   lever: string
   margin: string
   margin_usdt?: number
-  margin_source?: string
+  // 第一百九十八刀删除 `margin_source`：后端发的键是 **`marginSource`**（驼峰，
+  // 见 dashboard_payload/factors.py），蛇形这份全仓无人读 ⇒ 死声明。
   notional_usdt?: number
   avgPx: string
   last: string
@@ -93,7 +96,6 @@ export interface InstrumentFactor {
   vol24h: number
   rsi: number
   macd_hist: number
-  trend_direction: string
   action?: string
   confidence?: number
   leverage?: number
@@ -107,7 +109,6 @@ export interface InstrumentFactor {
   oiUsd?: number
   lsRatio?: number
   market_regime?: string
-  c_1h_ret?: number
   atr_pct?: number
   adx_1h?: number
   calculus?: {

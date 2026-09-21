@@ -344,14 +344,18 @@ const currentAtr = computed(() => {
   return 0
 })
 // 涨跌幅：当前蜡烛价格相比其开盘价的实时变化百分比
-const liveChangePct = computed(() => {
+// 涨跌幅：当前蜡烛价格相比其开盘价的实时变化百分比。
+// ⚠️ 第一百九十八刀：**读不到就是读不到**。原先没有蜡烛时 `return Number(factorItem.value?.c_1h_ret || 0) * 100`
+// —— 而 `c_1h_ret` 后端**从未发过**（全仓无生产者）⇒ 兜底恒为 0，界面会把"没有行情"渲染成
+// 精确的 "+0.00%"（doctrine：读不到 ≠ 没有）。现改为返回 null，模板据此显示占位。
+const liveChangePct = computed<number | null>(() => {
   if (candles.value.length > 0) {
     const last = candles.value[candles.value.length - 1]
     if (last && last.open > 0) {
       return ((currentPrice.value - last.open) / last.open) * 100
     }
   }
-  return Number(factorItem.value?.c_1h_ret || 0) * 100
+  return null
 })
 
 // 实盘在手持仓与在途委托
@@ -915,8 +919,10 @@ onUnmounted(() => {
         <span class="num font-mono text-sm font-bold" style="color: var(--ink-strong)">
           {{ currentPrice >= 100 ? currentPrice.toFixed(1) : currentPrice.toFixed(4) }}
         </span>
-        <span class="num font-mono text-xs font-semibold" :class="liveChangePct >= 0 ? 'up' : 'down'">
-          {{ liveChangePct >= 0 ? '+' : '' }}{{ liveChangePct.toFixed(2) }}%
+        <span class="num font-mono text-xs font-semibold"
+              :class="liveChangePct === null ? '' : (liveChangePct >= 0 ? 'up' : 'down')">
+          <template v-if="liveChangePct === null">--</template>
+          <template v-else>{{ liveChangePct >= 0 ? '+' : '' }}{{ liveChangePct.toFixed(2) }}%</template>
         </span>
         <span class="dsh-pill hidden md:inline-flex">
           <span class="dsh-status-dot active" aria-hidden="true" />{{ t('dash.matrix.chart.live') }}

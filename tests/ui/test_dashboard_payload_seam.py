@@ -496,3 +496,46 @@ class DisclosedJsonReaderTest(unittest.TestCase):
                / "market.py").read_text(encoding="utf-8")
         self.assertIn("多所组合读取失败", src)
         self.assertIn("请勿据此判断", src)
+
+class ScaleOutSurfacedFromTrackerTest(unittest.TestCase):
+    """切分止盈状态必须从 tracker 接到持仓行上（第一百九十八刀）。
+
+    背景：`frontend/.../PositionsOrdersPanel.vue` 一直读 `p.scaleOutPhase`（决定切分徽标）
+    与 `p.scaleOutTp`（决定 TP 显示），而这两个键**后端从未发过** —— 数据其实一直在
+    tracker 里（`scripts/trader/scale_out.py` 写 `scale_out_phase`/`scale_out_tp`），
+    只是没被接出来 ⇒ 徽标永远不亮。
+    """
+
+    def setUp(self):
+        from r20_backend.dashboard_payload.factors import enrich_position_risk_fields
+        self.enrich = enrich_position_risk_fields
+
+    def _pos(self, inst="X-USDT-SWAP", side="long"):
+        return [{"instId": inst, "posSide": side, "pos": "10", "markPx": "2.0", "lever": "5"}]
+
+    def test_tracker_scale_out_state_reaches_the_row(self):
+        trackers = {"X-USDT-SWAP_long": {"scale_out_phase": 1, "scale_out_tp": 2.34}}
+        row = self.enrich("unused.json", self._pos(), trackers)[0]
+        self.assertEqual(row.get("scaleOutPhase"), 1)
+        self.assertAlmostEqual(row.get("scaleOutTp"), 2.34)
+
+    def test_absent_state_stays_absent_not_zero(self):
+        """**缺席即缺席**：没 tracker 就不写这两个键 —— 写成 0 等于替币安/Gate 行
+        断言"切分未开始"（读不到 ≠ 没有）。"""
+        rows = self.enrich("unused.json", self._pos("Y-USDT-SWAP"), {})
+        self.assertNotIn("scaleOutPhase", rows[0])
+        self.assertNotIn("scaleOutTp", rows[0])
+
+    def test_producer_and_consumer_names_agree(self):
+        """源码钉：tracker 侧写 `scale_out_phase`、行上给 `scaleOutPhase` —— 两侧名字都必须真实存在。"""
+        root = Path(__file__).resolve().parents[2]
+        producer = (root / "scripts" / "trader" / "scale_out.py").read_text(encoding="utf-8")
+        self.assertIn('t["scale_out_phase"]', producer)
+        self.assertIn('t["scale_out_tp"]', producer)
+        facet = (root / "r20_backend" / "dashboard_payload" / "factors.py").read_text(encoding="utf-8")
+        self.assertIn('"scaleOutPhase"', facet)
+        self.assertIn('"scaleOutTp"', facet)
+        ui = (root / "frontend" / "src" / "components" / "dashboard"
+              / "PositionsOrdersPanel.vue").read_text(encoding="utf-8")
+        self.assertIn("scaleOutPhase", ui)
+        self.assertIn("scaleOutTp", ui)

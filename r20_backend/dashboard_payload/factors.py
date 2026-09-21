@@ -67,6 +67,15 @@ def enrich_position_risk_fields(tracker_file: str | os.PathLike[str], positions,
             "displayTakeProfit": exchange_tp or tracker_tp or None,
             "stageDesc": position.get("stageDesc") or tracker.get("stage_desc") or "持有监控中",
             "strategyTag": position.get("strategyTag") or tracker.get("strategy_tag") or ("顺势做多" if "long" in side else "逢高做空"),
+            # 第一百九十八刀：把 tracker 里**真实存在**的切分止盈状态接到行上。
+            # 面板 `PositionsOrdersPanel.vue` 一直在读 `scaleOutPhase`/`scaleOutTp`
+            # （`(p.scaleOutPhase ?? 0) >= 1` 决定徽标、`p.scaleOutTp` 决定 TP 显示），
+            # 而这两个键**后端从未发过** ⇒ 徽标永远不亮、TP 永远走别的来源。
+            # 数据就在 tracker 里（`scripts/trader/scale_out.py` 写 `scale_out_phase`/
+            # `scale_out_tp`），只是没被接出来。**缺席即缺席**：tracker 没这项就不写这一项
+            # （不写 0 —— 币安/Gate 行本来就没有 tracker，写成 0 等于替它们断言"未开始"）。
+            **({"scaleOutPhase": int(float(tracker.get("scale_out_phase")))} if str(tracker.get("scale_out_phase", "")).strip() not in ("", "None") else {}),
+            **({"scaleOutTp": float(tracker.get("scale_out_tp"))} if str(tracker.get("scale_out_tp", "")).strip() not in ("", "None") else {}),
             "cloudProtectionLastVerified": (tracker.get("cloudProtection") or {}).get("verifiedAt"),
             "cloudProtectionLastDetail": (tracker.get("cloudProtection") or {}).get("detail"),
         })
