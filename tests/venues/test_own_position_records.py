@@ -117,14 +117,29 @@ class ClassifyTest(unittest.TestCase):
 
 class LedgerReadTest(unittest.TestCase):
     def test_reads_real_ledger_shape_and_finds_the_uni_holding(self):
-        """真台账（若存在）必须能读出 UNI holding 行——本门同时是线上数据的守卫。"""
+        """真实台账形状必须读得出 UNI/binance 的 holding 行；线上台账只查**结构**自洽。
+
+        ⚠️ 第二百三十一刀：原断言要求「线上台账里**必须**存在 UNI/binance 的 holding 行」——
+        那是对**生产数据**的断言：仓一平、台账一更新，本门立刻红（本轮就是这么红的，
+        而代码一行没改）。测试依赖生产数据的**内容**＝定时炸弹。
+
+        改为两段：
+        ① 用**真实形状的固定数据**（`REAL_HOLDING_UNI`，从线上台账抄下来的形状）验证
+           「读得出 UNI/binance」——确定性的、真正在测读取逻辑的那一半；
+        ② 线上台账（若存在）只查**结构性**事实：读得出来、且 holding 行状态自洽。
+           它仍然守着"线上文件坏了/格式变了能被发现"，但**不再要求某个标的在场**。
+        """
+        rows = O.read_holding_rows([REAL_HOLDING_UNI])
+        self.assertTrue(any(O.canonical_inst(r.get("inst")) == "UNI"
+                            and str(r.get("venue")).lower() == "binance" for r in rows),
+                        "真实形状的 holding 行必须被读成 UNI/binance（确定性用例）")
+
         ledger = O.load_ledger()
         if ledger is None:
             self.skipTest("无 data/trading_ledger.json（干净检出）")
-        rows = O.read_holding_rows(ledger)
-        self.assertTrue(all(str(r.get("status")).lower() == "holding" for r in rows))
-        self.assertTrue(any(O.canonical_inst(r.get("inst")) == "UNI"
-                            and str(r.get("venue")).lower() == "binance" for r in rows), rows)
+        live_rows = O.read_holding_rows(ledger)
+        self.assertTrue(all(str(r.get("status")).lower() == "holding" for r in live_rows),
+                        "线上台账的 holding 行必须自洽（读得出来、状态一致）")
 
     def test_missing_file_is_none_not_empty(self):
         with tempfile.TemporaryDirectory() as d:
