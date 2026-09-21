@@ -89,6 +89,57 @@ class ScaleOutExecutionTests(unittest.TestCase):
         self.assertIn("降级为全仓追踪", actions[0])
         self.mock_okx.place_order.assert_not_called()
 
+    def test_notification_failure_does_not_change_the_outcome(self):
+        """**通知是 best-effort**：平仓单已经打到交易所 ⇒ 通知（Telegram/邮件等）失败
+        只吞掉，返回值仍是成功。否则上层会误以为平仓失败而重试。
+        """
+        self.mock_okx.place_order.return_value = [{"ordId": "12345"}]
+        self.mock_okx.pending_algo_orders.return_value = [
+            {"algoId": "algo_1", "posSide": "long", "state": "live"}
+        ]
+        boom = MagicMock(side_effect=RuntimeError("通知通道炸了"))
+        actions = []
+        ok, reason = execute_scale_out_if_eligible(
+            self.sample_f_long, self.sample_pos_long, self.sample_trackers,
+            "2026-09-20 12:00:00", actions,
+            okx_rest=self.mock_okx,
+            record_trade=self.mock_record_trade,
+            notify_trade_close=boom,
+            close_fee=self.mock_close_fee,
+            close_trade_payload=self.mock_payload,
+            ensure_cloud_position_protection=self.mock_ensure_oco,
+        )
+        self.assertTrue(ok, f"通知失败不得改变平仓结果：{reason}")
+        self.assertEqual(reason, "首批分批平仓成功")
+        boom.assert_called()
+
+    def test_trade_recording_failure_currently_propagates(self):
+        """⚠️ **实测边界（如实钉住现状，未擅自改）**：与「通知」不同，**台账记账是裸调用**
+        （`record_trade(...)` 没有 `try` 包裹，只有 `notify_trade_close` 那一段有）。
+        于是台账写失败会把异常抛给调用方 —— **而平仓单此刻已经打到交易所了**。
+
+        为什么值得记：这一族（本仓反复出现的形态）是「**成交已发生，副作用失败不该改变结果**」；
+        通知做到了 best-effort，台账没有，两者**不一致**。改它属钱路行为变更
+        （涉及是否重试、如何披露记账缺口）⇒ 列为待议项。
+        """
+        self.mock_okx.place_order.return_value = [{"ordId": "12345"}]
+        self.mock_okx.pending_algo_orders.return_value = [
+            {"algoId": "algo_1", "posSide": "long", "state": "live"}
+        ]
+        boom = MagicMock(side_effect=RuntimeError("台账库锁住了"))
+        actions = []
+        with self.assertRaises(RuntimeError):
+            execute_scale_out_if_eligible(
+                self.sample_f_long, self.sample_pos_long, self.sample_trackers,
+                "2026-09-20 12:00:00", actions,
+                okx_rest=self.mock_okx,
+                record_trade=boom,
+                notify_trade_close=self.mock_notify,
+                close_fee=self.mock_close_fee,
+                close_trade_payload=self.mock_payload,
+                ensure_cloud_position_protection=self.mock_ensure_oco,
+            )
+
     def test_successful_long_scale_out_and_state_lock(self):
         # profit = 82000 - 80000 = 2000 >= 1.2 * 1000
         self.mock_okx.place_order.return_value = [{"ordId": "12345"}]
