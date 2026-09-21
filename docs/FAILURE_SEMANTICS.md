@@ -79,6 +79,7 @@
 | 孤儿腿候选进面板（只报告）| 面板载荷 `protectionOrphans`：`attributed`（证据 tag/ledger ⇒ **可复核候选**）与 `unattributed`（一律不碰）分列；读腿失败 ⇒ `readable:false`＝**不可判定**（不是「没有孤儿腿」）；取证依据 `ledgerRows` 如实说明 ok/unavailable；面板**不得**出现任何撤销调用 | 披露 | `r20_backend/dashboard_payload/multi_venue.py` | `tests/ui/test_protection_contract.py::OrphanCandidatesPayloadTest` |
 | 孤儿腿的可观测与提示| `/metrics`：`r20_protection_orphans_readable{venue}` + 可判定时才发 `..._candidates`/`..._unattributed`/`..._ledger_evidence`（**读不到不发计数**，不可判定≠0）；提示词按所**只提示一次**并点明"同币再开仓可能按旧触发价减仓"；两处都只报告、**绝不**暗示会自动撤 | 披露 | `r20_backend/metrics.py` | `tests/ops/test_metrics_exposition.py::ProtectionOrphanMetricsTest` |
 | 触发价类型与保护判定**分开回答** | 类型回答「按什么价触发」；保护状态回答「腿在不在/量够不够/活不活」。类型**不得**进入任何判定条件：未上报 ⇒ 只 disclose `unknown`，**不**降级保护状态；类型是 `mark` 也**不**给覆盖背书（防过度保守与虚假安心两个方向）| 防 | `scripts/trader/venue_protection.py` | `tests/trading/test_trigger_type_verdict_boundary.py::TriggerTypeStaysOutOfVerdictsTest` |
+| 已过期 ≠ 覆盖 | 到期时间**确知已过**的腿不得计入 `covered_size`、不得算 `has_live_sl`、不得让整仓平腿补满覆盖（否则 `protected_now=True`、`needs_repair=False`，审计只报 renew 而**不进 critical** ⇒ 裸奔仓位被报成已保护）；`never`（显式 0/GTC）算活且不复验；到期**缺字段**算活但必须 `needs_verify`（不可判定≠安全，也不许过度报警）| 吼 | `scripts/trader/venue_protection.py` | `tests/trading/test_venue_protection.py::ExpiredLegIsNotCoverageTest` |
 <!-- anchors:end -->
 
 ## 3. 抽取门与"文档化差异"

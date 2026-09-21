@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import shutil
 import tempfile
 import re
@@ -1154,3 +1155,107 @@ class LedgerEvidenceTest(unittest.TestCase):
         call = src.split("_wd_report = venue_protection_watchdog_stage(")[1].split("\n    )")[0]
         self.assertIn("ledger_rows=read_ledger_rows(LEDGER_JSON_FILE)", call,
                       "活调用点未传台账行（或写法变了 ⇒ 请同步本门）")
+
+class ExpiredLegIsNotCoverageTest(unittest.TestCase):
+    """第一百七十八刀：**已过期 ≠ 覆盖**（真机反例：Gate 过期止损腿被算成"覆盖满量+有活止损"）。
+
+    为什么这刀重要：修复前，一条已过期的止损腿会让 `has_live_sl=True`、`covered_size` 满量、
+    `needs_repair=False` ⇒ `protected_now=True`，审计只报 "renew" 而**不进 critical**
+    —— 一个**裸奔**的仓位被系统报成"已保护"。到期信息是**确知**的（不是不可判定）。
+    """
+
+    @staticmethod
+    def _gate_sl(*, age_s, expiration_s=3600, is_close=True, size=None):
+        now = time.time()
+        row = {"id": "L1", "symbol": "BTC_USDT",
+               "initial": {"contract": "BTC_USDT", "size": 0 if is_close else (size or 1),
+                           "text": "t-r20sl1", "is_close": bool(is_close)},
+               "trigger": {"price": "60000", "expiration": expiration_s},
+               "create_time": (now - age_s) * 1000}
+        return row, now
+
+    def _scan(self, row, now, size=1.0):
+        return scan_protective_orders([row], symbol="BTC", pos_side="long",
+                                     position_size=size, now_s=now)
+
+    def test_expired_leg_is_not_coverage_and_not_a_live_sl(self):
+        row, now = self._gate_sl(age_s=7200)          # 2 小时前建、1 小时到期 ⇒ 已过期
+        v = self._scan(row, now)
+        self.assertEqual(v["has_live_sl"], False, "已过期腿被算成'有活止损'⇒ 假安心")
+        self.assertEqual(v["covered_size"], 0.0, "已过期腿仍计入覆盖 ⇒ 假安心")
+        self.assertFalse(v["coverage_ok"])
+        self.assertTrue(v["needs_repair"], "没有活止损就必须需要修复")
+        self.assertEqual(v["missing_size"], 1.0)
+
+    def test_expiring_but_not_expired_still_covers(self):
+        """反向：**临期但未过期**仍算覆盖（不许过度保守把好腿也算成没有）。"""
+        row, now = self._gate_sl(age_s=3000)          # 还有 600s 到期
+        v = self._scan(row, now)
+        self.assertEqual(v["has_live_sl"], True)
+        self.assertEqual(v["covered_size"], 1.0)
+        self.assertTrue(v["coverage_ok"])
+        self.assertTrue(v["needs_renew"], "临期仍要续期")
+
+    def test_expired_partial_leg_does_not_add_to_covered(self):
+        """**非**整仓平的过期腿（`is_close=False`、量可读）也不得计入覆盖。
+
+        ⚠️ 这条是反向验证逼出来的：我第一版只用了 `is_close=True` 的夹具 ⇒ 它走的是
+        `full_close_leg` 那条守卫，于是"`elif` 计入覆盖"这条守卫**反向验证时没翻红**
+        （等于没测到）。两个守卫各需一个用例。
+        """
+        row, now = self._gate_sl(age_s=7200, is_close=False, size=1)
+        v = self._scan(row, now, size=1.0)
+        self.assertEqual(v["covered_size"], 0.0, "过期腿（非整仓平）仍计入覆盖 ⇒ 假安心")
+        self.assertEqual(v["missing_size"], 1.0)
+        self.assertFalse(v["coverage_ok"])
+
+    def test_expired_full_close_leg_does_not_fake_full_coverage(self):
+        """`is_close` 腿会走 `covered = max(covered, size)`；过期时**不得**再补满覆盖。"""
+        row, now = self._gate_sl(age_s=7200, is_close=True)
+        v = self._scan(row, now, size=5.0)
+        self.assertEqual(v["covered_size"], 0.0)
+        self.assertEqual(v["missing_size"], 5.0)
+
+    def test_explicit_never_expires_is_live_without_verify_noise(self):
+        """**显式**永不过期（`expiration=0` / GTC）算活，且**不**产生复验噪音。"""
+        now = time.time()
+        row = {"id": "L2", "symbol": "BTC_USDT",
+               "initial": {"contract": "BTC_USDT", "size": 0, "text": "t-r20sl1", "is_close": True},
+               "trigger": {"price": "60000", "expiration": 0}, "create_time": (now - 9999) * 1000}
+        v = self._scan(row, now)
+        self.assertEqual(v["has_live_sl"], True)
+        self.assertEqual(v["covered_size"], 1.0)
+        self.assertEqual(v["expiry_unknown"], [], "显式永不过期不是'不可判定'")
+        self.assertFalse(v["needs_verify"], "明确形态不该每周期都要求复验（噪音会淹没真信号）")
+
+    def test_unknown_expiry_counts_but_asks_for_verification(self):
+        """口径明确：到期**不可判定** ⇒ 仍算覆盖（交易所列着它），但必须 `needs_verify`。
+
+        这条是**取舍**：算死（不覆盖）会让每个缺字段的所每周期都"需要修复"；算活而不复验
+        则是"不可判定当安全"。取"算活 + 要求复验"—— 既不过度报警，也不假装知道。
+        """
+        from scripts.trader.venue_protection import scan_protective_orders as _scan
+        now = time.time()
+        row = {"id": "L3", "symbol": "BTC_USDT",   # 完全没有到期字段 ⇒ exp_state = unknown
+               "initial": {"contract": "BTC_USDT", "size": 0, "text": "t-r20sl1", "is_close": True},
+               "trigger": {"price": "60000"}}
+        v = _scan([row], symbol="BTC", pos_side="long", position_size=1.0, now_s=now)
+        self.assertEqual(v["has_live_sl"], True, "不可判定到期**不**等于没有保护腿")
+        self.assertEqual(len(v["expiry_unknown"]), 1)
+        self.assertTrue(v["needs_verify"], "到期不可判定必须要求复验（不可判定≠安全）")
+
+    def test_audit_calls_expired_only_protection_critical(self):
+        """端到端：只有过期腿的仓位必须是 **critical/repair**（此前只说 renew，不进 critical）。"""
+        row, now = self._gate_sl(age_s=7200)
+        gate = MagicMock()
+        gate.list_protective_orders.return_value = [row]
+        reg = MagicMock()
+        reg.get_adapter.side_effect = lambda v, environment=None: {"gate": gate}[v]
+        rep = audit_cross_venue_protection(
+            {"gate": [{"venue": "gate", "inst_id": "BTC_USDT", "base": "BTC", "side": "long",
+                       "size_signed": 1.0}]},
+            venue_registry=reg, environment="demo", now_s=now, dry_run=True)
+        crit = rep["critical"]
+        self.assertEqual(len(crit), 1, "裸奔仓位必须进 critical")
+        self.assertEqual(crit[0]["would"], "repair")
+        self.assertEqual(crit[0]["expired"], ["L1"])

@@ -390,6 +390,7 @@ def scan_protective_orders(rows: Optional[Sequence[Dict[str, Any]]], *,
     expiring: List[Dict[str, Any]] = []
     expired: List[Dict[str, Any]] = []
     expiry_unknown: List[Dict[str, Any]] = []
+    live_sl_seen = False
 
     for row in (rows or []):
         if not isinstance(row, dict) or not _is_live(row):
@@ -423,14 +424,24 @@ def scan_protective_orders(rows: Optional[Sequence[Dict[str, Any]]], *,
         leg["expiry_state"] = exp_state
         ours.append(leg)
 
+        # 第一百七十八刀：**已过期 ⇒ 不是覆盖**。
+        # 真机反例（本刀实测）：Gate 一条 `expiration=3600`、`create_time` 在 2 小时前的止损腿，
+        # 仍被算成"覆盖满量 + 有活止损"⇒ `protected_now=True`、`needs_repair=False`，
+        # 审计只说 "renew" 而**不进 critical** ⇒ 一个**裸奔**的仓位被报成"已保护"。
+        # 过期腿的到期信息是**确知**的（不是"不可判定"）⇒ 必须从覆盖里剔除。
+        _leg_expired = (exp_state in ("relative", "absolute") and expires_at is not None
+                        and expires_at <= float(now_s))
+
         if kind == "sl":
-            if _is_full_close(row):
+            if _is_full_close(row) and not _leg_expired:
                 full_close_leg = True
             leg_size = _leg_size(row)
             if leg_size is None and not _is_full_close(row):
                 coverage_unknown = True
-            elif leg_size is not None:
+            elif leg_size is not None and not _leg_expired:
                 covered += leg_size
+            if not _leg_expired:
+                live_sl_seen = True
 
         if exp_state in ("relative", "absolute"):
             assert expires_at is not None
@@ -453,7 +464,12 @@ def scan_protective_orders(rows: Optional[Sequence[Dict[str, Any]]], *,
         coverage_ok = None
     else:
         coverage_ok = missing <= tolerance
-    has_live_sl = any(leg["kind"] == "sl" for leg in ours)
+    #: ⚠️ 不能写成 `any(kind == "sl")`：那会把**已过期**的腿算成"有活止损"（本刀实测的假安心）。
+    #: 口径：`expiry_state == "never"`（**显式** 0 / GTC ⇒ 明确"撤销前一直有效"）算活；
+    #: 到期时间**已过**（absolute/relative 且 <= now）算死；
+    #: `unknown`（**取数缺字段**，说不准）**算活但计入 `needs_verify`** —— 交易所列着它，
+    #: 只是我们无法断言它的到期，按"不可判定≠安全"必须要求复验。
+    has_live_sl = live_sl_seen
 
     return {
         "ours": ours,
