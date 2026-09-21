@@ -446,6 +446,57 @@ class AuditCrossVenueTest(unittest.TestCase):
         self.assertEqual(len(report["errors"]), 1)
         self.assertEqual(report["errors"][0]["stage"], "adapter")
 
+    def test_non_dict_snapshot_row_is_skipped(self):
+        """快照里的非 dict 行跳过并**如实登记**（脏数据不得带偏巡检，也不能当成巡检过）。"""
+        gate = MagicMock()
+        gate.list_protective_orders.return_value = [gate_sl_row()]
+        reg = self._registry({"gate": gate, "binance": MagicMock()})
+        report = audit_cross_venue_protection(
+            {"gate": ["垃圾", self._row()]}, venue_registry=reg, environment="demo", now_s=NOW)
+        self.assertEqual(report["venues"]["gate"]["checked"], 1, "只应巡检那条真仓")
+        self.assertTrue(report["skipped"], "跳过的行要登记（不装作巡检过）")
+
+    def test_dry_run_reports_verify_for_unknown_expiry(self):
+        """dry-run 是开闸前的**唯一安全取证**：到期不可判定 ⇒ `would=verify`（不写单）。"""
+        gate = MagicMock()
+        gate.list_protective_orders.return_value = [gate_sl_row(expiration=None)]
+        reg = self._registry({"gate": gate, "binance": MagicMock()})
+        report = audit_cross_venue_protection(
+            {"gate": [self._row()]}, venue_registry=reg, environment="demo", now_s=NOW,
+            dry_run=True)
+        self.assertEqual([w["would"] for w in report["would"]], ["verify"])
+        self.assertEqual(report["actions"], [], "dry-run 绝不写单")
+        gate.attach_protective_orders.assert_not_called()
+
+    def test_ensure_exception_is_registered_and_does_not_stop_the_venue(self):
+        """巡检**自身**异常不上抛（它只是加固层），逐所隔离、如实登记后继续。"""
+        gate = MagicMock()
+        gate.list_protective_orders.return_value = [gate_sl_row(created=NOW - (604800 - 60))]
+        reg = self._registry({"gate": gate, "binance": MagicMock()})
+        # 让 ensure 本身抛（巡检层只该加固、不该被它带崩）
+        from unittest.mock import patch as _patch
+        with _patch("scripts.trader.venue_protection.ensure_venue_protection",
+                    side_effect=RuntimeError("boom")):
+            report = audit_cross_venue_protection(
+                {"gate": [self._row()]}, venue_registry=reg, environment="demo", now_s=NOW)
+        self.assertGreaterEqual(report["venues"]["gate"]["errors"], 1, "必须登记错误")
+        stages = [e.get("stage") for e in report["errors"]]
+        self.assertIn("ensure", stages, f"错误要标明阶段：{report['errors']}")
+
+    def test_repair_is_counted_separately_from_renew(self):
+        """补挂（repair）与续期（renew）**分开计数** —— 两者是不同动作，合并会说谎。"""
+        gate = MagicMock()
+        # 腿量不足（**非整仓平**且量小于仓位）⇒ needs_repair 而非 needs_renew
+        # ⚠️ `gate_sl_row` 默认 `close=True`（整仓平腿）⇒ 那种腿天然"覆盖全部"，
+        # 只能靠 `close=False` + 小 size 才构造出"覆盖不全"。
+        gate.list_protective_orders.return_value = [gate_sl_row(size=1, close=False)]
+        gate.attach_protective_orders.return_value = {"sl": "new-sl"}
+        reg = self._registry({"gate": gate, "binance": MagicMock()})
+        report = audit_cross_venue_protection(
+            {"gate": [self._row(size=10.0)]}, venue_registry=reg, environment="demo", now_s=NOW)
+        self.assertEqual(report["venues"]["gate"]["repaired"], 1, f"{report['venues']['gate']}")
+        self.assertEqual(report["venues"]["gate"]["renewed"], 0, "补挂不等于续期")
+
     def test_absent_venue_in_snapshot_is_skipped_not_assumed_clean(self):
         reg = self._registry({"gate": MagicMock(), "binance": MagicMock()})
         report = audit_cross_venue_protection(
