@@ -350,15 +350,12 @@ class ListingGateTest(unittest.TestCase):
         self.assertTrue(ok, "对账不可用不该阻断下单")
 
 
-class RescaleFailureToleranceTest(unittest.TestCase):
-    def test_rescale_failure_does_not_block_the_order(self):
-        """重算过程出异常 ⇒ **照原价提交、不阻断**（fail-soft：报价重算是增强不是闸门）。
+class RescaleFailureTraceTest(unittest.TestCase):
+    def test_rescale_failure_is_traced_and_does_not_block(self):
+        """重算过程出异常 ⇒ **不阻断**，但必须**出声**（原来这里是静默 `pass`）。
 
-        ⚠️ 已知瑕疵（记录在此，不在测试里"钉住静默"）：原实现是 `except Exception: pass`，
-        重算一旦出 bug，交易照发而**没有任何痕迹** —— 与本仓"失败必须留痕"的纪律不符。
-        修它要动被 `tests/extraction` **逐字冻结**的下单主路径（该门没有 delta 机制），
-        故本刀只如实记录、不改实现。本用例只断言**可观测的契约**（不阻断、按原价发单），
-        将来有人补上留痕也不会红。
+        实测行为（如实钉住）：异常发生在**重算中途** ⇒ 入场价已改成沙盒价、而 tp/sl 仍是原值；
+        所幸**不可绕过的几何复验在其后**仍会跑，不一致的报价在那里被拒（下面第二条断言钉这一点）。
         """
         import io
         from contextlib import redirect_stdout
@@ -367,10 +364,9 @@ class RescaleFailureToleranceTest(unittest.TestCase):
         with redirect_stdout(buf):
             ok, _ = rig.run(venue_ctx={"notional_usdt": 1, "margin_usdt": 1})
         self.assertTrue(ok, "重算失败不该阻断下单")
+        self.assertIn("沙盒报价重算失败", buf.getvalue(),
+                      "失败必须留痕：原来静默 pass 会让「重算出 bug」毫无痕迹地过去")
         _, _, _, kw = rig.okx.orders[0]
-        # 实测行为（如实钉住）：异常发生在**重算中途** ⇒ 入场价已经被改成沙盒价、
-        # 而 tp/sl 仍是原值 ⇒ 半途状态。所幸**不可绕过的几何复验在其后**仍会跑，
-        # 不一致的报价在那里被拒（下面这条断言就是在钉这一点）。
         self.assertEqual(kw["px"], 95000.0, "中途失败：入场价已按沙盒价改过")
         self.assertTrue(rig.geometry_calls,
                         "即便重算中途失败，**核心安全复验也必须仍然跑到**（不可绕过）")

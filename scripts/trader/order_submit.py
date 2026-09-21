@@ -124,8 +124,11 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: f
                                 effective_sl = round(effective_px * 1.02, prec)
                             if effective_tp >= effective_px:
                                 effective_tp = round(effective_px * 0.96, prec)
-        except Exception:
-            pass
+        except Exception as _rsc_exc:
+            # ⚠️ 第二百二十九刀：这里原来是**静默 `pass`** —— 沙盒报价重算一旦出 bug，
+            # 交易照旧发出而**没有任何痕迹**（"算不出来 ≠ 没这回事"）。行为不变
+            # （仍按原价/已算出的值提交、仍不阻断），但必须出声。
+            print(f"[demo rescale] warn {inst_id} 沙盒报价重算失败，按当前值提交: {_rsc_exc}")
 
     # Final Non-Bypassable Verification: verify actual effective price, tp and sl
     from scripts.order_risk import validate_quote_geometry_and_rr
