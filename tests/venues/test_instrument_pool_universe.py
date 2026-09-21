@@ -19,9 +19,26 @@ import scripts.instrument_pool as ip
 from tests.risk_test_env import pin_baseline_risk_env
 
 
+_READ_SCOPE = None
+
+
 def setUpModule():
     # PoolCapacity 断言同向上限=3（基线）；隔离生产 .env 当前套件值
     pin_baseline_risk_env()
+    # ⚠️ 第二百三十三刀登记：本文件会读线上 `data/instrument_pool.json`（读取点 `scripts/instrument_pool.py:239`，由生产读守卫指出）——
+    # **已知的生产数据依赖**（结果随线上池内容漂移）。待办：改成夹具池并同步断言；
+    # 现在显式声明，避免"静默依赖"。
+    from tests import allow_real_data_reads
+    global _READ_SCOPE
+    _READ_SCOPE = allow_real_data_reads()
+    _READ_SCOPE.__enter__()
+
+
+def tearDownModule():
+    global _READ_SCOPE
+    if _READ_SCOPE is not None:
+        _READ_SCOPE.__exit__(None, None, None)
+        _READ_SCOPE = None
 
 
 class InstrumentPoolUniverseTests(unittest.TestCase):

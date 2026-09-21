@@ -15,6 +15,39 @@ from r20_backend import exchanges as ex
 from r20_backend.admin_auth import AdminAuthStore
 
 
+_SANDBOX_SCOPE = None
+
+
+def setUpModule():
+    """把配置来源钉到临时目录（第二百三十三刀）。
+
+    这些端点会经 `config.refresh_settings()` 读配置，而链路上有两个**调用期**取模块全局的读取点
+    —— 由生产读守卫指出的 `读取点`（不是猜的）：`scripts/okx_runtime.py:17` 的 `_load_dotenv()`
+    读 `ROOT / ".env"`，以及 `r20_backend/config.py:57` 的 `load_dotenv(ROOT / ".env")`。
+    临时目录里没有 `.env` ⇒ 两者都直接返回（不读生产、不覆盖 os.environ）；
+    各用例自己的 `patch.dict(os.environ, …)` 照旧生效。
+    """
+    global _SANDBOX_SCOPE
+    import r20_backend.config as config
+    import scripts.okx_runtime as okx_runtime
+    tmp = tempfile.TemporaryDirectory()
+    patchers = [patch.object(config, "ROOT", Path(tmp.name)),
+                patch.object(okx_runtime, "ROOT", Path(tmp.name))]
+    for _p in patchers:
+        _p.start()
+    _SANDBOX_SCOPE = (tmp, patchers)
+
+
+def tearDownModule():
+    global _SANDBOX_SCOPE
+    if _SANDBOX_SCOPE is not None:
+        tmp, patchers = _SANDBOX_SCOPE
+        for _p in patchers:
+            _p.stop()
+        tmp.cleanup()
+        _SANDBOX_SCOPE = None
+
+
 class MultiExchangeApiTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

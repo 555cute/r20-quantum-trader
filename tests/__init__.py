@@ -206,6 +206,22 @@ class allow_real_data_reads:  # noqa: N801 - 与 contextlib 用法一致（可�
         return False
 
 
+def _reader_frame() -> str:
+    """找出"是谁在读"（第一条不在本文件里的帧）——提示里带上它，清理才可机械执行。"""
+    import inspect
+
+    me = __file__
+    for fr in inspect.stack()[2:]:
+        fn = fr.filename
+        if fn == me or "/site-packages/" in fn or "/_pytest/" in fn:
+            continue
+        if "python3.11/" in fn or fn.endswith("pathlib.py") or fn.endswith("<frozen importlib._bootstrap>"):
+            continue          # 标准库/导入机制的中转帧不算"读取点"
+        if fn:
+            return f"{fn}:{fr.lineno}"
+    return "<unknown>"
+
+
 def _assert_not_reading_production(path: object) -> None:
     """测试读生产 `data/` 直接失败（缺省必须安全）。"""
     if _ALLOW_REAL_WRITES or _ALLOW_REAL_READS:
@@ -229,7 +245,8 @@ def _assert_not_reading_production(path: object) -> None:
         key = f"readcfg:{resolved}@{_CURRENT_TEST[0]}"
         if key not in _WARNED_PATHS:
             _WARNED_PATHS.add(key)
-            msg = (f"[tests] ⚠️ 生产配置依赖：{_CURRENT_TEST[0]} 读了线上 {resolved.name} —— "
+            msg = (f"[tests] ⚠️ 生产配置依赖：{_CURRENT_TEST[0]} 读了线上 {resolved.name}"
+                   f"（读取点 {_reader_frame()}）—— "
                    f"它的内容会塑造决策 ⇒ 结果随线上配置漂移。请 patch 到沙箱/临时文件"
                    f"（`tests.config_sandbox.isolate_config` 或 `patch.object(模块, \"XXX_FILE\", tmp)`）")
             if os.environ.get("R20_TESTS_STRICT_READS", "") == "1":
