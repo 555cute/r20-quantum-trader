@@ -1549,3 +1549,98 @@ class AmbiguousPositionsTest(unittest.TestCase):
                                           environment="demo", now_s=now, dry_run=True)
         self.assertEqual((rep.get("attribution") or {}).get("gate", {}).get("ambiguous_positions"),
                          ["BTC"])
+
+
+class CancelOrphanSafetyTest(unittest.TestCase):
+    """孤儿腿撤销的**护栏分支**（第二百零七刀：由轻量覆盖率探针发现这些分支从未被执行）。
+
+    被覆盖的三条都不是"顺路"，而是**安全契约**：
+
+    1. 该合约**仍有活动持仓** ⇒ 整合约跳过（宁可留腿，不可裸奔）；
+    2. 腿**没有 id** ⇒ 跳过（绝不退化成"按合约全撤"——那会撤掉别人的腿）；
+    3. 以 **tag 证据**归属的腿 ⇒ 才允许逐腿撤（`reason="tag"`）。
+    """
+
+    def setUp(self):
+        from scripts.trader.venue_protection import cancel_orphan_attributed_legs
+        self.cancel_orphans = cancel_orphan_attributed_legs
+
+    def _ad(self, rows, *, cancel_raises=None, list_raises=None):
+        ad = MagicMock()
+        if list_raises is not None:
+            ad.list_protective_orders.side_effect = list_raises
+        else:
+            ad.list_protective_orders.return_value = rows
+        ad.cancel_price_order.side_effect = cancel_raises
+        return ad
+
+    def test_live_position_blocks_the_whole_contract(self):
+        ad = self._ad([gate_sl_row("sl-mine")])
+        # positions 里混入**非 dict** 行（真机上可能出现 None/字符串）⇒ 必须被安全跳过，
+        # 不能让整个撤销流程炸掉（这条分支由覆盖率探针发现从未被执行）
+        rep = self.cancel_orphans(
+            ad, positions=[None, "junk", {"symbol": "BTC_USDT", "size_signed": 5.0}],
+            symbols=["BTC_USDT"], dry_run=False)
+        self.assertEqual(rep["cancelled"], [])
+        self.assertEqual(rep["would_cancel"], [])
+        self.assertTrue(any(x["symbol"] == "BTC" for x in rep["not_touched"]),
+                        f"仍有活动持仓的合约必须整条跳过：{rep}")
+        ad.cancel_price_order.assert_not_called()
+        # 更严的一条：既然整条跳过，就**不该去读腿**（少一次对外调用）
+        ad.list_protective_orders.assert_not_called()
+
+    def test_leg_without_id_is_skipped_not_cancelled_by_symbol(self):
+        row = gate_sl_row("sl-mine")
+        row["id"] = ""                       # 真机上可能缺 id
+        ad = self._ad([row])
+        rep = self.cancel_orphans(
+            ad, positions=[], symbols=["BTC_USDT"], dry_run=False)
+        self.assertEqual(rep["cancelled"], [])
+        self.assertTrue(any("没有 id" in x.get("why", "") for x in rep["skipped"]),
+                        f"缺 id 的腿必须登记为跳过而不是按合约全撤：{rep}")
+        ad.cancel_price_order.assert_not_called()
+
+    def test_unresolvable_symbol_is_skipped(self):
+        ad = self._ad([])
+        rep = self.cancel_orphans(ad, positions=[], symbols=["___"], dry_run=False)
+        self.assertEqual(rep["cancelled"], [])
+        ad.cancel_price_order.assert_not_called()
+
+    def test_list_failure_is_reported_not_fatal(self):
+        ad = self._ad([], list_raises=RuntimeError("list boom"))
+        rep = self.cancel_orphans(
+            ad, positions=[], symbols=["BTC_USDT"], dry_run=False)
+        self.assertEqual(rep["cancelled"], [])
+        self.assertTrue(any(x.get("stage") == "list" for x in rep["errors"]),
+                        f"读腿失败必须进 errors（不许静默当成没有腿）：{rep}")
+
+    def test_tag_evidenced_leg_is_selected_for_cancel(self):
+        """tag 分支：**平仓前基名对不上/无持仓**时，带量非 close 的 tag 腿才是"可撤的孤儿"。
+
+        ⚠️ 本条提示了一个真实边界（写测试时才发现）：当 `own_position` 里**有**该基名
+        （哪怕 size=0），带量腿会被判 `size_mismatch` ⇒ **保守不撤**（交归属审计）；
+        `close=True` 的腿则一律 `matched`。⇒ 只有"基名不在持仓映射里"时才走 tag 孤儿分支。
+        这在生产里由 `_cancel_proven_own_legs` 的 `leg_base(l) == canonical_inst(base)` 过滤
+        与 `before_position` 共同保证 ⇒ 该分支是**防御性**的。
+        """
+        from scripts.trader.venue_protection import (attribute_protective_orders,
+                                                     select_legs_to_cancel_after_close)
+        legs = [gate_sl_row("sl-mine", close=False, size=5)]   # text = t-r20sl… ⇒ tag 证据
+
+        # ① 归因层（真实流程）：无任何持仓 ⇒ 孤儿 + tag 证据
+        att = attribute_protective_orders([], legs, None)
+        tagged = [x for x in att.get("orphan_attributed", []) if x.get("evidence") == "tag"]
+        self.assertTrue(tagged, f"无持仓时 tag 腿必须归成「可撤孤儿」：{att.get('counts')}")
+        self.assertEqual(att["counts"]["orphan_attributed"], 1)
+
+        # ② 撤销层（真实流程）：dry_run 下它进 would_cancel 且**不发撤单**
+        ad = self._ad(legs)
+        rep = self.cancel_orphans(ad, positions=[], symbols=["BTC_USDT"], dry_run=True)
+        self.assertEqual([x["id"] for x in rep["would_cancel"]], ["sl-mine"])
+        ad.cancel_price_order.assert_not_called()
+
+        # ③ 选择器层（防御性分支）：基名对不上时也按 tag 撤
+        sel = select_legs_to_cancel_after_close({"base": "ETH", "side": "long"}, legs, None)
+        self.assertTrue(any(x.get("reason") == "tag" and x.get("id") == "sl-mine"
+                            for x in sel["to_cancel"]),
+                        f"tag 证据的腿必须可撤（这是唯一「敢撤自己腿」的依据）：{sel}")
