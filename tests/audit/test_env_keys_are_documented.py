@@ -33,7 +33,12 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SCAN_DIRS = ("scripts", "r20_backend")
+#: **全部代码根**。⚠️ 第二百刀自查：第一版只扫 `scripts` + `r20_backend`，
+#: 而本仓还有 `r20_gateway/`（网关：凭证库、发布器、任务存储）与 `plugins/` ——
+#: 那两处的读点**完全隐形**，实测漏掉 `R20_GATEWAY_DB`、`R20_ALLOW_TEST_PUBLISH`、
+#: `R20_JOB_RUNS_KEEP_DAYS` 三个键（模板里根本没有，门却是绿的 = **假绿**）。
+#: 这条清单本身就是"判据范围"的一部分：新增代码根必须同步加进来。
+SCAN_DIRS = ("scripts", "r20_backend", "r20_gateway", "plugins")
 
 #: 允许"代码读、模板不提"的例外（附理由）。当前为空 —— 全部已补进模板。
 ALLOWLIST: dict[str, str] = {}
@@ -114,7 +119,7 @@ class EnvKeysAreDocumentedTest(unittest.TestCase):
 
     def test_scan_is_not_vacuous(self):
         keys = all_consulted_keys()
-        self.assertGreaterEqual(len(keys), 55,
+        self.assertGreaterEqual(len(keys), 85,
                                 f"只扫到 {len(keys)} 个环境键 ⇒ 召回退化了（遗漏的读法会让门变假绿）")
         template = (ROOT / "env.example").read_text(encoding="utf-8")
         self.assertGreaterEqual(len(re.findall(r"^[A-Za-z_][A-Za-z0-9_]*\s*=", template, re.M)), 60,
@@ -126,6 +131,24 @@ class EnvKeysAreDocumentedTest(unittest.TestCase):
     def test_allowlist_entries_have_reasons(self):
         for key, reason in ALLOWLIST.items():
             self.assertTrue(str(reason).strip(), f"{key} 的放行理由不能为空")
+
+    def test_scanner_covers_every_code_root(self):
+        """牙齿（第二百刀）：代码根清单必须覆盖仓里**所有**含 .py 的一级目录。
+
+        第一版只写了两根 ⇒ `r20_gateway/` 的读点隐形。这里让"漏根"变成判红：
+        仓库里凡有 .py 的一级目录（除 tests/data 这类），都必须出现在 SCAN_DIRS 里。
+        """
+        skip = {"tests", "data", "backups", "logs", "deploy", "docs", "plan_local",
+                "promo_local", "frontend", "node_modules", "dist", ".archive"}
+        roots_with_py = set()
+        for path in ROOT.iterdir():
+            # 隐藏目录（`.venv`/`.archive`/`.git`）与构建产物一律不算代码根
+            if not path.is_dir() or path.name.startswith(".") or path.name in skip:
+                continue
+            if any(path.rglob("*.py")):
+                roots_with_py.add(path.name)
+        missing = sorted(roots_with_py - set(SCAN_DIRS))
+        self.assertEqual(missing, [], f"这些代码根没被扫描 ⇒ 它们的读点会隐形（假绿）：{missing}")
 
     def test_scanner_sees_env_dict_receivers(self):
         """牙齿（第一百九十九刀）：`env.get("R20_X")` 这种**dict 传参**的读法必须被看见。
