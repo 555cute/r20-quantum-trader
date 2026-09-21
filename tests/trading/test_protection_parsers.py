@@ -158,6 +158,29 @@ class AttributionEdgeTest(unittest.TestCase):
                          f"中文方向词必须归一：{r['orphan_attributed']}")
         self.assertEqual(r["orphan_attributed"][0]["evidence"], "ledger")
 
+    def test_non_dict_ledger_row_is_skipped_even_as_the_last_row(self):
+        """台账行是**倒序**遍历的 ⇒ 脏行放在**最后**才会先被看到。
+
+        （我第一版把脏行放最前面，结果匹配行先返回，`continue` 那条**根本没执行** ——
+        「用例绿了」不等于「那条分支被走过」，故这里显式把脏行放到最后。）
+        """
+        r = attribute_protective_orders(
+            [], [self.UNTAGGED],
+            [{"inst": "BTC_USDT", "side": "long", "sz": 10.0}, "垃圾"],
+            tolerance_ratio=0.0)
+        self.assertEqual(r["counts"]["orphan_attributed"], 1)
+        self.assertEqual(r["orphan_attributed"][0]["evidence"], "ledger")
+
+    def test_sell_and_buy_words_map_to_short_and_long(self):
+        """台账里用 `sell`/`buy` 写方向 ⇒ 必须归一为 `short`/`long` 才能参与同向判定。"""
+        for word in ("sell", "buy"):
+            with self.subTest(word=word):
+                r = attribute_protective_orders(
+                    [], [self.UNTAGGED],
+                    [{"inst": "BTC_USDT", "side": word, "sz": 10.0}], tolerance_ratio=0.0)
+                self.assertEqual(r["counts"]["orphan_attributed"], 1,
+                                 f"{word} 必须被归一：{r['counts']}")
+
     def test_side_filter_only_applies_when_the_leg_side_is_readable(self):
         """⚠️ **实测边界（如实记录，不是"应该"）**：台账的「同向」过滤**只在腿自己的方向
         读得出来时才生效** —— 腿方向读不出（`_leg_position_side` 返回 None）时，
