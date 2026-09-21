@@ -256,7 +256,8 @@ with make_old(t)():
             subprocess.run([sys.executable, "-c", self.OLD_IMPL],
                            capture_output=True, text=True, timeout=8, cwd=str(ROOT))
         except subprocess.TimeoutExpired:
-            self.assertTrue(True, "如期超时（阻塞）")
+            # 第二百零三刀：原为 `assertTrue(True, "如期超时（阻塞）")` —— 恒真，等于没断言。
+            # 真正的断言是**控制流**：走到这个 except 就说明旧实现如期阻塞（超时）了。
             return
         self.fail("旧实现没有阻塞")
 

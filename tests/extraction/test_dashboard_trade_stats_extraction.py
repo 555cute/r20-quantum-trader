@@ -157,8 +157,11 @@ class TodaySubstringTest(unittest.TestCase):
         """`time` 恰好只含日期时 `in` 与 `==` 都成立 —— 故这条**不能**用来区分两者。"""
         out = _call({"k": _order(time=TODAY, pnl=1.0)})
         self.assertEqual(out["today_win_trades"], 1)
-        self.assertIn(TODAY, TODAY)
-        self.assertEqual(TODAY, TODAY)
+        # 第二百零三刀：这里原本是 `assertIn(TODAY, TODAY)` + `assertEqual(TODAY, TODAY)`
+        # —— 同一个纯表达式两侧相等 ⇒ **恒真**，只是把"日期串上 in 与 == 恰好同真"这句话
+        # 写成了断言。它没法验证任何东西（那种"恰好同真"正是本用例标题说的情况：
+        # 这条用例**不能**用来区分 in 与 ==，故上面只断言真实计数）。
+        self.assertEqual(TODAY, "2026-09-14", "TODAY 常量本身变了，本用例前提失效")
 
     def test_other_day_not_counted_as_today(self):
         out = _call({"k": _order(time="2026-09-13 23:59", pnl=1.0)})

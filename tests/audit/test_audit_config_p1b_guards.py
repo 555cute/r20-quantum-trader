@@ -408,7 +408,18 @@ class VenuePoolGateTests(_Base):
         self.assertTrue(res["ok"], res.get("detail"))
         self.assertEqual(res["margin_usdt"], 120.0)
         self.assertEqual(res["margin_clamped_from_usdt"], 300.0)
-        self.assertIn("该所预算", "该所预算 120U")
+        # 第二百零三刀：这里原本是 `assertIn("该所预算", "该所预算 120U")` ——
+        # **字面量自证**（拿一个常量断言它包含自己），与代码毫无关系 ⇒ 恒真、白占一行。
+        # 现在改成**捕获真日志**：夹仓消息必须点名"该所预算"与实际夹到的上限，
+        # 这样"用例名说 venue budget"才是真的被验证了。
+        from contextlib import redirect_stdout
+        import io as _io
+        _buf = _io.StringIO()
+        with redirect_stdout(_buf):
+            self._run(pool={"margin_per_trade_usdt": 120.0}, margin_usdt=300.0)
+        _log = _buf.getvalue()
+        self.assertIn("该所预算", _log, f"夹仓日志没说清哪道上限生效：{_log!r}")
+        self.assertIn("120U", _log, f"夹仓日志没报夹到的上限：{_log!r}")
 
     def test_min_confidence_gate(self):
         res, ad = self._run(pool={"min_confidence": 90.0}, confidence=88.0)
