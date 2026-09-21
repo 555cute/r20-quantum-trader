@@ -36,6 +36,10 @@ class OKXPublicAdapter(BaseExchangeAdapter):
         native_amend=False,
         decimal_amount=False,
         position_modes=("net", "long_short"),
+        # 第一百九十三刀：本仓的下单/保护腿载荷是在**双向（long_short）**账户上核验的
+        # （显式 posSide、平仓按腿方向）；净持仓（net）模式未核验 ⇒ 不列为准入模式。
+        # 不声明 = 空元组 = 闸不生效（旧状），故这里必须显式声明。
+        entry_ready_position_modes=("long_short",),
         conditional_family="attached",
         protection_semantics="attachAlgoOrds **非受理即原子保护**：官方 attachAlgoClOrdId 说明"
                              "普通订单完全成交后才提交附带算法单，回执字段含 failCode/failReason"
@@ -148,6 +152,25 @@ class OKXPublicAdapter(BaseExchangeAdapter):
         )
 
 
+def interpret_position_mode(account_payload: Any) -> str:
+    """OKX `/api/v5/account/config` 回包 → 本仓词表（`long_short` / `net`）；读不出 ⇒ `unknown`。
+
+    真机字段：`data[0].posMode` ∈ {`long_short_mode`, `net_mode`}。
+    ⚠️ 读不出**绝不**给默认值：`execution_router` 的持仓模式闸对 `unknown` 的处置是
+    **禁新开仓**（fail-closed）——"读不到"必须与"干净"区分开。
+    """
+    rows = account_payload
+    if isinstance(rows, dict):
+        rows = rows.get("data")
+    if not isinstance(rows, (list, tuple)) or not rows:
+        return "unknown"
+    first = rows[0]
+    if not isinstance(first, dict):
+        return "unknown"
+    mode = str(first.get("posMode") or "").strip().lower()
+    return {"long_short_mode": "long_short", "net_mode": "net"}.get(mode, "unknown")
+
+
 class OKXAdapter(OKXPublicAdapter):
     """Full-featured OKX V5 adapter supporting both public market data and private trading."""
 
@@ -171,6 +194,23 @@ class OKXAdapter(OKXPublicAdapter):
                 passphrase=self.passphrase,
             )
         return current_environment()
+
+    def detect_position_mode(self) -> str:
+        """**只读**探测账户持仓模式（`long_short` / `net`）；读不到 ⇒ `"unknown"`。
+
+        端点 `GET /api/v5/account/config`（真机回包 `data[0].posMode`）。永不抛异常、永不改账户
+        ——本系统**绝不**调用 `POST /api/v5/account/set-position-mode` 自动切换用户账户模式。
+
+        第一百九十三刀补此洞：此前 OKX 是全仓**唯一没有该探测**的所，而
+        `execution_router` 的模式闸写成"声明了模式**且**有探测方法才体检" ⇒ 对 OKX
+        **整段跳过**——偏偏 OKX 是持仓最多的那个所。现在与 Gate/Binance 同尺。
+        """
+        try:
+            from scripts import okx_rest
+            return interpret_position_mode(
+                okx_rest.request("GET", "/api/v5/account/config", env=self._get_okx_env()))
+        except Exception:
+            return "unknown"
 
     def positions(self) -> List[Dict[str, Any]]:
         from scripts import okx_rest
