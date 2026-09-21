@@ -147,5 +147,13 @@ class EarlyReturnsTest(_Base):
             self._stub({"instId": "BTC-USDT-SWAP"})._load_spec("BTC-USDT-SWAP")
 
 
+
+    def test_candles_all_rows_unusable_is_none(self):
+        """全行不可用（缺字段/非数值）⇒ `None`（**不是空列表**：空列表会被当成「读到但没有」）。"""
+        for payload in ([[{}], ["x"]], [["1", "2"]]):
+            with self.subTest(payload=payload):
+                self.assertIsNone(self._stub(payload).fetch_candles("BTC"))
+
+
 if __name__ == "__main__":
     unittest.main()
