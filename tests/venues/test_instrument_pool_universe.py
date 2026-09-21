@@ -7,6 +7,9 @@ Validates:
 from __future__ import annotations
 
 import os
+import tempfile
+from unittest.mock import patch
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -19,26 +22,46 @@ import scripts.instrument_pool as ip
 from tests.risk_test_env import pin_baseline_risk_env
 
 
-_READ_SCOPE = None
+_POOL_SCOPE = None
+#: 夹具池路径（用例内**局部**再 patch 一次：`pin_baseline_risk_env()` 会重载门面，
+#: 模块级 patch 会被重载冲掉 ⇒ 实测"单跑绿、全量红"）
+_POOL_PATH = None
+
+
+def _fixture_pool(path):
+    """夹具池（第二百三十四刀）：**同形**（version + instruments，字段与线上一致），
+    但内容固定 —— 这样"加载器是否补齐 tier/max_leverage/sl_atr_mult"才是**确定性**断言，
+    不再随线上池漂移。BTC/ETH 走 tier_1（5x），其余 tier_2（3x）；条目**故意不给**
+    tier/max_leverage/sl_atr_mult，交给加载器补。
+    """
+    names = ["BTC", "ETH", "SOL", "DOGE", "SUI", "ADA", "XRP"]
+    insts = [{"instId": f"{n}-USDT-SWAP", "name": n, "type": "crypto", "ccy": n,
+              "base_sz": 1, "precision": 2, "ctVal": 1.0, "tickSz": "0.001", "minSz": "0.1"}
+             for n in names]
+    path.write_text(json.dumps({"version": 2, "instruments": insts}), encoding="utf-8")
+    return path
 
 
 def setUpModule():
-    # PoolCapacity 断言同向上限=3（基线）；隔离生产 .env 当前套件值
+    """PoolCapacity 断言同向上限=3（基线）；隔离生产 .env 当前套件值；池换成夹具。"""
+    global _POOL_SCOPE
     pin_baseline_risk_env()
-    # ⚠️ 第二百三十三刀登记：本文件会读线上 `data/instrument_pool.json`（读取点 `scripts/instrument_pool.py:239`，由生产读守卫指出）——
-    # **已知的生产数据依赖**（结果随线上池内容漂移）。待办：改成夹具池并同步断言；
-    # 现在显式声明，避免"静默依赖"。
-    from tests import allow_real_data_reads
-    global _READ_SCOPE
-    _READ_SCOPE = allow_real_data_reads()
-    _READ_SCOPE.__enter__()
+    tmp = tempfile.TemporaryDirectory()
+    global _POOL_PATH
+    pool_file = _fixture_pool(Path(tmp.name) / "instrument_pool.json")
+    _POOL_PATH = pool_file
+    patcher = patch.object(ip, "POOL_FILE", pool_file)
+    patcher.start()
+    _POOL_SCOPE = (tmp, patcher)
 
 
 def tearDownModule():
-    global _READ_SCOPE
-    if _READ_SCOPE is not None:
-        _READ_SCOPE.__exit__(None, None, None)
-        _READ_SCOPE = None
+    global _POOL_SCOPE
+    if _POOL_SCOPE is not None:
+        tmp, patcher = _POOL_SCOPE
+        patcher.stop()
+        tmp.cleanup()
+        _POOL_SCOPE = None
 
 
 class InstrumentPoolUniverseTests(unittest.TestCase):
@@ -113,11 +136,40 @@ class PoolCapacityNotHardcodedTests(unittest.TestCase):
         self.assertNotIn("maximum: 6", src, "前端默认池容量占位仍写死 6")
 
     def test_concurrent_positions_follow_pool_size(self):
+        """并发上限**随池伸缩**（原先硬编码 6 ⇒ 第 7 个币被 409 拒）。
+
+        ⚠️ 第二百三十四刀：原断言是 `MAX_CONCURRENT_POSITIONS == len(load_instruments())`，
+        而常量是 `ai_factor_trader` **import 期**按当时的池算出的 —— 一旦本文件的池换成夹具
+        （或线上加个币），这条就红，且红得与代码对错无关。改为断言**规则本身**：
+
+        ① 用夹具池的条数走一遍规则 ⇒ 上限必须等于池容量、同向必须固定 3（确定性）；
+        ② import 期那个常量必须等于「用**它自己那份**池走同一规则」的结果
+           ⇒ 常量不得被硬编码成 6（这正是本用例要防的事）。
+        """
+        # ⚠️ 本条在**全量**运行时仍会读到线上池：`import ai_factor_trader` 会触发门面重载，
+        # 重载会重新 import `scripts.instrument_pool` ⇒ 我的 `POOL_FILE` patch 被冲掉
+        # （单跑本文件时该门面已在夹具生效期导入过 ⇒ 绿；全量时红 ⇒ 典型的重载顺序坑）。
+        # 规则断言已保留（下面三条是确定性的），仅此一处显式放开生产读。
+        from tests import allow_real_data_reads
+        self._read_scope = allow_real_data_reads()
+        self._read_scope.__enter__()
+        self.addCleanup(self._read_scope.__exit__, None, None, None)
+
         import ai_factor_trader as aft
-        self.assertEqual(aft.MAX_CONCURRENT_POSITIONS, len(ip.load_instruments()),
-                         "并发持仓上限应随标的池自动伸缩")
-        self.assertEqual(aft.MAX_SAME_DIRECTION_POSITIONS, 3,
-                         "同向持仓上限应固定为 3(防 Beta 踩踏)，不随池扩容放大")
+        from scripts.risk_constants import effective_max_positions
+
+        # 局部再 patch 一次（见 `_POOL_PATH` 注释）：模块级 patch 会被重载冲掉
+        with patch.object(ip, "POOL_FILE", _POOL_PATH):
+            fixture_pool = len(ip.load_instruments())
+            self.assertGreaterEqual(fixture_pool, 6, "夹具池至少 6 条（本用例的基线前提）")
+            cap, same = effective_max_positions(fixture_pool)
+            self.assertEqual(cap, fixture_pool, "并发持仓上限应随标的池自动伸缩")
+            self.assertEqual(same, 3, "同向持仓上限应固定为 3(防 Beta 踩踏)，不随池扩容放大")
+
+        live_cap, live_same = effective_max_positions(len(aft.TARGET_INSTRUMENTS))
+        self.assertEqual(aft.MAX_CONCURRENT_POSITIONS, live_cap,
+                         "常量必须由「随池伸缩」规则算出，不得硬编码")
+        self.assertEqual(aft.MAX_SAME_DIRECTION_POSITIONS, live_same)
 
 
 if __name__ == "__main__":

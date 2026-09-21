@@ -39,9 +39,12 @@ def setUpModule():
     global _AMBIENT
     _AMBIENT = {k: os.environ.pop(k, None) for k in list(os.environ)
                 if k.startswith("R20_") and ("EXECUTION" in k or "TESTNET" in k)}
-    # ⚠️ 第二百三十三刀登记：本文件会读线上 `data/instrument_pool.json`（读取点 `scripts/instrument_pool.py:239`，由生产读守卫指出）——
-    # **已知的生产数据依赖**（结果随线上池内容漂移）。待办：改成夹具池并同步断言；
-    # 现在显式声明，避免"静默依赖"。
+    # ⚠️ 第二百三十三刀登记，第二百三十四刀**试改夹具池失败**（证据在此，免得后人重走）：
+    # 读线上 `data/instrument_pool.json`（读取点 `scripts/instrument_pool.py:239`，由生产读守卫指出）。
+    # 试过把 `ip.POOL_FILE` patch 成同形夹具池（含 tier/max_leverage/risk_per_trade_usd 全字段），
+    # 断言反而从 `protective` 变成 `venue_pool` ⇒ 说明这两条用例的分支**还取决于线上场所路由**
+    # （`data/venue_routing.json` 的 per-venue 准入），不止标的池 ⇒ 依赖比"换池"更深，
+    # 需单独一刀连场所路由一起沙箱化。故本刀仍显式声明：**已知的生产数据依赖**，不是"已经安全"。
     from tests import allow_real_data_reads
     global _READ_SCOPE
     _READ_SCOPE = allow_real_data_reads()
