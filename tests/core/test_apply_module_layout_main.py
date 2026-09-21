@@ -115,6 +115,45 @@ class MainPathTest(unittest.TestCase):
         self.assertEqual([m["content"] for m in got], ["内容"],
                          "对不上模板的标题：有内容才输出（空白内容跳过）")
 
+
+    def test_trading_user_keeps_a_profile_content_that_holds_variables(self):
+        """★ `trading_user` 下：档案内容**含变量** ⇒ **原样保留**，不编译。
+
+        理由：它本身就是一块模板（变量留给渲染器统一替换）；若此处编译，变量会被当正文固化 ——
+        正是席位提示词那次事故（提示词里出现字面量花括号）的形态。
+        """
+        PL.apply_module_layout("BASE",
+                               self._profile("trading_user", [
+                                   {"source": "base", "title": "实时一览",
+                                    "content": "实时:{{macro_4h}} 结束"}]),
+                               "trading_user", "标签", {"k": 1})
+        got = self.compile_mock.call_args.args[0]
+        self.assertEqual(got[0]["content"], "实时:{{macro_4h}} 结束",
+                         "含变量的档案内容不得被编译（否则变量变成字面量）")
+
+    def test_trading_user_without_variables_compiles_the_whole_group(self):
+        """★ `trading_user` 下：档案内容**不含变量** ⇒ 编译**整组**（含嵌套实时小节）。"""
+        PL.apply_module_layout("BASE",
+                               self._profile("trading_user", [
+                                   {"source": "base", "title": "实时一览", "content": "无变量"}]),
+                               "trading_user", "标签", {"k": 1})
+        got = self.compile_mock.call_args.args[0]
+        self.assertIn("模板A", got[0]["content"],
+                      "整组编译：本节的 base 模板内容出现在结果里")
+        self.assertIn("模板C", got[0]["content"],
+                      "整组编译：被编组吸收的后续模块也在结果里")
+
+    def test_a_matched_module_takes_its_identity_from_the_template(self):
+        """★ 模块身份以**模板**为准：档案项只提供 `content`，其余字段不参与合并。"""
+        PL.apply_module_layout("BASE",
+                               self._profile("trading_main", [
+                                   {"source": "base", "title": "实时一览",
+                                    "content": "档案A", "自定义字段": "应被忽略"}]),
+                               "trading_main", "标签", {"k": 1})
+        got = self.compile_mock.call_args.args[0]
+        self.assertEqual(got[0]["source"], "base", "身份字段来自模板")
+        self.assertNotIn("自定义字段", got[0], "档案里的额外字段不进入输出模块")
+
     def test_context_is_always_passed_to_the_renderer(self):
         ctx = {"k": 2}
         PL.apply_module_layout("BASE", self._profile("trading_main", []), "trading_main",
