@@ -54,7 +54,9 @@ def _consume_intent(token: str) -> dict[str, Any]:
 
 
 def _position_match(positions: list[dict[str, Any]], intent: dict[str, Any]) -> dict[str, Any] | None:
-    candidates=[p for p in positions if p.get("instId")==intent["instId"] and str(p.get("posSide","")).lower()==intent["posSide"]]
+    # 第一百八十七刀：缺失默认值统一为 `"net"`（本仓其余 10 处都这么写；此前只有这里用 `""`）。
+    # 缺字段时 `""` 会与 intent 的 `"net"` 配不上 ⇒ 明明有仓位却"匹配不到"（净持仓模式下更易触发）。
+    candidates=[p for p in positions if p.get("instId")==intent["instId"] and str(p.get("posSide","net")).lower()==intent["posSide"]]
     if intent["posId"]: candidates=[p for p in candidates if str(p.get("posId", ""))==intent["posId"]]
     return candidates[0] if candidates else None
 
