@@ -42,6 +42,18 @@ test_core_modules_do_not_import_dashboard_app` **当场拦下**
 """
 
 
+#: 表示"这份载荷是**上次成功**的旧数据"的状态词表（`data_health.status`）。
+#: 第一百九十七刀：前端 `stores/dashboard.ts` 一直在读载荷根上的 `is_stale`，而**后端从未发过**
+#: ⇒ 那个判断恒为 false（`?? false`），面板的陈旧分支只剩 `status === 'STALE'` 一条腿在撑。
+#: 这里把它变成真的：由**同一个**状态词推导，避免两处各写一套陈旧判据。
+STALE_STATUSES = ("STALE", "NOT_READY")
+
+
+def is_stale_status(status: object) -> bool:
+    """`data_health.status` → 这份载荷是否为"上次成功的旧数据"。"""
+    return str(status or "").strip().upper() in STALE_STATUSES
+
+
 def build_live_cache_payload(
     _load_cross_venue_data,
     _load_multi_venue_portfolio, _load_portfolio_risk_data, _today_stats_source, _trader_cycle_minutes,
@@ -64,9 +76,17 @@ def build_live_cache_payload(
     由**门面在调用期**以关键字传入 —— Python 在调用时解析门面全局，
     恰好就是被 `patch.object` 替换后的那个对象。
     """
+    _brain_rows = ai_history_list if isinstance(ai_history_list, (list, tuple)) else []
+    _latest_brain = _brain_rows[0] if _brain_rows and isinstance(_brain_rows[0], dict) else {}
     return {
     "timestamp": timestamp_full,
     "date": today_bj_str,
+    # 根级 `is_stale`（前端 `stores/dashboard.ts` 消费；TS 契约里是必填字段）
+    "is_stale": is_stale_status("LIVE" if not source_errors else "PARTIAL"),
+    # 根级 `macro_assessment`：TS 契约声明在根上，而真实内容一直在
+    # `ai_brain_history[0].macro_assessment`（真机缓存实测）⇒ 前端根级读取永远拿不到、只显示
+    # "扫描中…"。这里发一个**同源别名**（不新算，取最新一条脑内记录），嵌套原字段保留。
+    "macro_assessment": _latest_brain.get("macro_assessment"),
     "data_health": {
         "status": "LIVE" if not source_errors else "PARTIAL",
         "partial": bool(source_errors),

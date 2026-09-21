@@ -56,8 +56,9 @@ FACADE = ROOT / "r20_backend" / "dashboard_cache.py"
 
 SEAMS = ("load_instruments", "build_ai_health", "_load_cross_venue_data")
 
-#: 搬运前 `CACHE_DATA` 字面量的顶层字段（27 项，按搬迁前源码抄录并核对过）
-EXPECTED_TOP = {
+#: **历史冻结记录**：搬运前 `CACHE_DATA` 字面量的顶层字段（27 项，按搬迁前源码抄录并核对过）。
+#: 这是抽取那一轮"逐字段对拍"的证据，**永远不动** —— 后来按契约补发的字段不算历史里有过。
+HISTORICAL_TOP = {
     "timestamp", "date", "data_health", "system", "account", "today_stats",
     "performance", "positions", "positions_summary", "pending_orders", "factors",
     "funding_settlements", "adaptive_config", "review", "ai_trading_memory_md",
@@ -65,6 +66,24 @@ EXPECTED_TOP = {
     "news_intelligence", "ai_brain_history", "ai_health", "factor_library",
     "cross_venue", "portfolio_risk", "multi_venue_portfolio",
 }
+
+#: 抽取**之后**按 TS 契约补发的顶层字段 —— **新增必须登记在这里并写理由**。
+#:
+#: 第一百九十七刀：`frontend/src/types/dashboard.ts`（`DashboardResponse`）声明了这两个字段、
+#: `frontend/src/stores/dashboard.ts` 直接读**载荷根**，而后端此前**从未发过**：
+#:   · `is_stale` —— `data.value?.is_stale ?? false` 恒为 false，面板陈旧分支只剩
+#:     `status === 'STALE'` 一条腿在撑；
+#:   · `macro_assessment` —— 真实内容只存在于 `ai_brain_history[0].macro_assessment`
+#:     （真机缓存实测有真文本）⇒ 根级读取永远 undefined，面板宏观一行永远"扫描中…"。
+#: 两项均有独立门：`tests/audit/test_payload_contract_cross_layer.py`。
+ADDED_AFTER_EXTRACTION = {
+    "is_stale": "TS 契约必填 + 前端读根；由 `is_stale_status(data_health.status)` 单一事实源推导",
+    "macro_assessment": "TS 契约声明在根；取 `ai_brain_history[0]` 的同源别名（不新算）",
+}
+
+#: 当前应有的顶层字段 = 历史冻结 ∪ 契约补发。
+#: ⚠️ 下面这条断言刻意保持**逐个相等**（不是"至少包含"）：顶层字段的任何增删都必须显式露面。
+EXPECTED_TOP = HISTORICAL_TOP | set(ADDED_AFTER_EXTRACTION)
 
 
 def _load(path: Path):
@@ -314,9 +333,16 @@ class RuntimeEquivalenceRecordedTest(unittest.TestCase):
         这里只固化"顶层字段清单"这一可静态复核的部分 ——
         金额级等同无法在单测里重建（需要两个 worktree）。
         """
-        self.assertEqual(len(EXPECTED_TOP), 27)
-        self.assertIn("data_health", EXPECTED_TOP)
-        self.assertIn("positions_summary", EXPECTED_TOP)
+        # 历史记录是 27 项（抽取那一轮的对拍证据），**不接受**被后来的补发改写
+        self.assertEqual(len(HISTORICAL_TOP), 27)
+        self.assertIn("data_health", HISTORICAL_TOP)
+        self.assertIn("positions_summary", HISTORICAL_TOP)
+        # 抽取没有丢字段：历史 27 项必须**全部**仍在当前清单里（superset，不是 equality）
+        self.assertTrue(HISTORICAL_TOP <= EXPECTED_TOP,
+                        f"抽取后丢了历史字段：{sorted(HISTORICAL_TOP - EXPECTED_TOP)}")
+        # 补发的每一项都必须写明理由（防止"顺手加字段"混进来）
+        for field, reason in ADDED_AFTER_EXTRACTION.items():
+            self.assertGreaterEqual(len(str(reason).strip()), 12, f"{field} 缺理由")
 
 
 if __name__ == "__main__":

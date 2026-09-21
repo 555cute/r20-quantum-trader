@@ -291,8 +291,12 @@ def update_cache_cycle():
             stale = dict(CACHE_DATA)
             stale_positions = (stale.get("positions_summary") or {}).get("items", [])
             enrich_position_risk_fields(stale_positions, trackers)
+            # 第一百九十七刀：陈旧分支是**上次成功载荷的拷贝**，会带着 `is_stale=False`
+            # ⇒ 必须显式改真，否则前端永远看不出这是旧数据。
+            _stale_status = "NOT_READY" if _private_not_ready else "STALE"
+            stale["is_stale"] = True
             stale["data_health"] = {
-                "status": "NOT_READY" if _private_not_ready else "STALE",
+                "status": _stale_status,
                 "partial": True,
                 "errors": source_errors,
                 "message": _NOT_READY_TEXT if _private_not_ready else None,
