@@ -72,10 +72,12 @@ def canonical_inst(raw: Any) -> str:
     s = str(raw or "").strip().upper()
     if not s:
         return ""
+    if ":" in s:                      # 第一百八十九刀：剥场所前缀（GATE:BTC_USDT → BTC_USDT）
+        s = s.rsplit(":", 1)[1]       # 否则合成 id 会得到 "GATE:BTC"（与 canonical_base 不一致）
     for sep in ("-", "/", "_"):
         if sep in s:
             s = s.split(sep)[0]
-    for quote in ("USDT", "USDC", "USD"):
+    for quote in ("USDT", "USDC", "FDUSD", "BUSD", "TUSD", "USD"):
         if s.endswith(quote) and len(s) > len(quote):
             s = s[: -len(quote)]
     return s

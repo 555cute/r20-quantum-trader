@@ -186,7 +186,7 @@ def _trigger_price(row: Dict[str, Any]) -> Optional[float]:
     return None
 
 
-def _leg_symbol(row: Dict[str, Any]) -> str:
+def leg_base(row: Dict[str, Any]) -> str:
     """该腿的**币种基名**（各所字段位置不同，本机真单核对）。
 
     - Gate `price_orders`：`initial.contract` = `BTC_USDT`（顶层没有 `symbol`）；
@@ -711,7 +711,7 @@ def attribute_protective_orders(positions: Optional[Sequence[Dict[str, Any]]],
     for p in (positions or []):
         if not isinstance(p, dict):
             continue
-        base = _leg_symbol({"symbol": p.get("base") or p.get("symbol") or "",
+        base = leg_base({"symbol": p.get("base") or p.get("symbol") or "",
                             "inst_id": p.get("inst_id") or p.get("instId") or ""})
         if base:
             # 第一百八十三刀：同币**多仓**（对冲模式 / 异常数据）时 `setdefault` 只留第一个
@@ -725,7 +725,7 @@ def attribute_protective_orders(positions: Optional[Sequence[Dict[str, Any]]],
         for r in reversed(list(ledger_rows or [])):
             if not isinstance(r, dict):
                 continue
-            r_base = _leg_symbol({"symbol": r.get("inst") or r.get("symbol") or r.get("name") or ""})
+            r_base = leg_base({"symbol": r.get("inst") or r.get("symbol") or r.get("name") or ""})
             if r_base != base:
                 continue
             r_side = str(r.get("side") or "").strip().lower()
@@ -754,7 +754,7 @@ def attribute_protective_orders(positions: Optional[Sequence[Dict[str, Any]]],
         if _leg_kind(row) is None:
             buckets["foreign"].append({"reason": "无本系统保护腿特征（标签/类型名都不匹配）"})
             continue
-        base = _leg_symbol(row)
+        base = leg_base(row)
         if not base:
             buckets["unparsed"].append({"reason": "读不出币种（各所字段位置不同）",
                                         "id": str(row.get("id") or row.get("algo_id") or "")})

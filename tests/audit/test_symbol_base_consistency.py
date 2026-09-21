@@ -9,11 +9,11 @@
 | `canonical_base` | `r20_backend/exchanges/base.py` | 面板/因子/符号归一（共用最多）|
 | `_canonical_base_name`（= `canonical_base` 的别名）| `scripts/ai_brain_trader.py` | 池映射 |
 | `_base_of` | `scripts/trader/venue_protection.py` | 保护腿覆盖判定 |
-| `_leg_symbol` | `scripts/trader/venue_protection.py` | 腿归属 |
+| `leg_base` | `scripts/trader/venue_protection.py` | 腿归属（第一百八十九刀由 `_leg_symbol` 更名）|
 
 修复前它们在真机写法上**互相矛盾**（实测）：
 
-| 输入 | `canonical_base` | `_base_of` | `_leg_symbol` |
+| 输入 | `canonical_base` | `_base_of` | `leg_base` |
 |---|---|---|---|
 | `GATE:BTC_USDT` | **`GATE:BTC`** | `BTC` | **`GATE:BTC`** |
 | `BTC_USDC` | **`BTCUSDC`** | `BTC` | `BTC` |
@@ -59,16 +59,19 @@ SPELLINGS = [
 class BaseNameConsistencyTest(unittest.TestCase):
     def test_three_extractors_agree_on_real_spellings(self):
         from r20_backend.exchanges.base import canonical_base
-        from scripts.trader.venue_protection import _base_of, _leg_symbol
+        from r20_backend.execution.own_records import canonical_inst
+        from scripts.trader.venue_protection import _base_of, leg_base
         disagreements = []
         for raw in SPELLINGS:
             if isinstance(raw, tuple):
                 continue
             a = canonical_base(raw)
             b = _base_of(raw)
-            c = _leg_symbol({"symbol": raw, "inst_id": raw})
-            if not (a == b == c):
-                disagreements.append(f"{raw!r}: canonical_base={a!r} _base_of={b!r} _leg_symbol={c!r}")
+            c = leg_base({"symbol": raw, "inst_id": raw})
+            d = canonical_inst(raw)
+            if not (a == b == c == d):
+                disagreements.append(f"{raw!r}: canonical_base={a!r} _base_of={b!r} "
+                                     f"leg_base={c!r} canonical_inst={d!r}")
         self.assertEqual(disagreements, [], "同义异写（币种基名提取不一致）：\n"
                                             + "\n".join(disagreements))
 
@@ -83,7 +86,7 @@ class BaseNameConsistencyTest(unittest.TestCase):
     def test_extractors_delegate_to_the_single_implementation(self):
         """源码级：这两处**不得**再自己拼一份归一（就是漂移的根源）。"""
         src = (ROOT / "scripts" / "trader" / "venue_protection.py").read_text(encoding="utf-8")
-        for fn in ("_base_of", "_leg_symbol"):
+        for fn in ("_base_of", "leg_base"):
             body = src[src.index(f"def {fn}("):]
             body = body[:body.index("\ndef ", 10)]
             self.assertIn("canonical_base", body,

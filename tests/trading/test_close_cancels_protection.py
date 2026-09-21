@@ -191,6 +191,29 @@ class RouterCloseTest(unittest.TestCase):
         self._close(ad)
         self.assertEqual(ad.cancelled, [], "抓不到事实 ⇒ 归因不出 ⇒ 保守不撤")
 
+    def test_gate_legs_with_nested_contract_reach_the_selection(self):
+        """第一百八十九刀：Gate 腿的合约在**嵌套** `initial.contract`（扁平 `symbol` 为空）。
+
+        接线层此前只读扁平 `l.get("symbol")` ⇒ **所有 Gate 腿被静默排除** ⇒
+        "平仓后撤掉可证明属于自己的腿"这条链从未覆盖 Gate（线上遗留腿与该结论一致）。
+        本用例用带 `t-r20` 标签的 Gate 腿钉住它现在真的能进选择并被撤。
+        """
+        gate_leg = _gate_leg("UNI_USDT", "t-r20sl75064327", "close_short", 9.025, "gate-sl")
+        ad = self._Ad(legs=[gate_leg])
+        r = self._close(ad, venue="gate")
+        self.assertTrue(r["ok"], r["detail"])
+        self.assertEqual(ad.cancelled, ["gate-sl"],
+                         "Gate 腿（嵌套 contract + 本系统标签）应当被撤；被排除说明接线层又只看扁平字段")
+
+    def test_other_symbols_still_never_reach_the_selection(self):
+        """放宽字段读取后**不得**把别的币的腿也拉进来（撤错不可逆）。"""
+        mine = _gate_leg("UNI_USDT", "t-r20sl1", "close_short", 9.025, "gate-mine")
+        other = _gate_leg("BTC_USDT", "t-r20sl2", "close_short", 81320.0, "gate-other")
+        ad = self._Ad(legs=[mine, other])
+        r = self._close(ad, venue="gate")
+        self.assertTrue(r["ok"], r["detail"])
+        self.assertEqual(ad.cancelled, ["gate-mine"], "别的币的腿绝不能被撤")
+
 
 if __name__ == "__main__":
     unittest.main()

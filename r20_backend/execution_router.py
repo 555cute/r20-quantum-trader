@@ -617,15 +617,18 @@ def _cancel_proven_own_legs(ad: Any, base: str,
     """
     from .execution import own_records as _own
     try:
-        from scripts.trader.venue_protection import select_legs_to_cancel_after_close
+        from scripts.trader.venue_protection import leg_base, select_legs_to_cancel_after_close
     except ImportError:
-        from trader.venue_protection import select_legs_to_cancel_after_close
+        from trader.venue_protection import leg_base, select_legs_to_cancel_after_close
     try:
         legs = ad.list_protective_orders(None) or []
     except Exception:
         legs = []
-    symbol_legs = [l for l in legs if _own.canonical_inst(
-        (l.get("symbol") if isinstance(l, dict) else "") or "") == _own.canonical_inst(base)]
+    # 第一百八十九刀：这里原来只读**扁平** `l.get("symbol")` —— 而 Gate 的合约在
+    # `initial.contract`（嵌套，真机核对：`symbol` 字段为空）⇒ 所有 Gate 腿都被静默排除，
+    # 于是「平仓后撤掉可证明属于自己的腿」这条链**从未覆盖 Gate**（线上遗留腿与之一致）。
+    # 改用本仓既有的腿基名访问器（它会依次探 `initial.contract`/`contract`/`symbol`/`raw.*`）。
+    symbol_legs = [l for l in legs if leg_base(l) == _own.canonical_inst(base)]
     # 用**平仓前**抓到的事实做归属（平完再读只剩空仓，判不出 matched）
     own_position = dict(before_position or {"base": base})
     ledger = None
