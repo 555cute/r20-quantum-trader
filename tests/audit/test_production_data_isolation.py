@@ -78,6 +78,25 @@ def _guard_offline() -> None:
         raise unittest.SkipTest("离线套件下不 spawn 子进程（守卫在 spawn 之前）")
 
 
+def setUpModule():
+    """本门的**存在目的**就是核对生产文件本身（只读 + 哈希/结构，不断言其内容）
+    ⇒ 显式放开 `tests/__init__.py` 的生产读守卫（第二百三十二刀）。"""
+    from tests import allow_real_data_reads
+    global _READ_SCOPE
+    _READ_SCOPE = allow_real_data_reads()
+    _READ_SCOPE.__enter__()
+
+
+def tearDownModule():
+    global _READ_SCOPE
+    if _READ_SCOPE is not None:
+        _READ_SCOPE.__exit__(None, None, None)
+        _READ_SCOPE = None
+
+
+_READ_SCOPE = None
+
+
 class SubprocessDataWritesRedirectedTest(unittest.TestCase):
     """⚠️ 第七十六刀：堵住 §91.6 登记的**后台子进程泄漏**。
 

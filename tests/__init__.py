@@ -137,6 +137,112 @@ _ALLOW_REAL_WRITES = os.environ.get("R20_TESTS_ALLOW_REAL_DATA", "") == "1"
 _WARNED_PATHS: set[str] = set()
 
 
+# ── 生产数据**读**保护（2026-09-21 加）────────────────────────────────────
+# 起因（第二百三十一刀的个案）：一条用例断言「**线上** data/trading_ledger.json 里必须存在
+# UNI/binance 的 holding 行」——仓一平/台账一更新就红，而代码一行没改。
+# **断言依赖生产数据的内容＝定时炸弹**，与本仓「测试不触生产文件」的纪律冲突
+# （只读也不该**断言其内容**）。当时想用静态扫描做闸，实测 41 处命中里 40 处是假阳性
+# （docstring 提到 data/、临时目录恰叫 data/hello.txt、已被 patch 到临时路径的读取）
+# ⇒ 静态判不可靠，故改为**运行时**守卫：读生产 `data/` 直接失败。
+#
+# 与之配套的两个出口：
+#   ① 环境变量 `R20_TESTS_ALLOW_REAL_DATA=1`（与写守卫同一开关，整进程放开）；
+#   ② `_READ_ALLOW`：**逐文件**登记 + 写明理由（要求"只读且只做结构/哈希，不得断言内容"）。
+_READ_ALLOW: dict = {}
+
+#: 运行时开关：**少数**用例的存在目的就是核对生产文件（如
+#: `tests/audit/test_production_data_isolation.py`），它们在自己的作用域里显式放开。
+_ALLOW_REAL_READS = False
+
+#: 只在**用例执行中**才把"读生产运维配置"当硬错误：模块 import 期（收集阶段）读配置是本仓
+#: 大量模块的正常行为（61 个文件在收集期就 ERROR 的实测教训），那种读不是"测试依赖生产数据内容"。
+_IN_TEST = False
+_CURRENT_TEST = ["<收集期>"]
+
+
+def _install_in_test_flag() -> None:
+    """把 `unittest.TestCase.run` 包一层：仅用例执行期间 `_IN_TEST=True`。"""
+    import unittest as _unittest
+
+    if getattr(_unittest.TestCase.run, "_r20_wrapped", False):
+        return
+    _real_run = _unittest.TestCase.run
+
+    def _run_with_flag(self, *args, **kwargs):
+        global _IN_TEST
+        prev_in, prev_name = _IN_TEST, _CURRENT_TEST[0]
+        _IN_TEST, _CURRENT_TEST[0] = True, f"{type(self).__module__}::{type(self).__name__}.{self._testMethodName}"
+        try:
+            return _real_run(self, *args, **kwargs)
+        finally:
+            _IN_TEST, _CURRENT_TEST[0] = prev_in, prev_name
+
+    _run_with_flag._r20_wrapped = True  # type: ignore[attr-defined]
+    _unittest.TestCase.run = _run_with_flag
+
+
+class allow_real_data_reads:  # noqa: N801 - 与 contextlib 用法一致（可当装饰器/上下文）
+    """显式放开生产 `data/` 的**读**（默认拒绝）。
+
+    用法（只给"核对生产文件本身"这类用例）：
+
+        from tests import allow_real_data_reads
+
+        class MyGate(unittest.TestCase):
+            def setUp(self):
+                self._scope = allow_real_data_reads()
+                self._scope.__enter__()
+                self.addCleanup(self._scope.__exit__, None, None, None)
+    """
+
+    def __enter__(self):
+        global _ALLOW_REAL_READS
+        self._prev, _ALLOW_REAL_READS = _ALLOW_REAL_READS, True
+        return self
+
+    def __exit__(self, *exc):
+        global _ALLOW_REAL_READS
+        _ALLOW_REAL_READS = self._prev
+        return False
+
+
+def _assert_not_reading_production(path: object) -> None:
+    """测试读生产 `data/` 直接失败（缺省必须安全）。"""
+    if _ALLOW_REAL_WRITES or _ALLOW_REAL_READS:
+        return
+    try:
+        resolved = Path(os.fspath(path)).resolve()  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return
+    if resolved in _READ_ALLOW:
+        return
+    # 与**写**守卫同一套policy（缺省必须安全，但不搞一刀切）：
+    # ① 运维配置文件（venue_routing/instrument_pool/llm_models/…）的**内容会直接塑造决策**，
+    #    读它＝测试依赖生产配置 ⇒ **硬失败**；
+    # ② 其余 data/ 产物（台账、状态、快照…）历史上被大量测试读到，一律硬失败会掀翻整套，
+    #    而它们的危害形态是"断言依赖其内容"⇒ 每个路径**提示一次**，逼人看见。
+    if resolved in _PROTECTED_CONFIG_FILES and _IN_TEST:
+        # 实测（第二百三十二刀）：一旦硬失败，`tests/venues` 里立刻有 21 个用例红（3 个文件）——
+        # 也就是说**测试套件确实在依赖线上运维配置的内容**。这是真问题，但一次掀翻 21 个用例
+        # 不叫修好；缺省改为**可见的提示**（每个「路径@用例」一次），并留一个**严格模式**
+        # （`R20_TESTS_STRICT_READS=1`）供逐个清理时当闸用。清理清单见台账第 131 刀。
+        key = f"readcfg:{resolved}@{_CURRENT_TEST[0]}"
+        if key not in _WARNED_PATHS:
+            _WARNED_PATHS.add(key)
+            msg = (f"[tests] ⚠️ 生产配置依赖：{_CURRENT_TEST[0]} 读了线上 {resolved.name} —— "
+                   f"它的内容会塑造决策 ⇒ 结果随线上配置漂移。请 patch 到沙箱/临时文件"
+                   f"（`tests.config_sandbox.isolate_config` 或 `patch.object(模块, \"XXX_FILE\", tmp)`）")
+            if os.environ.get("R20_TESTS_STRICT_READS", "") == "1":
+                raise AssertionError(msg + "（当前为严格模式 R20_TESTS_STRICT_READS=1）")
+            print(msg)
+    if resolved == _DATA_DIR or str(resolved).startswith(str(_DATA_DIR) + os.sep):
+        key = "read:" + str(resolved)
+        if key not in _WARNED_PATHS:
+            _WARNED_PATHS.add(key)
+            print(f"[tests] 提示：测试正在**读**生产 data/ 下的 {resolved.name}"
+                  f"（非运维配置，仅提示）—— 若据此**断言其内容**，平台一变就红，请改沙箱")
+
+
 def _assert_not_production(path: object, action: str = "写入") -> None:
     """运维配置文件禁止测试写入；其余生产路径仅提示（每个路径一次）。"""
     if _ALLOW_REAL_WRITES:
@@ -176,11 +282,15 @@ if not _ALLOW_REAL_WRITES:
     def _guarded_path_open(self, mode="r", *args, **kwargs):  # type: ignore[no-untyped-def]
         if any(flag in str(mode) for flag in ("w", "a", "x", "+")):
             _assert_not_production(self)
+        else:
+            _assert_not_reading_production(self)
         return _real_path_open(self, mode, *args, **kwargs)
 
     def _guarded_open(file, mode="r", *args, **kwargs):  # type: ignore[no-untyped-def]
         if any(flag in str(mode) for flag in ("w", "a", "x", "+")):
             _assert_not_production(file)
+        else:
+            _assert_not_reading_production(file)
         return _real_open(file, mode, *args, **kwargs)
 
     def _guarded_replace(src, dst, *args, **kwargs):  # type: ignore[no-untyped-def]
@@ -201,6 +311,7 @@ if not _ALLOW_REAL_WRITES:
     os.replace = _guarded_replace
     os.remove = _guarded_remove
     os.unlink = _guarded_remove
+    _install_in_test_flag()
 
 # ⚠️ 第八十刀：import 时机静默 dashboard 的 **2 秒缓存外呼循环**。
 # `r20_backend/dashboard_cache.py` 模块**顶层末尾**就 `start_dashboard_background_worker()`

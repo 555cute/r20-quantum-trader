@@ -175,6 +175,16 @@ class RouterPrecheckIntegrationTest(unittest.TestCase):
     """预检接线：判定如实进 detail，**行为仍是拒开**（本刀不放开下单）。"""
 
     def setUp(self):
+        # ⚠️ 已知的**生产数据依赖**（第二百三十二刀登记，待办：换成夹具池后撤销本次放开）：
+        # 预检链会经 `load_instruments()` 读生产 `data/instrument_pool.json`，而走到
+        # `stage == "precheck"` 这一支的形状取决于线上池的内容；我试过注入夹具池，
+        # 结果直接跳到 `venue_dry_run`（夹具与线上池不同形），说明本类**确实依赖线上池**。
+        # 与其猜测线上池字段、不如显式登记：此处放开生产读守卫，并把"改夹具"列为待办。
+        from tests import allow_real_data_reads
+        self._read_scope = allow_real_data_reads()
+        self._read_scope.__enter__()
+        self.addCleanup(self._read_scope.__exit__, None, None, None)
+
         from r20_backend import execution_router
         from tests.test_gate_execution_router import _StubAdapter, _decision
         self.router = execution_router
