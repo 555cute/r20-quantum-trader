@@ -10,7 +10,7 @@ import os
 
 from scripts.trader.venue_protection import (
     _leg_size, _expiry, _leg_matches_base, protection_trigger_type_fields,
-    read_ledger_rows, cancel_protective_leg,
+    read_ledger_rows, cancel_protective_leg, attribute_protective_orders,
 )
 
 
@@ -121,6 +121,66 @@ class LedgerEvidenceTest(unittest.TestCase):
             self.assertIsNone(read_ledger_rows(path, log=lambda *a: None))
         finally:
             os.unlink(path)
+
+
+class AttributionEdgeTest(unittest.TestCase):
+    """归属判定的脏输入与台账证据边界（`attribute_protective_orders`）。
+
+    本函数**不做任何撤销**；`cleanup_candidates` 只是"若要清理，这些是可归因项"。
+    脏输入必须被跳过而不是把循环带偏（读得到 ≠ 每条都能用）。
+    """
+
+    LEG = {"id": "s1", "initial": {"contract": "BTC_USDT", "text": "t-r20sl"},
+           "size": 10.0, "side": "long"}
+    # 没有本系统标签、但有明确类型名的腿（Binance 真机形态）⇒ 走**台账证据**那条路
+    # `positionSide` 是 Binance 侧的持仓方向字段；**没有它**时腿的方向读不出来，
+    # 「同向」这个过滤条件就形同虚设（本刀实测：方向过滤只在能读出腿方向时才生效）
+    UNTAGGED = {"id": "b1", "initial": {"contract": "BTC_USDT"},
+                "type": "STOP_MARKET", "size": 10.0, "side": "long",
+                "positionSide": "LONG"}
+
+    def test_non_dict_positions_and_legs_are_skipped(self):
+        """`positions` 与 `legs` 里的非 dict 行都要跳过（脏数据不得带偏循环）。"""
+        r = attribute_protective_orders(["垃圾"], [self.LEG, "垃圾"], None, tolerance_ratio=0.0)
+        self.assertEqual(r["legs_total"], 1, "只应认下那条真腿")
+
+    def test_non_dict_ledger_rows_are_skipped_and_zh_side_is_normalised(self):
+        """台账里的非 dict 行跳过；**「多/空」中文方向词要归一为 long/short**。
+
+        ⚠️ 必须用**没有本系统标签**的腿（`STOP_MARKET`）：带 `t-r20sl` 的腿走的是
+        `tag` 证据（优先级高于台账），根本到不了台账这条路。
+        """
+        r = attribute_protective_orders(
+            [], [self.UNTAGGED],
+            ["垃圾", {"inst": "BTC_USDT", "side": "多", "sz": 10.0}],
+            tolerance_ratio=0.0)
+        self.assertEqual(r["counts"]["orphan_attributed"], 1,
+                         f"中文方向词必须归一：{r['orphan_attributed']}")
+        self.assertEqual(r["orphan_attributed"][0]["evidence"], "ledger")
+
+    def test_side_filter_only_applies_when_the_leg_side_is_readable(self):
+        """⚠️ **实测边界（如实记录，不是"应该"）**：台账的「同向」过滤**只在腿自己的方向
+        读得出来时才生效** —— 腿方向读不出（`_leg_position_side` 返回 None）时，
+        `_ledger_evidence` 收到 `want_pos_side=None`，于是**反向的台账行也算证据**。
+
+        影响面有限：`ledger` 档证据**不自动撤腿**（只有交易所侧 `tag` 才算「可证明」，
+        上一刀已钉），所以后果是**报告层面**的归属偏宽，而非误撤。
+        ⇒ 记在这里，作为"要不要让方向不可读时也不产生证据"的待议项（改它会动归属报告口径）。
+        """
+        r = attribute_protective_orders(
+            [], [self.UNTAGGED],
+            [{"inst": "BTC_USDT", "side": "short", "sz": 10.0}], tolerance_ratio=0.0)
+        self.assertEqual(r["counts"]["orphan_attributed"], 1,
+                         "腿方向不可读 ⇒ 反向台账行也成了证据（已如实记录该边界）")
+        self.assertEqual(r["orphan_attributed"][0]["evidence"], "ledger")
+
+    def test_ledger_row_without_size_is_not_evidence(self):
+        """台账行**没有数量** ⇒ 不作证据（量对不上就没法证明归属）。"""
+        r = attribute_protective_orders(
+            [], [self.UNTAGGED],
+            [{"inst": "BTC_USDT", "side": "long"}], tolerance_ratio=0.0)
+        self.assertEqual(r["counts"]["orphan_attributed"], 0)
+        self.assertEqual(r["counts"]["orphan_unattributed"], 1)
 
 
 class CancelProtectiveLegProbeTest(unittest.TestCase):

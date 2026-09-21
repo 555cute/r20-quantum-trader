@@ -15,6 +15,7 @@ import shutil
 import tempfile
 import re
 import unittest
+from types import SimpleNamespace
 from unittest.mock import MagicMock, call
 
 from scripts.trader.venue_protection import (
@@ -1644,3 +1645,30 @@ class CancelOrphanSafetyTest(unittest.TestCase):
         self.assertTrue(any(x.get("reason") == "tag" and x.get("id") == "sl-mine"
                             for x in sel["to_cancel"]),
                         f"tag 证据的腿必须可撤（这是唯一「敢撤自己腿」的依据）：{sel}")
+
+class EnsureStaleCancelEdgeTest(unittest.TestCase):
+    """续期的第②步「再撤旧」的两条边界。"""
+
+    def test_new_leg_reusing_old_id_is_not_cancelled(self):
+        """新腿**复用了旧腿的 id** ⇒ 绝不能把它当旧腿撤掉（否则刚挂上就被自己撤了）。"""
+        ad = MagicMock()
+        ad.list_protective_orders.return_value = [gate_sl_row("old-sl", created=NOW - (604800 - 60))]
+        ad.attach_protective_orders.return_value = {"sl": "old-sl"}
+        res = ensure_venue_protection(ad, symbol="BTC_USDT", pos_side="long",
+                                      position_size=10, tp_px=85000, sl_px=78000, now_s=NOW)
+        self.assertNotIn("old-sl", res.get("cancelled") or [],
+                         "新腿 id == 旧腿 id ⇒ 必须跳过（否则撤掉刚挂的保护腿）")
+        ad.cancel_price_order.assert_not_called()
+
+    def test_adapter_without_cancel_capability_registers_error_not_silence(self):
+        """撤旧用能力探针；适配器**三样撤腿方法都没有** ⇒ 诚实登记错误，不静默当成功。"""
+        ad = SimpleNamespace()
+        ad.list_protective_orders = lambda symbol: [gate_sl_row("old-sl", created=NOW - (604800 - 60))]
+        ad.attach_protective_orders = lambda *a, **k: {"sl": "new-sl"}
+        # 既无 cancel_price_order / cancel_algo_order / cancel_order
+        res = ensure_venue_protection(ad, symbol="BTC_USDT", pos_side="long",
+                                      position_size=10, tp_px=85000, sl_px=78000, now_s=NOW)
+        self.assertEqual(res.get("cancelled") or [], [], "撤不掉就不能报成已撤")
+        # 撤旧失败落在 kept_old（宁可双、不可裸：不回滚新腿），并**如实写进 detail**
+        self.assertEqual(res.get("kept_old"), ["old-sl"])
+        self.assertIn("未撤", res.get("detail") or "", f"必须如实披露：{res.get('detail')}")
