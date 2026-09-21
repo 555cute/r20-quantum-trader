@@ -846,3 +846,27 @@ class OrphanMismatchPromptTest(unittest.TestCase):
         out = self._line({"readable": True, "attributed": [], "unattributed": [],
                           "sideMismatch": [], "sizeMismatch": [], "ledgerRows": "ok"})
         self.assertNotIn("该所孤儿腿", out)
+
+class UnclassifiedLegsPromptTest(unittest.TestCase):
+    """第一百八十二刀：提示词要说清"认不出的腿不计入覆盖"（覆盖可能被低估）。"""
+
+    def _line(self, **over):
+        orph = {"readable": True, "attributed": [], "unattributed": [], "sideMismatch": [],
+                "sizeMismatch": [], "foreignCount": 0, "unparsedCount": 0, "ledgerRows": "ok"}
+        orph.update(over)
+        row = {"venue": "binance", "name": "XRP", "side": "long", "avgPx": "1", "markPx": "1",
+               "upl": "0", "uplRatio": "0", "protectionStatus": "fully_protected",
+               "protectionCoveragePct": 100.0, "protectionOrphans": orph}
+        return build_position_lines([row], safe_float=_sf)
+
+    def test_foreign_legs_are_disclosed_with_the_underestimate_risk(self):
+        out = self._line(foreignCount=3)
+        self.assertIn("认不出类型 3 条", out)
+        self.assertIn("不计入覆盖", out)
+        self.assertIn("覆盖被低估", out, "必须点明'覆盖可能被低估'（否则模型以为保护是满的）")
+
+    def test_unparsed_legs_are_disclosed(self):
+        self.assertIn("行解析不了 2 条", self._line(unparsedCount=2))
+
+    def test_zero_means_no_noise(self):
+        self.assertNotIn("该所孤儿腿", self._line())

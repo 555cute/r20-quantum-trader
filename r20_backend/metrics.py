@@ -262,12 +262,15 @@ def collect_protection_orphans(cache_payload: Optional[Dict[str, Any]]) -> Optio
         if info.get("readable") is False:
             out.setdefault(venue, {"readable": False, "candidates": None, "unattributed": None,
                                    "side_mismatch": None, "size_mismatch": None,
+                                   "foreign": None, "unparsed": None,
                                    "ledger_evidence": None})
             continue
         if info.get("readable") is not True:
             continue
         attributed = info.get("attributed") if isinstance(info.get("attributed"), list) else []
         unattributed = info.get("unattributed") if isinstance(info.get("unattributed"), list) else []
+        foreign = info.get("foreignCount")
+        unparsed = info.get("unparsedCount")
         side_mism = info.get("sideMismatch") if isinstance(info.get("sideMismatch"), list) else []
         size_mism = info.get("sizeMismatch") if isinstance(info.get("sizeMismatch"), list) else []
         out[venue] = {"readable": True, "candidates": len(attributed),
@@ -275,6 +278,8 @@ def collect_protection_orphans(cache_payload: Optional[Dict[str, Any]]) -> Optio
                       # 第一百八十一刀：方向/量与任何持仓都对不上的腿（此前面板/指标都没提）
                       "side_mismatch": len(side_mism),
                       "size_mismatch": len(size_mism),
+                      "foreign": foreign if isinstance(foreign, int) else None,
+                      "unparsed": unparsed if isinstance(unparsed, int) else None,
                       "ledger_evidence": info.get("ledgerRows") == "ok"}
     return out or None
 
@@ -531,6 +536,12 @@ def render_prometheus(snapshot: Dict[str, Any]) -> str:
                 emit("r20_protection_size_mismatch_legs", info.get("size_mismatch"), labels,
                      help_text="量与任何持仓都对不上的腿（**正被计入覆盖**，但归属存疑，"
                                "可能是旧仓遗留；价格触及仍会减仓）")
+                # "读到了但认不出"：语义也分两种 ⇒ 各自一个名字（同名多 HELP 只会发出首个）
+                emit("r20_protection_foreign_legs", info.get("foreign"), labels,
+                     help_text="认不出类型的腿（无本方标签、类型名也不认识 ⇒ **不计入覆盖**；"
+                               "若其实是保护腿，覆盖会被低估 ⇒ 须人工核对）")
+                emit("r20_protection_unparsed_legs", info.get("unparsed"), labels,
+                     help_text="行本身解析不了的腿（**不计入覆盖**，属取数/形状问题）")
 
     out: List[str] = []
     for name, family in families.items():

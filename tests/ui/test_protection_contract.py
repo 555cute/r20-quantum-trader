@@ -333,3 +333,32 @@ class MismatchLegsDisclosureTest(unittest.TestCase):
         body = body[:body.index("\ndef ", 10)]
         self.assertIn('"readable": False', body)
         self.assertIn('"sideMismatch": []', body, "读腿失败时不得给出'0 条'的假精确")
+
+class UnclassifiedLegsDisclosureTest(unittest.TestCase):
+    """第一百八十二刀：**读到了但认不出**的腿也要看得见（它们不计入覆盖 ⇒ 覆盖可能被低估）。"""
+
+    _UNKNOWN = {"symbol": "XRPUSDT", "type": "CONDITIONAL", "raw": {"quantity": "100"}}
+
+    def _summary(self, legs):
+        from r20_backend.dashboard_payload.multi_venue import _venue_orphan_summary
+        positions = [{"base": "XRP", "symbol": "XRPUSDT", "side": "long", "size_signed": 100.0}]
+        return _venue_orphan_summary(positions, legs, None, readable=True)
+
+    def test_unclassifiable_legs_are_counted_and_disclosed(self):
+        o = self._summary([self._UNKNOWN])
+        self.assertEqual(o["foreignCount"], 1, "认不出类型的腿必须给数（不计入覆盖 ⇒ 覆盖可能低估）")
+        self.assertEqual(o["unparsedCount"], 0)
+
+    def test_they_do_not_count_as_coverage(self):
+        """行为侧：认不出的腿**不得**算覆盖（否则会静默把不明订单当成保护）。"""
+        from scripts.trader.venue_protection import scan_protective_orders
+        import time
+        v = scan_protective_orders([self._UNKNOWN], symbol="XRPUSDT", pos_side="long",
+                                   position_size=100.0, now_s=time.time())
+        self.assertEqual(v["covered_size"], 0.0)
+        self.assertEqual(v["foreign_count"], 1)
+
+    def test_unreadable_legs_give_none_not_zero(self):
+        from r20_backend.dashboard_payload.multi_venue import _venue_orphan_summary
+        o = _venue_orphan_summary([], [], None, readable=False)
+        self.assertIsNone(o["foreignCount"], "读腿失败时不得给出'0 条认不出'的假精确")

@@ -94,6 +94,12 @@ function orphanMismatch(p: any): number {
   if (!o || !o.readable) return 0;
   return (o.sideMismatch || []).length + (o.sizeMismatch || []).length;
 }
+/** 读到了但认不出的腿数（认不出类型 + 行解析不了）：**不计入覆盖** ⇒ 覆盖可能被低估。 */
+function orphanUnclassified(p: any): number {
+  const o = p?.protectionOrphans;
+  if (!o || !o.readable) return 0;
+  return (o.foreignCount || 0) + (o.unparsedCount || 0);
+}
 /** 读腿失败 ⇒ 不可判定（**不是**没有孤儿腿）。 */
 function orphanReadFailed(p: any): boolean {
   return !!p?.protectionOrphans && p.protectionOrphans.readable === false;
@@ -319,6 +325,11 @@ function orderTooltipText(o: any): string {
                   ? t('dash.matrix.positions.orphanReadFailHint')
                   : t('dash.matrix.positions.orphanUnknownHint')"
               >{{ t('dash.matrix.positions.orphanUnknownPill') }}</span>
+              <span
+                v-if="orphanUnclassified(p) > 0"
+                class="inline-flex items-center gap-1 text-3xs text-[var(--ink-2)]"
+                :title="t('dash.matrix.positions.unclassifiedHint')"
+              >{{ t('dash.matrix.positions.unclassifiedPill') }} {{ orphanUnclassified(p) }}</span>
               <span
                 v-if="orphanMismatch(p) > 0"
                 class="inline-flex items-center gap-1 text-3xs text-[var(--ink-2)]"

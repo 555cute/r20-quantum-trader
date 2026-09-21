@@ -84,6 +84,8 @@
 | 串币覆盖（合约匹配）| 覆盖必须**只**统计本仓合约的腿：`_base_of` 先剥合成 id 的场所前缀（`GATE:BTC_USDT` → `BTC`，否则一开过滤就全丢 ⇒ **假缺口** ⇒ 重复挂腿），再按**归一后前缀相等**比较（`WBTCUSDT` 不得当成 `BTC`）；`ensure`/审计两个写单相关站点都显式 `require_symbol_match=True`（不假定适配器会尊重 symbol 参数）| 防 | `scripts/trader/venue_protection.py` | `tests/trading/test_venue_protection.py::ContractMatchRobustnessTest` |
 | 覆盖不足必须被看见 | 有活止损但**量不够/方向不覆盖** ⇒ `would` 取 `repair` 且进 `would` 列表（此前只看 `has_live_sl` ⇒ 落成 `noop`，既不进 `critical` 也不进 `would` ⇒ 静默缺口）；`critical` 语义**不变**（＝完全没有止损腿）| 吼 | `scripts/trader/venue_protection.py` | `tests/trading/test_venue_protection.py::ContractMatchRobustnessTest` |
 | 归属不符的腿要看得见（两种语义分开）| 面板载荷/提示词/指标都要披露 mismatch 腿，且**语义必须分开**：`sideMismatch`（方向与本仓不符 ⇒ **不计入覆盖**，反向腿保护不了本仓）与 `sizeMismatch`（量对不上任何持仓 ⇒ **正被计入覆盖**，归属存疑，价格触及仍会减仓）；指标用**两个名字**（一个名字只能有一个 HELP，共用会把两种语义混成一个数）；读腿失败 ⇒ `readable:false`，两边都不得给「0 条」的假精确 | 披露 | `r20_backend/dashboard_payload/multi_venue.py` | `tests/ui/test_protection_contract.py::MismatchLegsDisclosureTest` |
+| 一个指标名一个语义 | `emit` 用 `setdefault` 登记 family ⇒ 同名第二次带不同 HELP **不会出现在输出里**（静默丢失）；标签集不一致同属非法 exposition。不同语义必须**不同名字**（门用 AST 扫 `r20_backend/metrics.py`：同名多 HELP/TYPE/标签集即红）| 防 | `r20_backend/metrics.py` | `tests/ops/test_metrics_name_semantics.py::MetricsNameSemanticsTest` |
+| 认不出的腿也要看得见 | `foreign`（认不出类型）/`unparsed`（行解析不了）的腿**不计入覆盖** ⇒ 若其实是保护腿，覆盖被**低估**（可能触发重复挂腿）。两者语义不同 ⇒ 载荷/提示词分开给数、指标各自一个名字；读腿失败 ⇒ 不给「0 条」的假精确 | 披露 | `r20_backend/dashboard_payload/multi_venue.py` | `tests/ui/test_protection_contract.py::UnclassifiedLegsDisclosureTest` |
 <!-- anchors:end -->
 
 ## 3. 抽取门与"文档化差异"

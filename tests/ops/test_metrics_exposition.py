@@ -618,3 +618,27 @@ class ProtectionMismatchMetricsTest(unittest.TestCase):
         self.assertEqual([ln for ln in text.splitlines()
                           if ln.startswith("r20_protection_mismatch_legs")], [],
                          "读不到 ⇒ 不发 mismatch 计数（不可判定≠0）")
+
+class UnclassifiedLegMetricsTest(unittest.TestCase):
+    """第一百八十二刀：认不出/解析不了的腿各自一个指标名（语义不同）。"""
+
+    def test_counts_are_emitted_per_semantics(self):
+        cache = {"positions": [{"venue": "gate", "protectionOrphans": {
+            "readable": True, "attributed": [], "unattributed": [], "sideMismatch": [],
+            "sizeMismatch": [], "foreignCount": 2, "unparsedCount": 1, "ledgerRows": "ok"}}]}
+        summary = M.collect_protection_orphans(cache)
+        self.assertEqual(summary["gate"]["foreign"], 2)
+        self.assertEqual(summary["gate"]["unparsed"], 1)
+        text = M.render_prometheus(M.build_snapshot(protection_orphans=summary))
+        self.assertIn('r20_protection_foreign_legs{venue="gate"} 2', text)
+        self.assertIn('r20_protection_unparsed_legs{venue="gate"} 1', text)
+
+    def test_help_says_they_are_not_counted_in_coverage(self):
+        text = M.render_prometheus(M.build_snapshot(protection_orphans={
+            "gate": {"readable": True, "candidates": 0, "unattributed": 0, "side_mismatch": 0,
+                     "size_mismatch": 0, "foreign": 1, "unparsed": 1, "ledger_evidence": True}}))
+        for metric in ("r20_protection_foreign_legs", "r20_protection_unparsed_legs"):
+            helps = [ln for ln in text.splitlines() if ln.startswith(f"# HELP {metric}")]
+            self.assertTrue(helps, f"{metric} 缺 HELP")
+            self.assertTrue(any("不计入覆盖" in ln for ln in helps),
+                            f"{metric} 的 HELP 必须写明'不计入覆盖'（否则读者以为它算保护）")

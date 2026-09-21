@@ -62,6 +62,10 @@ export const enMatrix = {
     orphanHint: 'This venue has protective legs attributable to us with no matching position. '
       + 'They can reduce a NEW position on the same symbol, so an operator must review and '
       + 'cancel them explicitly (the system never cancels automatically).',
+    unclassifiedPill: 'unreadable legs',
+    unclassifiedHint: 'This venue has protective legs that were read but cannot be classified '
+      + '(no tag of ours, unrecognized type name, or an unparsable row). They are NOT counted '
+      + 'as coverage, so coverage may be UNDERESTIMATED (which can cause duplicate legs); review.',
     mismatchPill: 'legs unmatched',
     mismatchHint: 'This venue has protective legs whose side or size matches no position: '
       + 'side-mismatched legs are NOT counted as coverage (a reversed leg cannot protect this '

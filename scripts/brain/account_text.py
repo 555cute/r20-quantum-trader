@@ -80,6 +80,12 @@ def _orphan_legs_text(p: Dict[str, Any]) -> str:
     if size_mism:
         parts.append(f"量与任何持仓都不符 {len(size_mism)} 条"
                      "（**仍被计入覆盖**，归属存疑，须人工核对）")
+    foreign = info.get("foreignCount")
+    if isinstance(foreign, int) and foreign > 0:
+        parts.append(f"认不出类型 {foreign} 条（**不计入覆盖** ⇒ 若其实是保护腿，覆盖被低估）")
+    unparsed = info.get("unparsedCount")
+    if isinstance(unparsed, int) and unparsed > 0:
+        parts.append(f"行解析不了 {unparsed} 条（**不计入覆盖**，属取数/形状问题）")
     if not parts:
         return ""
     ledger = "" if info.get("ledgerRows") == "ok" else "（台账未读到 ⇒ 可归因数可能偏少）"

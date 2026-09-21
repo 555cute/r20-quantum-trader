@@ -98,6 +98,7 @@ def _venue_orphan_summary(v_positions, v_algos, ledger_rows, *, readable):
     if not readable:
         return {"readable": False, "attributed": [], "unattributed": [],
                 "sideMismatch": [], "sizeMismatch": [],
+                "foreignCount": None, "unparsedCount": None,
                 "matched": 0, "ledgerRows": "unknown"}
     from scripts.trader.venue_protection import attribute_protective_orders
     try:
@@ -126,6 +127,13 @@ def _venue_orphan_summary(v_positions, v_algos, ledger_rows, *, readable):
             #     （可能是旧仓遗留的 reduceOnly 单，日后价格触及就会减仓）。
             "sideMismatch": _brief("side_mismatch"),
             "sizeMismatch": _brief("size_mismatch"),
+            # 第一百八十二刀：**读到了但认不出**的腿（无本方标签、类型名也不认识 ⇒ `foreign`；
+            # 行本身解析不了 ⇒ `unparsed`）。它们**不计入覆盖** ⇒ 若其实是保护腿，覆盖会被低估
+            # （可能触发重复挂腿）⇒ 必须让运营看得见。两者语义不同，故分开给数。
+            # ⚠️ 这两个桶在归属层是**腿列表**（不是计数）——我第一版按 int 取 ⇒ 字段恒为 None
+            # （用例 `test_unclassifiable_legs_are_counted_and_disclosed` 当场抓到）。
+            "foreignCount": len(att.get("foreign") or []),
+            "unparsedCount": len(att.get("unparsed") or []),
             "matched": len(att.get("matched") or []),
             "ledgerRows": "ok" if ledger_rows is not None else "unavailable"}
 

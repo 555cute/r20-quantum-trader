@@ -173,3 +173,15 @@ test('归属存疑提示写明两种语义的差别', () => {
   assert.match(en, /NOT counted as coverage/i, '英文提示未写明 side-mismatch 不计覆盖');
   assert.match(en, /ARE counted as coverage/i, '英文提示未写明 size-mismatch 仍计覆盖');
 });
+
+test('腿认不出徽标：计数受 readable 守卫且写明"覆盖可能被低估"', () => {
+  const fn = panel.slice(panel.indexOf('function orphanUnclassified('));
+  assert.ok(fn.startsWith('function orphanUnclassified('), '缺 orphanUnclassified');
+  const body = fn.slice(0, fn.indexOf('\n}'));
+  assert.match(body, /(!\s*o\.readable)|(readable\s*\?)/, '缺 readable 守卫');
+  assert.match(body, /foreignCount/, '未统计认不出类型的腿');
+  assert.match(body, /unparsedCount/, '未统计解析不了的腿');
+  assert.match(panel, /unclassifiedPill/, '面板没有渲染该徽标');
+  assert.match(zh, /覆盖会被\*\*低估\*\*/, '中文提示未写明"覆盖可能被低估"');
+  assert.match(en, /UNDERESTIMATED/i, '英文提示未写明 UNDERESTIMATED');
+});
