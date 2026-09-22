@@ -10,7 +10,9 @@ import sqlite3
 import tempfile
 import threading
 import unittest
+from unittest import mock
 
+from r20_backend import risk_reservation as RR
 from r20_backend.risk_reservation import (
     ReservationError,
     ReservationExceeded,
@@ -249,3 +251,176 @@ class TestConcurrency(RiskReservationTestBase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestAccountKeyNormalisation(unittest.TestCase):
+    """`_normalize_account_key` 的四种入参形态（对象 / 元组 / 三段串 / 退化串）。"""
+
+    def test_an_object_with_venue_environment_and_fingerprint(self):
+        class Key:
+            venue = "okx"
+            environment = "live"
+            fingerprint = "fp-1"
+
+        self.assertEqual(RR._normalize_account_key(Key()),
+                         ("okx:live:fp-1", "okx", "live"))
+
+    def test_an_object_without_a_fingerprint_keeps_an_empty_tail(self):
+        class Key:
+            venue = "gate"
+            environment = "demo"
+
+        self.assertEqual(RR._normalize_account_key(Key()), ("gate:demo:", "gate", "demo"))
+
+    def test_a_tuple_is_accepted(self):
+        self.assertEqual(RR._normalize_account_key(("okx", "live", "fp-1")),
+                         ("okx:live:fp-1", "okx", "live"))
+
+    def test_a_list_is_accepted(self):
+        self.assertEqual(RR._normalize_account_key(["okx", "live", "fp-1"]),
+                         ("okx:live:fp-1", "okx", "live"))
+
+    def test_a_three_part_string_is_accepted(self):
+        self.assertEqual(RR._normalize_account_key("okx:live:fp-1"),
+                         ("okx:live:fp-1", "okx", "live"))
+
+    def test_a_degenerate_string_honestly_records_empty_parts(self):
+        """拆不出 venue/environment 时**诚实记空**，不冒充一个所名。"""
+        self.assertEqual(RR._normalize_account_key("solo"), ("solo", "", ""))
+
+    def test_a_four_part_string_is_also_degenerate(self):
+        self.assertEqual(RR._normalize_account_key("a:b:c:d"), ("a:b:c:d", "", ""))
+
+    def test_a_two_part_string_is_also_degenerate(self):
+        self.assertEqual(RR._normalize_account_key("okx:live"), ("okx:live", "", ""))
+
+
+class TestReserveEdgeCases(RiskReservationTestBase):
+    def test_a_negative_amount_is_rejected(self):
+        with self.assertRaises(ReservationError) as ctx:
+            self.mgr.reserve(self.okx_live, "i1", -1.0, STATE_PENDING)
+        self.assertIn("不可为负", str(ctx.exception))
+
+    def test_an_adjustment_that_breaks_the_budget_raises(self):
+        """已存在行的**差额重查**：others(0) + 调整后(250) > 上限(200) ⇒ 拒。"""
+        mgr, tmp = make_manager(total_limit_usdt=200.0)
+        self.addCleanup(lambda: __import__("shutil").rmtree(tmp, ignore_errors=True))
+        mgr.reserve(self.okx_live, "i1", 150.0, STATE_PENDING)
+        with self.assertRaises(ReservationExceeded) as ctx:
+            mgr.reserve(self.okx_live, "i1", 250.0, STATE_PENDING)
+        self.assertIn("其他占用", str(ctx.exception))
+        self.assertAlmostEqual(mgr.total_reserved(self.okx_live), 150.0,
+                               msg="被拒的调整不得改动原预留额")
+
+    def test_an_adjustment_within_the_budget_succeeds(self):
+        mgr, tmp = make_manager(total_limit_usdt=200.0)
+        self.addCleanup(lambda: __import__("shutil").rmtree(tmp, ignore_errors=True))
+        mgr.reserve(self.okx_live, "i1", 150.0, STATE_PENDING)
+        self.assertAlmostEqual(
+            mgr.reserve(self.okx_live, "i1", 180.0, STATE_PENDING)["amount_usdt"], 180.0)
+
+    def test_a_zero_amount_keeps_the_existing_reservation(self):
+        """amount=0 是"保持原额"的信号（release/confirm 靠它做语义糖）。"""
+        self.mgr.reserve(self.okx_live, "i1", 120.0, STATE_PENDING)
+        out = self.mgr.reserve(self.okx_live, "i1", 0.0, STATE_PARTIAL)
+        self.assertAlmostEqual(out["amount_usdt"], 120.0)
+        self.assertEqual(out["state"], STATE_PARTIAL)
+
+    def test_a_rollback_failure_is_swallowed_so_the_original_error_wins(self):
+        """第 194 行：回滚本身再抛错时，**原始错误必须胜出**（不能被回滚错误顶掉）。
+
+        ⚠️ 不能 `patch.object(sqlite3.Connection, "rollback")` —— 它是**不可变的 C 类型**，
+        patch 时能装上、退出时 `setattr` 还原会抛 `TypeError`。故用一个只覆写
+        `rollback`、其余全部委托给真连接的包装对象。
+        """
+
+        class _RollbackBoom:
+            def __init__(self, conn):
+                self._conn = conn
+
+            def __getattr__(self, item):
+                return getattr(self._conn, item)
+
+            def rollback(self):
+                raise RuntimeError("回滚也坏了")
+
+        wrapper = _RollbackBoom(self.mgr._connect())
+        with mock.patch.object(self.mgr, "_connect", return_value=wrapper):
+            with self.assertRaises(ReservationError) as ctx:
+                self.mgr.reserve(self.okx_live, "i1", 10.0, STATE_REJECTED)
+        self.assertIn("初始状态须为占用态", str(ctx.exception))
+
+    def test_release_rejects_a_non_terminal_state(self):
+        with self.assertRaises(ReservationError) as ctx:
+            self.mgr.release(self.okx_live, "i1", state=STATE_PENDING)
+        self.assertIn("只接受终态", str(ctx.exception))
+
+    def test_release_defaults_to_closed(self):
+        self.mgr.reserve(self.okx_live, "i1", 100.0, STATE_PENDING)
+        self.assertEqual(self.mgr.release(self.okx_live, "i1")["state"], STATE_CLOSED)
+        self.assertAlmostEqual(self.mgr.total_reserved(self.okx_live), 0.0)
+
+    def test_confirm_advances_pending_to_confirmed_and_still_occupies(self):
+        """confirmed 仍占预算直到终态 —— 这是设计本意（§6 状态机）。"""
+        self.mgr.reserve(self.okx_live, "i1", 100.0, STATE_PENDING)
+        out = self.mgr.confirm(self.okx_live, "i1")
+        self.assertEqual(out["state"], STATE_CONFIRMED)
+        self.assertAlmostEqual(out["amount_usdt"], 100.0)
+        self.assertAlmostEqual(self.mgr.total_reserved(self.okx_live), 100.0)
+
+
+class TestRecoveryFailurePath(RiskReservationTestBase):
+    def test_a_failure_rolls_back_closes_and_reraises(self):
+        """第 317/318/320 行：恢复失败必须**回滚 + 关连接 + 原样抛出**。"""
+        fake = mock.MagicMock()
+        fake.execute.side_effect = sqlite3.OperationalError("库坏了")
+        with mock.patch.object(self.mgr, "_connect", return_value=fake):
+            with self.assertRaises(sqlite3.OperationalError) as ctx:
+                self.mgr.recovery()
+        self.assertIn("库坏了", str(ctx.exception))
+        self.assertTrue(fake.rollback.called, "异常路径上必须回滚")
+        self.assertTrue(fake.close.called, "finally 里必须关连接")
+
+
+class TestDefaultManagerCaching(unittest.TestCase):
+    """模块级默认实例：**必须能被重置**，否则一次未沙箱的调用就把实例永久钉在生产库上。"""
+
+    def setUp(self):
+        self._orig = RR._default_manager
+        self.tmp = tempfile.mkdtemp(prefix="resv_default_")
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        self.addCleanup(setattr, RR, "_default_manager", self._orig)
+        RR.reset_default_manager()
+
+    def test_reset_clears_the_cache(self):
+        RR.reset_default_manager()
+        self.assertIsNone(RR._default_manager)
+
+    def test_get_manager_caches_one_instance_for_the_default_path(self):
+        with mock.patch.object(RR, "DEFAULT_DB_PATH", os.path.join(self.tmp, "d.db")):
+            first = RR.get_manager()
+            self.assertIs(RR.get_manager(), first)
+            self.assertIs(RR._default_manager, first)
+
+    def test_reset_forces_a_fresh_instance(self):
+        with mock.patch.object(RR, "DEFAULT_DB_PATH", os.path.join(self.tmp, "d.db")):
+            first = RR.get_manager()
+            RR.reset_default_manager()
+            self.assertIsNot(RR.get_manager(), first)
+
+    def test_an_explicit_path_bypasses_the_cache(self):
+        with mock.patch.object(RR, "DEFAULT_DB_PATH", os.path.join(self.tmp, "d.db")):
+            cached = RR.get_manager()
+            other = RR.get_manager(db_path=os.path.join(self.tmp, "other.db"))
+            self.assertIsNot(other, cached)
+            self.assertIs(RR._default_manager, cached, "显式路径不得污染模块级缓存")
+
+    def test_an_explicit_path_is_usable(self):
+        mgr = RR.get_manager(db_path=os.path.join(self.tmp, "other.db"),
+                             total_limit_usdt=50.0)
+        mgr.reserve(("okx", "live", "fp"), "i1", 10.0, STATE_PENDING)
+        self.assertAlmostEqual(mgr.total_reserved(("okx", "live", "fp")), 10.0)
+
+
+if __name__ == "__main__":
+    unittest.main()
