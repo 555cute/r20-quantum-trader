@@ -190,5 +190,314 @@ class TestDivergenceNotes(unittest.TestCase):
             {"bin_funding_pct": 0.0, "gate_funding_pct": 0.003}), "")
 
 
+class _XvModuleBase(unittest.TestCase):
+    """直连子模块测**内部分支**（上面几类走门面集成，这里补内部降级路径）。
+
+    子模块的状态刻意留在门面（`_XV_HEALTH` 必须与重载后的那个对象同一个），
+    所以这里把 `health` 当参数传进去 —— 正是门面调用期的做法。
+    """
+
+    def setUp(self):
+        from scripts.brain import xvenue as xv
+        self.xv = xv
+        self.health: dict = {}
+        self.records: list = []
+
+    def _record(self, venue, name, ok, latency_ms, err=""):
+        self.records.append((venue, name, ok, round(latency_ms), err))
+
+
+class TestHealthFlushFallbacks(_XvModuleBase):
+    """`_xv_flush_health` 的三处静默降级（第 95 / 129 / 139 / 152 行）。"""
+
+    def _flush(self, packages, **over):
+        wrote = {}
+        kw = {"health": self.health, "safe_float": lambda v: float(v or 0),
+              "atomic_write_json": lambda path, payload: wrote.update(payload),
+              "venue_health_file": "/tmp/should-not-be-used.json"}
+        kw.update(over)
+        self.xv._xv_flush_health(packages, **kw)
+        return wrote
+
+    def test_okx_testnet_env_fallback_when_runtime_module_is_unavailable(self):
+        # ★ 第 95 行：`from scripts.okx_runtime import current_environment` 抛 ⇒
+        #   回落到直接读环境变量（`R20_OKX_ENV == "demo"`）
+        pkgs = [{"name": "BTC", "price": 100.0}]
+        with patch.dict(sys.modules, {"scripts.okx_runtime": None}):
+            with patch.dict(os.environ, {"R20_OKX_ENV": "DEMO"}):
+                out = self._flush(pkgs)
+        self.assertTrue(out["venues"]["okx"]["testnet"], "回落分支必须按环境变量判 demo")
+
+    def test_okx_testnet_env_fallback_says_false_for_live(self):
+        pkgs = [{"name": "BTC", "price": 100.0}]
+        with patch.dict(sys.modules, {"scripts.okx_runtime": None}), \
+             patch.dict(os.environ, {"R20_OKX_ENV": "live"}):
+            out = self._flush(pkgs)
+        self.assertFalse(out["venues"]["okx"]["testnet"])
+
+    def test_okx_testnet_uses_the_runtime_module_when_available(self):
+        from scripts.okx_runtime import current_environment
+        pkgs = [{"name": "BTC", "price": 100.0}]
+        out = self._flush(pkgs)
+        self.assertEqual(out["venues"]["okx"]["testnet"],
+                         bool(current_environment().simulated))
+
+    def test_basis_returns_none_for_unparsable_prices(self):
+        # ★ 第 129 行：`_basis` 的 `except (TypeError, ValueError): return None`
+        pkgs = [{"name": "BTC", "price": 100.0,
+                 "xvenue": {"bin_last": "not-a-number"}}]
+        out = self._flush(pkgs)
+        self.assertIsNone(out["symbols"]["BTC"]["bin_basis_pct"])
+        self.assertEqual(out["symbols"]["BTC"]["bin_last"], "not-a-number")
+
+    def test_basis_is_none_for_non_positive_prices(self):
+        pkgs = [{"name": "BTC", "price": 100.0, "xvenue": {"bin_last": 0}}]
+        out = self._flush(pkgs)
+        self.assertIsNone(out["symbols"]["BTC"]["bin_basis_pct"])
+
+    def test_basis_is_computed_for_a_real_price(self):
+        pkgs = [{"name": "BTC", "price": 100.0, "xvenue": {"bin_last": 101.0}}]
+        out = self._flush(pkgs)
+        self.assertEqual(out["symbols"]["BTC"]["bin_basis_pct"], 1.0)
+
+    def test_symbols_are_skipped_when_price_or_snapshot_is_missing(self):
+        pkgs = [{"name": "BTC", "price": 0.0, "xvenue": {"bin_last": 1.0}},
+                {"name": "ETH", "price": 100.0},
+                {"name": "SOL", "price": 100.0, "xvenue": {"bin_last": 1.0}}]
+        out = self._flush(pkgs)
+        self.assertEqual(sorted(out["symbols"]), ["SOL"])
+
+    def test_a_package_without_a_name_aborts_the_whole_flush(self):
+        # ⚠️ 实测行为（本刀仅记录，**未改**）：第 88 行 `okx_ok = [p["name"] ...]`
+        #    用的是**硬下标**，而这一行在整个函数的最外层 `try` 之内 ⇒
+        #    一个**没有 `name` 键**的包会抛 KeyError，被第 151 行的 `except: pass`
+        #    吞掉，于是**整份 venue_health.json 都不落盘**（不是只跳过那一个包）。
+        #    调用方眼里只是"这次健康度没更新"，没有任何告警。
+        pkgs = [{"name": "BTC", "price": 100.0},
+                {"price": 100.0, "xvenue": {"bin_last": 1.0}}]
+        self.assertEqual(self._flush(pkgs), {})
+
+    def test_symbol_snapshot_build_failure_leaves_symbols_empty_but_keeps_venues(self):
+        # ★ 第 139 行 `pass`：逐币快照是**纯附加**，异常不许影响健康度落盘。
+        #   要走到这里，`xv` 必须**真值**（否则第 121 行的 `not xv` 会先 continue），
+        #   且 `.get` 会抛。
+        class _BadXv(dict):
+            def get(self, k, d=None):
+                raise RuntimeError("坏快照对象")
+
+        pkgs = [{"name": "BTC", "price": 100.0, "xvenue": _BadXv({"a": 1})}]
+        out = self._flush(pkgs)
+        self.assertEqual(out["symbols"], {}, "符号块整体失败 ⇒ 留空")
+        self.assertIn("okx", out["venues"], "但场所健康度仍要落盘")
+
+    def test_whole_flush_failure_is_swallowed(self):
+        # ★ 第 152 行 `pass`：健康度是观测面，写失败不许把交易周期打挂
+        pkgs = [{"name": "BTC", "price": 100.0}]
+        def boom(path, payload):
+            raise OSError("write failed")
+        out = self._flush(pkgs, atomic_write_json=boom)
+        self.assertEqual(out, {}, "写失败 ⇒ 什么都没落，但**不抛**")
+
+    def test_health_snapshot_is_a_copy_not_a_live_view(self):
+        self.health["binance"] = {"latency": {"BTC": 12}, "failed": {}}
+        out = self._flush([{"name": "BTC", "price": 100.0}])
+        self.health["binance"]["latency"]["ETH"] = 99
+        self.assertEqual(out["venues"]["binance"]["latency_ms"], {"BTC": 12})
+
+    def test_venue_testnet_flag_comes_from_the_upper_case_env_key(self):
+        pkgs = [{"name": "BTC", "price": 100.0}]
+        self.health["gate"] = {"latency": {"BTC": 5}, "failed": {}}
+        with patch.dict(os.environ, {"R20_GATE_TESTNET": "1"}):
+            out = self._flush(pkgs)
+        self.assertTrue(out["venues"]["gate"]["testnet"])
+
+    def test_average_latency_is_rounded_and_zero_when_empty(self):
+        self.health["binance"] = {"latency": {"BTC": 11, "ETH": 12}, "failed": {}}
+        out = self._flush([{"name": "BTC", "price": 100.0}])
+        self.assertEqual(out["venues"]["binance"]["avg_ms"], 12)
+        self.health["gate"] = {"latency": {}, "failed": {}}
+        out2 = self._flush([{"name": "BTC", "price": 100.0}])
+        self.assertEqual(out2["venues"]["gate"]["avg_ms"], 0)
+
+    def test_ok_venues_exclude_names_that_also_failed(self):
+        self.health["binance"] = {"latency": {"BTC": 9, "ETH": 9},
+                                  "failed": {"ETH": "boom"}}
+        out = self._flush([{"name": "BTC", "price": 100.0}])
+        self.assertEqual(out["venues"]["binance"]["ok"], ["BTC"])
+
+    def test_okx_latency_is_collected_from_the_packages(self):
+        pkgs = [{"name": "BTC", "price": 100.0, "okx_latency_ms": 40}]
+        out = self._flush(pkgs)
+        self.assertEqual(out["venues"]["okx"]["latency_ms"], {"BTC": 40})
+        self.assertEqual(out["venues"]["okx"]["avg_ms"], 40)
+
+    def test_okx_failed_lists_symbols_without_a_price(self):
+        pkgs = [{"name": "BTC", "price": 100.0}, {"name": "ETH", "price": 0.0}]
+        out = self._flush(pkgs)
+        self.assertEqual(out["venues"]["okx"]["ok"], ["BTC"])
+        self.assertIn("ETH", out["venues"]["okx"]["failed"])
+
+    def test_provenance_fields_are_written(self):
+        out = self._flush([{"name": "BTC", "price": 100.0}])
+        self.assertEqual(out["v"], 1)
+        self.assertEqual(out["writer_pid"], os.getpid())
+        self.assertEqual(out["package_count"], 1)
+
+
+class TestSnapshotFallbacks(_XvModuleBase):
+    """两个快照函数与矩阵装配的降级路径（第 158 / 192 / 195 / 220 / 225 / 236 / 239 行）。"""
+
+    def test_get_xvenue_adapter_forwards_to_the_backend_registry(self):
+        # ★ 第 158 行：该函数是**既定 mock 缝**，必须真的转调 backend registry
+        import r20_backend.exchanges as exchanges
+        with patch.object(exchanges, "get_adapter", lambda v: f"adapter:{v}"):
+            self.assertEqual(self.xv._get_xvenue_adapter("binance"), "adapter:binance")
+
+    def test_binance_snapshot_shapes_a_success(self):
+        class Ad:
+            def fetch_ticker(self, base): return {"last": 101.0}
+            def fetch_top_trader_ratio(self, base): return 2.1
+            def fetch_funding_rate(self, base): return 0.00003
+        out = self.xv._xv_binance_snapshot("BTC", get_adapter=lambda v: Ad(),
+                                           record=self._record)
+        self.assertEqual(out["last"], 101.0)
+        self.assertEqual(out["ls"], 2.1)
+        self.assertEqual(out["funding_rate"], 0.00003)
+        self.assertTrue(self.records[0][2], "成功要记 ok=True")
+
+    def test_binance_snapshot_tolerates_a_missing_funding_rate(self):
+        class Ad:
+            def fetch_ticker(self, base): return {"last": 101.0}
+            def fetch_top_trader_ratio(self, base): return 2.1
+            def fetch_funding_rate(self, base): raise RuntimeError("no funding")
+        out = self.xv._xv_binance_snapshot("BTC", get_adapter=lambda v: Ad(),
+                                           record=self._record)
+        self.assertIsNone(out["funding_rate"])
+        self.assertEqual(out["last"], 101.0)
+
+    def test_binance_snapshot_empty_ticker_is_recorded_and_returns_none(self):
+        class Ad:
+            def fetch_ticker(self, base): return {}
+            def fetch_top_trader_ratio(self, base): return 2.1
+            def fetch_funding_rate(self, base): return None
+        out = self.xv._xv_binance_snapshot("BTC", get_adapter=lambda v: Ad(),
+                                           record=self._record)
+        self.assertIsNone(out)
+        self.assertFalse(self.records[0][2])
+        self.assertIn("empty ticker", self.records[0][4])
+
+    def test_binance_snapshot_exception_is_recorded(self):
+        def boom(v): raise RuntimeError("registry down")
+        out = self.xv._xv_binance_snapshot("BTC", get_adapter=boom, record=self._record)
+        self.assertIsNone(out)
+        self.assertIn("registry down", self.records[0][4])
+
+    def test_gate_snapshot_tolerates_a_missing_trader_ratio(self):
+        # ★ 第 192 行 `ls = None`
+        class Ad:
+            def fetch_ticker(self, base): return {"last": 99.0}
+            def fetch_top_trader_ratio(self, base): raise RuntimeError("no stats")
+        out = self.xv._xv_gate_snapshot("BTC", get_adapter=lambda v: Ad(),
+                                        record=self._record)
+        self.assertIsNone(out["ls"])
+        self.assertEqual(out["last"], 99.0)
+
+    def test_gate_snapshot_empty_ticker_returns_none(self):
+        # ★ 第 195 行
+        class Ad:
+            def fetch_ticker(self, base): return {}
+            def fetch_top_trader_ratio(self, base): return 1.1
+        out = self.xv._xv_gate_snapshot("BTC", get_adapter=lambda v: Ad(),
+                                        record=self._record)
+        self.assertIsNone(out)
+        self.assertFalse(self.records[0][2])
+
+    def test_gate_snapshot_exception_is_recorded(self):
+        def boom(v): raise RuntimeError("gate down")
+        out = self.xv._xv_gate_snapshot("BTC", get_adapter=boom, record=self._record)
+        self.assertIsNone(out)
+        self.assertIn("gate down", self.records[0][4])
+
+    def _matrix(self, packages, *, binance=None, gate=None, enabled=True, flush=None):
+        flushed = []
+        # ⚠️ 必须真的把 `flush` 用上 —— 忽略了它的话，"flush 抛错"的用例
+        #    实际上测的是内部那个永不抛的 lambda（本刀就在这里自伤过一次）
+        self.xv.fetch_cross_venue_matrix(
+            packages, enabled=enabled,
+            snapshot_binance=binance or (lambda name: None),
+            snapshot_gate=gate or (lambda name: None),
+            flush_health=flush or (lambda pkgs: flushed.append(pkgs)))
+        return flushed
+
+    def test_disabled_matrix_touches_nothing(self):
+        pkgs = [{"name": "BTC", "price": 100.0}]
+        self.assertEqual(self._matrix(pkgs, enabled=False), [])
+        self.assertNotIn("xvenue", pkgs[0])
+
+    def test_snapshot_result_exception_is_treated_as_no_data(self):
+        # ★ 第 220 行 `val = None`：单个 future 抛（含超时）不许影响其它标的
+        def boom(name): raise RuntimeError("timeout")
+        def good(name): return {"venue": "gate", "name": name, "last": 101.0}
+        pkgs = [{"name": "BTC", "price": 100.0}]
+        self._matrix(pkgs, binance=boom, gate=good)
+        self.assertEqual(pkgs[0]["xvenue"], {"gate_last": 101.0})
+
+    def test_non_dict_snapshot_result_is_skipped(self):
+        pkgs = [{"name": "BTC", "price": 100.0}]
+        self._matrix(pkgs, binance=lambda n: "junk", gate=lambda n: 42)
+        self.assertNotIn("xvenue", pkgs[0])
+
+    def test_result_for_an_unknown_symbol_is_skipped(self):
+        # ★ 第 225 行 `continue`：快照回的 name 不在 by_name 里（竞态/改名）不许崩
+        pkgs = [{"name": "BTC", "price": 100.0}]
+        self._matrix(pkgs, binance=lambda n: {"venue": "binance", "name": "GHOST",
+                                              "last": 1.0})
+        self.assertNotIn("xvenue", pkgs[0])
+        self.assertEqual(len(self._matrix(pkgs)), 1, "flush 仍要执行")
+
+    def test_funding_rate_conversion_failure_is_swallowed(self):
+        # ★ 第 236 行 `pass`
+        pkgs = [{"name": "BTC", "price": 100.0}]
+        self._matrix(pkgs, binance=lambda n: {"venue": "binance", "name": n,
+                                              "last": 1.0, "funding_rate": "abc"})
+        self.assertEqual(pkgs[0]["xvenue"], {"bin_last": 1.0})
+
+    def test_funding_rate_is_scaled_to_percent(self):
+        pkgs = [{"name": "BTC", "price": 100.0}]
+        self._matrix(pkgs, binance=lambda n: {"venue": "binance", "name": n,
+                                              "last": 1.0, "funding_rate": 0.00032})
+        self.assertEqual(pkgs[0]["xvenue"]["bin_funding_pct"], 0.032)
+
+    def test_zero_values_are_kept_but_none_is_skipped(self):
+        pkgs = [{"name": "BTC", "price": 100.0}]
+        self._matrix(pkgs, binance=lambda n: {"venue": "binance", "name": n,
+                                              "last": 0.0, "ls": None,
+                                              "funding_rate": 0.0})
+        self.assertEqual(pkgs[0]["xvenue"], {"bin_last": 0.0, "bin_funding_pct": 0.0})
+
+    def test_matrix_level_failure_is_swallowed(self):
+        # ★ 第 239 行 `pass`：整个矩阵采集炸掉也不许打挂交易周期
+        # （注意：`(x for x in ()).throw(...)` 是**惰性**的，根本不会执行 ——
+        #   必须用真正的函数才会抛）
+        def boom_flush(pkgs):
+            raise RuntimeError("flush boom")
+
+        pkgs = [{"name": "BTC", "price": 100.0}]
+        self.assertEqual(self._matrix(pkgs, flush=boom_flush), [])
+
+    def test_flush_is_called_once_with_the_packages(self):
+        pkgs = [{"name": "BTC", "price": 100.0}]
+        flushed = self._matrix(pkgs, binance=lambda n: {"venue": "binance", "name": n,
+                                                        "last": 1.0})
+        self.assertEqual(len(flushed), 1)
+        self.assertIs(flushed[0], pkgs)
+
+    def test_packages_without_a_name_are_not_snapshotted(self):
+        seen = []
+        pkgs = [{"price": 100.0}]
+        self._matrix(pkgs, binance=lambda n: seen.append(n) or None)
+        self.assertEqual(seen, [])
+
+
 if __name__ == "__main__":
     unittest.main()
