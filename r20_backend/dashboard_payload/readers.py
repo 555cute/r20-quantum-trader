@@ -1,6 +1,6 @@
 """仪表盘载荷装配 —— 通用读取器。
 
-本包是结构性重构（plan_local/R20_STRUCTURE_OPTIMIZATION_20260914.md 阶段 2）的落点：
+本包是结构性重构（plan_local/records/structure-01.md 阶段 2）的落点：
 `r20_backend/dashboard_cache.py` 里那个 1021 行的 `update_cache_cycle` 要按数据域拆出来，
 这里先承载最基础、最无副作用的一层 —— 本地文件读取。
 
