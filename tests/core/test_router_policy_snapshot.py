@@ -204,3 +204,18 @@ class PolicyHashValidatorTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class ArchivesSuccessTest(unittest.TestCase):
+    """★ `policy.py` 收口那一行：归档列表成功路径必须**原样包装**返回。
+
+    （只有失败分支被测过 ⇒ 探针把 55 标了出来。）
+    """
+
+    def test_archives_are_wrapped_without_interpretation(self):
+        entries = [{"policy_hash": "h1"}, {"policy_hash": "h2"}]
+        with mock.patch.object(P, "require_admin_header", mock.Mock(), create=True), \
+                mock.patch("r20_backend.policy_snapshot.load_archive_index",
+                           return_value=entries):
+            out = P.admin_get_policy_archives(x_r20_session="t")
+        self.assertEqual(out, {"ok": True, "archives": entries},
+                         "列表原样返回（路由不做二次解释）")
