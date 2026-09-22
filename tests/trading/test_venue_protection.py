@@ -8,6 +8,8 @@
 """
 from __future__ import annotations
 
+import ast
+import dis
 import json
 import os
 import time
@@ -15,9 +17,11 @@ import shutil
 import tempfile
 import re
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call
 
+from scripts.trader import venue_protection
 from scripts.trader.venue_protection import (
     DEFAULT_RENEW_WITHIN_S,
     attribute_protective_orders,
@@ -1723,3 +1727,248 @@ class EnsureStaleCancelEdgeTest(unittest.TestCase):
         # 撤旧失败落在 kept_old（宁可双、不可裸：不回滚新腿），并**如实写进 detail**
         self.assertEqual(res.get("kept_old"), ["old-sl"])
         self.assertIn("未撤", res.get("detail") or "", f"必须如实披露：{res.get('detail')}")
+
+
+class RowShapeRobustnessTest(unittest.TestCase):
+    """★ 交易所回包形状**不保证** —— 非 dict / 非 live 的行必须被**跳过**而不是打挂巡检。
+
+    这两态在 `scan_protective_orders` 里走的是同一行 `continue`（第 450 行）：
+    `if not isinstance(row, dict) or not _is_live(row)`。判据是"**既不计入 foreign、
+    也不崩**" —— 因为 `continue` 发生在 `_leg_kind` 之前，所以陌生腿的计数器不会被
+    这两种噪音污染。下面用"陌生 dict 行 ⇒ foreign=1"作为**对照**，把这一点钉实。
+    """
+
+    def _scan(self, rows):
+        return scan_protective_orders(rows, symbol="BTC_USDT", pos_side="long",
+                                      position_size=10, now_s=NOW)
+
+    def test_non_dict_rows_are_dropped_before_classification(self):
+        scan = self._scan(["junk", None, 42, [], ("a",), 3.14, True])
+        self.assertEqual(scan["foreign_count"], 0,
+                         "非 dict 行必须在 _leg_kind **之前**就被丢弃，不许计成陌生腿")
+        self.assertEqual(scan["ours"], [])
+        self.assertTrue(scan["needs_repair"], "没有任何我方止损腿 ⇒ 仍要报缺口")
+
+    def test_dict_row_that_is_not_live_is_dropped(self):
+        for status in ("canceled", "cancelled", "filled", "expired", "closed"):
+            with self.subTest(status=status):
+                row = gate_sl_row("sl-dead", size=10)
+                row["status"] = status
+                scan = self._scan([row])
+                self.assertEqual(scan["foreign_count"], 0, status)
+                self.assertFalse(scan["has_live_sl"], status)
+
+    def test_live_status_synonyms_are_all_accepted(self):
+        for status in ("live", "effective", "open", "new", "active"):
+            with self.subTest(status=status):
+                row = gate_sl_row("sl-live", size=10)
+                row["status"] = status
+                scan = self._scan([row])
+                self.assertTrue(scan["has_live_sl"], status)
+
+    def test_unknown_leg_is_counted_as_foreign_for_contrast(self):
+        # 对照：**是** dict 且 live，但认不出是我方腿 ⇒ 才计入 foreign
+        manual = {"id": "m1", "status": "open", "contract": "BTC_USDT",
+                  "initial": {"contract": "BTC_USDT", "size": 10, "close": False,
+                              "text": "manual"},
+                  "trigger": {"price": "90000", "expiration": 604800},
+                  "create_time": NOW - 10}
+        scan = self._scan([manual])
+        self.assertEqual(scan["foreign_count"], 1)
+
+    def test_mixed_batch_keeps_only_the_classifiable_rows(self):
+        rows = ["junk", None, gate_sl_row("sl-ok", size=10),
+                {"id": "dead", "status": "canceled"}, {"id": "m", "status": "open"}]
+        scan = self._scan(rows)
+        self.assertTrue(scan["has_live_sl"])
+        self.assertEqual([o["id"] for o in scan["ours"]], ["sl-ok"])
+        self.assertEqual(scan["foreign_count"], 1)   # 只有那个可判定的陌生 dict
+
+    def test_empty_and_none_row_lists_are_safe(self):
+        for rows in (None, []):
+            with self.subTest(rows=rows):
+                self.assertTrue(self._scan(rows)["needs_repair"])
+
+
+class WatchdogDebounceStepTest(unittest.TestCase):
+    """★ 防抖的**纯函数**一步：输入容忍度 + 缺口身份稳定性。"""
+
+    def test_non_dict_items_are_skipped_not_crashed(self):
+        # 第 1197 行：`report["would"]` 里混进非 dict ⇒ 跳过而不是抛异常
+        new_state, observed, qualified = watchdog_debounce_step(
+            None, {"would": ["junk", None, 42, [], ("a",)]}, now_s=100.0, debounce_s=0.0)
+        self.assertEqual((new_state, observed, qualified), ({}, [], []))
+
+    def test_missing_or_none_would_list_is_safe(self):
+        for report in (None, {}, {"would": None}, {"would": []}):
+            with self.subTest(report=report):
+                self.assertEqual(watchdog_debounce_step(None, report, now_s=1.0,
+                                                        debounce_s=0.0), ({}, [], []))
+
+    def test_duplicate_gap_in_one_report_is_counted_once(self):
+        # 第 1200 行：同一份报告里重复出现同一缺口 ⇒ observed 只登记一次
+        item = {"venue": "okx", "inst": "BTC-USDT-SWAP", "stage": "sl_missing"}
+        new_state, observed, qualified = watchdog_debounce_step(
+            None, {"would": [item, dict(item), dict(item)]}, now_s=100.0, debounce_s=0.0)
+        self.assertEqual(observed, ["okx|BTC-USDT-SWAP|sl_missing"])
+        self.assertEqual(len(observed), 1)
+        self.assertEqual(new_state, {"okx|BTC-USDT-SWAP|sl_missing": 100.0})
+        self.assertEqual(qualified, observed)
+
+    def test_detail_wording_does_not_change_the_gap_identity(self):
+        # ★ 模块 docstring 的显式警告：`detail` 含"距到期 1.2 天"这类**每周期都会变**的
+        #   措辞，绝不能进键 —— 否则同一缺口每周期都算"新缺口"，防抖永不成立（等于没防抖）
+        base = {"venue": "okx", "inst": "BTC-USDT-SWAP", "stage": "sl_missing"}
+        first = dict(base, detail="距到期 1.2 天")
+        second = dict(base, detail="距到期 0.9 天")
+        self.assertEqual(watchdog_gap_key(first), watchdog_gap_key(second))
+        _, observed, _ = watchdog_debounce_step(
+            None, {"would": [first, second]}, now_s=100.0, debounce_s=0.0)
+        self.assertEqual(len(observed), 1, "措辞变化不许产生第二个缺口身份")
+
+    def test_gap_key_is_lowercased_venue_and_stable_across_calls(self):
+        self.assertEqual(watchdog_gap_key({"venue": "OKX", "inst": "BTC", "stage": "S"}),
+                         "okx|BTC|S")
+        self.assertEqual(watchdog_gap_key({}), "||")
+
+    def test_first_seen_timestamp_is_preserved_across_cycles(self):
+        item = {"venue": "okx", "inst": "BTC", "stage": "sl_missing"}
+        state, _, _ = watchdog_debounce_step(None, {"would": [item]}, now_s=100.0,
+                                             debounce_s=0.0)
+        state2, _, _ = watchdog_debounce_step(state, {"would": [item]}, now_s=999.0,
+                                              debounce_s=0.0)
+        self.assertEqual(state2["okx|BTC|sl_missing"], 100.0, "首见时间不许被后续周期改写")
+
+    def test_healed_gap_is_dropped_from_state(self):
+        item = {"venue": "okx", "inst": "BTC", "stage": "sl_missing"}
+        state, _, _ = watchdog_debounce_step(None, {"would": [item]}, now_s=100.0,
+                                             debounce_s=0.0)
+        state2, observed, _ = watchdog_debounce_step(state, {"would": []}, now_s=200.0,
+                                                     debounce_s=0.0)
+        self.assertEqual(state2, {}, "缺口愈合 ⇒ 状态自清，不攒垃圾")
+        self.assertEqual(observed, [])
+
+    def test_debounce_gates_qualification_but_not_observation(self):
+        item = {"venue": "okx", "inst": "BTC", "stage": "sl_missing"}
+        _, observed, qualified = watchdog_debounce_step(None, {"would": [item]}, now_s=100.0,
+                                                        debounce_s=600.0)
+        self.assertEqual(observed, ["okx|BTC|sl_missing"], "新缺口仍要被观测到")
+        self.assertEqual(qualified, [], "但未满防抖窗口 ⇒ 不许合格（不许触发真实写单）")
+        # 用首见时间"喂"一次未来时刻 ⇒ 满窗口后可合格
+        state = {"okx|BTC|sl_missing": 100.0}
+        _, _, qualified2 = watchdog_debounce_step(state, {"would": [item]}, now_s=700.0,
+                                                 debounce_s=600.0)
+        self.assertEqual(qualified2, ["okx|BTC|sl_missing"])
+
+    def test_zero_or_negative_debounce_qualifies_immediately(self):
+        # 模块 docstring：「`debounce_s <= 0` 视为**不防抖**（立即合格）—— 这是显式运营选择」
+        item = {"venue": "okx", "inst": "BTC", "stage": "sl_missing"}
+        for debounce in (0.0, -1.0):
+            with self.subTest(debounce=debounce):
+                _, _, qualified = watchdog_debounce_step(None, {"would": [item]},
+                                                         now_s=100.0, debounce_s=debounce)
+                self.assertEqual(qualified, ["okx|BTC|sl_missing"])
+
+    def test_none_debounce_is_also_no_debounce(self):
+        item = {"venue": "okx", "inst": "BTC", "stage": "sl_missing"}
+        _, _, qualified = watchdog_debounce_step(None, {"would": [item]}, now_s=100.0,
+                                                 debounce_s=None)
+        self.assertEqual(qualified, ["okx|BTC|sl_missing"])
+
+    def test_input_state_is_not_mutated(self):
+        original = {"okx|BTC|sl_missing": 100.0}
+        snapshot = dict(original)
+        watchdog_debounce_step(original, {"would": []}, now_s=200.0, debounce_s=0.0)
+        self.assertEqual(original, snapshot, "纯函数不许改调用方的 state")
+
+
+class CoverageOkTriStateTest(unittest.TestCase):
+    """`coverage_ok` 是**三态**（True / False / None）—— 这是"不可判定 ≠ 安全"的落点。"""
+
+    def _scan(self, rows):
+        return scan_protective_orders(rows, symbol="BTC_USDT", pos_side="long",
+                                      position_size=10, now_s=NOW)
+
+    # ⚠️ Gate 的 `close=True` 是**整仓平**（`size` 无关紧要）：`gate_sl_row()` 默认即此，
+    #    所以"按量覆盖"的用例必须显式 `close=False`，否则 size 写多少都是全覆盖。
+    def test_true_when_fully_covered(self):
+        self.assertIs(self._scan([gate_sl_row()])["coverage_ok"], True)
+        self.assertIs(self._scan([gate_sl_row(close=False, size=10)])["coverage_ok"], True)
+
+    def test_false_when_short(self):
+        scan = self._scan([gate_sl_row(close=False, size=4)])
+        self.assertIs(scan["coverage_ok"], False)
+        self.assertEqual(scan["missing_size"], 6)
+
+    def test_none_when_a_leg_size_is_undecidable(self):
+        # 有腿但**量算不出来** ⇒ 不说够也不说不够
+        row = gate_sl_row(close=False)
+        del row["initial"]["size"]
+        scan = self._scan([row])
+        self.assertIsNone(scan["coverage_ok"])
+        self.assertTrue(scan["needs_verify"], "不可判定必须要求人工核验")
+        self.assertNotIn(row["id"], [r.get("id") for r in (scan.get("needs_renew") or [])],
+                         "不可判定的腿绝不许进续期名单")
+
+    def test_none_is_never_treated_as_safe(self):
+        row = gate_sl_row(close=False)
+        del row["initial"]["size"]
+        scan = self._scan([row])
+        self.assertIsNone(scan["coverage_ok"])
+        self.assertIsNot(scan["coverage_ok"], True)
+
+
+class UncoverableLineTest(unittest.TestCase):
+    """★ 本模块有**一行物理上不可能被行覆盖**，此处把它变成**机器校验**而不是口头说明。
+
+    `scan_protective_orders` 里的第 521 行是：
+
+        coverage_ok: Optional[bool]
+
+    这是**纯注解语句**（`AnnAssign` 且无值）。CPython 对**函数内**的局部变量注解
+    **不生成任何字节码**（注解只对模块/类层级的 `__annotations__` 生效），所以任何
+    基于行事件的追踪器都记不到它。这不是"没测到"，是"测不到"。
+
+    把它写成断言而不是注释，是为了让下一个人**改不动这个借口**：如果哪天有人给它补上
+    初值（`coverage_ok: Optional[bool] = None`），本用例会立刻变红并告诉他"现在可以覆盖了"。
+    """
+
+    SRC = Path(venue_protection.__file__).read_text(encoding="utf-8")
+
+    def test_the_module_has_exactly_one_bare_annotation(self):
+        tree = ast.parse(self.SRC)
+        bare = [(n.lineno, n.target.id) for n in ast.walk(tree)
+                if isinstance(n, ast.AnnAssign) and n.value is None]
+        self.assertEqual(bare, [(521, "coverage_ok")],
+                         "纯注解语句集合变了 —— 要么补了初值（那就该删掉本类），"
+                         "要么新增了一处（那就该把它一起核查）")
+
+    def test_that_line_really_has_no_bytecode(self):
+        code = compile(self.SRC, venue_protection.__file__, "exec")
+
+        def find(co, name):
+            for const in co.co_consts:
+                if hasattr(const, "co_name"):
+                    if const.co_name == name:
+                        return const
+                    found = find(const, name)
+                    if found is not None:
+                        return found
+            return None
+
+        fn = find(code, "scan_protective_orders")
+        self.assertIsNotNone(fn, "找不到目标函数的 code 对象")
+        executable_lines = {i.starts_line for i in dis.get_instructions(fn)
+                            if i.starts_line is not None}
+        self.assertNotIn(521, executable_lines)
+        # 对照：紧邻的两行**有**字节码 —— 证明"没字节码"是这一行的性质，
+        # 而不是整个函数都没被编译
+        self.assertIn(520, executable_lines)
+        self.assertIn(522, executable_lines)
+
+    def test_neighbouring_assignments_are_covered_by_other_tests(self):
+        # 521 之所以是"孤例"，是因为它两侧都正常执行：520 算容差、522 判是否不可判定。
+        # 本用例把两侧都实际跑一遍，确保"孤例"不是"整段都没跑到"。
+        self.assertIsInstance(scan_protective_orders([], symbol="BTC_USDT", pos_side="long",
+                                                     position_size=1, now_s=NOW)["coverage_ok"],
+                              bool)
