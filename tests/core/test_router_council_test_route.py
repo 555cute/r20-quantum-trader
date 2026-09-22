@@ -186,3 +186,87 @@ class CouncilTestRouteTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class NonDictRowsInsideTheSliceTest(unittest.TestCase):
+    """★ 收口行 156/169/170/201：脏行**落在前 8 条之内**时也要被跳过。
+
+    （我上一刀把 "坏行" 放在列表**末尾**（第 11 条）⇒ `[:8]` 直接把它切掉了，
+    所以那两条 `continue` 从没被执行 —— 探针把差额指了出来。这次把它放在**前 8 条里**。）
+    """
+
+    def setUp(self):
+        p = mock.patch.object(C, "require_admin_header", mock.Mock(), create=True)
+        p.start()
+        self.addCleanup(p.stop)
+        p = mock.patch("r20_backend.council_manager.load_council_config",
+                       return_value={"timeout_seconds": 60.0, "roles": {}})
+        p.start()
+        self.addCleanup(p.stop)
+        p = mock.patch("scripts.prompt_library.active_profile", return_value={"pipelines": {}})
+        p.start()
+        self.addCleanup(p.stop)
+        self.kwargs = {}
+
+        def _debate(**kw):
+            self.kwargs = dict(kw)
+            return ({}, {})
+        p = mock.patch("r20_backend.council_manager.execute_council_debate",
+                       side_effect=_debate)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def _run_with_cache(self, cache):
+        import r20_backend.dashboard_cache as dc
+        saved = dc.CACHE_DATA
+        self.addCleanup(setattr, dc, "CACHE_DATA", saved)
+        dc.CACHE_DATA = cache
+        import tempfile
+        from pathlib import Path
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        (root / "data").mkdir(parents=True, exist_ok=True)
+        with mock.patch.object(C, "ROOT", root):
+            return C.admin_test_council_debate(CouncilTestRequest(), x_r20_session="t")
+
+    def test_a_dirty_position_row_inside_the_first_eight_is_skipped(self):
+        cache = {"account": {"avail_eq": 1},
+                 "positions": ["坏行"] + [{"instId": f"I{i}"} for i in range(5)],
+                 "pending_orders": []}
+        self._run_with_cache(cache)
+        prompt = self.kwargs["market_prompt"]
+        self.assertIn("共 6 笔", prompt, "计数按**全部**条目算")
+        self.assertEqual(prompt.count("- 标的:"), 5, "脏行不产生标的行")
+
+    def test_a_dirty_order_row_inside_the_first_eight_is_skipped(self):
+        cache = {"account": {"avail_eq": 1}, "positions": [],
+                 "pending_orders": [{"ordId": "o1"}, "坏行", {"id": "o2"}]}
+        self._run_with_cache(cache)
+        prompt = self.kwargs["market_prompt"]
+        self.assertIn("共 3 笔", prompt)
+        self.assertIn("o1", prompt)
+        self.assertIn("o2", prompt, "`ordId` 缺失时回退到 `id`")
+        self.assertEqual(prompt.count("- [挂单ID:"), 2)
+
+    def test_a_raising_profile_falls_back_to_the_fixed_prompt(self):
+        """★ 行 201：`active_profile()` 抛错 ⇒ 用固定兜底提示词，而不是让请求失败。"""
+        with mock.patch("scripts.prompt_library.active_profile",
+                        side_effect=RuntimeError("配置坏了")):
+            self._run_with_cache({"account": {"avail_eq": 1}, "positions": [],
+                                  "pending_orders": []})
+        self.assertIn("1.8~2.2x ATR", self.kwargs["original_system_prompt"])
+
+    def test_a_module_layout_is_used_when_configured(self):
+        profile = {"name": "P", "pipelines": {"trading_system": [{"m": 1}]}}
+        with mock.patch("scripts.prompt_library.active_profile", return_value=profile), \
+                mock.patch("scripts.prompt_library.compile_modules",
+                           return_value="编译后的模块") as compiler, \
+                mock.patch("scripts.prompt_library.apply_module_layout",
+                           return_value="布局后的系统提示词") as layout:
+            self._run_with_cache({"account": {"avail_eq": 1}, "positions": [],
+                                  "pending_orders": []})
+        compiler.assert_called_once()
+        self.assertEqual(layout.call_args.args[2], "trading_system")
+        self.assertEqual(layout.call_args.args[3], "委员会测试")
+        self.assertEqual(layout.call_args.kwargs["context"]["profile_name"], "P")
+        self.assertEqual(self.kwargs["original_system_prompt"], "布局后的系统提示词")
