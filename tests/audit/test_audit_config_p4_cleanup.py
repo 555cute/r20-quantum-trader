@@ -46,8 +46,14 @@ class EnvInjectionTests(_Base):
         self.env_file = self.root / ".env"
         self.env_file.parent.mkdir(parents=True, exist_ok=True)
         self.env_file.write_text("R20_MAX_LEVERAGE=5.0\n", encoding="utf-8")
+        # ⚠️ 原实现 `addCleanup(setattr, self.ss, "ENV_FILE", self.ss.ENV_FILE)` 有 bug：
+        # addCleanup 的**实参是立即求值**的，而上一行已经把 ENV_FILE 改成了临时路径
+        # ⇒ 清理时又把**临时路径**写回去，`settings_store.ENV_FILE` 从此永久指向一个
+        # 已被删除的临时目录（本刀由 `test_settings_store.py::ManagedKeysTests` 抓出）。
+        # 必须先存原值，再改。
+        self._orig_env_file = self.ss.ENV_FILE
         self.ss.ENV_FILE = self.env_file
-        self.addCleanup(setattr, self.ss, "ENV_FILE", self.ss.ENV_FILE)
+        self.addCleanup(setattr, self.ss, "ENV_FILE", self._orig_env_file)
 
     def test_newline_in_value_is_rejected_and_file_untouched(self):
         before = self.env_file.read_text(encoding="utf-8")
