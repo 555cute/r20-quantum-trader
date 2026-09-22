@@ -164,3 +164,241 @@ class ArchiveSafetyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# =====================================================================
+# 第三百刀：把 fail-closed 的最后四行补齐 + 时间格式/夹取/分片
+# =====================================================================
+
+class ParseCloseTimeTests(unittest.TestCase):
+    """`_TIME_FORMATS` 里四种拼写都要真的认（实测台账里都出现过）。"""
+
+    def test_the_second_precision_format(self):
+        self.assertEqual(al.parse_close_time("2026-09-14 12:30:45"),
+                         datetime(2026, 9, 14, 12, 30, 45, tzinfo=BJ))
+
+    def test_the_minute_precision_format(self):
+        self.assertEqual(al.parse_close_time("2026-09-14 12:30"),
+                         datetime(2026, 9, 14, 12, 30, tzinfo=BJ))
+
+    def test_the_iso_t_separator_format(self):
+        self.assertEqual(al.parse_close_time("2026-09-14T12:30:45"),
+                         datetime(2026, 9, 14, 12, 30, 45, tzinfo=BJ))
+
+    def test_the_slash_separated_format(self):
+        self.assertEqual(al.parse_close_time("2026/09/14 12:30:45"),
+                         datetime(2026, 9, 14, 12, 30, 45, tzinfo=BJ))
+
+    def test_the_result_carries_the_beijing_timezone(self):
+        parsed = al.parse_close_time("2026-09-14 12:30:45")
+        self.assertEqual(parsed.utcoffset(), timedelta(hours=8))
+
+    def test_the_placeholder_text_is_refused(self):
+        for text in ("持仓中...", "持仓中", "--", "N/A"):
+            with self.subTest(text=text):
+                self.assertIsNone(al.parse_close_time(text))
+
+    def test_blank_and_missing_are_refused(self):
+        for value in (None, "", "   ", 0):
+            with self.subTest(value=value):
+                self.assertIsNone(al.parse_close_time(value))
+
+    def test_whitespace_is_trimmed(self):
+        self.assertIsNotNone(al.parse_close_time("  2026-09-14 12:30:45  "))
+
+    def test_a_numeric_epoch_is_not_silently_reinterpreted(self):
+        """绝不猜：Unix 时间戳这种"看着像数字"的输入一律拒绝。"""
+        self.assertIsNone(al.parse_close_time(1757800000))
+
+
+class KeepDaysClampTests(unittest.TestCase):
+    def test_zero_days_is_clamped_to_one(self):
+        """★ `max(int(keep_days), 1)` —— 0 天等于"归档所有能解析的行"，是个危险的误输入。"""
+        rows = [row(1, "2026-09-14 11:00:00"), row(2, "2026-09-13 00:00:00")]
+        hot, cold = al.plan_archive(rows, keep_days=0, now=NOW)
+        self.assertEqual([r["id"] for r in hot], [1])
+        self.assertEqual([r["id"] for r in cold], [2])
+
+    def test_a_negative_window_is_clamped_to_one(self):
+        rows = [row(1, "2026-09-14 11:00:00"), row(2, "2026-09-13 00:00:00")]
+        hot, cold = al.plan_archive(rows, keep_days=-30, now=NOW)
+        self.assertEqual([r["id"] for r in cold], [2])
+
+    def test_an_empty_row_set_yields_two_empty_lists(self):
+        self.assertEqual(al.plan_archive([], now=NOW), ([], []))
+
+
+class ArchiveShardsTests(unittest.TestCase):
+    def test_rows_are_grouped_by_close_year(self):
+        cold = [row(1, "2024-05-01 10:00:00"), row(2, "2025-01-01 10:00:00"),
+                row(3, "2025-12-31 23:59:59")]
+        shards = al.archive_shards(cold)
+        self.assertEqual(sorted(shards), ["2024", "2025"])
+        self.assertEqual(len(shards["2025"]), 2)
+
+    def test_an_unparsable_row_is_dropped_here_never_guessed_into_a_shard(self):
+        """★ 本函数的防御分支：`plan_archive` 保证 cold 一定可解析，但**别处可能直接调用**。
+
+        而这里是**唯一**会按年份分片的地方 —— 若它把不可解析的行猜进某个分片，
+        台账就真的错位了。故宁可丢掉也不猜。
+        """
+        shards = al.archive_shards([{"id": 1, "close_time": "持仓中..."},
+                                    {"id": 2}])
+        self.assertEqual(shards, {})
+
+    def test_a_mixed_batch_keeps_only_the_parsable_rows(self):
+        shards = al.archive_shards([row(1, "2025-01-01 00:00:00"),
+                                    {"id": 2, "close_time": "坏"}])
+        self.assertEqual([r["id"] for r in shards["2025"]], [1])
+
+    def test_an_empty_input_is_an_empty_mapping(self):
+        self.assertEqual(al.archive_shards([]), {})
+
+
+class ReadbackIntegrityTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="r20-ledger-readback-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.ledger = self.tmp / "trading_ledger.json"
+        self.archive = self.tmp / "archive"
+        self.rows = [row(1, "2025-03-01 10:00:00"), row(2, "2026-09-01 10:00:00")]
+        self.ledger.parent.mkdir(parents=True, exist_ok=True)
+        self.ledger.write_text(json.dumps(self.rows, ensure_ascii=False), encoding="utf-8")
+
+    def test_a_sha256_mismatch_aborts_before_touching_the_hot_ledger(self):
+        """★ 第二道闸：条数对了但**字节不一致**（写盘被截断/磁盘撒谎）也要停。
+
+        伪造手法：让 `_atomic_write_json` 返回一个不可能匹配的摘要。
+        """
+        before = self.ledger.read_bytes()
+        real = al._atomic_write_json
+
+        def _lying_write(path, payload):
+            real(path, payload)
+            return "0" * 64
+
+        with mock.patch.object(al, "_atomic_write_json", _lying_write):
+            with self.assertRaises(RuntimeError) as ctx:
+                al.run(self.ledger, self.archive, keep_days=180, apply=True, now=NOW)
+        self.assertIn("sha256 不一致", str(ctx.exception))
+        self.assertEqual(self.ledger.read_bytes(), before, "校验失败必须 fail-closed")
+
+    def test_the_reported_status_is_noop_when_nothing_qualifies(self):
+        self.ledger.write_text(json.dumps([row(1, "2026-09-13 00:00:00")]), encoding="utf-8")
+        result = al.run(self.ledger, self.archive, keep_days=180, apply=True, now=NOW)
+        self.assertEqual(result["status"], "noop")
+        self.assertFalse(self.archive.exists())
+
+    def test_the_report_counts_unparsable_rows(self):
+        self.ledger.write_text(json.dumps(
+            [row(1, "2025-01-01 00:00:00"), row(2, "持仓中..."), {"id": 3}]),
+            encoding="utf-8")
+        result = al.run(self.ledger, self.archive, now=NOW)
+        self.assertEqual(result["unparsable_kept_hot"], 2)
+
+    def test_the_report_lists_the_shard_sizes(self):
+        result = al.run(self.ledger, self.archive, now=NOW)
+        self.assertEqual(result["shards"], {"2025": 1})
+
+    def test_the_report_echoes_the_inputs(self):
+        result = al.run(self.ledger, self.archive, keep_days=42, apply=False, now=NOW)
+        self.assertEqual(result["keep_days"], 42)
+        self.assertIs(result["apply"], False)
+        self.assertEqual(result["total"], 2)
+        self.assertEqual((result["keep_hot"], result["to_archive"]), (1, 1))
+
+    def test_a_missing_ledger_raises_before_any_write(self):
+        missing = self.tmp / "nope.json"
+        with self.assertRaises(OSError):
+            al.run(missing, self.archive, apply=True, now=NOW)
+        self.assertFalse(self.archive.exists())
+
+    def test_a_top_level_object_is_refused(self):
+        self.ledger.write_text('{"rows": []}', encoding="utf-8")
+        with self.assertRaises(ValueError):
+            al.run(self.ledger, self.archive, apply=True, now=NOW)
+
+    def test_the_shard_file_is_a_plain_array(self):
+        al.run(self.ledger, self.archive, apply=True, now=NOW)
+        self.assertIsInstance(json.loads((self.archive / "ledger_2025.json").read_text("utf-8")),
+                              list)
+
+    def test_multiple_years_produce_multiple_shards(self):
+        self.ledger.write_text(json.dumps([row(1, "2024-01-01 00:00:00"),
+                                           row(2, "2025-01-01 00:00:00"),
+                                           row(3, "2026-09-01 00:00:00")]), encoding="utf-8")
+        result = al.run(self.ledger, self.archive, apply=True, now=NOW)
+        self.assertEqual(sorted(result["archived_files"]), ["ledger_2024.json", "ledger_2025.json"])
+        self.assertEqual(result["hot_after"], 1)
+
+    def test_the_atomic_writer_leaves_no_temp_files(self):
+        al.run(self.ledger, self.archive, apply=True, now=NOW)
+        leftovers = [p.name for p in list(self.tmp.rglob("*")) + list(self.archive.rglob("*"))
+                     if p.is_file() and p.name.endswith(".tmp")]
+        self.assertEqual(leftovers, [])
+
+
+class CliFailClosedTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="r20-ledger-cli-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.ledger = self.tmp / "trading_ledger.json"
+        self.archive = self.tmp / "archive"
+
+    def test_a_broken_ledger_yields_exit_code_one(self):
+        """★ 闸门：任何异常都只报告、**绝不写盘**，退出码必须是 1（调度器要能看出失败）。"""
+        self.ledger.write_text('{"not": "a list"}', encoding="utf-8")
+        code = al.main(["--ledger", str(self.ledger), "--archive-dir", str(self.archive)])
+        self.assertEqual(code, 1)
+        self.assertFalse(self.archive.exists())
+
+    def test_the_failure_report_is_machine_readable(self):
+        import io
+        from contextlib import redirect_stdout
+        self.ledger.write_text('{"not": "a list"}', encoding="utf-8")
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            al.main(["--ledger", str(self.ledger), "--archive-dir", str(self.archive)])
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(payload["status"], "failed")
+        self.assertIn("ValueError", payload["reason"])
+
+    def test_a_missing_ledger_also_yields_exit_code_one(self):
+        code = al.main(["--ledger", str(self.tmp / "nope.json"),
+                        "--archive-dir", str(self.archive)])
+        self.assertEqual(code, 1)
+
+    def test_apply_through_the_cli_actually_writes(self):
+        self.ledger.write_text(json.dumps([row(1, "2025-01-01 00:00:00"),
+                                           row(2, "2026-09-01 00:00:00")], ensure_ascii=False),
+                               encoding="utf-8")
+        code = al.main(["--ledger", str(self.ledger), "--archive-dir", str(self.archive),
+                        "--apply"])
+        self.assertEqual(code, 0)
+        self.assertTrue((self.archive / "ledger_2025.json").exists())
+
+    def test_the_main_guard_runs_the_cli(self):
+        """覆盖 `if __name__ == "__main__": raise SystemExit(main())`。
+
+        调度器/运维真的就是 `python scripts/archive_ledger.py` 这样调用它 ——
+        `SystemExit` 必须带着 `main()` 的退出码冒出来。用**隔离命名空间 exec** 触发，
+        并把 `sys.argv` 指到临时路径（默认不带 `--apply` ⇒ 仍然一个字节都不写）。
+        """
+        self.ledger.write_text(json.dumps([row(1, "2025-01-01 00:00:00")],
+                                          ensure_ascii=False), encoding="utf-8")
+        source = (ROOT / "scripts" / "archive_ledger.py").read_text(encoding="utf-8")
+        namespace = {"__name__": "__main__",
+                     "__file__": str(ROOT / "scripts" / "archive_ledger.py")}
+        import io
+        from contextlib import redirect_stdout
+        argv = ["archive_ledger.py", "--ledger", str(self.ledger),
+                "--archive-dir", str(self.archive)]
+        buffer = io.StringIO()
+        with mock.patch.object(sys, "argv", argv):
+            with redirect_stdout(buffer):
+                with self.assertRaises(SystemExit) as ctx:
+                    exec(compile(source, str(ROOT / "scripts" / "archive_ledger.py"), "exec"),
+                         namespace)  # noqa: S102
+        self.assertEqual(ctx.exception.code, 0)
+        self.assertIn("dry_run", buffer.getvalue())
+        self.assertFalse(self.archive.exists(), "默认必须是 dry-run")
