@@ -91,6 +91,34 @@ class SlimPayloadTest(unittest.TestCase):
         self.assertEqual(out["ai_brain_history"][5]["ai_last_prompt"], short, "短存根保留")
         self.assertEqual(out["ai_brain_history"][4]["ai_last_prompt"], different, "不同文保留")
 
+    def test_long_but_different_prompts_are_not_elided(self):
+        """★ 第 66 行的分支：**够长但不同文**（前 200 字符就不同）⇒ 原样保留。
+
+        （上一刀只覆盖了"短存根"与"同文"两条，这一条是探针指出来的最后一行。）
+        """
+        top = "T" * 3000
+        mine = "U" * 3000
+        data = {"ai_last_prompt": top, "ai_brain_history": _history(6)}
+        data["ai_brain_history"][5]["ai_last_prompt"] = mine
+        out = S.slim_payload(data)
+        row = out["ai_brain_history"][5]
+        self.assertEqual(row["ai_last_prompt"], mine, "不同文 ⇒ 不去重")
+        self.assertNotIn("ai_last_prompt_elided", row)
+        self.assertNotIn("ai_brain_history.prompt_text", out["_meta"]["omitted"],
+                         "没有任何一条被去重 ⇒ 不留痕")
+
+    def test_non_dict_rows_inside_the_prompt_elision_loop(self):
+        """★ 第 66 行：**顶层有提示词**时，去重循环会遇到非 dict 行 ⇒ 必须跳过而不是炸。
+
+        ⚠️ 我上一刀把第 66 行说成"够长但不同文"的分支 —— **错**（那是第 68 行），
+        所以用例加了、探针却仍标 66 未命中。这次先**打印**那一行再动笔。
+        """
+        data = {"ai_last_prompt": "abc", "ai_brain_history": _history(6) + ["裸字符串"]}
+        out = S.slim_payload(data)
+        self.assertEqual(out["ai_brain_history"][-1], "裸字符串", "非 dict 行原样保留")
+        self.assertNotIn("ai_brain_history.prompt_text", out["_meta"]["omitted"],
+                         "没有一条被去重 ⇒ 不留痕")
+
     def test_review_prompt_is_deduplicated_against_the_top_level_copy(self):
         long_prompt = "P" * 4000
         data = {"ai_last_prompt": long_prompt, "review": {"ai_last_prompt": long_prompt,
