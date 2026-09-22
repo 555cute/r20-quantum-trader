@@ -31,6 +31,7 @@ import ast
 import json
 import runpy
 import sys
+import threading
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -104,6 +105,12 @@ def run(targets: list, pytest_args: list) -> dict:
     argv = sys.argv
     sys.argv = ["pytest"] + list(pytest_args)
     sys.settrace(tracer)
+    # ⚠️ `sys.settrace` **只对调用它的那个线程**生效。默认的 tracer 不会被新线程继承
+    # （CPython 里线程的 tracing 由 `threading.settrace` 单独设置）。而本仓有大量代码跑在
+    # `ThreadPoolExecutor` 的工作线程里（如 `factors/smart_money.py` 的 `fetch_smart_money_pool`、
+    # 看板的并发抓取）—— 不装这一条，那些行会被**静默误报成"未命中"**，
+    # 而错误方向是"看起来还有缺口"，于是白写一堆测试（`smart_money.py` 实测差 4 行即此因）。
+    threading.settrace(tracer)
     try:
         _failed = traced_import(targets)
         if _failed:
@@ -114,6 +121,7 @@ def run(targets: list, pytest_args: list) -> dict:
     except SystemExit:
         pass
     finally:
+        threading.settrace(None)
         sys.settrace(None)
         sys.argv = argv
 
