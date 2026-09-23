@@ -1,0 +1,35 @@
+.git
+.gitignore
+.venv
+venv
+ENV
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache
+tests
+
+# 前端本地开发缓存（由 Docker 多阶段重新构建）
+frontend/node_modules
+frontend/dist
+
+# 敏感与运行时数据（必须通过 Volume 挂载，绝不打入镜像）
+.env
+.env.local
+..env.lock
+.env.lock
+data/
+logs/
+backups/
+*.log
+*.tar.gz
+*.zip
+*.pid
+/core
+/core.[0-9]*
+
+# 本地归档与推广物料
+promo_local/
+plan_local/
+.archive/

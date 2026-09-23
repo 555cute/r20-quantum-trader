@@ -25,7 +25,22 @@ An incomplete selected profile is **NOT READY**: private operations and trading 
 
 The authenticated `GET /api/v1/admin/okx/runtime` (management session in `X-R20-Session`) reports `environment`, `mode_configured`, `live_configured`, `demo_configured`, `fingerprint`, `base_url`, `connection: "static-v5-key"`, and `status: "READY" | "NOT_READY"`; `not_ready_reason` is present when unconfigured. This is a **local configuration check**, not an exchange connectivity or permission test. Use a read-only account snapshot to confirm connectivity before enabling trading.
 
-## Run Locally
+## Docker Deployment (Recommended)
+
+To deploy with zero host dependencies on a remote server:
+
+```sh
+# 1. Prepare configuration
+cp env.example .env && vim .env
+
+# 2. Build and launch with Docker Compose
+docker compose up -d --build
+# Or run: ./deploy/docker-start.sh
+```
+
+Both `r20-backend` (Web & API) and `r20-gateway` (quant scheduler worker) will start automatically with persistent volumes for `data/`, `logs/`, and `backups/`.
+
+## Run Locally (Native Python)
 
 Terminal 1:
 

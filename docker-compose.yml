@@ -1,0 +1,54 @@
+# ==============================================================================
+# R20 Quantum Trader - Production Docker Compose Stack
+# ==============================================================================
+
+services:
+  # ----------------------------------------------------------------------------
+  # 1. Web 主引擎：FastAPI 控制面 + Vue 3 操盘大屏与管理后台
+  # ----------------------------------------------------------------------------
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: r20-quantum-trader:latest
+    container_name: r20-backend
+    restart: unless-stopped
+    command: ["backend"]
+    ports:
+      - "8080:8080"
+    environment:
+      - TZ=Asia/Shanghai
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # 挂载私密配置（只读）
+      - ./.env:/app/.env:ro
+      # 挂载持久化运行态数据
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./backups:/app/backups
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:8080/api/v1/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ----------------------------------------------------------------------------
+  # 2. 量化网关与调度核心：15分钟波段扫描、因子刷新、AI 投委会与硬风控执行
+  # ----------------------------------------------------------------------------
+  gateway:
+    image: r20-quantum-trader:latest
+    container_name: r20-gateway
+    restart: unless-stopped
+    command: ["gateway"]
+    environment:
+      - TZ=Asia/Shanghai
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./.env:/app/.env:ro
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./backups:/app/backups
+    depends_on:
+      backend:
+        condition: service_healthy
