@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import os
 import time
 
 from r20_backend.dashboard_payload.market import _global_env_axis
@@ -409,7 +410,10 @@ def collect_cross_venue_positions(positions, pending_orders_list,
 
                     _opp_side = "sell" if vo_is_long else "buy"
                     _vo_sl, _vo_tp = _protection_triggers(v_algos, base_sym, _opp_side)
-                    _vo_lever = float(vo.get("leverage") or 3.0)
+                    _vo_lever = float(vo.get("leverage") or 0.0)
+                    if _vo_lever <= 0:
+                        _sym_pos = next((p for p in (v_positions or []) if canonical_base(str(p.get("base") or p.get("symbol", ""))) == base_sym), None)
+                        _vo_lever = float((_sym_pos or {}).get("leverage") or os.getenv("R20_MIN_LEVERAGE") or 3.0)
                     if _vo_lever <= 0:
                         _vo_lever = 3.0
                     # 保证金 = 名义额 / 杠杆。名义额只按**该所适配器的合约面值**折算：
