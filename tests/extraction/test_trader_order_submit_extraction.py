@@ -53,8 +53,9 @@ class OrderSubmitVerbatimTest(unittest.TestCase):
             (ROOT / "scripts/trader/order_submit.py").read_text(encoding="utf-8")), FN)
         self.assertEqual([a.arg for a in o.args.args], [a.arg for a in n.args.args])
         self.assertEqual([a.arg for a in n.args.kwonlyargs], list(INJ))
-        self.assertEqual(_body_dump(o), _body_dump(n),
-                         "下单主路径与抽取前**不再是同一实现**")
+        # v8.2.0 之后允许在抽取实现上做显式行为修复；本门继续守签名/注入面，
+        # net-mode wire posSide 的行为由 tests/trading/test_okx_wire_pos_side.py 锁定。
+        self.assertIn("wire_pos_side", ast.unparse(n))
 
     def test_shell_signature_and_injections(self):
         o = _get_func(ast.parse(_base_text()), FN)
@@ -99,7 +100,8 @@ class OrderSubmitVerbatimTest(unittest.TestCase):
              patch.object(aft, "current_environment", self._stub_env), \
              patch.object(aft, "fetch_ticker", lambda inst: {"last": 100.0}), \
              patch.object(aft, "venue_registry", bad_registry), \
-             patch.object(aft, "okx_rest", okx):
+             patch.object(aft, "okx_rest", okx), \
+             patch("scripts.okx_pos_mode.wire_pos_side", lambda *a, **k: "long"):
             ok, msg = aft.submit_protected_limit_order(
                 # 几何合法且不穿价（0.2% < 0.5%）：不得带穿价拒因
                 "BTC-USDT-SWAP", "buy", "long", 1.0, 100.2, 120.0, 95.0)

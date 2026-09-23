@@ -27,6 +27,12 @@ class ThreeTierRatchetAndCloudSyncTests(unittest.TestCase):
 
     def setUp(self):
         self.http = install_http(self, aft)
+        # posMode -> wire SSOT: default hedge long/short; net cases override
+        wp = patch("scripts.okx_pos_mode.wire_pos_side",
+                   lambda side, endpoint="order", env=None: (None if str(side).lower() == "net"
+                                                             else str(side).lower()))
+        wp.start()
+        self.addCleanup(wp.stop)
 
     def test_sync_cloud_algo_stop_success_and_idempotence(self):
         row = self.http.rows[0]
@@ -198,6 +204,11 @@ class CloudOcoHttpBoundaryTests(unittest.TestCase):
 
     def setUp(self):
         self.http = install_http(self, aft)
+        wp = patch("scripts.okx_pos_mode.wire_pos_side",
+                   lambda side, endpoint="order", env=None: (
+                       None if str(side).lower() in ("net", "") else str(side).lower()))
+        wp.start()
+        self.addCleanup(wp.stop)
         from scripts.okx_runtime import freeze_environment, unfreeze_environment
         freeze_environment({
             "R20_OKX_ENV": "demo",

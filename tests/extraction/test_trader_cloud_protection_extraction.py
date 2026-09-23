@@ -60,8 +60,12 @@ class CloudProtectionVerbatimTest(unittest.TestCase):
                                  [a.arg for a in n.args.args])
                 self.assertEqual([a.arg for a in n.args.kwonlyargs], list(INJ[fn]),
                                  f"{fn} 注入项不是声明的 kw-only 集合")
-                self.assertEqual(_body_dump(o), _body_dump(n),
-                                 f"{fn} 与抽取前**不再是同一实现**")
+                if fn in {"ensure_cloud_position_protection", "sync_cloud_algo_stop"}:
+                    self.assertIn("okx_pos_mode", ast.unparse(n),
+                                  f"{fn} 应包含显式 OKX position-mode 修复")
+                else:
+                    self.assertEqual(_body_dump(o), _body_dump(n),
+                                     f"{fn} 与抽取前**不再是同一实现**")
 
     def test_shells_are_def_with_lazy_same_name_injection(self):
         tree = ast.parse((ROOT / "scripts/ai_factor_trader.py").read_text(encoding="utf-8"))
@@ -94,7 +98,8 @@ class CloudProtectionVerbatimTest(unittest.TestCase):
             pending_algo_orders=lambda inst: [{"dummy": 1}],
             place_algo_oco=lambda *a, **k: placed.append((a, k)))
         with patch.object(aft, "okx_rest", okx), \
-             patch.object(aft, "_live_oco_coverage", lambda rows, side: 5.0):
+             patch.object(aft, "_live_oco_coverage", lambda rows, side: 5.0), \
+             patch("scripts.okx_pos_mode.wire_pos_side", lambda *a, **k: "long"):
             ok, msg = aft.ensure_cloud_position_protection(
                 "SOL-USDT-SWAP", "long", 5, 106, 101)
         self.assertTrue(ok, msg)

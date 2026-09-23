@@ -97,16 +97,17 @@ class ScaleOutExecutionTests(unittest.TestCase):
         ]
 
         actions = []
-        ok, reason = execute_scale_out_if_eligible(
-            self.sample_f_long, self.sample_pos_long, self.sample_trackers,
-            "2026-09-20 12:00:00", actions,
-            okx_rest=self.mock_okx,
-            record_trade=self.mock_record_trade,
-            notify_trade_close=self.mock_notify,
-            close_fee=self.mock_close_fee,
-            close_trade_payload=self.mock_payload,
-            ensure_cloud_position_protection=self.mock_ensure_oco,
-        )
+        with patch("scripts.okx_pos_mode.wire_pos_side", lambda side, endpoint="order", env=None: "long"):
+            ok, reason = execute_scale_out_if_eligible(
+                self.sample_f_long, self.sample_pos_long, self.sample_trackers,
+                "2026-09-20 12:00:00", actions,
+                okx_rest=self.mock_okx,
+                record_trade=self.mock_record_trade,
+                notify_trade_close=self.mock_notify,
+                close_fee=self.mock_close_fee,
+                close_trade_payload=self.mock_payload,
+                ensure_cloud_position_protection=self.mock_ensure_oco,
+            )
 
         self.assertTrue(ok)
         self.assertEqual(reason, "首批分批平仓成功")
