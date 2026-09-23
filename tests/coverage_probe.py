@@ -90,6 +90,34 @@ def traced_import(targets: list) -> list:
     return failed
 
 
+def arm_sticky_tracer(outer):
+    """把 `sys.settrace` 换成**粘性**版本；返回 `restore()`。
+
+    ## 为什么必须有（第三百三十四刀，实测事故）
+
+    `tests/audit/test_coverage_probe_attribution.py` 在自己的 `finally:` 里调
+    `sys.settrace(None)`（对普通 pytest 运行是**正确**行为）。但只要探针的范围里包含
+    那个文件，它在测试内部就**拆掉了外层 tracer** ⇒ 其后所有文件一律记 0 行，
+    整份基线被**静默截断**。
+
+    症状极具误导性：同一份数据下，"超集范围"能报出比"子集范围"**更少**的命中
+    （实测 `r20_backend/exchanges/gate.py`：全量 `0/347`，只跑 `tests/venues` `305/347`）。
+    **超集不可能更少** —— 见者即应怀疑探针本身，而不是去补测试。
+
+    语义：`settrace(None)` ⇒ 重新装回 `outer`；`settrace(别的 tracer)` 照常放行
+    （调用方多半只在自己的块内用，随后那句 `settrace(None)` 会装回 `outer`）。
+    """
+    original = sys.settrace
+
+    def sticky(fn):
+        if fn is None:
+            return original(outer)
+        return original(fn)
+    original(outer)                      # 自装一次：调用方不必再单独 settrace
+    sys.settrace = sticky
+    return lambda: setattr(sys, "settrace", original)
+
+
 def run(targets: list, pytest_args: list) -> dict:
     """跑 pytest 并返回 {目标: {executable, hit, missing}}。"""
     hits: dict = {}
@@ -111,6 +139,19 @@ def run(targets: list, pytest_args: list) -> dict:
     # 看板的并发抓取）—— 不装这一条，那些行会被**静默误报成"未命中"**，
     # 而错误方向是"看起来还有缺口"，于是白写一堆测试（`smart_money.py` 实测差 4 行即此因）。
     threading.settrace(tracer)
+    # ★★ 追踪必须"粘性"，否则数字会被**静默截断**（第三百三十四刀）。
+    #
+    # 根因：`tests/audit/test_coverage_probe_attribution.py` 在自己的 `finally:` 里调
+    # `sys.settrace(None)`（对普通 pytest 运行是**正确**行为）。但当探针的范围里包含
+    # 那个文件时，它在测试内部**拆掉外层 tracer** ⇒ 其后所有文件一律记 0 行。
+    #
+    # 症状极具误导性：同一份数据下，"超集范围"能比"子集范围"报出**更少**的命中
+    # （实测 `r20_backend/exchanges/gate.py`：全量 0/347，只跑 tests/venues 305/347）。
+    # **超集不可能更少** —— 见者即应怀疑探针本身，而不是去补测试。
+    #
+    # 修法：把 `settrace(None)` 改写为"重新装回我们的 tracer"；测试自己的
+    # `settrace(它自己的 tracer)` 照常放行（它只在那个块内有效）。
+    restore_settrace = arm_sticky_tracer(tracer)
     try:
         _failed = traced_import(targets)
         if _failed:
@@ -121,6 +162,7 @@ def run(targets: list, pytest_args: list) -> dict:
     except SystemExit:
         pass
     finally:
+        restore_settrace()
         threading.settrace(None)
         sys.settrace(None)
         sys.argv = argv

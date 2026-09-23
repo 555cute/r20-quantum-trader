@@ -93,3 +93,53 @@ class TracedImportAttributionTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StickyTracerTest(unittest.TestCase):
+    """★ 第三百三十四刀：外层 tracer **不许**被测试的 `settrace(None)` 拆掉。
+
+    事故：`tests/audit/test_coverage_probe_attribution.py` 自己的 `finally:` 就是一句
+    `sys.settrace(None)`。只要探针的范围里包含本文件，它就在测试内部拆掉外层 tracer
+    ⇒ 其后所有文件记 0 行，整份基线被**静默截断**。
+    症状是"**超集范围报出比子集更少的命中**"—— 逻辑上不可能，见者应怀疑探针本身。
+    """
+
+    def setUp(self):
+        self._saved = sys.settrace
+        self.addCleanup(lambda: setattr(sys, "settrace", self._saved))
+
+    def _outer(self):
+        def outer(frame, event, arg):      # pragma: no cover - 由 gettrace 观测
+            return outer
+        return outer
+
+    def test_a_nested_settrace_none_rearms_the_outer_tracer(self):
+        outer = self._outer()
+        restore = coverage_probe.arm_sticky_tracer(outer)
+        self.addCleanup(restore)
+        self.assertIs(sys.gettrace(), outer)
+        # ↓ 就是那条例外用例做的事
+        sys.settrace(None)
+        self.assertIs(sys.gettrace(), outer,
+                      "外层 tracer 被拆掉 ⇒ 整份基线会被静默截断")
+
+    def test_a_nested_foreign_tracer_is_passed_through(self):
+        outer = self._outer()
+
+        def inner(frame, event, arg):      # pragma: no cover - 由 gettrace 观测
+            return inner
+        restore = coverage_probe.arm_sticky_tracer(outer)
+        self.addCleanup(restore)
+        sys.settrace(inner)
+        self.assertIs(sys.gettrace(), inner, "调用方自己的 tracer 必须能装上")
+        sys.settrace(None)
+        self.assertIs(sys.gettrace(), outer, "收起自己的 tracer 后应装回外层")
+
+    def test_restore_puts_the_original_settrace_back(self):
+        original = sys.settrace
+        restore = coverage_probe.arm_sticky_tracer(self._outer())
+        self.assertIsNot(sys.settrace, original)
+        restore()
+        self.assertIs(sys.settrace, original)
+        sys.settrace(None)
+        self.assertIsNone(sys.gettrace(), "还原后 `settrace(None)` 必须恢复原语义")
