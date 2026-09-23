@@ -169,7 +169,11 @@ def sync_cloud_algo_stop(inst_id: str, pos_side: str, new_sl: float, reason: str
     # 与 execute_ai_position_management 内联云端止损上移行为保持一致(演示盘与实盘同构)。
     try:
         algo_orders = okx_rest.pending_algo_orders(inst_id)
-        live_algo = next((o for o in algo_orders if o.get("state") == "live" and o.get("posSide") == pos_side and o.get("slTriggerPx")), None)
+        from scripts.okx_pos_mode import algo_order_matches_logical_side as _matches_logical_side
+        live_algo = next((o for o in algo_orders
+                          if o.get("state") == "live"
+                          and _matches_logical_side(o, pos_side)
+                          and o.get("slTriggerPx")), None)
         if not live_algo:
             return False
         current_cloud_sl = float(live_algo.get("slTriggerPx") or 0.0)

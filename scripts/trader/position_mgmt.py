@@ -111,7 +111,11 @@ def execute_ai_position_management(real_pos_dict, trackers, timestamp_full, exec
                 except Exception as exc:
                     executed_actions.append(f"[{name}] 云端止损收紧失败，原保护单保持不变（查询异常：{exc}）")
                     continue
-                live_algo = next((o for o in algo_orders if o.get("state") == "live" and o.get("posSide") == pos_side and o.get("slTriggerPx")), None)
+                from scripts.okx_pos_mode import algo_order_matches_logical_side as _matches_logical_side
+                live_algo = next((o for o in algo_orders
+                                  if o.get("state") == "live"
+                                  and _matches_logical_side(o, pos_side)
+                                  and o.get("slTriggerPx")), None)
                 if not live_algo:
                     executed_actions.append(f"[{name}] 未找到真实云端止损单，无法更新")
                     continue

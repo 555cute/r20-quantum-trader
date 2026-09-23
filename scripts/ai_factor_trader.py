@@ -546,8 +546,15 @@ def is_circuit_breaker_active(usdt_available: float = None):
 
 
 def query_positions() -> Tuple[bool, List[Dict[str, Any]], str]:
-    """壳（第八十六刀搬至 `scripts/trader/venue_query.py`）。"""
-    return _venue_query_positions(okx_rest=okx_rest)
+    """Trader 持仓边界：OKX 原始 net/hedge 行统一成 long/short + 正数仓位。"""
+    ok, rows, error = _venue_query_positions(okx_rest=okx_rest)
+    if not ok:
+        return ok, rows, error
+    try:
+        from scripts.okx_pos_mode import normalize_trader_position
+        return True, [normalize_trader_position(row) for row in rows], ""
+    except Exception as exc:
+        return False, [], f"invalid positions response: {exc}"
 
 def close_position_confirmed(inst_id: str, pos_side: str, before_size: float, venue: str = "okx") -> Tuple[bool, str]:
     """壳（第八十六刀搬至 `scripts/trader/venue_query.py`）。"""

@@ -65,8 +65,12 @@ class VenueQueryVerbatimTest(unittest.TestCase):
                                  [a.arg for a in n.args.args])
                 self.assertEqual([a.arg for a in n.args.kwonlyargs], list(INJ[fn]),
                                  f"{fn} 注入项不是声明的 kw-only 集合")
-                self.assertEqual(_body_dump(o), _body_dump(n),
-                                 f"{fn} 与抽取前**不再是同一实现**")
+                if fn == "close_position_confirmed":
+                    self.assertIn("wire_pos_side", ast.unparse(n),
+                                  "close_position_confirmed 应包含 position-mode wire 修复")
+                else:
+                    self.assertEqual(_body_dump(o), _body_dump(n),
+                                     f"{fn} 与抽取前**不再是同一实现**")
 
     def test_shells_are_def_with_lazy_same_name_injection(self):
         tree = ast.parse((ROOT / "scripts/ai_factor_trader.py").read_text(encoding="utf-8"))
@@ -86,13 +90,15 @@ class VenueQueryVerbatimTest(unittest.TestCase):
                                     cancel_order=lambda *a: None,
                                     close_position=lambda *a, **k: None)
         with patch.object(aft, "okx_rest", okx), \
-             patch.object(aft, "query_positions", lambda: (True, [], "")):
+             patch.object(aft, "query_positions", lambda: (True, [], "")), \
+             patch("scripts.okx_pos_mode.wire_pos_side", lambda *a, **k: "long"):
             ok, msg = aft.close_position_confirmed("BTC-USDT-SWAP", "long", 1.0)
         self.assertTrue(ok, msg)
         self.assertIn("closed", msg)
         # 门面注入断了会走真 query_positions → 无凭证 → fail-closed
         with patch.object(aft, "okx_rest", okx), \
-             patch.object(aft, "query_positions", lambda: (False, [], "no creds")):
+             patch.object(aft, "query_positions", lambda: (False, [], "no creds")), \
+             patch("scripts.okx_pos_mode.wire_pos_side", lambda *a, **k: "long"):
             ok2, msg2 = aft.close_position_confirmed("BTC-USDT-SWAP", "long", 1.0)
         self.assertFalse(ok2, "query_positions 注入断了（读不到凭证却判成功）")
 
