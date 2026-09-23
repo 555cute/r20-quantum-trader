@@ -52,6 +52,8 @@ def executable_lines(path: Path) -> set:
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef):
             lines.add(node.lineno)
+        elif isinstance(node, (ast.If, ast.While)):
+            lines.add(node.test.lineno)
         elif isinstance(node, ast.stmt) and not isinstance(
                 node, (ast.AsyncFunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom,
                        ast.Expr, ast.Global, ast.Nonlocal)):

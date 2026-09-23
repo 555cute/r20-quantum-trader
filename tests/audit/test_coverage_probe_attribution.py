@@ -90,6 +90,23 @@ class TracedImportAttributionTest(unittest.TestCase):
                                                     start=1) if line.startswith("def touched"))
         self.assertIn(def_line, lines, "`def` 行在分母里（也就必须有办法把它记成命中）")
 
+    def test_multiline_if_condition_attributes_to_expression_lineno(self):
+        """★ 第三百三十八刀：CPython 3.11 编译纪律 —— 当写成 `if (\n    expr` 时，
+        字节码 line 事件只在表达式首行（node.test.lineno）产生，
+        纯 `if (` 行没有任何指令。分母若记 `if (` 会产生不可被任何运行消除的幽灵缺口。
+        """
+        temp_file = Path(self.dir, "multiline_if_fixture.py")
+        temp_file.write_text(textwrap.dedent("""
+            x = 1
+            if (
+                x == 1
+            ):
+                y = 2
+        """).lstrip(), encoding="utf-8")
+        lines = coverage_probe.executable_lines(temp_file)
+        self.assertNotIn(2, lines, "纯 `if (` 行无字节码指令，不得计入分母制造幽灵缺口")
+        self.assertIn(3, lines, "表达式首行必须计入分母")
+
 
 if __name__ == "__main__":
     unittest.main()
