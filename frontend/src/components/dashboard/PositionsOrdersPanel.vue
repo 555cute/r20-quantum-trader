@@ -81,18 +81,24 @@ function ocoOk(p: any): boolean {
 /** 孤儿腿候选数（可归因：本方标签或台账同向同量已平记录）——**只报告**，撤销是显式运营动作。 */
 function orphanCandidates(p: any): number {
   const o = p?.protectionOrphans;
-  return o && o.readable ? (o.attributed || []).length : 0;
+  const sym = String(p?.name || p?.base || '').toUpperCase();
+  const list = o && o.readable ? (o.attributed || []) : [];
+  return (sym ? list.filter((x: any) => String(x.symbol || '').toUpperCase() === sym) : (o && o.readable ? o.attributed || [] : [])).length;
 }
 /** 归属不可判定的孤儿腿数（按纪律一律不碰）。 */
 function orphanUnattributed(p: any): number {
   const o = p?.protectionOrphans;
-  return o && o.readable ? (o.unattributed || []).length : 0;
+  const sym = String(p?.name || p?.base || '').toUpperCase();
+  const list = o && o.readable ? (o.unattributed || []) : [];
+  return (sym ? list.filter((x: any) => String(x.symbol || '').toUpperCase() === sym) : (o && o.readable ? o.unattributed || [] : [])).length;
 }
 /** 方向或量与任何持仓都对不上的腿数（方向不符的不计覆盖；量不符的仍计覆盖）。 */
 function orphanMismatch(p: any): number {
   const o = p?.protectionOrphans;
   if (!o || !o.readable) return 0;
-  return (o.sideMismatch || []).length + (o.sizeMismatch || []).length;
+  const sym = String(p?.name || p?.base || '').toUpperCase();
+  const filterList = (arr: any[]) => sym ? arr.filter((x: any) => String(x.symbol || '').toUpperCase() === sym) : arr;
+  return filterList(o.sideMismatch || []).length + filterList(o.sizeMismatch || []).length;
 }
 /** 读到了但认不出的腿数（认不出类型 + 行解析不了）：**不计入覆盖** ⇒ 覆盖可能被低估。 */
 function orphanUnclassified(p: any): number {
