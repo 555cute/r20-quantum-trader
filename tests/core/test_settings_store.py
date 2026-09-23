@@ -417,6 +417,16 @@ class UpdateEnvTests(_Base):
         SS.update_env({"OKX_API_KEY": "sk-live"})
         self.assertIn("OKX_API_KEY=sk-live", self._read())
 
+    def test_ebusy_fallback_for_docker_bind_mount(self):
+        import errno
+        self._write("LLM_MODEL=old-model\n")
+        err = OSError("Device or resource busy")
+        err.errno = errno.EBUSY
+        with mock.patch.object(SS.os, "replace", side_effect=err):
+            SS.update_env({"LLM_MODEL": "new-docker-model"})
+        self.assertIn("LLM_MODEL=new-docker-model", self._read())
+        self.assertEqual(self._temps(), [])
+
     def test_a_non_string_key_is_not_managed(self):
         self._write("A=1\n")
         SS.update_env({123: "x"})

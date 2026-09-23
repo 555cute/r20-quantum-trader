@@ -12,7 +12,9 @@ cd "$ROOT_DIR"
 mkdir -p "$ROOT_DIR/data" "$ROOT_DIR/logs" "$ROOT_DIR/backups"
 
 # 2. 如果缺少 .env，从 env.example 自动生成一份最小兜底（提醒用户尽快配置）
-if [ ! -f "$ROOT_DIR/.env" ] && [ -f "$ROOT_DIR/env.example" ]; then
+if [ -d "$ROOT_DIR/.env" ]; then
+    echo "⚠️ [Entrypoint] Warning: /app/.env is mounted as a directory! Please mount a file instead."
+elif [ ! -f "$ROOT_DIR/.env" ] && [ -f "$ROOT_DIR/env.example" ]; then
     echo "⚠️ [Entrypoint] .env not found. Generating default .env from env.example..."
     cp "$ROOT_DIR/env.example" "$ROOT_DIR/.env"
     chmod 600 "$ROOT_DIR/.env"

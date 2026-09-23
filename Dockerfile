@@ -9,6 +9,8 @@ FROM node:20-slim AS frontend-builder
 
 WORKDIR /build
 
+ENV NODE_ENV=development
+
 # 先安装依赖利用 Docker 缓存层
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --prefer-offline || npm install
@@ -28,11 +30,13 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     tzdata \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
-# 设置环境变量：Python 输出直冲控制台、时区默认北京时间
+# 设置环境变量：Python 输出直冲控制台、时区默认北京时间、PYTHONPATH包含项目根目录
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app \
     TZ=Asia/Shanghai
 
 # 安装 Python 后端核心依赖

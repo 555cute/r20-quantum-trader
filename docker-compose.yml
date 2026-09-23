@@ -19,9 +19,10 @@ services:
     environment:
       - TZ=Asia/Shanghai
       - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
     volumes:
-      # 挂载私密配置（只读）
-      - ./.env:/app/.env:ro
+      # 挂载私密配置（读写挂载：支持管理后台直接修改并持久化配置变更）
+      - ./.env:/app/.env
       # 挂载持久化运行态数据
       - ./data:/app/data
       - ./logs:/app/logs
@@ -44,8 +45,9 @@ services:
     environment:
       - TZ=Asia/Shanghai
       - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
     volumes:
-      - ./.env:/app/.env:ro
+      - ./.env:/app/.env
       - ./data:/app/data
       - ./logs:/app/logs
       - ./backups:/app/backups

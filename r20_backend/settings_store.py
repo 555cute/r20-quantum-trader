@@ -120,6 +120,30 @@ def sanitize_env_value(key: str, value: Any) -> str:
     return text.strip()
 
 
+import errno
+
+
+def _safe_commit_file(temp_path: str, target: Path) -> None:
+    """原子替换目标文件，对 Docker bind-mount 单文件挂载点的 EBUSY 提供安全回退。"""
+    os.chmod(temp_path, 0o600)
+    try:
+        os.replace(temp_path, target)
+    except OSError as exc:
+        # 当 target 是 Docker 单文件 bind-mount 挂载点时，rename 会报 EBUSY (Device or resource busy)
+        # 此时安全回退为截断覆写已有 inode，并以 fsync 保证落盘
+        if getattr(exc, "errno", None) == errno.EBUSY:
+            with open(temp_path, "r", encoding="utf-8") as src, open(target, "w", encoding="utf-8") as dst:
+                dst.write(src.read())
+                dst.flush()
+                os.fsync(dst.fileno())
+        else:
+            raise
+    try:
+        os.chmod(target, 0o600)
+    except OSError:
+        pass
+
+
 def remove_env(keys: set[str] | list[str] | tuple[str, ...]) -> None:
     targets = {str(k) for k in keys}
     invalid = sorted(k for k in targets if not _ENV_KEY_RE.match(k))
@@ -143,7 +167,7 @@ def remove_env(keys: set[str] | list[str] | tuple[str, ...]) -> None:
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 handle.write("\n".join(result).rstrip() + "\n"); handle.flush(); os.fsync(handle.fileno())
-            os.chmod(temp_path, 0o600); os.replace(temp_path, ENV_FILE); os.chmod(ENV_FILE, 0o600)
+            _safe_commit_file(temp_path, ENV_FILE)
         finally:
             if os.path.exists(temp_path): os.unlink(temp_path)
     for key in targets: os.environ.pop(key, None)
@@ -183,9 +207,7 @@ def update_env(values: Mapping[str, str | bool | None]) -> None:
                 handle.write("\n".join(result) + "\n")
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.chmod(temp_path, 0o600)
-            os.replace(temp_path, ENV_FILE)
-            os.chmod(ENV_FILE, 0o600)
+            _safe_commit_file(temp_path, ENV_FILE)
         finally:
             if os.path.exists(temp_path):
                 os.unlink(temp_path)

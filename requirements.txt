@@ -1,4 +1,4 @@
-﻿# R20 Quantum Trader Dependencies
+# R20 Quantum Trader Dependencies
 # Pinned for strict reproducibility & zero supply chain drift
 
 fastapi==0.141.1
@@ -12,3 +12,4 @@ cryptography>=42.0.0
 httpx==0.28.1
 python-multipart>=0.0.9
 pydantic>=2.7.0,<3.0.0
+websockets>=12.0

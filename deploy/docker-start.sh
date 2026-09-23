@@ -13,7 +13,12 @@ echo "🐳 [R20 Docker Launcher] Pre-flight checks..."
 # 1. 确保运行时挂载目录存在
 mkdir -p "$ROOT_DIR/data" "$ROOT_DIR/logs" "$ROOT_DIR/backups"
 
-# 2. 检查 .env 配置文件
+# 2. 检查 .env 配置文件（防范 docker mount 把 .env 误当作目录创建）
+if [ -d "$ROOT_DIR/.env" ]; then
+    echo "⚠️ Warning: .env was found as a directory. Correcting..."
+    rm -rf "$ROOT_DIR/.env"
+fi
+
 if [ ! -f "$ROOT_DIR/.env" ]; then
     if [ -f "$ROOT_DIR/env.example" ]; then
         echo "📝 Creating initial .env from env.example..."
@@ -24,6 +29,8 @@ if [ ! -f "$ROOT_DIR/.env" ]; then
         echo "❌ Error: Neither .env nor env.example found."
         exit 1
     fi
+else
+    chmod 600 "$ROOT_DIR/.env"
 fi
 
 # 3. 检查 Docker 与 Docker Compose 命令
