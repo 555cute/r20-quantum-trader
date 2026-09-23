@@ -41,6 +41,7 @@ __all__ = [
     "pending_orders", "orders_history", "fills",
     "position", "positions", "balances", "bills", "positions_history",
     "place_algo_oco", "cancel_algo_orders", "amend_algo_sl", "pending_algo_orders",
+    "account_config",
 ]
 
 USER_AGENT = (
@@ -412,6 +413,12 @@ def balances(ccy: str | None = None, *, env: OKXEnvironment | None = None) -> li
     return request("GET", "/api/v5/account/balance", {"ccy": ccy}, env=env)
 
 
+
+def account_config(*, env: OKXEnvironment | None = None) -> list[dict[str, Any]]:
+    """GET /api/v5/account/config — read-only posMode (net_mode|long_short_mode)."""
+    return request("GET", "/api/v5/account/config", {}, env=env)
+
+
 def bills(*, inst_type: str | None = None, inst_id: str | None = None, mgn_mode: str | None = None,
           type: str | None = None, ccy: str | None = None, begin: Any = None, end: Any = None,
           limit: int = 100, before: str | None = None, after: str | None = None, env: OKXEnvironment | None = None) -> list[dict[str, Any]]:
@@ -455,7 +462,7 @@ def place_algo_oco(
     side: str,
     size: Any,
     *,
-    pos_side: str,
+    pos_side: str | None = None,
     td_mode: str = "cross",
     tp_trigger_px: Any,
     sl_trigger_px: Any,
@@ -469,12 +476,14 @@ def place_algo_oco(
     """POST /api/v5/trade/order-algo with ordType=oco — the cloud TP/SL pair the
     engine ratchets (old ``okx swap algo place --ordType oco --reduceOnly --cxlOnClosePos``)."""
     params: dict[str, Any] = {
-        "instId": inst_id, "tdMode": td_mode, "side": side, "posSide": pos_side,
+        "instId": inst_id, "tdMode": td_mode, "side": side,
         "ordType": "oco", "sz": size,
         "tpTriggerPx": tp_trigger_px, "tpOrdPx": tp_ord_px,
         "slTriggerPx": sl_trigger_px, "slOrdPx": sl_ord_px,
         "reduceOnly": reduce_only, "cxlOnClosePos": cxl_on_close_pos,
     }
+    if pos_side:
+        params["posSide"] = pos_side
     if extra:
         params.update(extra)
     _required(params.get("instId"), "instId")

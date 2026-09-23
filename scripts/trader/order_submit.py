@@ -209,11 +209,20 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: f
             _want_lever = float(venue_ctx.get("leverage") or 0.0)
         except (TypeError, ValueError):
             _want_lever = 0.0
+    # 交易所边界：逻辑 long/short -> wire posSide（net 省略 / hedge 映射）。
+    # 策略内部 pos_side 仍保留 long/short（几何/日志/风控/记录）。
+    from scripts.okx_pos_mode import wire_pos_side as _wire_pos_side
+    try:
+        _wire = _wire_pos_side(pos_side, endpoint="order")
+    except Exception as _pm_exc:
+        release_signal_reservation(_reservation, f"posMode 确认失败: {_pm_exc}")
+        return False, f"posMode 确认失败(fail-closed): {_pm_exc}"
+
     if _want_lever > 0:
         _want_lever = max(1.0, min(_want_lever, float(MAX_LEVERAGE or 20.0)))
         try:
             okx_rest.set_leverage(inst_id, int(_want_lever), mgn_mode="cross",
-                                  pos_side=(pos_side or None))
+                                  pos_side=_wire)
         except Exception as lev_exc:
             print(f"[杠杆落地] warn {inst_id} 设档至 {int(_want_lever)}x 失败，"
                   f"按账户现档发单（不影响 TP/SL 覆盖）: {lev_exc}")
@@ -221,7 +230,7 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: f
     try:
         rows = okx_rest.place_order(
             inst_id, side, f"{size:g}",
-            pos_side=pos_side, td_mode="cross", ord_type="limit",
+            pos_side=_wire, td_mode="cross", ord_type="limit",
             px=effective_px, attach_tp=effective_tp, attach_sl=effective_sl,
         )
     except Exception as exc:

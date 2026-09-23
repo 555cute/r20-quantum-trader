@@ -129,11 +129,13 @@ def execute_scale_out_if_eligible(
 
     if pos_venue == "okx":
         try:
+            from scripts.okx_pos_mode import wire_pos_side as _wire_pos_side
+            _wire = _wire_pos_side(pos_side, endpoint="order")
             res = okx_rest.place_order(
                 inst_id,
                 close_side,
                 f"{close_sz:g}",
-                pos_side=pos_side,
+                pos_side=_wire,
                 td_mode="cross",
                 ord_type="market",
                 reduce_only=True,

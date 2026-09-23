@@ -40,6 +40,12 @@ class SubmitProtectedLimitOrderTests(unittest.TestCase):
                            lambda inst_id=None, **kw: {"last": "100.0"})
         tp_.start()
         self.addCleanup(tp_.stop)
+        # default hedge wire mapping (no network); net-mode cases override
+        wp = patch("scripts.okx_pos_mode.wire_pos_side",
+                   lambda side, endpoint="order", env=None: (
+                       None if str(side).lower() in ("net", "") else str(side).lower()))
+        wp.start()
+        self.addCleanup(wp.stop)
 
     @patch("scripts.ai_factor_trader.okx_rest")
     @patch("scripts.ai_factor_trader.current_environment")
@@ -68,18 +74,31 @@ class SubmitProtectedLimitOrderTests(unittest.TestCase):
         mock_rest.place_order.assert_not_called()
 
         # 4. Valid quote proceeds to the REST place with attached TP/SL legs
+        # long_short_mode: wire posSide must be long; net_mode: must omit (not long/short)
         mock_rest.place_order.return_value = [{"ordId": "ord_mock_12345", "sCode": "0"}]
-        ok, order_id = aft.submit_protected_limit_order("BTC-USDT-SWAP", "buy", "long", 1, 100.0, 125.0, 90.0)
+        with patch("scripts.okx_pos_mode.wire_pos_side", lambda side, endpoint="order", env=None: "long"):
+            ok, order_id = aft.submit_protected_limit_order("BTC-USDT-SWAP", "buy", "long", 1, 100.0, 125.0, 90.0)
         self.assertTrue(ok)
         self.assertEqual(order_id, "ord_mock_12345")
         mock_rest.place_order.assert_called_once()
         kwargs = mock_rest.place_order.call_args.kwargs
         self.assertEqual(kwargs.get("attach_tp"), 125.0)
         self.assertEqual(kwargs.get("attach_sl"), 90.0)
-        self.assertEqual(kwargs.get("pos_side"), "long")
+        self.assertEqual(kwargs.get("pos_side"), "long")  # hedge wire only
         self.assertEqual(kwargs.get("td_mode"), "cross")
         self.assertEqual(kwargs.get("ord_type"), "limit")
         self.assertEqual(mock_rest.place_order.call_args.args[:2], ("BTC-USDT-SWAP", "buy"))
+
+        # 4b. net_mode wire must NOT carry posSide=long/short
+        mock_rest.place_order.reset_mock()
+        mock_rest.place_order.return_value = [{"ordId": "ord_net_1", "sCode": "0"}]
+        with patch("scripts.okx_pos_mode.wire_pos_side", lambda side, endpoint="order", env=None: None):
+            ok_net, _oid = aft.submit_protected_limit_order("BTC-USDT-SWAP", "buy", "long", 1, 100.0, 125.0, 90.0)
+        self.assertTrue(ok_net)
+        kwargs_net = mock_rest.place_order.call_args.kwargs
+        self.assertTrue(kwargs_net.get("pos_side") in (None, ""),
+                        f"net_mode 不得发送 posSide=long/short，收到 {kwargs_net.get('pos_side')!r}")
+        mock_rest.place_order.reset_mock()
 
         # 5. Accepted response without an ordId fails closed (never blind trust)
         mock_rest.place_order.return_value = []

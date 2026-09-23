@@ -251,6 +251,11 @@ class SubmitListingGateTests(_EnvFreezeMixin, unittest.TestCase):
 
     def test_12_listing_gate_fail_open_still_places_order(self):
         """目录拉取失败 → fail-open 放行，正常下单流程不受阻塞。"""
+        from unittest.mock import patch as _patch
+        _wp = _patch("scripts.okx_pos_mode.wire_pos_side", lambda *a, **k: None)
+        _wp.start()
+        self.addCleanup(_wp.stop)
+
         listing_router = _Router({
             ("GET", "/api/v5/public/instruments"): OSError("network down"),
         })

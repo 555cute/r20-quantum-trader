@@ -132,8 +132,10 @@ def ensure_cloud_position_protection(inst_id: str, pos_side: str, size: float, t
 
     close_side = "sell" if pos_side == "long" else "buy"
     try:
+        from scripts.okx_pos_mode import wire_pos_side as _wire_pos_side
+        _wire = _wire_pos_side(pos_side, endpoint="algo")
         okx_rest.place_algo_oco(
-            inst_id, close_side, missing, pos_side=pos_side, td_mode="cross",
+            inst_id, close_side, missing, pos_side=_wire, td_mode="cross",
             tp_trigger_px=tp_px, tp_ord_px="-1", sl_trigger_px=sl_px, sl_ord_px="-1",
             reduce_only=True, cxl_on_close_pos=True,
         )

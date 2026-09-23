@@ -203,7 +203,9 @@ def close_position_confirmed(inst_id: str, pos_side: str, before_size: float, ve
         print(f"[Close Pre-Clean] Warning cancelling pending orders for {inst_id}: {e}")
 
     try:
-        okx_rest.close_position(inst_id, pos_side, td_mode="cross", auto_cxl=True)
+        from scripts.okx_pos_mode import wire_pos_side as _wire_pos_side
+        _wire = _wire_pos_side(pos_side, endpoint="close")
+        okx_rest.close_position(inst_id, _wire or "net", td_mode="cross", auto_cxl=True)
     except Exception as exc:
         return False, f"close command failed: {exc}"
 
@@ -216,7 +218,9 @@ def close_position_confirmed(inst_id: str, pos_side: str, before_size: float, ve
         saw_successful_query = True
         remaining = 0.0
         for position in positions:
-            if position.get("instId") == inst_id and str(position.get("posSide", "net")).lower() == pos_side:
+            _ps = str(position.get("posSide", "net")).lower()
+            _want = str(pos_side).lower()
+            if position.get("instId") == inst_id and (_ps == _want or _ps == "net"):
                 remaining = abs(float(position.get("pos", 0) or 0))
                 break
         if remaining < max(1e-12, abs(before_size) * 0.001):
