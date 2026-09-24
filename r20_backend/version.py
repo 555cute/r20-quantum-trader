@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-__version__ = "8.2.0"
+__version__ = "8.3.0"
 APP_VERSION = f"v{__version__}"
 APP_NAME = "R20量子交易系统"
 APP_NAME_EN = "R20 Quantum Trading System"
