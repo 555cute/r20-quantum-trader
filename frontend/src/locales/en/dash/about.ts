@@ -16,6 +16,8 @@ export const enAbout = {
     qqGroup: 'Quant QQ group',
     qqPersonal: 'Author QQ',
     linuxdo: 'LINUX DO',
+    okxChannel: 'OKX Channel (20% Rebate)',
+    gateChannel: 'Gate Channel (20% Rebate)',
     copyHint: 'Click to copy',
   },
   version: 'Version {v} · build {r}',

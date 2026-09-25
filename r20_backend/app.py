@@ -140,7 +140,8 @@ async def lifespan(_: FastAPI):
             save_instruments(DEFAULT_INSTRUMENTS)
     except Exception:
         pass
-    start_gateway_supervisor()
+    if os.environ.get("R20_STANDALONE_GATEWAY", "").lower() not in ("1", "true", "yes"):
+        start_gateway_supervisor()
     try:
         from r20_backend.dashboard_cache import start_dashboard_background_worker
         start_dashboard_background_worker()
@@ -152,7 +153,8 @@ async def lifespan(_: FastAPI):
         stop_dashboard_background_worker()
     except Exception:
         pass
-    stop_gateway_supervisor()
+    if os.environ.get("R20_STANDALONE_GATEWAY", "").lower() not in ("1", "true", "yes"):
+        stop_gateway_supervisor()
 
 
 app = FastAPI(

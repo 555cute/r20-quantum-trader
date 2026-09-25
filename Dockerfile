@@ -17,6 +17,8 @@ RUN npm ci --prefer-offline || npm install
 
 # 复制前端源码并构建
 COPY frontend/ ./
+# 若 public/images 为外部软链接则解绑防范构建断链
+RUN rm -rf public/images && mkdir -p public/images
 RUN npm run build
 
 # ------------------------------------------------------------------------------

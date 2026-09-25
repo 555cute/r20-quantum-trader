@@ -77,6 +77,10 @@ function switchTab(tab: TabKey) {
   }
 }
 
+function openExternal(url: string) {
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
+
 // ---- LIVE / DEMO API keys (OKX) ----
 const keys = ref({ live_key: '', live_secret: '', live_pass: '', demo_key: '', demo_secret: '', demo_pass: '' })
 
@@ -746,6 +750,19 @@ onMounted(() => { loadAll(); loadMx() })
               </div>
 
               <template #extra>
+                <div class="sc-channel-box">
+                  <div class="sc-channel-row">
+                    <span class="sc-channel-label">{{ t('admin.security.okxBrokerTagLabel') }}</span>
+                    <span class="sc-channel-tag mono">6e2191f027c6SUDE</span>
+                  </div>
+                  <button
+                    type="button"
+                    class="sc-channel-btn"
+                    @click="openExternal('https://www.mitxcqvwnhj.com/join/48039151')"
+                  >
+                    <span>{{ t('admin.security.okxRegisterDiscount') }}</span>
+                  </button>
+                </div>
                 <p class="sc-hint"><AlertTriangle :size="11" />{{ t('admin.security.liveConfirmNote') }}</p>
               </template>
               <template #footer-left>
@@ -869,6 +886,15 @@ onMounted(() => { loadAll(); loadMx() })
                     :placeholder="t('admin.security.gatePhrasePlaceholder')"
                     class="field mono"
                   />
+                </div>
+                <div class="sc-channel-box">
+                  <button
+                    type="button"
+                    class="sc-channel-btn"
+                    @click="openExternal('https://www.gatesites.net/share/MCHDBKYF')"
+                  >
+                    <span>{{ t('admin.security.gateRegisterDiscount') }}</span>
+                  </button>
                 </div>
                 <p class="sc-hint">{{ t('admin.security.gateExtra') }}</p>
               </template>
@@ -1606,5 +1632,43 @@ onMounted(() => { loadAll(); loadMx() })
   color: var(--down);
   font-family: var(--ds-font-mono);
   font-weight: 600;
+}
+.sc-channel-box {
+  margin-top: var(--ds-space-2);
+  padding: var(--ds-space-2);
+  border: 1px dashed var(--ds-color-border-subtle, rgba(255, 255, 255, 0.1));
+  border-radius: var(--r-xs);
+  background-color: var(--ds-color-bg-surface-inset);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sc-channel-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--text-3xs);
+}
+.sc-channel-label {
+  color: var(--ds-color-text-description);
+}
+.sc-channel-tag {
+  color: var(--accent);
+  font-size: var(--text-3xs);
+  font-weight: 600;
+}
+.sc-channel-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: var(--text-3xs);
+  color: var(--brand, #3b82f6);
+  text-align: left;
+  display: inline-flex;
+  align-items: center;
+}
+.sc-channel-btn:hover {
+  text-decoration: underline;
 }
 </style>

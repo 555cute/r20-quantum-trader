@@ -13,6 +13,8 @@ const { t, tm } = useI18n();
 const QQ_GROUP = '655973677';
 const QQ_PERSONAL = '1090188816';
 const LINUXDO = 'https://linux.do/';
+const OKX_REBATE_URL = 'https://www.mitxcqvwnhj.com/join/48039151';
+const GATE_REBATE_URL = 'https://www.gatesites.net/share/MCHDBKYF';
 </script>
 
 <template>
@@ -84,6 +86,20 @@ const LINUXDO = 'https://linux.do/';
           <span class="sr-only">{{ t('common.opensInNewTab') }}</span>
         </span>
       </a>
+      <div class="card-flat flex items-center justify-between gap-2 px-3 py-2.5">
+        <div class="min-w-0">
+          <p class="t-label">{{ t('dash.about.community.okxChannel') }}</p>
+          <p class="num truncate text-sm font-semibold" style="color: var(--brand, #3b82f6)">48039151</p>
+        </div>
+        <CopyButton :text="OKX_REBATE_URL" />
+      </div>
+      <div class="card-flat flex items-center justify-between gap-2 px-3 py-2.5">
+        <div class="min-w-0">
+          <p class="t-label">{{ t('dash.about.community.gateChannel') }}</p>
+          <p class="num truncate text-sm font-semibold" style="color: var(--brand, #3b82f6)">MCHDBKYF</p>
+        </div>
+        <CopyButton :text="GATE_REBATE_URL" />
+      </div>
     </div>
 
     <div class="mt-4 space-y-1 border-t pt-3 text-center" style="border-color: var(--line-1)">

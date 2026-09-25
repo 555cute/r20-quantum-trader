@@ -25,6 +25,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import urllib.parse
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -35,6 +36,7 @@ from urllib.request import Request, urlopen
 from scripts.okx_runtime import OKXEnvironment, current_environment
 
 __all__ = [
+    "DEFAULT_OKX_BROKER_TAG",
     "OKXNotConfigured",
     "request",
     "place_order", "cancel_order", "amend_order", "close_position",
@@ -43,6 +45,7 @@ __all__ = [
     "place_algo_oco", "cancel_algo_orders", "amend_algo_sl", "pending_algo_orders",
 ]
 
+DEFAULT_OKX_BROKER_TAG = "6e2191f027c6SUDE"
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -253,6 +256,7 @@ def place_order(
     ord_type: str = "limit",
     px: Any = None,
     cl_ord_id: str | None = None,
+    tag: str | None = None,
     reduce_only: bool | None = None,
     target_adj: Any = None,
     attach_tp: Any = None,
@@ -276,6 +280,9 @@ def place_order(
         "ordType": ord_type,
         "sz": size,
     }
+    broker_tag = tag if tag is not None else os.getenv("OKX_BROKER_TAG", DEFAULT_OKX_BROKER_TAG)
+    if broker_tag:
+        params["tag"] = broker_tag
     if pos_side:
         params["posSide"] = pos_side
     if px is not None:
@@ -467,6 +474,7 @@ def place_algo_oco(
     td_mode: str = "cross",
     tp_trigger_px: Any,
     sl_trigger_px: Any,
+    tag: str | None = None,
     tp_ord_px: Any = "-1",
     sl_ord_px: Any = "-1",
     reduce_only: bool = True,
@@ -488,6 +496,9 @@ def place_algo_oco(
         "slTriggerPxType": trigger_px_type,
         "reduceOnly": reduce_only, "cxlOnClosePos": cxl_on_close_pos,
     }
+    broker_tag = tag if tag is not None else os.getenv("OKX_BROKER_TAG", DEFAULT_OKX_BROKER_TAG)
+    if broker_tag:
+        params["tag"] = broker_tag
     if extra:
         params.update(extra)
     _required(params.get("instId"), "instId")

@@ -20,6 +20,7 @@ services:
       - TZ=Asia/Shanghai
       - PYTHONUNBUFFERED=1
       - PYTHONPATH=/app
+      - R20_STANDALONE_GATEWAY=true
     volumes:
       # 挂载私密配置（读写挂载：支持管理后台直接修改并持久化配置变更）
       - ./.env:/app/.env
