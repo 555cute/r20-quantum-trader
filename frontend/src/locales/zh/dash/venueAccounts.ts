@@ -23,6 +23,8 @@ export const zhVenueAccounts = {
   status: {
     ready: '已同步',
     unavailable: '未接入',
+    mismatch: '环境不符',
+    invalidKey: '凭据无效',
     not_implemented: '未实装',
     degraded: '读取异常',
     unknown: '未知',

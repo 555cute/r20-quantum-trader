@@ -24,10 +24,18 @@ const venueName = computed(() => t(`dash.venueAccounts.venueNames.${props.venue}
 
 const statusMeta = computed(() => {
   const s = props.account?.status;
+  const reason = props.account?.reason || '';
   if (!s) return { icon: Info, statusDot: 'warn', label: t('dash.venueAccounts.status.unknown') };
   switch (s) {
     case 'ready': return { icon: CheckCircle2, statusDot: 'active', label: t('dash.venueAccounts.status.ready') };
-    case 'unavailable': return { icon: PlugZap, statusDot: 'error', label: t('dash.venueAccounts.status.unavailable') };
+    case 'unavailable':
+      if (reason.includes('跨档') || reason.includes('不符')) {
+        return { icon: PlugZap, statusDot: 'warn', label: t('dash.venueAccounts.status.mismatch') };
+      }
+      if (reason.includes('凭证无效') || reason.includes('无效') || reason.includes('过期')) {
+        return { icon: PlugZap, statusDot: 'error', label: t('dash.venueAccounts.status.invalidKey') };
+      }
+      return { icon: PlugZap, statusDot: 'error', label: t('dash.venueAccounts.status.unavailable') };
     case 'degraded': return { icon: AlertTriangle, statusDot: 'warn', label: t('dash.venueAccounts.status.degraded') };
     default: return { icon: Info, statusDot: 'warn', label: t('dash.venueAccounts.status.not_implemented') };
   }

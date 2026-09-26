@@ -23,6 +23,8 @@ export const enVenueAccounts = {
   status: {
     ready: 'Synced',
     unavailable: 'Not connected',
+    mismatch: 'Env mismatch',
+    invalidKey: 'Invalid key',
     not_implemented: 'Not implemented',
     degraded: 'Read failed',
     unknown: 'Unknown',

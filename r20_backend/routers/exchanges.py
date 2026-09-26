@@ -66,8 +66,7 @@ def _venue_accounts_okx(environment: str) -> dict[str, Any]:
     if env.mode != environment:
         return _venue_account_unknown(
             "unavailable",
-            f"系统当前 OKX 档位为 {env.mode.upper()}，与请求环境 {environment.upper()} 不符——"
-            "只读卡拒绝跨档读取（防止实盘/模拟混线；档位切换属后台配置动作）")
+            f"当前请求为 {environment.upper()} 环境，OKX 后台配置为 {env.mode.upper()}，已拦截跨档读取；请在后台「账户与标的」切换档位")
     if not env.configured:
         return _venue_account_unknown(
             "unavailable",
@@ -127,6 +126,13 @@ def _venue_accounts_gate(environment: str) -> dict[str, Any]:
     except ExchangeCapabilityError as exc:
         return _venue_account_unknown("unavailable", f"Gate 账户面不可用：{exc}")
     except Exception as exc:
+        err_msg = str(exc)
+        if "INVALID_KEY" in err_msg or "Invalid key" in err_msg:
+            return _venue_account_unknown("unavailable", "Gate API Key 凭证无效或已过期，请在后台核对 API 密钥与签名")
+        if "IP" in err_msg or "ip" in err_msg:
+            return _venue_account_unknown("unavailable", "Gate 访问 IP 未加白名单，请在交易所后台添加服务器 IP")
+        if "PERMISSION" in err_msg or "permission" in err_msg:
+            return _venue_account_unknown("unavailable", "Gate API Key 权限不足，请确认已开启合约读取权限")
         return _venue_account_unknown("degraded", f"Gate 账户读取失败: {type(exc).__name__}: {exc}")
     try:
         return {
@@ -167,6 +173,15 @@ def _venue_accounts_binance(environment: str = "demo") -> dict[str, Any]:
     except ExchangeCapabilityError as exc:
         return _venue_account_unknown("unavailable", f"Binance 账户面不可用：{exc}")
     except Exception as exc:
+        err_msg = str(exc)
+        if "-2015" in err_msg or "Invalid API-key" in err_msg:
+            return _venue_account_unknown("unavailable", "Binance API Key 凭证无效或 IP 未加白，请在后台核对密钥与权限")
+        if "-2014" in err_msg:
+            return _venue_account_unknown("unavailable", "Binance API Key 格式无效，请在后台核对 API Key")
+        if "-1021" in err_msg or "Timestamp" in err_msg:
+            return _venue_account_unknown("degraded", "Binance 系统时间戳不同步，建议宿主机校准时间")
+        if "PERMISSION" in err_msg or "permission" in err_msg:
+            return _venue_account_unknown("unavailable", "Binance API Key 权限不足，请确认已开启合约读取权限")
         return _venue_account_unknown("degraded", f"Binance 账户读取失败: {type(exc).__name__}: {exc}")
 
     try:
