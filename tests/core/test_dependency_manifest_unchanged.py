@@ -40,6 +40,9 @@ git log --oneline --grep="第.*刀" -- frontend/package-lock.json → 0
 `fastapi` `uvicorn` `jinja2` `requests` `pandas` `numpy` `openpyxl`
 `cryptography` `httpx` `python-multipart` `pydantic`
 
+> 2026-09-26 追加：`websockets`（`websockets>=12.0`，容器化运行依赖，
+> 见 `eb946682`）。哈希基线已随之更新。
+
 `frontend/package.json` 的 `dependencies`：
 `@tailwindcss/vite` `lucide-vue-next` `pinia` `tailwindcss` `vue`
 `vue-router` `klinecharts` `lightweight-charts`
@@ -59,8 +62,11 @@ ROOT = Path(__file__).resolve().parents[2]
 
 #: 结构优化阶段基线（第六十九刀记录）
 BASELINE: dict[str, str] = {
+    # 2026-09-26 更新：本仓 `eb946682`（容器化加固）有意补的 `websockets>=12.0`
+    # （并去掉文件头 BOM），但该提交漏更新此处基线 ⇒ 此后本门一直红着。
+    # 依赖清单已按本文件 docstring 的要求同步进「记录时的实际清单」一节。
     "requirements.txt":
-        "ff13cf1aa8191385efaf0196d7e4f7df52ca8ea42543df74a47bdeab3d8c2fcb",
+        "38e467026d65a1f5df4760484a72bc3efee7f5f856dcb100566f5cd126f61a4a",
     "frontend/package.json":
         "a558a88f9e1704e639cfb57fa37d98968b8fed052c9b47c9bfc9a6cd44269eb6",
 }

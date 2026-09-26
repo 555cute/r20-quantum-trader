@@ -17,6 +17,7 @@
 """
 
 import math
+import os
 import types
 import unittest
 from unittest import mock
@@ -628,11 +629,15 @@ class OpenSizingTests(_Base):
         adapter = _FakeAdapter(venue="binance")
         adapter.rows = []
         adapter._ = None
-        out = ER.open_protected_position({**self.decision, "venue": "binance",
-                                          "entry_price": 100.1234,
-                                          "take_profit_price": 110.9876,
-                                          "stop_loss_price": 95.4567},
-                                         adapter=adapter, price_ref=100.0)
+        # 本用例断言的是**限价**单的报单价已被对齐到 tick ⇒ 必须钉死下单模式。
+        # `R20_ORDER_MODE` 是运行期可改的运维设置（后台可切市价单，且会写 `.env`）；
+        # 不钉的话，运维一切到 market，这里就会因为"市价单本就不该带 px"而红。
+        with mock.patch.dict(os.environ, {"R20_ORDER_MODE": "limit"}):
+            out = ER.open_protected_position({**self.decision, "venue": "binance",
+                                              "entry_price": 100.1234,
+                                              "take_profit_price": 110.9876,
+                                              "stop_loss_price": 95.4567},
+                                             adapter=adapter, price_ref=100.0)
         self.assertIs(out["ok"], True)
         place = [c for c in adapter.calls if isinstance(c, tuple) and c[0] == "place_order"]
         self.assertEqual(place[0][4], 100.1)

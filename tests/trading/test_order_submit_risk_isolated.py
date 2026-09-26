@@ -4,6 +4,7 @@ the ai_factor_trader module binding; zero real CLI, zero network, zero exchange 
 """
 from __future__ import annotations
 
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -40,6 +41,14 @@ class SubmitProtectedLimitOrderTests(unittest.TestCase):
                            lambda inst_id=None, **kw: {"last": "100.0"})
         tp_.start()
         self.addCleanup(tp_.stop)
+        # 下单模式必须钉死：`R20_ORDER_MODE` 是**运行期可改**的运维设置
+        # （后台「账户与标的」可在限价/市价间切换，且它会写进 `.env`）。
+        # 本文件断言的是**限价**语义（`px` 有值、`ord_type == "limit"`），
+        # 不钉模式就会变成"跟着运维的档位红绿" —— 2026-09 实测：运维切到
+        # market 后本文件两条用例当场翻红，而代码其实没坏。
+        mode = patch.dict(os.environ, {"R20_ORDER_MODE": "limit"})
+        mode.start()
+        self.addCleanup(mode.stop)
 
     @patch("scripts.ai_factor_trader.okx_rest")
     @patch("scripts.ai_factor_trader.current_environment")

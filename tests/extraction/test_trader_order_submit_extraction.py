@@ -35,6 +35,20 @@ BODY_DELTAS: list = [
     ("except Exception:\n        pass",
      "except Exception as _rsc_exc:\n"
      "        print(f'[demo rescale] warn {inst_id} 沙盒报价重算失败，按当前值提交: {_rsc_exc}')"),
+    # ---- 后台「委托订单模式」：限价单 / 市价单（2026-09）----
+    # 需求：操盘手可在后台切换入场单为**市价**（见 `r20_backend/routers/system.py`
+    # 写 `R20_ORDER_MODE`）。落点必然在这条唯一落单的主路径上 —— 原先 `ord_type`
+    # 与 `px` 都是字面量（恒限价），要按模式分支就只能改这里。
+    # 语义：market ⇒ `ord_type='market'` 且 `px=None`（市价单不带价），
+    # 限价 ⇒ 原样传 `effective_px`。`os.getenv` 的兜底仍是 `'limit'`，
+    # 即读到空/拼错的值一律退回限价（失败取保守侧）。
+    ("try:\n    rows = okx_rest.place_order(inst_id, side, f'{size:g}', pos_side=pos_side, "
+     "td_mode='cross', ord_type='limit', px=effective_px, attach_tp=effective_tp, attach_sl=effective_sl)",
+     "order_mode = str(os.getenv('R20_ORDER_MODE', 'limit')).strip().lower()\n"
+     "ord_type = 'market' if order_mode == 'market' else 'limit'\n"
+     "entry_px = None if ord_type == 'market' else effective_px\n"
+     "try:\n    rows = okx_rest.place_order(inst_id, side, f'{size:g}', pos_side=pos_side, "
+     "td_mode='cross', ord_type=ord_type, px=entry_px, attach_tp=effective_tp, attach_sl=effective_sl)"),
 ]
 
 INJ = ("confirm_signal_reservation", "record_open_intent", "release_signal_reservation",

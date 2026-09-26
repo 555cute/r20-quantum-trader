@@ -182,7 +182,9 @@ class TestRouter(unittest.TestCase):
 
     def test_open_long_full_sequence(self):
         ad = _StubAdapter()
-        with patch.dict(os.environ, {"R20_GATE_EXECUTION": "1"}):
+        # 钉死限价模式：本用例断言 place 的价格是限价（市价单模式下 px 本就为 None）。
+        # `R20_ORDER_MODE` 由后台写 `.env`，属运行期可变的运维设置。
+        with patch.dict(os.environ, {"R20_GATE_EXECUTION": "1", "R20_ORDER_MODE": "limit"}):
             r = router.open_protected_position(_decision(), adapter=ad,
                                                price_ref=79000.0)
         self.assertTrue(r["ok"], r.get("detail"))
@@ -260,7 +262,7 @@ class TestRouter(unittest.TestCase):
     def test_price_aligned_to_tick(self):
         # tick 0.1 下 79000.04 必须对齐为 79000.0 再下单（防 Gate PRICE_INVALID）
         ad = _StubAdapter()
-        with patch.dict(os.environ, {"R20_GATE_EXECUTION": "1"}):
+        with patch.dict(os.environ, {"R20_GATE_EXECUTION": "1", "R20_ORDER_MODE": "limit"}):
             r = router.open_protected_position(
                 _decision(entry_price=79000.04, take_profit_price=85000.07,
                           stop_loss_price=77000.02), adapter=ad, price_ref=79000.0)

@@ -64,9 +64,13 @@ def _venue_accounts_okx(environment: str) -> dict[str, Any]:
     except Exception as exc:
         return _venue_account_unknown("unavailable", f"OKX 环境解析失败: {type(exc).__name__}: {exc}")
     if env.mode != environment:
+        # 「档位不符」四个字是 `test_venue_accounts_endpoint.py` 钉住的判定词，
+        # 也是前端 `VenueAccountCard.statusMeta` 归到「环境不符」态的判据之一
+        # （另一个是「跨档」）—— 改写文案时不要把它顺手删掉。
         return _venue_account_unknown(
             "unavailable",
-            f"当前请求为 {environment.upper()} 环境，OKX 后台配置为 {env.mode.upper()}，已拦截跨档读取；请在后台「账户与标的」切换档位")
+            f"当前请求为 {environment.upper()} 环境，OKX 后台配置为 {env.mode.upper()} —— 档位不符，"
+            "已拦截跨档读取；请在后台「账户与标的」切换档位")
     if not env.configured:
         return _venue_account_unknown(
             "unavailable",
