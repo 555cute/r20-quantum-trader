@@ -75,3 +75,52 @@ export function deriveLiveTakeProfit(input: { position: any; order: any }): numb
   }
   return 0
 }
+
+/** K 线上的一个止盈档位（含图签文案与相对开仓成本的百分比）。 */
+export interface TpLevel {
+  price: number
+  /** 相对开仓成本的百分比距离（与 `computeRiskReward().rewardPct` 同口径）。 */
+  pct: number
+  /** 图签后缀：单档为 `TP`，分批为 `TP1` / `TP2`。 */
+  label: 'TP' | 'TP1' | 'TP2'
+}
+
+/**
+ * 展示用**全部**止盈档位 —— 本仓建仓默认分批落袋，K 线必须把两档都画出来。
+ *
+ * 背景：一笔仓位的止盈是**分两批**挂的 —— 首批 50% 打 `scaleOutTp`（TP1），
+ * 达标后把止损推到保本，剩余 50% 挂 `exchangeTp` / `displayTakeProfit`（TP2）。
+ * 但 K 线上原先只画 `deriveLiveTakeProfit()` 那**一条**终点线，图上看不到 TP1，
+ * 等于把"分批"这件事从图上抹掉了（用户反馈：只会显示一个止盈点）。
+ *
+ * 三条刻意的口径：
+ * 1. 终点档一律取 `deriveLiveTakeProfit()` —— 同一套 `??` 回退链，保证终点线
+ *    仍画在**原来那个价位**上，本次改动不移动任何既有线；
+ * 2. 首批档的判据与面板 `PositionsOrdersPanel.vue` 一致：`scaleOutTp > 0` 即
+ *    认为该仓有首批目标（两档同价时只留一条，避免叠线）；
+ * 3. `pct` 与 `computeRiskReward()` 同口径（多空各自取正向距离 ÷ 开仓价），
+ *    否则图签上的百分比会和右侧 R:R 面板对不上。
+ */
+export function deriveLiveTakeProfits(input: {
+  position: any
+  order: any
+  /** 展示用开仓成本（`deriveLiveEntry` 的结果） */
+  entry: number
+  side: 'long' | 'short'
+}): TpLevel[] {
+  const { position, order, entry, side } = input
+  const pctOf = (price: number): number => {
+    if (!(entry > 0)) return 0
+    const dist = side === 'long' ? price - entry : entry - price
+    return (Math.max(0, dist) / entry) * 100
+  }
+
+  const finalPx = deriveLiveTakeProfit({ position, order })
+  const firstPx = Number(position?.scaleOutTp ?? 0)
+  const hasFirst = firstPx > 0 && firstPx !== finalPx
+
+  const levels: TpLevel[] = []
+  if (hasFirst) levels.push({ price: firstPx, pct: pctOf(firstPx), label: 'TP1' })
+  if (finalPx > 0) levels.push({ price: finalPx, pct: pctOf(finalPx), label: hasFirst ? 'TP2' : 'TP' })
+  return levels
+}
