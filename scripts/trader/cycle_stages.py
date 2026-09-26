@@ -59,6 +59,8 @@ def fetch_universe_and_manage_positions(*,
 
 def persist_state_and_sync_ledger(*,
         _xv_total,
+        xv_positions_by_venue,
+        venue_position_span,
         active_pos_count,
         all_factors,
         cb_active,
@@ -104,7 +106,12 @@ def persist_state_and_sync_ledger(*,
         except Exception as e:
             print(f"[Ledger Sync Warning] {e}")
 
-    log_entry = f"[{timestamp_full}] ⚡ R20 Quantum Trader v{__version__} 巡检完成 | 持仓 OKX {active_pos_count}/{MAX_CONCURRENT_POSITIONS} (多{long_count}/空{short_count})｜跨所 {_xv_total if _xv_total is not None else '未知'} 笔 | 动作: {', '.join(executed_actions) if executed_actions else '无开平仓操作'}\n"
+    position_span = venue_position_span(okx_count=active_pos_count, okx_long=long_count,
+                                        okx_short=short_count,
+                                        xv_positions_by_venue=xv_positions_by_venue,
+                                        xv_total=_xv_total,
+                                        max_positions=MAX_CONCURRENT_POSITIONS)
+    log_entry = f"[{timestamp_full}] ⚡ R20 Quantum Trader v{__version__} 巡检完成 | {position_span} | 动作: {', '.join(executed_actions) if executed_actions else '无开平仓操作'}\n"
     with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(log_entry)
     print(log_entry.strip())
@@ -377,6 +384,7 @@ def fetch_positions_and_reconcile(*,
 
 def scan_risk_gates_and_ai_brain(*,
         _xv_total,
+        venue_position_span,
         active_pos_count,
         all_factors,
         executed_actions,
@@ -412,7 +420,10 @@ def scan_risk_gates_and_ai_brain(*,
     # One LLM call covers the full six-instrument universe and all active positions.
     if not cb_active and execute_batch_ai_brain_cycle:
         try:
-            pos_desc = f"当前系统总持仓 OKX {active_pos_count}/{MAX_CONCURRENT_POSITIONS} (多{long_count}/空{short_count})｜跨所持仓 {_xv_total if _xv_total is not None else '未知(拉取失败)'} 笔"
+            pos_desc = "当前系统总" + venue_position_span(
+                okx_count=active_pos_count, okx_long=long_count, okx_short=short_count,
+                xv_positions_by_venue=xv_positions_by_venue, xv_total=_xv_total,
+                max_positions=MAX_CONCURRENT_POSITIONS)
             # 持仓全景装配（阶段 4·B3 第三十一刀：迁至 scripts/trader/position_universe.py）
             active_pos_list = _collect_okx_position_payloads(all_factors, trackers)
             # 汇入多所（Binance / Gate）在管持仓，形成三所平权持仓全景。

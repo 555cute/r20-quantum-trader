@@ -18,6 +18,17 @@
 原实现 25 行的手工字典拼装（含 17 个字段的逐项拷贝与四舍五入）。
 搬出后字段清单集中一处，新增面板字段不必在 652 行里翻找。
 
+## 3. `venue_position_span` —— 「持仓构成」一行（2026-09 新增纯函数）
+
+不是搬家，是**缺陷修复**抽出的纯函数：巡检通知与 AI 提示词此前把场所写死成
+`持仓 OKX {n}/{max}`，而系统实际在三个所上跑（OKX 直签 + Binance/Gate 跨所）
+⇒ 通知读起来像"只有 OKX 有仓"（用户报的原话：「现在的通知有bug，平台只有okx」）。
+口径见函数 docstring：跨所拉取失败时只报 OKX 并显式标「跨所未知」，**绝不装 0**。
+
+两处调用点（`cycle_stages.py` 的巡检通知与 `pos_desc`）都必须共用它 —— 各自
+再写一份口径就是本缺陷的成因，故 `tests/trading/test_venue_position_span.py`
+既钉纯函数、也钉两个接线点。
+
 ## 边界说明（有意保守）
 
 本模块**只搬这两块**。同一函数里另有三处"从订单对象推基础币种"的表达式
@@ -189,3 +200,57 @@ def build_state_payload(*, timestamp_full, active_pos_count, max_positions, long
         })
 
     return payload
+
+
+def venue_position_span(*, okx_count, okx_long, okx_short, xv_positions_by_venue,
+                        xv_total, max_positions, venue_order=("okx", "binance", "gate")):
+    """巡检通知与 AI 提示词共用的「持仓构成」一行（2026-09 用户报缺陷后新增）。
+
+    缺陷原话：「现在的通知有bug，平台只有okx」。实测：巡检头部把第一段
+    **写死**成 `持仓 OKX {n}/{max}`，而系统实际在三个所上跑（OKX 直签 +
+    Binance/Gate 跨所）。于是通知读起来像"只有 OKX 有仓"，另外两所只以
+    「跨所 M 笔」出现 —— **看不出是哪个所、更看不出各所几笔**。
+
+    返回形如：
+
+        持仓 7/9 (多4/空3)｜okx 2 · binance 4 · gate 1
+        持仓 2/9 (多0/空2)｜okx 2 · 跨所未知        ← 跨所拉取失败（xv_total is None）
+
+    两条口径（与既有 fail-closed 一致）：
+
+    - **绝不装 0**：`xv_total is None`（本轮拉取失败）时总和与多空**只报 OKX**，
+      并显式追加「跨所未知」—— 装 0 等于对用户谎报"外所没仓"；
+    - 各所笔数**一律从 `xv_positions_by_venue` 现算**（`xv_total` 仅当核验旗标），
+      免得"合计 N 笔"与逐所明细对不上；
+    - 只列**本轮真拉到的**所（`xv_positions_by_venue` 的键，含 0 笔的所），
+      不为没启用的所凑 0；OKX 恒在首位（直签链路，永远核验）。
+
+    纯函数：不碰网络、不读全局，便于逐条钉住口径（本仓"多所平权"的计数
+    历来最易出错 —— 曾发生过「按开闸判 ⇒ 跨所敞口把 OKX 整个漏掉」）。
+    """
+    xv_known = xv_total is not None
+    # ⚠️ 各所笔数**一律从 dict 现算**，`xv_total` 只当"本轮跨所核验成功没有"的旗标。
+    # 混用两者会出现「合计 3 笔、逐所写 binance 1」这种自相矛盾的输出
+    # （生产里二者同源，但一旦谁传个不一致的值就会当场撒谎）。
+    xv_rows = [row for rows in (xv_positions_by_venue or {}).values() for row in (rows or [])]
+
+    names = [str(n) for n in (xv_positions_by_venue or {})]
+    ordered = [n for n in venue_order if n == "okx" or n in names]
+    # 未登记在 venue_order 的所按名补在其后（新增场所时不必改本函数）
+    ordered += sorted(n for n in names if n not in venue_order)
+
+    counts = {"okx": int(okx_count)}
+    for name in names:
+        counts[name] = len(xv_positions_by_venue.get(name) or [])
+
+    segments = [f"{name} {counts[name]}" for name in ordered]
+    if not xv_known:
+        segments.append("跨所未知")
+        head = (f"持仓 {int(okx_count)}/{max_positions} "
+                f"(多{int(okx_long)}/空{int(okx_short)})")
+    else:
+        xv_long = sum(1 for row in xv_rows if str(row.get("side", "")).lower() == "long")
+        xv_short = len(xv_rows) - xv_long
+        head = (f"持仓 {int(okx_count) + len(xv_rows)}/{max_positions} "
+                f"(多{int(okx_long) + xv_long}/空{int(okx_short) + xv_short})")
+    return head + "｜" + " · ".join(segments)

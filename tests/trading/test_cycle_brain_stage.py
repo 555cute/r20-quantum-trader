@@ -16,6 +16,7 @@
 import unittest
 
 from scripts.trader.cycle_stages import scan_risk_gates_and_ai_brain
+from scripts.trader.cycle_snapshot import venue_position_span
 
 
 class _Rig:
@@ -58,10 +59,11 @@ class _Rig:
             return self.refresh
 
         out = scan_risk_gates_and_ai_brain(
-            _xv_total=2, active_pos_count=1, all_factors=[{"name": "BTC"}],
+            _xv_total=2, venue_position_span=venue_position_span,
+            active_pos_count=1, all_factors=[{"name": "BTC"}],
             executed_actions=self.actions, long_count=1, short_count=0,
             timestamp_full="2026-09-21 12:00:00", trackers={"t": 1}, usdt_available=1000.0,
-            xv_positions_by_venue={"binance": [{"inst_id": "SOL"}]},
+            xv_positions_by_venue={"binance": [{"inst_id": "SOL"}, {"inst_id": "UNI"}]},
             MAX_CONCURRENT_POSITIONS=5,
             _collect_okx_position_payloads=collect,
             _merge_cross_venue_positions=merge,
@@ -163,10 +165,18 @@ class ScanRiskGatesAndBrainTest(unittest.TestCase):
                       "外所持仓要进全景，否则模型看不到它")
 
     def test_position_description_discloses_counts_and_cross_venue(self):
+        """持仓描述必须是**全场所合计 + 逐所点名**。
+
+        ⚠️ 2026-09 改：此前这里断言 `1/5` —— 那是"只报 OKX 的 1 笔 / 上限 5"，
+        而系统实际有 OKX 1 笔 + 跨所 2 笔。用户正是读到这种形状才报
+        「通知有 bug，平台只有 okx」。现在合计 3/5，并把每个所写出来。
+        """
         rig = _Rig(brain={"BTC": {}})
         rig.run()
-        self.assertIn("1/5", rig.pos_desc)
-        self.assertIn("2", rig.pos_desc, "跨所笔数要写进描述")
+        self.assertIn("3/5", rig.pos_desc, "合计应为 OKX 1 + 跨所 2")
+        self.assertIn("okx 1", rig.pos_desc, "每个所都要点名")
+        self.assertIn("binance 2", rig.pos_desc, "跨所必须点名到所")
+        self.assertNotIn("持仓 OKX", rig.pos_desc, "不得再写死场所")
 
     def test_unknown_cross_venue_count_is_spelled_out(self):
         rig = _Rig(brain={"BTC": {}})
@@ -176,7 +186,8 @@ class ScanRiskGatesAndBrainTest(unittest.TestCase):
         import scripts.trader.cycle_stages as cs
         captured = {}
         out = cs.scan_risk_gates_and_ai_brain(
-            _xv_total=None, active_pos_count=1, all_factors=[], executed_actions=[],
+            _xv_total=None, venue_position_span=venue_position_span,
+            active_pos_count=1, all_factors=[], executed_actions=[],
             long_count=1, short_count=0, timestamp_full="t", trackers={}, usdt_available=1.0,
             xv_positions_by_venue={}, MAX_CONCURRENT_POSITIONS=5,
             _collect_okx_position_payloads=lambda a, t: [],

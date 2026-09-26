@@ -24,6 +24,9 @@ import types
 import unittest
 from pathlib import Path
 
+# 场所构成是**纯函数**：冒烟例直接用真身，替身会掩盖"各所几笔"的真实口径。
+from scripts.trader.cycle_snapshot import venue_position_span
+
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
@@ -147,6 +150,40 @@ SEGMENT_DELTAS = {
          "pending_inst_ids |= {str(_x) for _x in _xv_pending_ids or set() if _x}\n"
          "pending_long_count += int(_xv_pending_long or 0)\n"
          "pending_short_count += int(_xv_pending_short or 0)"),
+    ],
+    # ---- 第二百二十一刀（用户报「现在的通知有bug，平台只有okx」）---------------
+    # 巡检通知与 AI 提示词的「持仓构成」此前把场所**写死**成 `持仓 OKX {n}/{max}`：
+    # 系统实际在三个所上跑（OKX 直签 + Binance/Gate 跨所），于是通知读起来像
+    # "只有 OKX 有仓"，另外两所只以「跨所 M 笔」出现，看不出是哪个所、各所几笔。
+    # 现改为调用纯函数 `venue_position_span`（口径见 `cycle_snapshot.py`：
+    # 跨所拉取失败时只报 OKX 并显式追加「跨所未知」，**绝不装 0**）。
+    "persist_state_and_sync_ledger": [
+        (
+            'log_entry = f"[{timestamp_full}] ⚡ R20 Quantum Trader v{__version__} 巡检完成 | '
+            "持仓 OKX {active_pos_count}/{MAX_CONCURRENT_POSITIONS} "
+            "(多{long_count}/空{short_count})｜跨所 "
+            "{(_xv_total if _xv_total is not None else '未知')} 笔 | 动作: "
+            "{(', '.join(executed_actions) if executed_actions else '无开平仓操作')}\\n\"",
+            'position_span = venue_position_span(okx_count=active_pos_count, '
+            'okx_long=long_count, okx_short=short_count, '
+            'xv_positions_by_venue=xv_positions_by_venue, xv_total=_xv_total, '
+            'max_positions=MAX_CONCURRENT_POSITIONS)\n'
+            'log_entry = f"[{timestamp_full}] ⚡ R20 Quantum Trader v{__version__} 巡检完成 | '
+            "{position_span} | 动作: "
+            "{(', '.join(executed_actions) if executed_actions else '无开平仓操作')}\\n\"",
+        ),
+    ],
+    "scan_risk_gates_and_ai_brain": [
+        # 同一处写死：这句是喂给主脑的持仓全景描述，模型据此以为"只有 OKX 有仓"。
+        (
+            '        pos_desc = f"当前系统总持仓 OKX {active_pos_count}/'
+            "{MAX_CONCURRENT_POSITIONS} (多{long_count}/空{short_count})｜跨所持仓 "
+            "{(_xv_total if _xv_total is not None else '未知(拉取失败)')} 笔\"",
+            "        pos_desc = '当前系统总' + venue_position_span("
+            "okx_count=active_pos_count, okx_long=long_count, okx_short=short_count, "
+            "xv_positions_by_venue=xv_positions_by_venue, xv_total=_xv_total, "
+            "max_positions=MAX_CONCURRENT_POSITIONS)",
+        ),
     ],
 }
 
@@ -308,7 +345,9 @@ class CycleStagesVerbatimTest(unittest.TestCase):
         written = []
         with tempfile.TemporaryDirectory() as td:
             cs.persist_state_and_sync_ledger(
-                _xv_total=0, active_pos_count=0, all_factors=[], cb_active=False,
+                _xv_total=0, xv_positions_by_venue={},
+                venue_position_span=venue_position_span,
+                active_pos_count=0, all_factors=[], cb_active=False,
                 cb_reason="", executed_actions=[],
                 long_count=0, short_count=0, timestamp_full="2026-09-15 08:00:00",
                 DATA_DIR=td, LEDGER_AUTOSYNC_ENABLED=False,
@@ -406,6 +445,7 @@ class CycleStagesVerbatimTest(unittest.TestCase):
             _xv_total=0, active_pos_count=0, all_factors=[], executed_actions=[],
             long_count=0, short_count=0, timestamp_full="2026-09-15 09:00:00",
             trackers={}, usdt_available=1000.0, xv_positions_by_venue={},
+            venue_position_span=venue_position_span,
             MAX_CONCURRENT_POSITIONS=6,
             _collect_okx_position_payloads=lambda *a, **k: [],
             _merge_cross_venue_positions=lambda *a, **k: [],

@@ -351,7 +351,7 @@ class ParityTest(unittest.TestCase):
         """真机形状：`real_pos_dict` 只有 OKX 仓，AI 却对 binance 仓发 CLOSE_MARKET。"""
         h = _Harness({"instructions": [
             {"instId": "UNI-USDT-SWAP", "action": "CLOSE_MARKET", "confidence": 99, "reason": "x"}],
-        }, {})          # OKX 字典为空 = 与真机"持仓 OKX 0/9｜跨所 1 笔"同形
+        }, {})          # OKX 字典为空 = 与真机"OKX 无仓、外所 1 笔"同形
         got_raw = h.run(position_mgmt.execute_ai_position_management)
         self.addCleanup(h.cleanup)
         self.assertEqual(len(got_raw), 1, "必须留痕，不得静默")

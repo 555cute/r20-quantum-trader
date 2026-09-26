@@ -20,6 +20,7 @@ from pathlib import Path
 from scripts.trader.cycle_stages import (fetch_universe_and_manage_positions,
                                         persist_state_and_sync_ledger,
                                         preflight_reconcile_and_housekeeping)
+from scripts.trader.cycle_snapshot import venue_position_span
 
 
 class _FakePool:
@@ -92,7 +93,9 @@ class PersistStageTest(unittest.TestCase):
 
         log = self.root / "trader.log"
         persist_state_and_sync_ledger(
-            _xv_total=2, active_pos_count=1, all_factors=[], cb_active=False, cb_reason="",
+            _xv_total=2, xv_positions_by_venue={"binance": [{"inst_id": "SOL"}]},
+            venue_position_span=venue_position_span,
+            active_pos_count=1, all_factors=[], cb_active=False, cb_reason="",
             executed_actions=["开了 1 单"], long_count=1, short_count=0,
             timestamp_full="2026-09-21 12:00:00", DATA_DIR=str(self.root),
             LEDGER_AUTOSYNC_ENABLED=autosync, LOG_FILE=str(log),

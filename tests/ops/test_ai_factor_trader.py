@@ -65,20 +65,20 @@ class ImportFallbackTests(unittest.TestCase):
         for bad in ("not-a-number", ""):
             with patch.dict(aft.os.environ,
                             {"R20_VENUE_PROTECTION_WATCHDOG_DEBOUNCE_MIN": bad}):
-                ns = _exec_node(_try_at(233))
+                ns = _exec_node(_try_at(234))
             self.assertEqual(ns["R20_VENUE_PROTECTION_WATCHDOG_DEBOUNCE_S"], 1800.0, bad)
 
     def test_debounce_reads_env_when_valid(self):
         with patch.dict(aft.os.environ,
                         {"R20_VENUE_PROTECTION_WATCHDOG_DEBOUNCE_MIN": "5"}):
-            ns = _exec_node(_try_at(233))
+            ns = _exec_node(_try_at(234))
         self.assertEqual(ns["R20_VENUE_PROTECTION_WATCHDOG_DEBOUNCE_S"], 300.0)
 
     def test_backend_facade_missing_leaves_six_none_sentinels(self):
         # 六件套缺失时必须是 None 哨兵（调用点据此决定"跳过/降级"），而不是 AttributeError
         poisoned = {"db_manager": None, "qq_notifier": None, "ai_brain_trader": None}
         with patch.dict(sys.modules, poisoned):
-            ns = _exec_node(_try_at(253))
+            ns = _exec_node(_try_at(254))
         for name in ("record_trade_sqlite", "notify_trade_open", "notify_trade_close",
                      "execute_batch_ai_brain_cycle", "get_latest_ai_decision",
                      "read_cycle_health"):
@@ -511,7 +511,7 @@ class MainGuardTests(unittest.TestCase):
     """`__main__`：未配置 API Key ⇒ 退出码 3，**不执行任何交易**。"""
 
     def _run_guard(self, configured):
-        node = next(n for n in _TREE.body if isinstance(n, ast.If) and n.lineno == 1320)
+        node = next(n for n in _TREE.body if isinstance(n, ast.If) and n.lineno == 1324)
         module = ast.Module(body=[node], type_ignores=[])
         ast.fix_missing_locations(module)
         ran = []

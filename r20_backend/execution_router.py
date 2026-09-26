@@ -69,7 +69,9 @@ def _exposure_venues(venue: str, environment: Optional[str]):
     OKX 走的是 `ai_factor_trader` 直签链路，能力表里**没有**声明
     `adapter_execution_flag` ⇒ `execution_open("okx")` **结构性恒 False**
     （见 `registry.execution_open` 文档）。而 OKX 恰恰是持仓最多的那一所
-    （实盘日志「持仓 OKX 1/9｜跨所 4 笔」）。若按开闸判，跨所敞口会**把 OKX 整个漏掉**
+    （当时日志写作「持仓 OKX 1/9｜跨所 4 笔」；该措辞已于 2026-09 改为逐所点名，
+    见 `scripts/trader/cycle_snapshot.py::venue_position_span`）。
+    若按开闸判，跨所敞口会**把 OKX 整个漏掉**
     —— 本机实测第一版就是这样：只统计到 binance 的 726U，而 OKX 在持仓位完全没算。
 
     - 计入 = 本次场所 + 其它**凭证齐备**的已登记场所；

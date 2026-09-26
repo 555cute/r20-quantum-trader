@@ -122,6 +122,7 @@ from scripts.trader.cycle_snapshot import (
     broken_execution_venues,
     build_state_payload,
     collect_pending_inst_ids,
+    venue_position_span,
 )
 from scripts.trader.notifications import (
     entry_action_message,
@@ -1187,6 +1188,7 @@ def execute_portfolio():
     # 4. Check Circuit Breaker & Batch AI Brain Scan (Including Active Positions Detail)
     ASSET_MARGIN_CAP, brain_cache, cb_active, cb_reason = scan_risk_gates_and_ai_brain(
         _xv_total=_xv_total,
+        venue_position_span=venue_position_span,
         active_pos_count=active_pos_count,
         all_factors=all_factors,
         executed_actions=executed_actions,
@@ -1284,6 +1286,8 @@ def execute_portfolio():
     # 5. Persist Latest State for Web Monitoring Dashboard
     persist_state_and_sync_ledger(
         _xv_total=_xv_total,
+        xv_positions_by_venue=xv_positions_by_venue,
+        venue_position_span=venue_position_span,
         active_pos_count=active_pos_count,
         all_factors=all_factors,
         cb_active=cb_active,
