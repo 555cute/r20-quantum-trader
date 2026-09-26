@@ -132,7 +132,7 @@ export const zhCommon = {
     siteTimeTip: '全站时间：Asia/Shanghai (UTC+8)',
   },
   brand: {
-    name: 'AstraQuant 量化交易系统',
+    name: 'AstraQuant',
     nameEn: 'AstraQuant',
     tagline: 'AI 主脑全自动永续波段终端',
     official: 'Official',

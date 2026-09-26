@@ -5,7 +5,7 @@ from pathlib import Path
 
 __version__ = "8.3.1"
 APP_VERSION = f"v{__version__}"
-APP_NAME = "AstraQuant 量化交易系统"
+APP_NAME = "AstraQuant"
 APP_NAME_EN = "AstraQuant"
 
 

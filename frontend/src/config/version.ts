@@ -6,7 +6,7 @@
 
 export const APP_VERSION_RAW = '8.3.1'
 export const APP_VERSION = `v${APP_VERSION_RAW}`
-export const APP_NAME = 'AstraQuant 量化交易系统'
+export const APP_NAME = 'AstraQuant'
 export const APP_NAME_EN = 'AstraQuant'
 // —— 官方出处与发版标记：每次发版请同步更新 BRAND_REVISION（发版仪式清单之一）——
 export const BRAND_REVISION = '2026.09.25-v831'

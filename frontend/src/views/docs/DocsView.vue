@@ -245,7 +245,7 @@ onUnmounted(() => {
           </div>
 
           <p class="text-xs sm:text-sm leading-body font-sans text-[var(--ink-2)]">
-            <strong>AstraQuant 量化交易系统</strong> 是一套专为高波动加密货币（Crypto）打造的<strong>机构级全自动波段量化决策与执行系统</strong>。系统通过 OKX / Binance / Gate.io REST API 直签执行私有账户与交易请求。系统运行在严格的北京时间（UTC+8）自然日财务基准之上，聚焦 1H~4H 大级别顺势波段，以<strong>“胜率第一、宁缺毋滥、三位一体 Fail-Closed 物理硬防线”</strong>为最高风控宗旨。
+            <strong>AstraQuant</strong> 是一套专为高波动加密货币（Crypto）打造的<strong>机构级全自动波段量化决策与执行系统</strong>。系统通过 OKX / Binance / Gate.io REST API 直签执行私有账户与交易请求。系统运行在严格的北京时间（UTC+8）自然日财务基准之上，聚焦 1H~4H 大级别顺势波段，以<strong>“胜率第一、宁缺毋滥、三位一体 Fail-Closed 物理硬防线”</strong>为最高风控宗旨。
           </p>
 
           <!-- 4 Core Pillars Grid -->
