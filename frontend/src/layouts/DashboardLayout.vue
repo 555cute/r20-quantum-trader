@@ -13,6 +13,7 @@ import { useUi } from '../composables/useUi';
 import { useHotkeys } from '../composables/useHotkeys';
 import { useLocalStorage } from '../composables/useLocalStorage';
 import { publicTabs } from '../config/nav';
+import FirstRunGuide from '../components/dashboard/FirstRunGuide.vue';
 import {
   BookOpen,
   ChevronLeft,
@@ -275,6 +276,8 @@ function go(path: string) {
         class="flex-1 overflow-y-auto overflow-x-hidden min-w-0 p-3 sm:p-4 pb-20 md:pb-6 outline-none"
       >
         <div class="mx-auto w-full max-w-[2048px]">
+          <!-- 陌生人的第一公里：只在读不到账户数据时出现，就绪即消失 -->
+          <FirstRunGuide />
           <KeepAlive :max="5">
             <MatrixView v-if="activeTab === 'trading'" key="trading" />
             <RadarView v-else-if="activeTab === 'factors'" key="factors" />

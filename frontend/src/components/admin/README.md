@@ -51,7 +51,7 @@ F7 的另一种解法（推广）对这三个组件目前**不成立**，理由�
 | 组件 | 消费者数 | 消费者 |
 | --- | --- | --- |
 | `base/BaseDrawer` | 4 | `dashboard/` 的 FactorDrawer · LedgerDrawer · PeekDrawer · RadarDrawer |
-| `base/CopyButton` | 6 | `base/BaseCodeBlock` · `dashboard/AboutModal` · `dashboard/PeekDrawer` · `views/admin/AboutPage` · `views/admin/DecisionsPage` · `views/admin/PromptStudioPage` |
+| `base/CopyButton` | 7 | `base/BaseCodeBlock` · `dashboard/AboutModal` · `dashboard/FirstRunGuide` · `dashboard/PeekDrawer` · `views/admin/AboutPage` · `views/admin/DecisionsPage` · `views/admin/PromptStudioPage` |
 | `base/BaseDialog` | 15 | `base/ConfirmHost` · `dashboard/AboutModal` · `views/admin/GatewayPage` · `views/admin/CouncilPage` · `views/admin/PromptStudioPage` · `views/admin/PolicySnapshotPage` · `views/admin/EvolutionPage` · `views/admin/InterceptorsPage` · `views/admin/NotifyPage` · `views/admin/AboutPage` · `views/admin/llm/ModelEditDialog` · `views/admin/llm/RemoteFetchDialog` · `views/admin/SecurityPage` · `views/admin/BackupPage` |
 | `base/BaseSwitch` | 11 | `dashboard/SettingsPopover` · `views/admin/CouncilPage` · `views/admin/PromptStudioPage` · `views/admin/EvolutionPage` · `views/admin/InterceptorsPage` · `views/admin/NotifyPage` · `views/admin/llm/ProviderListView` · `views/admin/llm/ProviderDetailView` · `views/admin/SecurityPage` · `views/admin/RiskPage` |
 | `base/BaseSparkline` | 1 | `dashboard/KpiRibbon` |

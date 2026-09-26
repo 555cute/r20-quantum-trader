@@ -16,8 +16,10 @@ export const enAbout = {
     qqGroup: 'Quant QQ group',
     qqPersonal: 'Author QQ',
     linuxdo: 'LINUX DO',
-    okxChannel: 'OKX Channel (20% Rebate)',
-    gateChannel: 'Gate Channel (20% Rebate)',
+    // 2026-09: the channel list is served by the backend
+    // (`/api/v1/referral-channels`, public read-only); only the label stays here.
+    channel: '{venue} channel',
+    open: 'Open sign-up',
     copyHint: 'Click to copy',
   },
   version: 'Version {v} · build {r}',

@@ -4,7 +4,7 @@ import os
 import platform
 import subprocess
 import time
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 from typing import Any
 from fastapi import APIRouter, Header, HTTPException, Request
 
@@ -532,3 +532,61 @@ def update_application(
         "restart_required": updated,
         "restart_note": "请重启 r20-quantum 与 r20-scheduler 服务，让新代码接管后台与调度。" if updated else "当前代码已是最新，无需重启服务。",
     }
+
+
+# =====================================================================
+# 注册/返佣通道（**公开只读**，2026-09）
+# =====================================================================
+#
+# 为什么单独开一个**无鉴权**的端点：这三条地址是要给**跑这套程序的人**看的
+# （`dashboard/AboutModal` 与首次启动引导），而它们此前是**前端硬编码**的
+# （`AboutModal.vue` 里两份字面量），与 `config.py` 的 `*_invite_url` 各说各话 ——
+# 于是"用环境变量换成自己的通道"这个能力**对用户可见的那一处完全失效**
+# （改了后端，前端照旧显示旧链接）。现收敛成单一事实源：后端出值，前端只渲染。
+#
+# 公开是安全的：这三条本就是给人点的邀请链接，不含任何凭证。
+
+CHANNEL_SPECS = (
+    ("okx", "OKX", "okx_invite_url"),
+    ("gate", "Gate", "gate_invite_url"),
+    ("binance", "Binance", "binance_invite_url"),
+)
+
+
+def _invite_code(url: str) -> str:
+    """从邀请链接里取「给人看的短码」（纯展示用，不是鉴权值）。
+
+    优先取查询串里的 `ref`/`code`/`invite`（币安那种把码放在 `?ref=` 的形态），
+    否则取路径末段（OKX `/join/48039151`、Gate `/share/MCHDBKYF`）。
+    取不到就返回空串 —— 前端据此退化成"只显示整条链接"，不编造。
+    """
+    parts = urlparse(str(url or "").strip())
+    # 只认绝对的 http(s) 链接：否则 `not-a-url` 这类垃圾输入会把整串当成"短码"显示出去，
+    # 那就成了编造（本函数的契约是"抽不到就空串，前端退化成只显示链接"）。
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        return ""
+    query = parse_qs(parts.query)
+    for key in ("ref", "code", "invite", "affiliate"):
+        values = [str(v).strip() for v in (query.get(key) or []) if str(v).strip()]
+        if values:
+            return values[0]
+    tail = (parts.path or "").rstrip("/").rsplit("/", 1)[-1]
+    return "" if "." in tail else tail
+
+
+@router.get("/api/v1/referral-channels")
+def referral_channels() -> dict[str, Any]:
+    """公开只读：三条注册/返佣通道（用户可见；**不需要任何鉴权**）。
+
+    ⚠️ 与 `scripts/okx_rest.py` 的经纪商 tag 是两件事，别混：
+    - **tag**（`6e2191f027c6SUDE`）随每一笔订单发出，负责把成交**归属**到经纪商 ——
+      这才是返佣的机制，与用户是否走过下列链接**无关**；
+    - 本接口这几条链接是给用户**开户**用的入口（顺带可叠加节点返佣）。
+    """
+    refresh_settings()
+    channels = []
+    for key, name, attr in CHANNEL_SPECS:
+        url = str(getattr(settings, attr, "") or "").strip()
+        channels.append({"key": key, "name": name, "invite_url": url,
+                         "code": _invite_code(url) if url else ""})
+    return {"channels": channels}

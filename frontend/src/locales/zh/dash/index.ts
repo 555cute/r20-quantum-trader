@@ -1,3 +1,4 @@
+import { zhDashFirstRun } from './firstRun';
 import { zhShell } from './shell';
 import { zhMatrix } from './matrix';
 import { zhRadar } from './radar';
@@ -14,6 +15,7 @@ export const zhDash = {
   news: zhNews,
   evolution: zhEvolution,
   ledger: zhLedger,
+  firstRun: zhDashFirstRun,
   about: zhAbout,
   venueAccounts: zhVenueAccounts,
 };

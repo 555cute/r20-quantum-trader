@@ -17,8 +17,10 @@ export const zhAbout = {
     qqGroup: '量化交流群',
     qqPersonal: '作者 QQ',
     linuxdo: 'LINUX DO 社区',
-    okxChannel: 'OKX 专属通道 (返20%)',
-    gateChannel: 'Gate 对冲通道 (返20%)',
+    // 2026-09：通道列表改为**后端出值**（`/api/v1/referral-channels`，公开只读），
+    // 前端不再写死链接 ⇒ 这里只留"每种所叫什么"的展示文案。
+    channel: '{venue} 专属通道',
+    open: '打开注册页',
     copyHint: '点击复制',
   },
   version: '版本 {v} · 构建 {r}',

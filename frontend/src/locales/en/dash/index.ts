@@ -1,3 +1,4 @@
+import { enDashFirstRun } from './firstRun';
 import { enShell } from './shell';
 import { enMatrix } from './matrix';
 import { enRadar } from './radar';
@@ -14,6 +15,7 @@ export const enDash = {
   news: enNews,
   evolution: enEvolution,
   ledger: enLedger,
+  firstRun: enDashFirstRun,
   about: enAbout,
   venueAccounts: enVenueAccounts,
 };

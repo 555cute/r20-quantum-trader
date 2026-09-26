@@ -1,10 +1,12 @@
 <script setup lang="ts">
 /** 关于与社区弹窗：架构 / 仓库 / QQ / LINUX DO / 许可与风险提示 */
+import { onMounted } from 'vue';
 import { Github, ShieldCheck, ExternalLink } from 'lucide-vue-next';
 import BaseDialog from '../base/BaseDialog.vue';
 import CopyButton from '../base/CopyButton.vue';
 import { useUi } from '../../composables/useUi';
 import { useI18n } from '../../composables/useI18n';
+import { useReferralChannels } from '../../composables/useReferralChannels';
 import { APP_VERSION, BRAND_REVISION, OFFICIAL_REPO } from '../../config/version';
 
 const { aboutOpen } = useUi();
@@ -13,8 +15,11 @@ const { t, tm } = useI18n();
 const QQ_GROUP = '655973677';
 const QQ_PERSONAL = '1090188816';
 const LINUXDO = 'https://linux.do/';
-const OKX_REBATE_URL = 'https://www.mitxcqvwnhj.com/join/48039151';
-const GATE_REBATE_URL = 'https://www.gatesites.net/share/MCHDBKYF';
+
+// 通道来自后端（公开只读），**不再在前端写死** —— 两份字面量会让
+// "用环境变量替换成自己的通道"能力在用户唯一看得见的地方失效。
+const { channels, load: loadChannels } = useReferralChannels();
+onMounted(loadChannels);
 </script>
 
 <template>
@@ -86,19 +91,33 @@ const GATE_REBATE_URL = 'https://www.gatesites.net/share/MCHDBKYF';
           <span class="sr-only">{{ t('common.opensInNewTab') }}</span>
         </span>
       </a>
-      <div class="card-flat flex items-center justify-between gap-2 px-3 py-2.5">
+      <!-- 卡片本体是 div：复制按钮是 <button>，塞进 <a> 里就是交互元素嵌套（a11y 违规）。
+           故"打开"与"复制"并排两个控件，各自可聚焦、各自有名字。 -->
+      <div
+        v-for="ch in channels"
+        :key="ch.key"
+        class="card-flat flex items-center justify-between gap-2 px-3 py-2.5"
+      >
         <div class="min-w-0">
-          <p class="t-label">{{ t('dash.about.community.okxChannel') }}</p>
-          <p class="num truncate text-sm font-semibold" style="color: var(--brand, #3b82f6)">48039151</p>
+          <p class="t-label">{{ t('dash.about.community.channel', undefined, { venue: ch.name }) }}</p>
+          <p class="num truncate text-sm font-semibold" style="color: var(--brand, #3b82f6)">
+            {{ ch.code || ch.name }}
+          </p>
         </div>
-        <CopyButton :text="OKX_REBATE_URL" />
-      </div>
-      <div class="card-flat flex items-center justify-between gap-2 px-3 py-2.5">
-        <div class="min-w-0">
-          <p class="t-label">{{ t('dash.about.community.gateChannel') }}</p>
-          <p class="num truncate text-sm font-semibold" style="color: var(--brand, #3b82f6)">MCHDBKYF</p>
+        <div class="flex shrink-0 items-center gap-1.5">
+          <a
+            :href="ch.invite_url"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="btn btn-quiet btn-sm"
+            :title="t('dash.about.community.open')"
+            :aria-label="`${ch.name} · ${t('dash.about.community.open')}`"
+          >
+            <ExternalLink class="h-3.5 w-3.5" aria-hidden="true" />
+            <span class="sr-only">{{ t('common.opensInNewTab') }}</span>
+          </a>
+          <CopyButton :text="ch.invite_url" />
         </div>
-        <CopyButton :text="GATE_REBATE_URL" />
       </div>
     </div>
 
