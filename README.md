@@ -4,7 +4,7 @@
 
 <!-- 指向 release **列表**而不是某个 tag 页：`v8.3.1` 只有 git tag、没有 release 对象，
      直指 /releases/tag/v8.3.1 会 404（实测）。列表页永远有效。 -->
-[![Release](https://img.shields.io/badge/Release-v8.3.1-blue.svg?style=flat-square)](https://github.com/555cute/astraquant/releases)
+[![Release](https://img.shields.io/badge/Release-v8.3.1-blue.svg?style=flat-square)](https://github.com/555cute/astra-quant-agent/releases)
 [![Website](https://img.shields.io/badge/Site-astraquant.tech-6E56CF.svg?style=flat-square)](https://astraquant.tech)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg?style=flat-square)](https://www.python.org/)
@@ -33,7 +33,7 @@
 > *Internal codename: R20 (see 「品牌与内部代号」 below — package names and `R20_*` env keys intentionally keep the old prefix).*
 
 ```
-git clone https://github.com/555cute/astraquant.git && cd astraquant
+git clone https://github.com/555cute/astra-quant-agent.git && cd astra-quant-agent
 ./deploy/docker-start.sh          # or: deploy/install.sh for a host install
 ```
 
@@ -269,8 +269,8 @@ AstraQuant 是一套面向专业交易团队与量化交易员打造的**多交�
 
 ```bash
 # 1. 克隆代码
-git clone https://github.com/555cute/astraquant.git
-cd astraquant
+git clone https://github.com/555cute/astra-quant-agent.git
+cd astra-quant-agent
 
 # 2. 准备环境变量与持久化目录（若无 .env 可由启动脚本自动创建）
 cp env.example .env
@@ -296,8 +296,8 @@ docker compose logs -f
 
 ### 1. 克隆仓库与初始化依赖
 ```bash
-git clone https://github.com/555cute/astraquant.git
-cd astraquant
+git clone https://github.com/555cute/astra-quant-agent.git
+cd astra-quant-agent
 
 # 执行环境初始化脚本（创建 .venv 并安装核心依赖）
 sh deploy/install.sh

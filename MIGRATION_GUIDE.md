@@ -63,7 +63,7 @@ chmod +x start.sh deploy/install.sh
 如果新电脑可以直接访问 GitHub：
 ```bash
 # 1. 克隆完整仓库
-git clone https://github.com/555cute/astraquant.git astraquant
+git clone https://github.com/555cute/astra-quant-agent.git astra-quant-agent
 cd r20
 chmod +x start.sh deploy/install.sh
 

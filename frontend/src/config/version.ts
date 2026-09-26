@@ -10,7 +10,7 @@ export const APP_NAME = 'AstraQuant'
 export const APP_NAME_EN = 'AstraQuant'
 // —— 官方出处与发版标记：每次发版请同步更新 BRAND_REVISION（发版仪式清单之一）——
 export const BRAND_REVISION = '2026.09.25-v831'
-export const OFFICIAL_REPO = 'https://github.com/555cute/astraquant'
+export const OFFICIAL_REPO = 'https://github.com/555cute/astra-quant-agent'
 /** 官网（自有域名）：品牌主页与部署文档的对外出处 */
 export const OFFICIAL_SITE = 'https://astraquant.tech'
 export const OFFICIAL_NOTICE = `AstraQuant 官方仓库：${OFFICIAL_REPO}`
