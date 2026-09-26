@@ -7,6 +7,7 @@ export const enMatrix = {
     venuesConnected: '{n} venues',
     comboEquity: 'Portfolio Equity (U)',
     comboEquityTip: 'Aggregated equity across venues',
+    comboEquityEmpty: 'No readable account in this environment; other tiers are excluded',
     todayPnl: 'Realized today',
     floatPnl: 'Floating PnL',
     ls: 'Long / short',

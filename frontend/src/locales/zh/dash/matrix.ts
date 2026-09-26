@@ -9,6 +9,8 @@ export const zhMatrix = {
     venuesConnected: '{n} 所接入',
     comboEquity: '组合总权益 (U)',
     comboEquityTip: '多所聚合权益',
+    // 所选档位一所都读不到时（例：切到实盘但只配了模拟盘 key）不显示别档的钱
+    comboEquityEmpty: '当前档位没有可读账户，不计入任何其他档位的余额',
     todayPnl: '今日已实现',
     floatPnl: '持仓浮动盈亏',
     ls: '多空持仓比',

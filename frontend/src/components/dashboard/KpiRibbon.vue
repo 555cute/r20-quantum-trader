@@ -23,21 +23,60 @@ const today = computed(() => (store.data as any)?.today_stats || {});
 const isLiveEnv = computed(() => venueStore.environment === 'live');
 const envBadgeText = computed(() => (isLiveEnv.value ? t('dash.venueAccounts.envLive') : t('dash.venueAccounts.envDemo')));
 
-const portfolioSummary = computed(() => venueStore.portfolioSummary || (store.data as any)?.multi_venue_portfolio || null);
+/* ── 资金环境轴：所有权益来源都必须先过这道闸 ────────────────────────────────
+ * 修的是这个 bug：把面板从「模拟盘」切到「实盘」后，总权益显示的却是
+ * OKX **模拟盘**的余额（用户实测：OKX 只配了模拟盘 key，切到实盘后
+ * 主页总权益仍显示 5,299.69 —— 正是模拟盘余额）。
+ *
+ * 成因是**回退链没有环境轴**：
+ *   1. `venueStore.portfolioSummary`（`/api/v1/venue_accounts`，带 environment）
+ *      在实盘档下正确地聚合为 0（三所均 unavailable，OKX 被跨档闸拒绝）；
+ *   2. 于是 `totalEquityNum` 回退到 `account.total_eq` —— 那是 `/api/all` 里的
+ *      **OKX 单所快照**，不区分档位，取的正是后端 OKX 当前档（模拟盘）的钱。
+ *
+ * 两处都要闸：聚合摘要按 `environment` 比对，单所快照按 `account.environment`
+ * （后端 `dashboard_cache.py` 确实按 OKX 实际档位写入该字段）比对。
+ * 两边都不匹配时**显示「—」**——宁可未知，也不拿另一档的钱顶到这一档头上。
+ * ────────────────────────────────────────────────────────────────────────── */
+const selectedEnv = computed(() => String(venueStore.environment || 'demo').trim().toLowerCase());
+
+function envOf(o: any): string {
+  return String(o?.environment || '').trim().toLowerCase();
+}
+
+/** 聚合结果只在「数据档位 === 当前所选档位」时可用（换挡瞬间的旧数据也不算）。 */
+const scopedSummary = computed(() => {
+  const fromEndpoint = venueStore.portfolioSummary;
+  if (fromEndpoint && envOf(fromEndpoint) === selectedEnv.value) return fromEndpoint;
+  const fromPayload = (store.data as any)?.multi_venue_portfolio;
+  if (fromPayload && envOf(fromPayload) === selectedEnv.value) return fromPayload;
+  return null;
+});
+
+/** 单所 OKX 快照只在它自己那一档与所选一致时才可回落。 */
+const okxSnapshotInScope = computed(() => envOf(account.value) === selectedEnv.value);
+
+const portfolioSummary = computed(() => scopedSummary.value);
 const hasMultiVenue = computed(() => {
-  const sum = portfolioSummary.value;
+  const sum = scopedSummary.value;
   return !!sum && Number(sum.total_equity || 0) > 0;
 });
 
-const totalEquityNum = computed(() => {
-  const sum = portfolioSummary.value;
-  if (sum && Number(sum.total_equity || 0) > 0) return Number(sum.total_equity);
-  return Number(account.value.total_eq || 0);
+/** null = 该档位没有任何可读账户（不是 0，也不是别的档的钱）。 */
+const totalEquityNum = computed<number | null>(() => {
+  const sum = scopedSummary.value;
+  const agg = Number(sum?.total_equity || 0);
+  if (agg > 0) return agg;
+  if (okxSnapshotInScope.value) {
+    const one = Number(account.value.total_eq || 0);
+    if (one > 0) return one;
+  }
+  return null;
 });
 
-const totalAggregatedEquity = computed(() => {
-  return fmtNum(totalEquityNum.value, 2);
-});
+const totalAggregatedEquity = computed(() =>
+  totalEquityNum.value === null ? t('dash.venueAccounts.unknown') : fmtNum(totalEquityNum.value, 2),
+);
 
 const distOkx = computed(() => Number(portfolioSummary.value?.asset_distribution?.okx?.share_pct || 0));
 const distBinance = computed(() => Number(portfolioSummary.value?.asset_distribution?.binance?.share_pct || 0));
@@ -70,8 +109,9 @@ const actualMarginUsed = computed(() => {
 });
 
 const marginUsage = computed(() => {
-  if (totalEquityNum.value > 0) {
-    return Math.round((actualMarginUsed.value / totalEquityNum.value) * 1000) / 10;
+  const eq = totalEquityNum.value;
+  if (eq !== null && eq > 0) {
+    return Math.round((actualMarginUsed.value / eq) * 1000) / 10;
   }
   return 0;
 });
@@ -109,6 +149,17 @@ onMounted(async () => {
           {{ t('dash.matrix.kpi.multiEquity') }}
         </span>
         <span class="hidden md:inline font-mono font-semibold" style="color: var(--ink-1)">{{ totalAggregatedEquity }} U</span>
+        <!-- 档位徽标：这是「这几个数属于哪一档」的唯一可见出口。
+             缺了它，读者只能靠记忆分辨手上这串钱是实盘还是模拟盘。 -->
+        <span
+          class="rounded px-1.5 py-0.5 border text-3xs font-mono"
+          :style="isLiveEnv
+            ? 'background-color: var(--up-bg); border-color: var(--up-line); color: var(--up)'
+            : 'background-color: var(--warn-bg); border-color: var(--warn-line); color: var(--warn)'"
+          data-test="kpi-env-badge"
+        >
+          {{ envBadgeText }}
+        </span>
         <span
           class="rounded px-1.5 py-0.5 border text-3xs font-mono"
           style="background-color: var(--surface-2); border-color: var(--line-1); color: var(--ink-2)"
@@ -143,9 +194,19 @@ onMounted(async () => {
         <BaseStat
           :label="t('dash.matrix.kpi.comboEquity')"
           :value="totalAggregatedEquity"
-          :hint="hasMultiVenue ? `${envBadgeText} ${t('dash.matrix.kpi.comboEquityTip')}` : t('dash.matrix.kpi.equityTip')"
+          :hint="
+            totalEquityNum === null
+              ? t('dash.matrix.kpi.comboEquityEmpty')
+              : hasMultiVenue
+                ? `${envBadgeText} ${t('dash.matrix.kpi.comboEquityTip')}`
+                : t('dash.matrix.kpi.equityTip')
+          "
         >
-          <template #extra>
+          <!-- 今日盈亏与净值走势取自**后端交易轴**（OKX 台账），而本格的总权益是
+               按所选档位聚合的。两者档位不一致时（例：切到实盘但只有模拟盘 key）
+               把它们并排放在同一个「组合总权益」格子里，等于又把另一档的钱画回来。
+               总权益未知时这一行整块不渲染；今日盈亏本身在下方的「今日已实现」有专格。 -->
+          <template v-if="totalEquityNum !== null" #extra>
             <div class="flex items-center gap-2 mt-1">
               <span class="num text-xs font-semibold" :class="todayNet >= 0 ? 'up' : 'down'">
                 {{ arrow(todayNet) }} {{ fmtSigned(todayNet) }}
