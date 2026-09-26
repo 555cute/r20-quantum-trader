@@ -22,11 +22,12 @@ SLOT_KEYS = ("{{decision_timestamp}}", "{{market_matrix}}", "{{closed_trades_jso
 class PromptImportExportTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.original = library.LIBRARY_FILE
-        library.LIBRARY_FILE = Path(self.temp.name) / "prompt_library.json"
+        self.original = (library.BASELINE_FILE, library.LOCAL_FILE)
+        library.BASELINE_FILE = Path(self.temp.name) / "prompt_library.json"
+        library.LOCAL_FILE = Path(self.temp.name) / "prompt_library.local.json"
 
     def tearDown(self):
-        library.LIBRARY_FILE = self.original
+        library.BASELINE_FILE, library.LOCAL_FILE = self.original
         self.temp.cleanup()
 
     # ------------------------------------------------------------------ export
@@ -199,11 +200,12 @@ class PromptImportExportApiTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.original_auth = app_module.admin_auth
-        self.original_library = library.LIBRARY_FILE
+        self.original_library = (library.BASELINE_FILE, library.LOCAL_FILE)
         root = Path(self.temp.name)
         app_module.admin_auth = AdminAuthStore(root / "admin.db")
         app_module.admin_auth.initialize_from_legacy("InitialAdmin123456")
-        library.LIBRARY_FILE = root / "prompt_library.json"
+        library.BASELINE_FILE = root / "prompt_library.json"
+        library.LOCAL_FILE = root / "prompt_library.local.json"
         self.client = TestClient(app_module.app)
         login = self.client.post(
             "/api/v1/admin/auth/login", json={"username": "admin", "password": "InitialAdmin123456"}
@@ -212,7 +214,7 @@ class PromptImportExportApiTests(unittest.TestCase):
 
     def tearDown(self):
         app_module.admin_auth = self.original_auth
-        library.LIBRARY_FILE = self.original_library
+        library.BASELINE_FILE, library.LOCAL_FILE = self.original_library
         self.temp.cleanup()
 
     def test_export_endpoint_returns_self_describing_payload(self):

@@ -13,15 +13,15 @@ from r20_backend.admin_auth import AdminAuthStore
 class ControlPlaneV2ApiTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(); root=Path(self.temp.name)
-        self.original_auth=app_module.admin_auth; self.original_prompt=prompts.LIBRARY_FILE; self.original_backup=backups.CONFIG_FILE
+        self.original_auth=app_module.admin_auth; self.original_prompt=(prompts.BASELINE_FILE, prompts.LOCAL_FILE); self.original_backup=backups.CONFIG_FILE
         app_module.admin_auth=AdminAuthStore(root/"admin.db"); app_module.admin_auth.initialize_from_legacy("InitialAdmin123456")
-        prompts.LIBRARY_FILE=root/"prompt_library.json"; backups.CONFIG_FILE=root/"backup_methods.json"
+        prompts.BASELINE_FILE=root/"prompt_library.json"; prompts.LOCAL_FILE=root/"prompt_library.local.json"; backups.CONFIG_FILE=root/"backup_methods.json"
         self.client=TestClient(app_module.app)
         response=self.client.post('/api/v1/admin/auth/login',json={'username':'admin','password':'InitialAdmin123456'})
         self.headers={'X-R20-Session':response.json()['session_token']}
 
     def tearDown(self):
-        app_module.admin_auth=self.original_auth; prompts.LIBRARY_FILE=self.original_prompt; backups.CONFIG_FILE=self.original_backup; self.temp.cleanup()
+        app_module.admin_auth=self.original_auth; prompts.BASELINE_FILE, prompts.LOCAL_FILE=self.original_prompt; backups.CONFIG_FILE=self.original_backup; self.temp.cleanup()
 
     def test_snapshot_missing_key_is_503(self):
         from scripts.okx_rest import OKXNotConfigured

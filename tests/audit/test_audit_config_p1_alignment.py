@@ -225,8 +225,11 @@ class PipelineMergeNoDoublingTests(_SandboxBase):
         self.lib_path.parent.mkdir(parents=True, exist_ok=True)
         self.lib_path.write_text((ROOT / "data" / "prompt_library.json").read_text(encoding="utf-8"),
                                  encoding="utf-8")
-        p = patch.object(pl, "LIBRARY_FILE", self.lib_path)
-        p.start(); self.addCleanup(p.stop)
+        # 双文件模型（2026-09）：夹具当**出厂基线**（读侧），写入侧另钉一个本地文件
+        for _attr, _val in (("BASELINE_FILE", self.lib_path),
+                            ("LOCAL_FILE", self.lib_path.parent / "prompt_library.local.json")):
+            p = patch.object(pl, _attr, _val)
+            p.start(); self.addCleanup(p.stop)
 
     def _shape_evolution(self, profile):
         key = "evolution_system"

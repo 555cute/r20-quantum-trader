@@ -21,15 +21,16 @@ BJ = timezone(timedelta(hours=8))
 class PromptProfileV2Tests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.original = prompts.LIBRARY_FILE
-        prompts.LIBRARY_FILE = Path(self.temp.name) / "prompt_library.json"
+        self.original = (prompts.BASELINE_FILE, prompts.LOCAL_FILE)
+        prompts.BASELINE_FILE = Path(self.temp.name) / "prompt_library.json"
+        prompts.LOCAL_FILE = Path(self.temp.name) / "prompt_library.local.json"
 
     def tearDown(self):
-        prompts.LIBRARY_FILE = self.original
+        prompts.BASELINE_FILE, prompts.LOCAL_FILE = self.original
         self.temp.cleanup()
 
     def test_v1_custom_migrates_without_loss(self):
-        prompts.LIBRARY_FILE.write_text(json.dumps({
+        prompts.BASELINE_FILE.write_text(json.dumps({
             "version": 1, "active_style": "custom",
             "custom": {"trading_system": "OLD_CUSTOM", "trading_user": "U", "evolution_system": "E", "evolution_user": "EU"},
         }))

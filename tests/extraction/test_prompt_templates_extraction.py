@@ -9,7 +9,7 @@
 | **模板编译** | 文本↔模块互转、模块标签继承、管线布局套用与视图 |
 | 配置库 CRUD | `load_library` / `save_library` / profile 增删改查 / 导入导出 / 校验 |
 
-实测（传递纯度扫描）：**CRUD 簇全部经 `LIBRARY_FILE` / `MAX_PROFILE_CHARS`
+实测（传递纯度扫描）：**CRUD 簇全部经 `BASELINE_FILE` / `LOCAL_FILE` / `MAX_PROFILE_CHARS`
 被"污染"，而模板编译簇是纯的**。故抽出模板簇到
 `scripts/prompt_templates.py`，门面 `prompt_library.py` **1035 → 1009 行**，
 保留同名薄壳。
@@ -125,7 +125,10 @@ class SharedModuleTest(unittest.TestCase):
         tree = ast.parse(SHARED.read_text(encoding="utf-8"))
         assigned = {t.id for n in tree.body if isinstance(n, ast.Assign)
                     for t in n.targets if isinstance(t, ast.Name)}
-        for banned in ("LIBRARY_FILE", "ROOT", "MAX_PROFILE_CHARS", "ROOT_DIR"):
+        # 2026-09 起方案库是双文件（`BASELINE_FILE` 读 / `LOCAL_FILE` 写），
+        # 两个新名一并列入"共享模块不得定义"清单 —— 否则这次改名会把这门静默架空。
+        for banned in ("LIBRARY_FILE", "BASELINE_FILE", "LOCAL_FILE",
+                       "ROOT", "MAX_PROFILE_CHARS", "ROOT_DIR"):
             self.assertNotIn(banned, assigned, f"prompt_templates 不该定义 {banned}")
 
     def test_shared_module_does_not_import_the_facade(self):

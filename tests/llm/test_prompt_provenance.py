@@ -62,11 +62,15 @@ class _PromptLibraryCase(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self._tmp, True)
         target = self._tmp / "prompt_library.json"
         target.write_text(REAL_LIBRARY.read_text(encoding="utf-8"), encoding="utf-8")
-        patcher = mock.patch.object(pl, "LIBRARY_FILE", target)
-        patcher.start()
-        self.addCleanup(patcher.stop)
-        self.assertNotEqual(Path(pl.LIBRARY_FILE).resolve(), REAL_LIBRARY,
-                            "提示词方案库没有被沙箱化——测试会改写生产配置")
+        # 双文件模型（2026-09）：`target` 是**出厂基线**（读侧），写入侧另钉一个。
+        for _attr, _val in (("BASELINE_FILE", target),
+                            ("LOCAL_FILE", self._tmp / "prompt_library.local.json")):
+            patcher = mock.patch.object(pl, _attr, _val)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        for _attr in ("BASELINE_FILE", "LOCAL_FILE"):
+            self.assertNotEqual(Path(getattr(pl, _attr)).resolve(), REAL_LIBRARY,
+                                f"{_attr} 没有被沙箱化——测试会改写生产配置")
 
     def _profile(self, pid: str = "stable") -> dict:
         return pl.load_library()["profiles"][pid]

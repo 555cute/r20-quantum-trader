@@ -10,11 +10,13 @@ import scripts.prompt_library as library
 class PromptLibraryTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.original = library.LIBRARY_FILE
-        library.LIBRARY_FILE = Path(self.temp.name) / "prompt_library.json"
+        # 双文件模型（2026-09）：读侧（出厂基线）与写侧（用户改动）都要沙箱化
+        self.original = (library.BASELINE_FILE, library.LOCAL_FILE)
+        library.BASELINE_FILE = Path(self.temp.name) / "prompt_library.json"
+        library.LOCAL_FILE = Path(self.temp.name) / "prompt_library.local.json"
 
     def tearDown(self):
-        library.LIBRARY_FILE = self.original
+        library.BASELINE_FILE, library.LOCAL_FILE = self.original
         self.temp.cleanup()
 
     def test_default_is_stable_and_presets_have_four_templates(self):

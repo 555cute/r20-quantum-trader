@@ -130,6 +130,9 @@ _PROTECTED_CONFIG_FILES = {
     (_PROJECT_ROOT / "data" / "instrument_pool.json").resolve(),
     (_PROJECT_ROOT / "data" / "council_config.json").resolve(),
     (_PROJECT_ROOT / "data" / "prompt_library.json").resolve(),
+    # 2026-09 起方案库拆成"出厂基线（跟踪，只读）+ 用户改动（不跟踪，写侧）"，
+    # 新写入目标同样必须硬保护 —— 它是用户提示词的**唯一落点**。
+    (_PROJECT_ROOT / "data" / "prompt_library.local.json").resolve(),
     (_PROJECT_ROOT / "data" / "llm_models.json").resolve(),
     (_PROJECT_ROOT / "data" / "account_baseline.json").resolve(),
     (_PROJECT_ROOT / "data" / "position_trackers.json").resolve(),
@@ -366,7 +369,10 @@ class _ConfigSandboxFinder:
 
     def __init__(self, targets):
         # 模块名 -> (属性名, 沙箱值, 是否让位给 isolate_config)
-        self._targets = targets
+        # 2026-09 起允许**一个模块钉多个属性**（提示词库拆成"出厂基线 + 用户改动"
+        # 两个路径常量，必须一起重定向；只钉其中一个会让读取侧仍指向生产）。
+        # 传入 list 即多属性；单个三元组仍按老写法。
+        self._targets = {k: (v if isinstance(v, list) else [v]) for k, v in targets.items()}
 
     def find_spec(self, name, path=None, target=None):
         if name not in self._targets:
@@ -376,7 +382,7 @@ class _ConfigSandboxFinder:
         spec = _machinery.PathFinder.find_spec(name, path)
         if spec is None or spec.loader is None:
             return None
-        attr, value, defer = self._targets[name]
+        entries = self._targets[name]
         inner = spec.loader
 
         class _SandboxedLoader:
@@ -390,9 +396,10 @@ class _ConfigSandboxFinder:
                 # 它白名单里的模块（含 prompt_library）重载进**更具体的**沙箱；
                 # 那种情况下让位（否则会把它的沙箱路径顶掉 —— 实测
                 # `test_config_sandbox.py::test_nested_policy_paths_share_one_sandbox` 就是这么红的）。
-                if defer and os.environ.get("R20_DATA_DIR"):
-                    return
-                setattr(module, attr, value)
+                for attr, value, defer in entries:
+                    if defer and os.environ.get("R20_DATA_DIR"):
+                        continue
+                    setattr(module, attr, value)
 
         spec.loader = _SandboxedLoader()
         return spec
@@ -458,16 +465,26 @@ def _install_session_config_sandbox() -> None:
     }, ensure_ascii=False), encoding="utf-8")
     for name in ("r20_backend.exchanges.routing_policy",):
         targets[name] = ("ROUTING_FILE", routing, False)
-    # 提示词库：指向沙箱里**不存在**的路径 ⇒ `load_library()` 走 `_default()` 确定性回退
-    # （不读生产、也不随线上模板漂移）。要断言"线上模板内容"的用例必须自带夹具。
+    # 提示词库：**双文件都要钉**（2026-09 拆分）——出厂基线指向沙箱里**不存在**的路径
+    # ⇒ `load_library()` 走 `_default()` 确定性回退（不读生产、也不随线上模板漂移）；
+    # 用户改动同样钉到沙箱路径（它是写入目标，绝不能落回生产的 `.local.json`）。
+    # 要断言"线上模板内容"的用例必须自带夹具。
     for name in ("prompt_library", "scripts.prompt_library"):
-        targets[name] = ("LIBRARY_FILE", root / "prompt_library.json", True)
+        targets[name] = [
+            ("BASELINE_FILE", root / "prompt_library.json", True),
+            ("LOCAL_FILE", root / "prompt_library.local.json", True),
+        ]
 
     # 已经导入过的：就地钉一次；之后所有（含 reload）由 finder 兜住
-    for name, (attr, value, defer) in targets.items():
+    # ⚠️ 这里也要归一化：单元组（老写法）与 list（多属性，2026-09 提示词库双文件）
+    # 都接受 —— 直接 `for ... in entries` 会把单元组当成"三个元素"解包而炸在收集期。
+    for name, entries in targets.items():
         mod = sys.modules.get(name)
-        if mod is not None and not (defer and os.environ.get("R20_DATA_DIR")):
-            setattr(mod, attr, value)
+        if mod is None:
+            continue
+        for attr, value, defer in (entries if isinstance(entries, list) else [entries]):
+            if not (defer and os.environ.get("R20_DATA_DIR")):
+                setattr(mod, attr, value)
     sys.meta_path.insert(0, _ConfigSandboxFinder(targets))
     print(f"[tests] 会话级配置沙箱已启用：okx_runtime.ROOT / instrument_pool.POOL_FILE → {root}"
           f"（要读真实配置：R20_TESTS_ALLOW_REAL_DATA=1）")

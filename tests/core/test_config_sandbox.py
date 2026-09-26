@@ -49,7 +49,7 @@ class ConfigSandboxTests(unittest.TestCase):
         import scripts.prompt_library as prompts
         root = isolate_config(self)
         for path in (policy.ARCHIVE_INDEX_FILE, council.COUNCIL_CONFIG_FILE,
-                     prompts.LIBRARY_FILE):
+                     prompts.BASELINE_FILE, prompts.LOCAL_FILE):
             self.assertTrue(Path(path).is_relative_to(root))
             self.assertTrue(Path(path).parent.is_dir())
         self.assertEqual(policy.ARCHIVE_INDEX_FILE.parent, policy.ARCHIVE_DIR)

@@ -9,7 +9,7 @@
 | **模板编译** | 文本↔模块互转、模块标签继承、管线布局套用与视图（本模块） |
 | 配置库 CRUD | `load_library` / `save_library` / profile 增删改查 / 导入导出 / 校验 |
 
-实测（传递纯度扫描）：**CRUD 簇全部经 `LIBRARY_FILE` / `MAX_PROFILE_CHARS`
+实测（传递纯度扫描）：**CRUD 簇全部经 `BASELINE_FILE` / `LOCAL_FILE` / `MAX_PROFILE_CHARS`
 被"污染"，而模板编译簇是纯的**。故抽出本簇，
 门面 `prompt_library.py` **1035 → 973 行**。
 

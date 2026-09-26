@@ -38,9 +38,12 @@ class _Sandbox(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.library = self.root / "prompt_library.json"
-        p = patch.object(pl, "LIBRARY_FILE", self.library)
-        p.start()
-        self.addCleanup(p.stop)
+        # `self.library` 是**出厂基线**（读侧）；写入侧另钉一个本地文件（双文件模型 2026-09）
+        for _attr, _val in (("BASELINE_FILE", self.library),
+                            ("LOCAL_FILE", self.root / "prompt_library.local.json")):
+            p = patch.object(pl, _attr, _val)
+            p.start()
+            self.addCleanup(p.stop)
 
     def _write(self, payload):
         self.library.write_text(json.dumps(payload), encoding="utf-8")

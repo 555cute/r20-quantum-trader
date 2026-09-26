@@ -16,11 +16,12 @@ class CustomSystemApiTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         root = Path(self.temp.name)
         self.original_auth = app_module.admin_auth
-        self.original_prompt = prompt_store.LIBRARY_FILE
+        self.original_prompt = (prompt_store.BASELINE_FILE, prompt_store.LOCAL_FILE)
         self.original_backup = backup_store.CONFIG_FILE
         app_module.admin_auth = AdminAuthStore(root / "admin.db")
         app_module.admin_auth.initialize_from_legacy("InitialAdmin123456")
-        prompt_store.LIBRARY_FILE = root / "prompt_library.json"
+        prompt_store.BASELINE_FILE = root / "prompt_library.json"
+        prompt_store.LOCAL_FILE = root / "prompt_library.local.json"
         backup_store.CONFIG_FILE = root / "backup_jobs.json"
         self.client = TestClient(app_module.app)
         self.root = self.login("admin", "InitialAdmin123456")
@@ -29,7 +30,7 @@ class CustomSystemApiTests(unittest.TestCase):
 
     def tearDown(self):
         app_module.admin_auth = self.original_auth
-        prompt_store.LIBRARY_FILE = self.original_prompt
+        prompt_store.BASELINE_FILE, prompt_store.LOCAL_FILE = self.original_prompt
         backup_store.CONFIG_FILE = self.original_backup
         self.temp.cleanup()
 

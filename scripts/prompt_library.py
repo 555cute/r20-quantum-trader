@@ -1,4 +1,28 @@
-"""Versioned prompt profile library used directly by Python trading processes."""
+"""Versioned prompt profile library used directly by Python trading processes.
+
+## 双文件模型（2026-09 改造，起因是一次真实的数据丢失）
+
+方案库分两个文件，**职责不重叠**：
+
+| 文件 | 角色 | git | 谁写 |
+|---|---|---|---|
+| `BASELINE_FILE` `data/prompt_library.json` | 出厂基线 | **跟踪**（随发版更新） | 没人（运行期只读） |
+| `LOCAL_FILE` `data/prompt_library.local.json` | 用户改动 | 忽略（`data/*.json`） | 本模块（唯一写入目标） |
+
+`load_library()` = 基线 ⊕ 本地（**本地优先**）；`save_library()` 只写本地，
+且**只写真差异**（与出厂逐字相同的预设不落本地，好让它继续跟随发版更新）。
+
+### 为什么不这么改不行
+
+改造前只有一个文件，而它**被 git 跟踪**。于是用户一改提示词，工作区就脏了，
+而后台「更新」有一道「工作区存在未提交修改 ⇒ 409 拒绝更新」的闸
+（`r20_backend/routers/system.py`）—— 用户为了更新只能丢弃改动，丢的正是自己的
+提示词；`git pull` 再把仓库版本盖回来。表现出来就是用户报的那句
+「更新后预设提示词覆盖了用户的预设提示词」。
+
+**推论（别再把运行态文件加回 git）**：任何"应用会写 + git 跟踪"的文件都会
+复现同一事故。`data/policy_archives/*` 同批停止跟踪，理由相同。
+"""
 from __future__ import annotations
 import copy
 import functools
@@ -56,7 +80,21 @@ except ImportError:  # scripts/ 在 sys.path
     from local_lock import local_file_lock  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
-LIBRARY_FILE = ROOT / "data" / "prompt_library.json"
+#: 出厂基线：随发版更新，**运行时只读**（应用从不写它）。
+BASELINE_FILE = ROOT / "data" / "prompt_library.json"
+#: 用户改动：应用**唯一的写入目标**，不纳入 git（`.gitignore` 的 `data/*.json` 已覆盖）。
+#:
+#: 为什么要分成两个文件（2026-09 实测事故）：单文件时代这个数据文件**被 git 跟踪**，
+#: 于是用户一在后台改提示词就把工作区弄脏，而后台「更新」有一道
+#: 「工作区存在未提交修改 ⇒ 409 拒绝更新」的闸（`r20_backend/routers/system.py`）。
+#: 用户为了更新只能丢弃改动 —— 丢弃的正是自己的提示词；`git pull` 再把仓库版本盖回来。
+#: 表现出来就是「更新后预设提示词覆盖了用户的预设提示词」。
+#:
+#: 分成两文件后：基线继续由 git 交付（新部署/新克隆拿得到真正的出厂预设，
+#: 而不是代码里那份**残缺兜底** —— 实测 `evolution_system` 兜底只有 92 字符，
+#: 而基线里有 1049），用户改动落在不跟踪文件里，**永远不会弄脏工作区**，
+#: 也永远不会被 `git pull` 覆盖。
+LOCAL_FILE = ROOT / "data" / "prompt_library.local.json"
 BJ_TZ = timezone(timedelta(hours=8))
 TEMPLATE_KEYS = ("trading_system", "trading_user", "evolution_system", "evolution_user")
 
@@ -584,12 +622,97 @@ def _migrate(raw: dict[str, Any]) -> dict[str, Any]:
     return {"version": 2, "active_profile_id": active_style if active_style in PRESETS else custom["id"], "profiles": {custom["id"]: custom}, "revisions": []}
 
 
-def load_library() -> dict[str, Any]:
+def _read_json_dict(path: Path) -> dict[str, Any] | None:
+    """读一个 JSON 对象；**缺失/损坏一律返回 None**（不抛、不猜）。
+
+    「文件不在」在双文件模型里是**正常状态**（用户还没改过任何东西），
+    所以这里不能把它当异常处理 —— 与 `load_library` 的兜底语义一致。
+    """
     try:
-        raw = json.loads(LIBRARY_FILE.read_text(encoding="utf-8"))
-        payload = _migrate(raw if isinstance(raw, dict) else {})
+        raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, ValueError):
-        payload = _default()
+        return None
+    return raw if isinstance(raw, dict) else None
+
+
+def _profile_fingerprint(profile: dict[str, Any]) -> str:
+    """方案**内容**指纹，**忽略时间戳**。
+
+    用途：判定"用户到底改没改过这条方案"（见 `_is_user_owned`）。
+    必须忽略 `created_at`/`updated_at` —— 它们每次 `_clean_profile` 都会被刷新，
+    带上就等于"永远不相同"，纯净判定会失效（预设将永远收不到发版改进）。
+    """
+    comparable = {k: v for k, v in (profile or {}).items()
+                  if k not in ("created_at", "updated_at")}
+    blob = json.dumps(comparable, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _shipped_profiles(baseline: dict[str, Any]) -> dict[str, Any]:
+    """"出厂"方案的权威内容 = 代码预设 ⊕ 基线文件（**基线优先**）。
+
+    为什么基线优先：基线是发版交付的那份**完整**预设，而代码 `PRESETS` 只是
+    基线缺失时的兜底 —— 实测二者并不相同（`evolution_system` 基线 1049 字符、
+    兜底只有 92），所以基线在时必须盖住兜底。
+    """
+    shipped = {pid: _clean_profile(copy.deepcopy(PRESETS[pid]), pid) for pid in PRESETS}
+    # ⚠️ 基线侧**也必须 `_clean_profile`**：传进来的可能是文件原样的 dict，
+    # 而待判定那一侧（`save_library` 收到的 payload）已经规范化过。两边不同归
+    # ⇒ 指纹永远不同 ⇒ **纯净预设定被判成"用户改过"而落进本地**，
+    # 后果是把出厂基线永久钉死在旧版本上（发版改进再也进不来）。
+    for pid, prof in (baseline.get("profiles") or {}).items():
+        if isinstance(prof, dict):
+            shipped[str(pid)] = _clean_profile(copy.deepcopy(prof), str(pid))
+    return shipped
+
+
+def _is_user_owned(profile_id: str, profile: dict[str, Any],
+                   shipped: dict[str, Any]) -> bool:
+    """这条方案该不该落进**本地**文件？
+
+    只有两种情况该落：①基线里根本没有它（用户自建）；②基线里有、但内容与出厂不同
+    （用户改过）。**与出厂逐字相同的不落** —— 这正是"没改过的预设能自动跟随发版
+    改进"的实现：本地不留副本，读取时自然由基线供给。
+    """
+    if profile_id not in shipped:
+        return True
+    return _profile_fingerprint(profile) != _profile_fingerprint(shipped[profile_id])
+
+
+def _merge_libraries(baseline_raw: dict[str, Any] | None,
+                     local_raw: dict[str, Any] | None) -> dict[str, Any]:
+    """基线 ⊕ 本地（**本地优先**）。
+
+    - `profiles`：按 id 合并且本地覆盖基线；
+    - `active_profile_id`：本地显式设过才覆盖（否则沿用基线）；
+    - `revisions`：两边**按 id 去重**后合并（见下）。
+    """
+    baseline = _migrate(baseline_raw) if baseline_raw else _default()
+    if not local_raw:
+        return baseline
+    local = _migrate(local_raw)
+    merged = copy.deepcopy(baseline)
+    merged["profiles"].update(copy.deepcopy(local["profiles"]))
+    if local_raw.get("active_profile_id"):
+        merged["active_profile_id"] = local["active_profile_id"]
+    # 修订按 **id 去重**后合并：本地文件里存的是"合并后的历史"（save 时整体写入），
+    # 若这里只做简单相加，基线的旧修订会在每次 load 时被重新前置 ⇒ 历史无限膨胀。
+    seen: dict[str, dict[str, Any]] = {}
+    for item in [*(baseline.get("revisions") or []), *(local.get("revisions") or [])]:
+        if isinstance(item, dict) and item.get("id"):
+            seen[str(item["id"])] = item
+    if seen:
+        merged["revisions"] = list(seen.values())[-MAX_REVISIONS:]
+    return merged
+
+
+def load_library() -> dict[str, Any]:
+    """读方案库 = `BASELINE_FILE`（出厂基线）⊕ `LOCAL_FILE`（用户改动，本地优先）。
+
+    两个文件都在时以本地为准；本地不在（用户还没改过任何东西）时**就等于基线**，
+    行为与双文件改造前逐位相同。
+    """
+    payload = _merge_libraries(_read_json_dict(BASELINE_FILE), _read_json_dict(LOCAL_FILE))
     active = str(payload.get("active_profile_id") or "stable")
     if active not in PRESETS and active not in payload["profiles"]:
         active = "stable"
@@ -604,15 +727,18 @@ def _library_lock():
     """跨进程互斥（审计 P2-6）：提示词方案库是 RMW 目标（管理页多次点击 / 导入 / 回滚 /
     采集脚本都会 load→改→save）。优先用可重入的后端锁，退化为本地 flock。
 
+    ⚠️ 双文件模型（2026-09）后只锁 `LOCAL_FILE`：基线是**只读**的，没人跟它竞争；
+    真正需要串行化的是"读两侧 → 改 → 写本地"这个 RMW 循环本身。
+
     兜底实现已移到 `scripts/local_lock.py`（结构优化阶段 4·B3 第四十八刀）——
     原先两处脚本各手写一份**不可重入**的裸 flock，而调用方存在嵌套
     （`mutate_instruments` → `save_instruments`），一旦走兜底分支会同线程自锁挂死。
     """
     try:
         from r20_backend.file_locks import file_lock
-        return file_lock(LIBRARY_FILE)
+        return file_lock(LOCAL_FILE)
     except Exception:
-        return local_file_lock(LIBRARY_FILE)
+        return local_file_lock(LOCAL_FILE)
 
 
 def _locked_library(fn):
@@ -632,8 +758,7 @@ def save_library(payload: dict[str, Any]) -> None:
     legacy_update = "profiles" not in payload
     if not legacy_update and "active_style" in payload:
         try:
-            persisted_raw = json.loads(LIBRARY_FILE.read_text(encoding="utf-8"))
-            persisted_active = _migrate(persisted_raw).get("active_profile_id", "stable")
+            persisted_active = load_library().get("active_profile_id", "stable")
         except (OSError, json.JSONDecodeError, ValueError):
             persisted_active = "stable"
         requested_style = str(payload.get("active_style") or "stable")
@@ -651,7 +776,18 @@ def save_library(payload: dict[str, Any]) -> None:
         payload = existing
     normalized = _migrate(payload)
     normalized.pop("active_style", None); normalized.pop("custom", None)
-    _atomic_write(LIBRARY_FILE, normalized)
+    # ⚠️ 只写**本地**文件，且只写"真差异"（见 `_is_user_owned`）。
+    # 基线是出厂交付物，应用**永不写它** —— 写它就等于把用户改动塞回 git 跟踪的文件，
+    # 又会把工作区弄脏（那正是本次要消除的形态）。
+    shipped = _shipped_profiles(_read_json_dict(BASELINE_FILE) or {})
+    local = {
+        "version": 2,
+        "active_profile_id": normalized.get("active_profile_id", "stable"),
+        "profiles": {pid: prof for pid, prof in normalized["profiles"].items()
+                     if _is_user_owned(pid, prof, shipped)},
+        "revisions": list(normalized.get("revisions") or [])[-MAX_REVISIONS:],
+    }
+    _atomic_write(LOCAL_FILE, local)
 
 
 def resolve_profile(profile: dict[str, Any]) -> dict[str, Any]:

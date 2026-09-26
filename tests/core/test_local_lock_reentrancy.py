@@ -290,8 +290,9 @@ class FacadeWiringTest(unittest.TestCase):
 
         `tests/config_sandbox.isolate_config` 只重定向**大写路径常量**，
         对"调用时传入的函数/参数覆盖"无效，所以那次没被拦下。
-        故这里用子进程 + `TempDirectory`，并把 `LIBRARY_FILE`/`POOL_FILE`
-        一并指向临时目录 —— **绝不触碰真实 `data/`**。
+        故这里用子进程 + `TempDirectory`，并把提示词库的两个路径常量
+        （`BASELINE_FILE`/`LOCAL_FILE`）与 `POOL_FILE` 一并指向临时目录
+        —— **绝不触碰真实 `data/`**。
         """
         # 第七十八刀：以 spawn 为被测行为，离线守护下如实 skip（守卫在 spawn 前）。
         from tests.config_sandbox import skip_if_offline_suite
@@ -304,14 +305,18 @@ sys.modules['r20_backend.file_locks'] = None      # 逼出 ImportError → 兜�
 
 d = pathlib.Path(tempfile.mkdtemp(prefix='r20-lock-probe-'))
 import prompt_library, instrument_pool
-for mod, const in ((prompt_library, 'LIBRARY_FILE'), (instrument_pool, 'POOL_FILE')):
-    object.__setattr__(mod, const, d / (const.lower() + '.json'))
+# 提示词库 2026-09 拆成"出厂基线 + 用户改动"两文件：锁只跟**写入目标**（LOCAL_FILE）
+# 走，但两个常量都要挪到沙箱，免得读侧仍指向生产。
+for mod, consts in ((prompt_library, ('BASELINE_FILE', 'LOCAL_FILE')),
+                    (instrument_pool, ('POOL_FILE',))):
+    for const in consts:
+        object.__setattr__(mod, const, d / (const.lower() + '.json'))
     lockfn = getattr(mod, '_library_lock', None) or getattr(mod, '_pool_lock')
     with lockfn():
         with lockfn():
             pass
 print('FALLBACK-REENTRANT-OK')
-assert (d / '.library_file.json.lock').exists() or (d / '.pool_file.json.lock').exists()
+assert (d / '.local_file.json.lock').exists() or (d / '.pool_file.json.lock').exists()
 """ % (str(SCRIPTS), str(ROOT))
         r = subprocess.run([sys.executable, "-c", probe],
                            capture_output=True, text=True, timeout=60, cwd=str(ROOT))

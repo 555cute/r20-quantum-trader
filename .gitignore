@@ -61,6 +61,13 @@ credentials.json
 .r20-admin-bootstrap
 
 # Live Real-Money Ledger & Private DBs (CRITICAL)
+#
+# ⚠️ 运行态数据一律不跟踪 —— 且**永远不要用 `git add -f` 破例**。
+# 2026-09 实测事故：`data/prompt_library.json`（提示词方案库）曾被 -f 强加进来，
+# 于是用户一在后台改提示词就把工作区弄脏；而后台「更新」有一道
+# 「工作区存在未提交修改 ⇒ 409 拒绝更新」的闸（r20_backend/routers/system.py），
+# 用户为了更新只能丢弃改动 —— 丢弃的正是他自己的提示词。
+# 现在提示词库拆成「出厂基线（跟踪）+ 用户改动（本规则忽略）」两个文件。
 data/*.json
 data/*.db
 data/*.db-wal

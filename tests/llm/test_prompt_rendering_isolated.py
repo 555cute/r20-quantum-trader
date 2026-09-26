@@ -60,7 +60,8 @@ class Sandbox(unittest.TestCase):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.stack.enter_context(patch.object(prompts, "ROOT", self.root))
-        self.stack.enter_context(patch.object(prompts, "LIBRARY_FILE", self.root / "library.json"))
+        self.stack.enter_context(patch.object(prompts, "BASELINE_FILE", self.root / "library.json"))
+        self.stack.enter_context(patch.object(prompts, "LOCAL_FILE", self.root / "library.local.json"))
         original_open, original_io_open, original_os_open = builtins.open, io.open, os.open
 
         def check(path):
@@ -179,7 +180,7 @@ class RenderingTests(Sandbox):
     def test_storage_roundtrip_retains_slots(self):
         profile = prompts._clean_profile(self.profile, "custom-test")
         prompts.save_library({"version": 2, "profiles": {"custom-test": profile}, "active_profile_id": "custom-test", "revisions": []})
-        disk = json.loads(prompts.LIBRARY_FILE.read_text())
+        disk = json.loads(prompts.LOCAL_FILE.read_text())   # 写侧已改为本地文件（2026-09）
         for value in (disk["profiles"]["custom-test"]["trading_user"], prompts.active_profile()["trading_user"]):
             self.assertIn("{{account_balance}}", value)
             self.assertIn("{{account_positions}}", value)
