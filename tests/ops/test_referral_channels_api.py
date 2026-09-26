@@ -20,6 +20,8 @@
 """
 from __future__ import annotations
 
+import json
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -106,41 +108,43 @@ class ReferralChannelsApiTest(unittest.TestCase):
             system_router.settings.binance_invite_url = original
 
 
-class AdminReferralChannelsApiTest(unittest.TestCase):
-    """管理员版多给一个 OKX 经纪商 code；公开版**刻意不给**。
+class BrokerCodeNeverLeaksTest(unittest.TestCase):
+    """经纪商 code **不得出现在任何接口响应里**（2026-09 仓库所有者拍板）。
 
-    存在的理由：后台 `SecurityPage` 曾把 code 与两条链接硬编码在模板里（第三份副本）。
-    现由这里出值，且必须与**实发订单上的 tag 同源**。
+    理由是收益性的：这个值随每笔订单发出、是归属标识；摆在用户看得到的界面上
+    （尤其是"你这份副本会带上什么"这种地方）等于邀请别人照着改掉、把返佣弄没。
+    订单带不带 tag 与它显不显示**无关** —— `okx_rest._with_broker_tag` 是唯一出口。
+
+    本门同时钉住那个曾被创建又删除的"管理员版"接口不再复活：它当年的存在只是
+    为了给后台页面显示这个 code，界面已不显示，接口也就不该留。
     """
+
+    #: 经纪商 code 的形状：12 位小写十六进制 + 4 位大写（官方样例同形）。
+    CODE_SHAPE = re.compile(r"\b[0-9a-f]{12}[A-Z]{4}\b")
 
     def setUp(self):
         self.client = TestClient(app_module.app)
 
-    def test_requires_admin_auth(self):
-        """鉴权那一层单独钉：不带会话必须被拒。"""
-        res = self.client.get("/api/v1/admin/referral-channels")
-        self.assertIn(res.status_code, (401, 403), res.text)
-
-    def test_broker_code_matches_the_wire_value(self):
-        """展示用的 code 必须与**真正挂到订单上的那个值同源**（同一个函数）。
-
-        否则就会出现"页面显示一个 code、订单带另一个" —— 而展示那份是给操作员
-        用来核对订单的，漂移了就等于在骗自己。
-        """
-        import scripts.okx_rest as okx_rest
-        # 本用例测的是**载荷语义**，不是鉴权（鉴权由上面那条单独钉）。
-        # 故把鉴权闸替成放行 —— 免去在本用例里造管理员会话（那会去碰真库）。
-        with patch.object(system_router, "require_admin_header", lambda *a, **k: None):
-            body = self.client.get("/api/v1/admin/referral-channels").json()
-        okx = next(c for c in body["channels"] if c["key"] == "okx")
-        self.assertEqual(okx["broker_code"], okx_rest.effective_broker_tag())
-        self.assertEqual(okx["broker_code"], okx_rest.DEFAULT_OKX_BROKER_TAG)
-
-    def test_public_variant_deliberately_omits_the_broker_code(self):
-        """公开版不该把经纪商 code 发出去（少一个公开面就少一分被冒用）。"""
-        public = self.client.get("/api/v1/referral-channels").json()
-        for ch in public["channels"]:
+    def test_no_channel_payload_carries_the_code(self):
+        body = self.client.get("/api/v1/referral-channels").json()
+        for ch in body["channels"]:
             self.assertNotIn("broker_code", ch, f"{ch['key']} 泄露了经纪商 code")
+        blob = json.dumps(body, ensure_ascii=False)
+        self.assertIsNone(self.CODE_SHAPE.search(blob),
+                          f"响应里出现了经纪商 code 形状的值：{blob}")
+
+    def test_admin_variant_is_gone(self):
+        """那条只为"给界面显示 code"而生的接口不应复活（复活=又一处泄露面）。"""
+        res = self.client.get("/api/v1/admin/referral-channels")
+        self.assertEqual(res.status_code, 404, "管理员版通道接口已删除，不该再存在")
+
+    def test_about_payload_does_not_carry_the_code(self):
+        """后台「关于」页的载荷同样不得带 code（其徽章已移除）。"""
+        with patch.object(system_router, "require_admin_header", lambda *a, **k: None):
+            body = self.client.get("/api/v1/admin/about").json()
+        blob = json.dumps(body.get("channels") or {}, ensure_ascii=False)
+        self.assertNotIn("broker_code", blob)
+        self.assertIsNone(self.CODE_SHAPE.search(blob), f"关于页载荷带了 code：{blob}")
 
 
 if __name__ == "__main__":

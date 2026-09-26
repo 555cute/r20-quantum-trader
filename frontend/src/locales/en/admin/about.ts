@@ -49,7 +49,6 @@ export const enAdminAbout = {
   channelsTitle: 'Sign-up channels',
   channelsSub: 'Account opening & fee binding',
   channelsLead: 'Registering through the entries below binds that exchange\'s fee rate and rebate; returning users qualify when the exchange\'s win-back conditions are met.',
-  channelBrokerCode: 'Broker code',
   channelOpen: 'Sign-up link',
   channelUnset: 'Not configured (overridable via env var)',
 };

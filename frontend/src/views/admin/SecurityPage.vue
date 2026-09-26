@@ -63,10 +63,11 @@ const runtime = ref<any>(null)
  */
 const channels = ref<any[]>([])
 const channelOf = (key: string) => channels.value.find((c) => c.key === key) || null
-const brokerCode = computed(() => channelOf('okx')?.broker_code || '')
+// 注：**不**显示经纪商 code（2026-09 仓库所有者拍板）—— 它是随订单发出去的归属标识，
+// 摆到界面上等于邀请别人照着改。本页只用通道链接（公开接口，无需管理员权限）。
 async function loadChannels() {
   try {
-    const res = await api<any>('/api/v1/admin/referral-channels')
+    const res = await api<any>('/api/v1/referral-channels')
     channels.value = Array.isArray(res?.channels) ? res.channels : []
   } catch {
     // 取不到就整块不渲染注册入口（**不回落到写死的旧链接** —— 那正是本次要消灭的东西）
@@ -812,10 +813,6 @@ onMounted(() => { loadAll(); loadMx(); loadChannels() })
 
               <template #extra>
                 <div v-if="channelOf('okx')" class="sc-channel-box">
-                  <div v-if="brokerCode" class="sc-channel-row">
-                    <span class="sc-channel-label">{{ t('admin.security.okxBrokerTagLabel') }}</span>
-                    <span class="sc-channel-tag mono">{{ brokerCode }}</span>
-                  </div>
                   <button
                     v-if="channelOf('okx')?.invite_url"
                     type="button"
@@ -1695,20 +1692,6 @@ onMounted(() => { loadAll(); loadMx(); loadChannels() })
   display: flex;
   flex-direction: column;
   gap: 4px;
-}
-.sc-channel-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: var(--text-3xs);
-}
-.sc-channel-label {
-  color: var(--ds-color-text-description);
-}
-.sc-channel-tag {
-  color: var(--accent);
-  font-size: var(--text-3xs);
-  font-weight: 600;
 }
 .sc-channel-btn {
   background: none;

@@ -466,15 +466,14 @@ def admin_about(
         "repository": {"url": "https://github.com/555cute/r20-quantum-trader", "branch": app_attr("git", git)(["branch", "--show-current"]), "commit": app_attr("git", git)(["rev-parse", "--short", "HEAD"])},
         "update": app_attr("update_status", update_status)(),
         # 注册/返佣通道（后台「关于」页渲染成可复制入口）。
-        # ⚠️ OKX 的经纪商 code 取 `okx_rest.effective_broker_tag()` —— 与**实发订单上的
-        # tag 同源**，避免"页面显示一个、订单带另一个"。三条 URL 走 settings（可被
-        # OKX_INVITE_URL / GATE_INVITE_URL / BINANCE_INVITE_URL 覆盖，便于分发副本替换）。
+        # ⚠️ 三条 URL 走 settings（可被 OKX_INVITE_URL / GATE_INVITE_URL /
+        # BINANCE_INVITE_URL 覆盖，便于分发副本替换）。
+        # **刻意不含经纪商 code**（2026-09 仓库所有者拍板）：它是随订单发出去的归属
+        # 标识，不出现在任何用户看得到的界面上 —— 摆出来等于邀请别人照着改。
         "channels": {
-            "okx": {"name": "OKX", "invite_url": settings.okx_invite_url,
-                    "broker_code": app_attr("effective_broker_tag",
-                                            _effective_broker_tag)()},
-            "gate": {"name": "Gate", "invite_url": settings.gate_invite_url, "broker_code": ""},
-            "binance": {"name": "Binance", "invite_url": settings.binance_invite_url, "broker_code": ""},
+            "okx": {"name": "OKX", "invite_url": settings.okx_invite_url},
+            "gate": {"name": "Gate", "invite_url": settings.gate_invite_url},
+            "binance": {"name": "Binance", "invite_url": settings.binance_invite_url},
         },
         "security": {"authentication": "PBKDF2-SHA256 + server-side sessions", "session_hours": 12, "plugin_policy": "builtin-only", "prompt_transport": "python-direct"},
     }
@@ -574,22 +573,20 @@ def _invite_code(url: str) -> str:
     return "" if "." in tail else tail
 
 
-def _channel_payload(*, include_broker_code: bool) -> list[dict[str, Any]]:
-    """三条通道的载荷（公开版 / 管理员版共用同一个出口，避免两处各写一遍）。
+def _channel_payload() -> list[dict[str, Any]]:
+    """三条通道的载荷。
 
-    `include_broker_code` 只对 OKX 多给一个 `broker_code`，且**取
-    `effective_broker_tag()`** —— 与真正挂到订单上的那个值是同一个函数，
-    杜绝"页面显示一个、订单带另一个"（显示值与实发值漂移正是这类事故的温床）。
+    ⚠️ **刻意不含经纪商 code**（2026-09，仓库所有者拍板）：那个值要跟订单一起发出去，
+    是归属标识，**不该出现在任何用户看得到的界面上** —— 摆出来等于邀请别人照着改。
+    订单带不带 tag 与它显示与否**无关**：`okx_rest._with_broker_tag` 是唯一出口，
+    无条件挂载（不看账户、不看 demo/live）。此前那个"管理员版"接口即因此删除。
     """
     refresh_settings()
     channels = []
     for key, name, attr in CHANNEL_SPECS:
         url = str(getattr(settings, attr, "") or "").strip()
-        item: dict[str, Any] = {"key": key, "name": name, "invite_url": url,
-                                "code": _invite_code(url) if url else ""}
-        if include_broker_code and key == "okx":
-            item["broker_code"] = _effective_broker_tag()
-        channels.append(item)
+        channels.append({"key": key, "name": name, "invite_url": url,
+                         "code": _invite_code(url) if url else ""})
     return channels
 
 
@@ -601,24 +598,5 @@ def referral_channels() -> dict[str, Any]:
     - **tag** 随每一笔订单发出，负责把成交**归属**到经纪商 —— 这才是返佣的机制，
       与用户是否走过下列链接**无关**；
     - 本接口这几条链接是给用户**开户**用的入口（顺带可叠加节点返佣）。
-
-    刻意**不**在这里暴露经纪商 code：普通用户用不上，而它是随订单外发的东西，
-    少一个公开面就少一分被冒用的机会（管理员版另给）。
     """
-    return {"channels": _channel_payload(include_broker_code=False)}
-
-
-@router.get("/api/v1/admin/referral-channels")
-def admin_referral_channels(
-    x_r20_admin_token: str | None = Header(default=None),
-    x_r20_session: str | None = Header(default=None, alias="X-R20-Session"),
-) -> dict[str, Any]:
-    """管理员版：额外给出 OKX 经纪商 code（后台凭证页展示用）。
-
-    存在的理由：后台 `SecurityPage` 此前把 code 与两条链接**硬编码在模板里**，
-    是继 `okx_rest` / `config.py` / `AboutModal` 之后的**第三份副本** ——
-    分发副本的人用环境变量换掉自己的通道后，这一页照旧显示原作者的链接与 code
-    （也就是"注册到别人名下"的那类事故）。现统一由后端出值。
-    """
-    require_admin_header(x_r20_admin_token, x_r20_session)
-    return {"channels": _channel_payload(include_broker_code=True)}
+    return {"channels": _channel_payload()}

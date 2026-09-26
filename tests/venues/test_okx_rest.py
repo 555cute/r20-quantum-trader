@@ -506,7 +506,8 @@ class BrokerTagCannotBeSilentlyLostTest(unittest.TestCase):
     故取值口径是"只有填了**合法值**才算数，否则回落硬编码默认值"。
     """
 
-    BROKEN_VALUES = ("", "   ", "my-broker-code", "x" * 40, "6e2191f027c6SUDE-extra")
+    # 最后一项是"合法码后面拖后缀"——用合成值拼，不把真实 code 写进来
+    BROKEN_VALUES = ("", "   ", "my-broker-code", "x" * 40, "0123456789abABCD-extra")
 
     def test_broken_env_values_all_fall_back_to_the_default(self):
         for value in self.BROKEN_VALUES:

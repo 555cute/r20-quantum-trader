@@ -31,7 +31,7 @@ const BANNED_DOMAINS = ['mitxcqvwnhj', 'gatesites', 'bsmkweb'];
 
 /**
  * OKX Broker code 的形状：12 位小写十六进制 + 4 位大写字母。
- * 官方文档给的样例 `6099c63a8d75SCDE` 与在用的 `6e2191f027c6SUDE` 都符合；
+ * 官方文档给的样例（12 位小写十六进制 + 4 位大写）即符合；
  * 收紧到这个形状是为了**不必**把具体那串码写进本文件（写进来本身就是又一份副本）。
  */
 const BROKER_CODE_SHAPE = /\b[0-9a-f]{12}[A-Z]{4}\b/;
@@ -86,7 +86,8 @@ test('判据自检：扫描面非空（否则本门空转变绿）', () => {
 test('判据自检：能真的命中（拿两个样例字面量验证）', () => {
   // 否则正则写错了也会"全绿"，这个门就成了摆设。
   assert.ok(BANNED_DOMAINS.some((d) => `https://www.${d}.example/join/1`.includes(d)));
-  assert.ok(BROKER_CODE_SHAPE.test('6e2191f027c6SUDE'), '在用的 code 必须被形状判据认出来');
+  // 用**合成**值验证形状判据，不把真实 code 写进本仓（连测试文件也不留）。
+  assert.ok(BROKER_CODE_SHAPE.test('0123456789ab' + 'ABCD'), '形状判据必须认得出合法码');
   assert.ok(BROKER_CODE_SHAPE.test('6099c63a8d75SCDE'), '文档样例必须被认出来');
   assert.ok(!BROKER_CODE_SHAPE.test('48039151'), '纯数字邀请码不该被误判为经纪商 code');
   assert.ok(!BROKER_CODE_SHAPE.test('MCHDBKYF'), 'Gate 邀请码不该被误判为经纪商 code');

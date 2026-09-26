@@ -273,8 +273,6 @@ const bandFacts = computed(() => {
             <div v-for="ch in channelRows" :key="ch.key" class="ab-channel">
               <div class="ab-channel-head">
                 <span class="ab-channel-name">{{ ch.name }}</span>
-                <span v-if="ch.broker_code" class="badge badge-up mono ab-channel-code"
-                      :title="t('admin.about.channelBrokerCode')">{{ ch.broker_code }}</span>
               </div>
 
               <template v-if="ch.invite_url">
@@ -492,11 +490,6 @@ const bandFacts = computed(() => {
   font-size: var(--text-xs);
   font-weight: 600;
   color: var(--ds-color-text-primary);
-}
-.ab-channel-code {
-  font-family: var(--ds-font-mono);
-  font-size: var(--text-4xs);
-  letter-spacing: 0.02em;
 }
 .ab-channel-url {
   font-family: var(--ds-font-mono);

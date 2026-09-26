@@ -52,7 +52,6 @@ export const zhAdminAbout = {
   channelsTitle: '注册通道',
   channelsSub: '开户与费率绑定入口',
   channelsLead: '经下列入口注册可绑定对应交易所的费率与返佣；老用户满足交易所的召回条件时同样可绑定。',
-  channelBrokerCode: '经纪商 code',
   channelOpen: '注册入口',
   channelUnset: '未配置（可用环境变量覆盖）',
 };

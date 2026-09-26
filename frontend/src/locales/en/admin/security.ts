@@ -70,7 +70,6 @@ export const enAdminSecurity = {
   probing: 'Testing…',
   detect: 'Test',
   saveOkx: 'Save OKX',
-  okxBrokerTagLabel: 'Official Broker Channel',
   okxRegisterDiscount: 'VIP Fast-Track · 20% Lifetime Fee Rebate ↗',
   binanceName: 'Binance',
   binanceApiLabel: 'USDT-M perpetual futures',

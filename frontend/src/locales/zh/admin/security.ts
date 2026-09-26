@@ -71,7 +71,6 @@ export const zhAdminSecurity = {
   probing: '检测中…',
   detect: '检测',
   saveOkx: '保存 OKX',
-  okxBrokerTagLabel: '官方经纪商通道',
   okxRegisterDiscount: '极速开户直通车 · 终身享 20% 手续费返还 ↗',
   binanceName: 'Binance · 币安',
   binanceApiLabel: 'USDT-M 永续合约',
