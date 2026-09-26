@@ -26,6 +26,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import urllib.parse
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -48,13 +49,29 @@ __all__ = [
 DEFAULT_OKX_BROKER_TAG = "6e2191f027c6SUDE"
 
 
+#: OKX 对 `tag` 的取值规范（官方接口文档）：字母（区分大小写）与数字的组合，不超过 16 位。
+#: 实测印证：40 位 → HTTP 400；含 `!@#` → HTTP 400；本仓在用的 16 位码 → 正常受理。
+_TAG_SHAPE = re.compile(r"^[0-9A-Za-z]{1,16}$")
+
+
 def effective_broker_tag() -> str:
     """当前**生效**的经纪商 tag（与真正发单时用的是同一个取值口径）。
 
-    展示侧（后台「关于」页）必须调它而不是自己读环境变量/字面量 ——
+    ⚠️ 环境变量 `OKX_BROKER_TAG` **只有填了合法值才算数**，否则一律回落默认值。
+    两个都在实盘上真实会咬人的形状：
+
+    1. **空/空白**（`.env` 里写了 `OKX_BROKER_TAG=` 却没填值）—— 若照 `getenv`
+       的字面语义返回空串，下游 `if broker_tag:` 就会**静默不挂 tag**：程序照跑、
+       订单照下，而这台机器**一分返佣都赚不到，且没有任何报错**；
+    2. **形状非法**（带 `-`/下划线、超 16 位等）—— OKX **会校验**这个字段
+       （实测非法值直接 HTTP 400）。照发出去会让**每一笔订单都失败**：
+       拿不到返佣事小，用户下不了单事大。
+
+    展示侧（后台「关于」/凭证页）也必须调本函数而非自己读环境变量 ——
     否则显示值与实发值会漂移，而"我以为带着 tag"正是少赚返佣的成因。
     """
-    return os.getenv("OKX_BROKER_TAG", DEFAULT_OKX_BROKER_TAG)
+    raw = str(os.getenv("OKX_BROKER_TAG", "") or "").strip()
+    return raw if _TAG_SHAPE.match(raw) else DEFAULT_OKX_BROKER_TAG
 
 
 def _with_broker_tag(params: dict[str, Any], tag: str | None) -> dict[str, Any]:

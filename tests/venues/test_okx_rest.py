@@ -448,9 +448,9 @@ class BrokerTagCoverageTest(unittest.TestCase):
         with patch.object(okx_rest, "request", _fake):
             okx_rest.close_position("BTC-USDT-SWAP", "long", tag="EXPLICIT")
             self.assertEqual(captured[-1]["tag"], "EXPLICIT")
-            with patch.dict("os.environ", {"OKX_BROKER_TAG": "FROM-ENV"}):
+            with patch.dict("os.environ", {"OKX_BROKER_TAG": "ENVCODE123456789"}):
                 okx_rest.close_position("BTC-USDT-SWAP", "long")
-            self.assertEqual(captured[-1]["tag"], "FROM-ENV")
+            self.assertEqual(captured[-1]["tag"], "ENVCODE123456789")
 
 
 class NoOrderEndpointBypassTest(unittest.TestCase):
@@ -490,3 +490,72 @@ class NoOrderEndpointBypassTest(unittest.TestCase):
         self.assertEqual(offenders, [],
                          "这些生产模块绕过了统一客户端自拼产单请求（会漏掉经纪商 tag）：\n  "
                          + "\n  ".join(offenders))
+
+
+class BrokerTagCannotBeSilentlyLostTest(unittest.TestCase):
+    """**tag 不允许被配置错误静默弄丢**（2026-09，用户明确要求"所有用户都带上"）。
+
+    两个真实会咬人的形状：
+
+    1. `.env` 里写了 `OKX_BROKER_TAG=` 却没填值（空串）。`os.getenv` 照字面返回空串，
+       下游 `if broker_tag:` 就静默不挂 —— 程序照跑、订单照下，而这台机器
+       **一分返佣都赚不到，且没有任何报错**；
+    2. 形状非法（带 `-`/下划线、超 16 位）。OKX **会校验**该字段（实测非法值
+       HTTP 400），照发出去会让**每一笔订单都失败** —— 用户直接下不了单。
+
+    故取值口径是"只有填了**合法值**才算数，否则回落硬编码默认值"。
+    """
+
+    BROKEN_VALUES = ("", "   ", "my-broker-code", "x" * 40, "6e2191f027c6SUDE-extra")
+
+    def test_broken_env_values_all_fall_back_to_the_default(self):
+        for value in self.BROKEN_VALUES:
+            with self.subTest(value=value):
+                with patch.dict("os.environ", {"OKX_BROKER_TAG": value}):
+                    self.assertEqual(okx_rest.effective_broker_tag(),
+                                     okx_rest.DEFAULT_OKX_BROKER_TAG,
+                                     f"{value!r} 既没被当成合法值，也没回落默认 —— tag 会被弄丢")
+
+    def test_a_legal_custom_value_is_still_honoured(self):
+        """分发副本的人换成自己的 code 必须生效（否则这套机制就不可移植了）。"""
+        with patch.dict("os.environ", {"OKX_BROKER_TAG": "0123456789abcdef"}):
+            self.assertEqual(okx_rest.effective_broker_tag(), "0123456789abcdef")
+
+    def test_all_order_endpoints_still_carry_the_tag_under_an_empty_env(self):
+        """最容易漏的一条：空值环境下，**三个产单端点照样都要带 tag**。
+
+        单测 `effective_broker_tag` 只证明取值对；这条真跑端点，证明它确实落到了
+        请求体里 —— 中间任何一层（`if broker_tag:` 之类）都不会把它吞掉。
+        """
+        captured = []
+
+        def _fake(method, path, params=None, *, env=None, **kw):
+            captured.append((path, dict(params or {})))
+            return []
+
+        with patch.dict("os.environ", {"OKX_BROKER_TAG": ""}):
+            with patch.object(okx_rest, "request", _fake):
+                okx_rest.place_order("BTC-USDT-SWAP", "buy", 1, ord_type="limit", px="79000")
+                okx_rest.place_algo_oco("BTC-USDT-SWAP", "buy", 1, pos_side="long",
+                                        tp_trigger_px="80000", sl_trigger_px="78000")
+                okx_rest.close_position("BTC-USDT-SWAP", "long")
+        self.assertEqual(len(captured), 3)
+        for path, params in captured:
+            self.assertEqual(params.get("tag"), okx_rest.DEFAULT_OKX_BROKER_TAG,
+                             f"{path} 在空值环境下把 tag 弄丢了")
+
+    def test_explicit_empty_argument_still_opts_out(self):
+        """**显式传参**仍可关掉（那是代码里的有意为之，不是配置失手）。
+
+        与上面两条的区别很重要：环境变量是"配置面"，会被分发的用户改坏；
+        显式实参是"代码面"，只有写代码的人能决定。故只兜底前者。
+        """
+        captured = []
+
+        def _fake(method, path, params=None, *, env=None, **kw):
+            captured.append(dict(params or {}))
+            return []
+
+        with patch.object(okx_rest, "request", _fake):
+            okx_rest.close_position("BTC-USDT-SWAP", "long", tag="")
+        self.assertNotIn("tag", captured[-1])
