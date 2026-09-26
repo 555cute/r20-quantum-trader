@@ -70,7 +70,7 @@ test('所有 target="_blank" 外链必须提供「新标签页打开」提示', 
   //   6 → 9：用户可见的 `dashboard/AboutModal.vue` 通道项改为**后端出值**后每个通道
   //          各一个外链（含新增的 Binance），以及新增的 `dashboard/FirstRunGuide.vue`
   //          里 1 个注册通道外链 + 1 个官方仓库外链 —— 全部带 `common.opensInNewTab`。
-  //   9 → 10：品牌改名 AstraQuant 后，「关于」浮层新增**自有官网** astraquant.tech 入口
+  //   9 → 10：品牌改名 AstraQuant 后，「关于」浮层新增**自有官网** www.astraquant.tech 入口
   //          （自有域名，不依赖任何第三方托管），同样带新标签页提示。
   assert.equal(total, 10, `target="_blank" 外链数量变化（期望 10，实得 ${total}），请复核本闸覆盖范围`);
   assert.deepEqual(bad, [], `以下外链静默开新标签，读屏用户事前无从得知：\n  ${bad.join('\n  ')}`);
