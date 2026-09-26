@@ -188,21 +188,29 @@ const venueHealth = computed(() => {
           v-for="tab in publicTabs"
           :key="tab.key"
           type="button"
-          class="w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium cursor-pointer transition-all"
+          class="w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-medium cursor-pointer transition-all relative overflow-hidden group"
           :class="
             activeTab === tab.key
-              ? 'bg-[var(--surface-3)] text-[var(--ink-strong)] font-semibold border border-[var(--line-2)] shadow-xs'
+              ? 'bg-gradient-to-r from-[var(--brand-bg)] to-transparent text-[var(--ink-strong)] font-semibold border border-[var(--line-2)] shadow-xs'
               : 'text-[var(--ink-2)] hover:bg-[var(--surface-2)] hover:text-[var(--ink-1)] border border-transparent'
           "
           :title="navCompact ? t(tab.labelKey) : undefined"
           :aria-current="activeTab === tab.key ? 'page' : undefined"
           @click="go(tab.path)"
         >
-          <component :is="tab.icon" class="h-4 w-4 shrink-0" />
+          <span
+            v-if="activeTab === tab.key"
+            class="absolute left-0 top-1.5 bottom-1.5 w-1 rounded-r-full bg-[var(--brand)] shadow-[0_0_8px_var(--brand)]"
+          />
+          <component
+            :is="tab.icon"
+            class="h-4 w-4 shrink-0 transition-all duration-200"
+            :class="activeTab === tab.key ? 'text-[var(--brand)] scale-105' : 'opacity-70 group-hover:opacity-100'"
+          />
           <span v-if="!navCompact" class="truncate">{{ t(tab.labelKey) }}</span>
           <span
             v-if="!navCompact && activeTab === tab.key"
-            class="ms-auto h-1.5 w-1.5 rounded-full bg-[var(--accent)]"
+            class="ms-auto h-1.5 w-1.5 rounded-full bg-[var(--brand)] shadow-[0_0_6px_var(--brand)]"
           />
         </button>
 
@@ -247,14 +255,17 @@ const venueHealth = computed(() => {
             <div
               v-for="v in venueHealth"
               :key="v.name"
-              class="rounded py-0.5 px-1 border"
+              class="rounded-md py-1 px-1 border transition-colors hover:border-[var(--line-2)]"
               style="background-color: var(--surface-1); border-color: var(--line-1)"
             >
-              <div class="flex items-center justify-center gap-1">
-                <span class="h-1.5 w-1.5 rounded-full" :class="v.status === 'active' ? 'bg-[var(--up)]' : 'bg-[var(--ink-3)]'" />
-                <span class="font-semibold">{{ v.name }}</span>
+              <div class="flex items-center justify-center gap-1.5">
+                <span class="relative flex h-1.5 w-1.5 shrink-0">
+                  <span v-if="v.status === 'active'" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-[var(--up)] opacity-75"></span>
+                  <span class="relative inline-flex rounded-full h-1.5 w-1.5" :class="v.status === 'active' ? 'bg-[var(--up)]' : 'bg-[var(--ink-3)]'"></span>
+                </span>
+                <span class="font-semibold text-3xs text-[var(--ink-strong)]">{{ v.name }}</span>
               </div>
-              <div class="text-3xs text-[var(--ink-3)]">{{ v.ping }}</div>
+              <div class="text-4xs text-[var(--ink-3)] mt-0.5">{{ v.ping }}</div>
             </div>
           </div>
         </div>
