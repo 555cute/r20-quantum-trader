@@ -5,7 +5,7 @@ export const enAdminSecurity = {
   chipEnv: 'Environment',
   syncing: 'Syncing configuration…',
   okxApi: 'OKX · V5 API',
-  okxLinked: 'Connected (READY)',
+  okxLinked: 'Connected',
   okxUnconfigured: 'Not fully configured',
   binanceKeyed: 'Credentials configured',
   publicMarket: 'Keyless public market data',

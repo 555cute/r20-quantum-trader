@@ -92,7 +92,9 @@
   border: 1px solid var(--ds-color-border-default);
   border-radius: var(--r-ctl);
   box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.04) inset;
-  transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+  /* 只声明真的会变的两件事：`transform` 原先挂在过渡表里，但 `:hover` 从不设
+     它 —— 属于「声明了却永不触发」的死过渡属性，读代码时容易误以为有位移动效。 */
+  transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
 }
 .dsh-card-sub:hover {
   border-color: var(--ds-color-border-hover);
@@ -390,7 +392,11 @@ textarea.input {
   /* 批 18：22 → 24px，全站分段控件统一到可点下限（此前低于 24px 命中区） */
   height: 24px;
   padding: 0 10px;
-  border-radius: var(--r-xs);
+  /* 同心圆角：内层 = 外层 − 容器内边距（10 − 2 = 8）。
+     原来写死 `--r-xs`(6px)：外层 10px、内边距 2px，同心值应是 8px，
+     差这 2px 就是选中态四角那圈肉眼可见的偏心室隔。改用算式推导，
+     以后改 `.seg` 的圆角或内边距，内层自动跟着走，不需要第二个字面值。 */
+  border-radius: calc(var(--r-ctl) - var(--sp-1));
   border: 1px solid transparent;
   background: transparent;
   color: var(--ds-color-text-description);

@@ -6,7 +6,7 @@ export const zhAdminSecurity = {
   chipEnv: '环境',
   syncing: '正在同步配置…',
   okxApi: 'OKX · V5 接口',
-  okxLinked: '已接入 (READY)',
+  okxLinked: '已接入',
   okxUnconfigured: '未完整配置',
   binanceKeyed: '凭证已配置',
   publicMarket: '免密公共行情',

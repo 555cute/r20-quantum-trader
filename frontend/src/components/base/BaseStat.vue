@@ -2,6 +2,11 @@
 /**
  * BaseStat.vue · DeepSeek Harness 风格 KPI 指标单元
  * 包含：微标头、大号等宽数理数值、动态变动副值、走势图插槽与可展开释义
+ *
+ * ⚠️ 左侧内边距必须 = 卡片头 `.dsh-card-header`（16px）与 `.fact` 单元（16px）：
+ *    全站卡片正文只有**一条 16px 左轨**。此前这里是 `px-3.5`（14px，且 14 不在
+ *    密集尺度刻度 2/4/6/8/10/12/16 上）⇒ 卡片头标题起点 16px、KPI 数值起点 14px，
+ *    每个统计条都带 2px 左轨错位，整列扫视时读数发虚。见 `px-4`。
  */
 import { ref, useId } from 'vue';
 
@@ -28,7 +33,7 @@ const toneVar = {
 </script>
 
 <template>
-  <div class="group flex min-w-0 flex-col justify-center gap-1 overflow-hidden px-3.5 py-2.5 select-none" :title="hint">
+  <div class="group flex min-w-0 flex-col justify-center gap-1 overflow-hidden px-4 py-2.5 select-none" :title="hint">
     <div class="flex min-w-0 items-center justify-between gap-1">
       <span class="truncate text-3xs font-semibold uppercase tracking-wider text-[var(--ink-3)]">{{ label }}</span>
       <!-- 批 85：`aria-controls` 的目标 `<p :id="hintId">` 是 `v-if="hint && showHint"`

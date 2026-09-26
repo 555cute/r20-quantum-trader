@@ -206,8 +206,10 @@ function refreshAll(): void {
         </div>
       </div>
 
-      <!-- 三所卡片网格 -->
-      <div id="venue-accounts-grid" :class="['gap-2.5 md:grid md:grid-cols-3', isMobileExpanded ? 'grid grid-cols-1' : 'hidden md:grid']">
+      <!-- 三所卡片网格：间距走 --ds-space-6(12px)，与工作台其余卡片栅格同拍。
+           原为 gap-2.5(10px)：三张卡之间两道竖缝比上下卡片缝窄 2px，
+           在视线扫过整列卡片时能看出错位。 -->
+      <div id="venue-accounts-grid" :class="['gap-3 md:grid md:grid-cols-3', isMobileExpanded ? 'grid grid-cols-1' : 'hidden md:grid']">
         <VenueAccountCard
           v-for="v in VENUES"
           :key="`${store.environment}-${v}`"

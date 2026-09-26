@@ -90,28 +90,28 @@ const listingTitle = computed(() => {
 
     <!-- 资产与仓位数据格 -->
     <dl class="grid grid-cols-2 gap-2 text-2xs">
-      <div class="min-w-0 rounded-lg p-2 transition-colors hover:bg-[var(--surface-2)]" style="background-color: var(--surface-1); border: 1px solid var(--line-1)">
+      <div class="min-w-0 rounded-lg p-2" style="background-color: var(--surface-1); border: 1px solid var(--line-1)">
         <dt class="truncate text-3xs text-[var(--ink-3)]">{{ t('dash.venueAccounts.fields.equity') }}</dt>
         <dd class="num truncate font-mono text-xs font-bold text-[var(--ink-strong)]" data-test="cell-equity">
           {{ money(account?.equity) }}
         </dd>
       </div>
 
-      <div class="min-w-0 rounded-lg p-2 transition-colors hover:bg-[var(--surface-2)]" style="background-color: var(--surface-1); border: 1px solid var(--line-1)">
+      <div class="min-w-0 rounded-lg p-2" style="background-color: var(--surface-1); border: 1px solid var(--line-1)">
         <dt class="truncate text-3xs text-[var(--ink-3)]">{{ t('dash.venueAccounts.fields.available') }}</dt>
         <dd class="num truncate font-mono text-xs font-semibold text-[var(--ink-1)]" data-test="cell-available">
           {{ money(account?.available) }}
         </dd>
       </div>
 
-      <div class="min-w-0 rounded-lg p-2 transition-colors hover:bg-[var(--surface-2)]" style="background-color: var(--surface-1); border: 1px solid var(--line-1)">
+      <div class="min-w-0 rounded-lg p-2" style="background-color: var(--surface-1); border: 1px solid var(--line-1)">
         <dt class="truncate text-3xs text-[var(--ink-3)]">{{ t('dash.venueAccounts.fields.positions') }}</dt>
         <dd class="num truncate font-mono text-xs font-semibold text-[var(--ink-1)]" data-test="cell-positions">
           {{ count(account?.positions_count) }}
         </dd>
       </div>
 
-      <div class="min-w-0 rounded-lg p-2 transition-colors hover:bg-[var(--surface-2)]" style="background-color: var(--surface-1); border: 1px solid var(--line-1)">
+      <div class="min-w-0 rounded-lg p-2" style="background-color: var(--surface-1); border: 1px solid var(--line-1)">
         <dt class="truncate text-3xs text-[var(--ink-3)]">{{ t('dash.venueAccounts.fields.openOrders') }}</dt>
         <dd class="num truncate font-mono text-xs font-semibold text-[var(--ink-1)]" data-test="cell-orders">
           {{ count(account?.open_orders_count) }}
