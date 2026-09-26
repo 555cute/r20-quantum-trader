@@ -85,7 +85,16 @@ class OKXEnvironmentTests(unittest.TestCase):
             [{"instId":"SOL-USDT-SWAP","posSide":"long","ordId":"11","reduceOnly":"true","side":"sell"}],
             [], [], [],
         ]
-        with patch.object(trade_service,"current_environment",return_value=env), patch.object(trade_service,"_request",side_effect=responses) as request, patch.object(trade_service.time,"sleep"), \
+        # 2026-09：平仓改走 okx_rest.close_position（统一挂经纪商 tag 的出口），
+        # 不再经 `_request` ⇒ 必须单独替掉它，否则本用例会**真的发出网络请求**
+        # （实测过：漏替会打到 OKX 并吃 401）。
+        close_calls=[]
+        def _close(inst_id, pos_side="net", **kw):
+            close_calls.append((inst_id, pos_side))
+            return [{"sCode":"0"}]
+        with patch.object(trade_service,"current_environment",return_value=env), patch.object(trade_service,"_request",side_effect=responses) as request, \
+             patch.object(trade_service.okx_rest, "close_position", side_effect=_close), \
+             patch.object(trade_service.time,"sleep"), \
              patch.object(trade_service, "pending_algo_orders", return_value=[{"algoId":"777","posSide":"long","instId":"SOL-USDT-SWAP"}]) as algo_scan, \
              patch.object(trade_service, "cancel_algo_orders", return_value=[]) as algo_cancel:
             result=trade_service.fast_close_confirmed(token,confirmation)
@@ -95,7 +104,10 @@ class OKXEnvironmentTests(unittest.TestCase):
         algo_cancel.assert_called_once_with(["777"], inst_id="SOL-USDT-SWAP", env=env)
         calls=[(c.args[0],c.args[1],c.args[2]) for c in request.call_args_list]
         self.assertIn(("POST","/api/v5/trade/cancel-order",{"instId":"SOL-USDT-SWAP","ordId":"11"}),calls)
-        self.assertTrue(any(path=="/api/v5/trade/close-position" for _,path,_ in calls))
+        self.assertNotIn("/api/v5/trade/close-position", [p for _,p,_ in calls],
+                         "平仓不再自拼请求体（统一出口才带得上经纪商 tag）")
+        self.assertEqual(close_calls, [("SOL-USDT-SWAP","long")],
+                         "平仓必须经 okx_rest.close_position（唯一带 tag 的出口）")
 
 
 class NotificationChannelRemovalTests(unittest.TestCase):

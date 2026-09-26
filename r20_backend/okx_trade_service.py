@@ -103,7 +103,15 @@ def fast_close_confirmed(close_token: str, confirmation: str) -> dict[str, Any]:
     if cancel_failures:
         raise RuntimeError("平仓前存在无法撤销的同仓位委托：" + "; ".join(cancel_failures))
     close_side = intent["posSide"] if intent["posSide"] in {"long", "short"} else "net"
-    close_result=_request("POST","/api/v5/trade/close-position",{"instId":intent["instId"],"mgnMode":str(target.get("mgnMode") or "cross"),"posSide":close_side,"autoCxl":True,"clOrdId":f"r20close{int(time.time())}"},env)
+    # 2026-09：改走 `okx_rest.close_position` —— **唯一的带经纪商 tag 的平仓出口**。
+    # 此处原先自己拼请求体，绕过了 `_with_broker_tag` ⇒ 后台「应急一键平仓」的成交
+    # 全部不计经纪商归属（OKX 文档「经纪商指引」把「市价全平」明确列为需带
+    # Broker code 的产单端点）。参数逐项等价：instId/mgnMode/posSide/autoCxl/
+    # clOrdId 同名同义，超时同为 `DEFAULT_TIMEOUT`=20s（原先显式传的也是 20）。
+    close_result=okx_rest.close_position(
+        intent["instId"], close_side,
+        td_mode=str(target.get("mgnMode") or "cross"),
+        auto_cxl=True, cl_ord_id=f"r20close{int(time.time())}", env=env)
     remaining=actual
     for _ in range(10):
         time.sleep(.7); current=_position_match(_request("GET","/api/v5/account/positions",{"instType":"SWAP","instId":intent["instId"]},env),intent)

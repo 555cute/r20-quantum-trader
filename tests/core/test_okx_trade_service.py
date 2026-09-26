@@ -195,6 +195,16 @@ class FastCloseTests(_Base):
               algo_error=None, cancel_error=None):
         seq = list(positions_seq)
 
+        self.close_calls = []   # 2026-09：平仓改走 okx_rest.close_position（统一出口）
+
+        def _close(inst_id, pos_side="net", *, td_mode="cross", auto_cxl=True,
+                   cl_ord_id=None, tag=None, env=None):
+            # 记录成与旧请求体同形的 dict，断言处照旧按字段取值
+            self.close_calls.append({"instId": inst_id, "mgnMode": td_mode,
+                                     "posSide": pos_side, "autoCxl": auto_cxl,
+                                     "clOrdId": cl_ord_id, "tag": tag})
+            return list(close_result or [{"sCode": "0"}])
+
         def _req(method, path, params=None, env=None, timeout=20):
             if path.endswith("/account/positions"):
                 return seq.pop(0) if seq else []
@@ -204,11 +214,11 @@ class FastCloseTests(_Base):
                 if cancel_error:
                     raise cancel_error
                 return [{"sCode": "0"}]
-            if path.endswith("/trade/close-position"):
-                return list(close_result or [{"sCode": "0"}])
             return []
 
         self.request = self._start(mock.patch.object(OT, "_request", side_effect=_req))
+        self.close = self._start(mock.patch.object(OT.okx_rest, "close_position",
+                                                   side_effect=_close))
         self.algo = self._start(mock.patch.object(
             OT, "pending_algo_orders",
             side_effect=algo_error if algo_error else None,
@@ -301,14 +311,18 @@ class FastCloseTests(_Base):
         request = self._wire([[_pos(mgn_mode="isolated")], []])
         token, confirmation = self._intent()
         OT.fast_close_confirmed(token, confirmation)
-        close_calls = [c for c in request.call_args_list
-                       if c[0][1].endswith("/trade/close-position")]
-        payload = close_calls[0][0][2]
+        payload = self.close_calls[0]
         self.assertEqual(payload["instId"], "BTC-USDT-SWAP")
         self.assertEqual(payload["mgnMode"], "isolated")
         self.assertEqual(payload["posSide"], "long")
         self.assertTrue(payload["autoCxl"])
         self.assertTrue(payload["clOrdId"].startswith("r20close"))
+        # ⚠️ tag 不在此处断言：本用例把 `okx_rest.close_position` 整个换成替身，
+        # 而 tag 正是**由那个函数内部**统一挂上的（替身自然看不到）。
+        # 「应急平仓的 HTTP 体真的带 tag」由 tests/venues/test_okx_private_channel_unified.py
+        # 断言 —— 那边只替 urlopen，真实 close_position 会被执行，tag 落在请求体里。
+        # 这里只需钉住"走的确实是统一出口"（不是自拼请求体）。
+        self.assertIsNotNone(self.close, "应急平仓必须复用 okx_rest.close_position")
 
     def test_net_intent_closes_with_net_side(self):
         env = _env()
@@ -316,9 +330,7 @@ class FastCloseTests(_Base):
         request = self._wire([[_pos(pos_side="net", pos="2")], []])
         token, confirmation = OT._create_intent(env, _pos(pos="2", pos_side="net"))
         OT.fast_close_confirmed(token, confirmation)
-        close_calls = [c for c in request.call_args_list
-                       if c[0][1].endswith("/trade/close-position")]
-        self.assertEqual(close_calls[0][0][2]["posSide"], "net")
+        self.assertEqual(self.close_calls[0]["posSide"], "net")
 
     def test_side_is_inferred_from_the_sign_when_the_intent_is_net_but_row_is_signed(self):
         env = _env()
@@ -330,9 +342,7 @@ class FastCloseTests(_Base):
                                                       "pos": "-2", "posSide": "net",
                                                       "posId": "p1"})
         OT.fast_close_confirmed(token, confirmation)
-        close_calls = [c for c in request.call_args_list
-                       if c[0][1].endswith("/trade/close-position")]
-        self.assertEqual(close_calls[0][0][2]["posSide"], "net",
+        self.assertEqual(self.close_calls[0]["posSide"], "net",
                          "net 档位下不下有方向的 posSide")
 
     def test_position_not_zeroed_after_ten_polls_raises(self):

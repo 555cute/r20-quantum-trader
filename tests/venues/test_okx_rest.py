@@ -18,6 +18,7 @@ import json
 import unittest
 import urllib.parse
 from decimal import Decimal
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import scripts.okx_rest as okx_rest
@@ -450,3 +451,42 @@ class BrokerTagCoverageTest(unittest.TestCase):
             with patch.dict("os.environ", {"OKX_BROKER_TAG": "FROM-ENV"}):
                 okx_rest.close_position("BTC-USDT-SWAP", "long")
             self.assertEqual(captured[-1]["tag"], "FROM-ENV")
+
+
+class NoOrderEndpointBypassTest(unittest.TestCase):
+    """除 `scripts/okx_rest.py` 外，**任何生产模块**都不得自己拼产单端点的请求体。
+
+    起因（实测漏网）：`r20_backend/okx_trade_service.py::fast_close_confirmed`
+    —— 后台「应急一键平仓」—— 自己拼了 `POST /api/v5/trade/close-position`，
+    绕过了 `_with_broker_tag` ⇒ 那批成交不计经纪商归属。
+
+    OKX 文档「经纪商指引/经纪商常用接口」把产单端点列得很明确：**下单 / 批量下单 /
+    市价全平 / 策略委托下单** —— 请求参数带 `tag` 的都"务必录入专属 Broker code"。
+    故这四个端点的字面量只允许出现在统一客户端里；旁路一出现本门就红。
+    """
+
+    #: 会产单的端点（带引号比较，避免 `/trade/order` 前缀命中 `/trade/order-algo`）
+    ORDER_ENDPOINT_LITERALS = ('"/api/v5/trade/order"', "'/api/v5/trade/order'",
+                               '"/api/v5/trade/batch-orders"', "'/api/v5/trade/batch-orders'",
+                               '"/api/v5/trade/close-position"', "'/api/v5/trade/close-position'",
+                               '"/api/v5/trade/order-algo"', "'/api/v5/trade/order-algo'")
+
+    ALLOWED = {"scripts/okx_rest.py"}
+
+    def test_only_the_shared_client_talks_to_order_endpoints(self):
+        root = Path(okx_rest.__file__).resolve().parents[1]
+        offenders = []
+        for base in ("scripts", "r20_backend", "r20_gateway"):
+            for path in (root / base).rglob("*.py"):
+                if "__pycache__" in path.parts:
+                    continue
+                rel = path.relative_to(root).as_posix()
+                if rel in self.ALLOWED:
+                    continue
+                text = path.read_text(encoding="utf-8")
+                for literal in self.ORDER_ENDPOINT_LITERALS:
+                    if literal in text:
+                        offenders.append(f"{rel} :: {literal.strip(chr(34))}")
+        self.assertEqual(offenders, [],
+                         "这些生产模块绕过了统一客户端自拼产单请求（会漏掉经纪商 tag）：\n  "
+                         + "\n  ".join(offenders))

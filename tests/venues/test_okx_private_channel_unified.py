@@ -14,6 +14,7 @@ import r20_backend.app as api
 import r20_backend.config as config
 import r20_backend.okx_client as client_module
 import r20_backend.okx_trade_service as trade
+from scripts import okx_rest as rest
 import r20_gateway.secrets as secrets
 from r20_backend.admin_auth import AdminAuthStore
 from scripts import okx_rest as rest, okx_runtime as runtime
@@ -139,7 +140,13 @@ class UnifiedPrivateChannelTests(unittest.TestCase):
             else:
                 rows = [{'sCode': '0'}]
             if path.endswith('/close-position'):
-                self.assertIs(json.loads(request.data)['autoCxl'], True)
+                body = json.loads(request.data)
+                self.assertIs(body['autoCxl'], True)
+                # 2026-09：应急一键平仓也必须带经纪商 tag。此前本路径自己拼请求体、
+                # 绕过了 `_with_broker_tag` ⇒ 后台平掉的那些仓不计经纪商归属
+                # （OKX「经纪商指引」把「市价全平」明确列为需带 Broker code 的产单端点）。
+                self.assertEqual(body.get('tag'), rest.DEFAULT_OKX_BROKER_TAG,
+                                 "应急平仓漏了经纪商 tag —— 这批成交拿不到返佣")
                 closed = True
             if path.endswith('/cancel-algos'):
                 self.assertEqual(json.loads(request.data), [{'algoId': 'A', 'instId': position['instId']}])
