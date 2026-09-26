@@ -109,6 +109,8 @@ class GoldenTest(unittest.TestCase):
             "entry_long_zh", "entry_long_en", "entry_short_zh", "entry_short_en",
             "sl_zh", "sl_en", "sl_frac",
             "tp_zh", "tp_en", "tp_frac",
+            # 分批止盈两档（2026-09）：TP1 / TP2 图签必须各自有样本
+            "tp1_zh", "tp2_zh",
             "plan_none", "plan_all", "plan_entry_guard", "plan_sl_only",
         }
         self.assertEqual(set(self.golden), need)
@@ -163,10 +165,12 @@ class GoldenTest(unittest.TestCase):
         self.assertIn("+10.1%", self.golden["tp_frac"]["extendData"])
 
     def test_plan_none_draws_nothing(self):
-        self.assertEqual(self.golden["plan_none"], {})
+        self.assertEqual(self.golden["plan_none"], {"tps": []})
 
-    def test_plan_all_draws_three(self):
-        self.assertEqual(set(self.golden["plan_all"]), {"entry", "sl", "tp"})
+    def test_plan_all_draws_entry_sl_and_the_tp_lines(self):
+        """止盈改成一档一条后，`plan` 的止盈键是**数组** `tps`（不再是单值 `tp`）。"""
+        self.assertEqual(set(self.golden["plan_all"]), {"entry", "sl", "tps"})
+        self.assertEqual(len(self.golden["plan_all"]["tps"]), 1)
 
     def test_entry_guard_requires_has_pos_or_order(self):
         """**关键守卫**：`hasPosOrOrder` 为假时即使 entryPx>0 也不画入场线。
@@ -176,17 +180,32 @@ class GoldenTest(unittest.TestCase):
         o = self.golden["plan_entry_guard"]
         self.assertNotIn("entry", o, "无持仓无挂单时不得画入场线")
         self.assertIn("sl", o, "止损线不受 hasPosOrOrder 约束")
-        self.assertIn("tp", o, "止盈线不受 hasPosOrOrder 约束")
+        self.assertTrue(o["tps"], "止盈线不受 hasPosOrOrder 约束")
 
     def test_sl_only_when_entry_price_zero(self):
-        self.assertEqual(set(self.golden["plan_sl_only"]), {"sl"})
+        self.assertEqual(set(self.golden["plan_sl_only"]), {"sl", "tps"})
+        self.assertEqual(self.golden["plan_sl_only"]["tps"], [], "未设止盈时不得出线")
 
     def test_plan_pieces_match_standalone_builders(self):
         """plan 造出的线必须与单独调用构造函数**逐字节相同**。"""
         o = self.golden["plan_all"]
         self.assertEqual(o["entry"], self.golden["entry_long_zh"])
         self.assertEqual(o["sl"], self.golden["sl_zh"])
-        self.assertEqual(o["tp"], self.golden["tp_zh"])
+        self.assertEqual(o["tps"][0], self.golden["tp_zh"])
+
+    # ---- 行为 0（2026-09 新增）：分批止盈 ----
+
+    def test_batch_tp_labels_distinct(self):
+        """分批止盈：TP1 / TP2 图签必须真的不同，且单档图签与改前**逐字相同**。
+
+        改前 K 线只画终点一条（`tps` 长度恒为 1）—— 用户反馈"只会显示一个止盈点，
+        但平时都是分批挂单"。这条钉住"两档都出、且图签可区分、单档不硬凑 TP1/TP2"。
+        """
+        self.assertNotEqual(self.golden["tp1_zh"]["extendData"],
+                            self.golden["tp2_zh"]["extendData"])
+        self.assertEqual(self.golden["tp1_zh"]["extendData"], "▲ 止盈TP1 +5.0%")
+        self.assertEqual(self.golden["tp2_zh"]["extendData"], "▲ 止盈TP2 +10.0%")
+        self.assertEqual(self.golden["tp_zh"]["extendData"], "▲ 止盈TP +10.0%")
 
 
 class DerivedBehaviourTest(unittest.TestCase):
@@ -225,8 +244,14 @@ class DerivedBehaviourTest(unittest.TestCase):
         return m.group(1)
 
     def _fn_body(self, name: str) -> str:
-        """取导出的函数体（到下一个 `export ` 或文件末尾）。"""
-        start = self.code.index(f"export function {name}(")
+        """取导出的函数体（到下一个 `export ` 或文件末尾）。
+
+        容忍泛型参数（`export function f<T extends …>(`）—— 旧实现写死 `name(`，
+        遇到带泛型的导出会直接 `ValueError`。
+        """
+        m = re.search(rf"export function {re.escape(name)}\b", self.code)
+        self.assertIsNotNone(m, f"找不到导出函数 {name}")
+        start = m.start()
         nxt = self.code.find("\nexport ", start + 1)
         return self.code[start:] if nxt == -1 else self.code[start:nxt]
 
@@ -308,16 +333,17 @@ class DerivedBehaviourTest(unittest.TestCase):
         body = self._fn_body("planPriceLines")
         self.assertIn("if (hasPosOrOrder && entryPx > 0)", body)
         self.assertIn("if (slPx > 0)", body)
-        self.assertIn("if (tpPx > 0)", body)
+        # 止盈守卫：分批后由单值 `tpPx > 0` 改为逐档 `lv.price > 0`
+        self.assertIn("lv.price > 0", body)
         # 黄金样本必须与此一致
-        self.assertNotIn("entry", self.golden["plan_entry_guard"])
-        self.assertIn("sl", self.golden["plan_entry_guard"])
-        self.assertIn("tp", self.golden["plan_entry_guard"])
+        guard = self.golden["plan_entry_guard"]
+        self.assertNotIn("entry", guard, "无持仓无挂单时不得画入场线")
+        self.assertIn("sl", guard, "止损线不受 hasPosOrOrder 约束")
+        self.assertTrue(guard["tps"], "止盈线不受 hasPosOrOrder 约束")
 
     def test_sl_guard_does_not_require_pos_or_order(self):
         body = self._fn_body("planPriceLines")
-        self.assertNotIn("hasPosOrOrder && slPx", body,
-                         "止损线不得被 hasPosOrOrder 约束")
+        self.assertNotIn("hasPosOrOrder && slPx", body,                         "止损线不得被 hasPosOrOrder 约束")
 
     # ---- 行为 5：i18n 标签 ----
 
@@ -340,6 +366,30 @@ class DerivedBehaviourTest(unittest.TestCase):
         self.assertTrue(self.golden["sl_zh"]["extendData"].startswith("▼"))
         self.assertTrue(self.golden["tp_zh"]["extendData"].startswith("▲"))
 
+    # ---- 行为 6（2026-09 新增）：一档一条 + 价格轴扩范围 ----
+
+    def test_batch_tp_one_line_per_level_derived_from_source(self):
+        """一档一条：`planPriceLines` 必须**逐档**出线，而不是只取单个 tpPx。"""
+        body = self._fn_body("planPriceLines")
+        m = re.search(r"for \(const (\w+) of tpLevels\)", body)
+        self.assertIsNotNone(m, "planPriceLines 必须遍历档位（而非只取单个 tpPx）")
+        self.assertIn(f"{m.group(1)}.price > 0", body, "每档仍要各自判 price > 0")
+        self.assertIn("plan.tps.push(", body)
+        # 图签后缀必须来自入参，否则分批档位无法区分
+        self.assertIn("label", self._fn_body("buildTpOverlay"))
+
+    def test_axis_range_helper_only_grows(self):
+        """价格轴范围：库侧只统计蜡烛+指标（不看 overlay），故本模块把它撑到含仓位价位。
+
+        钉住"只扩不缩" —— 缩小会把 K 线拉伸进无意义的空白区。
+        """
+        self.assertIn("export function expandRangeToLevels", self.src)
+        body = self._fn_body("expandRangeToLevels")
+        self.assertIn("Math.min(defaultRange.realFrom", body)
+        self.assertIn("Math.max(defaultRange.realTo", body)
+        self.assertIn("return defaultRange", body, "无有效价位时必须原样返回")
+        self.assertIn("Number.isFinite(p) && p > 0", body, "非法价位必须被滤掉")
+
 
 class SourceShapeTest(unittest.TestCase):
     """源码结构核对 —— 防"实现没了/改名了、黄金样本却还绿"。"""
@@ -351,21 +401,26 @@ class SourceShapeTest(unittest.TestCase):
 
     def test_module_exports_the_four_functions(self):
         for name in ("buildEntryOverlay", "buildSlOverlay", "buildTpOverlay",
-                     "planPriceLines"):
-            self.assertIn(f"export function {name}(", self.src, name)
+                     "planPriceLines", "expandRangeToLevels"):
+            # `expandRangeToLevels` 带泛型参数 ⇒ 只断到函数名，不咬死签名形状
+            self.assertRegex(self.src, rf"export function {name}\b", name)
 
     def test_constants_present_in_source(self):
         """黄金样本里的固定值必须能在 `.ts` 里找到（否则样本是"孤儿数据"）。"""
         for token in (LONG, SHORT, "'priceLine'", "'candle_pane'",
                       "[6, 4]", "多头入场", "空头入场", "Entry Long", "Entry Short",
-                      "止损SL", "止盈TP", "▼", "▲", "toFixed(1)"):
+                      "止损SL", "止盈", "'TP'", "'TP1'", "'TP2'", "▼", "▲", "toFixed(1)"):
             self.assertIn(token, self.src, f"源码缺少黄金样本里的 {token!r}")
 
     def test_guard_expressions_present(self):
-        """三条守卫必须原样在源码里（改坏会被黄金样本 + 这条一起拦下）。"""
+        """三条守卫必须原样在源码里（改坏会被黄金样本 + 这条一起拦下）。
+
+        止盈守卫由"单个 `tpPx > 0`"演进为"逐档 `lv.price > 0`"（分批止盈），
+        入场/止损两条口径未变。
+        """
         self.assertIn("hasPosOrOrder && entryPx > 0", self.src)
         self.assertIn("slPx > 0", self.src)
-        self.assertIn("tpPx > 0", self.src)
+        self.assertIn("lv.price > 0", self.src)
 
     def test_module_has_no_component_dependency(self):
         """反向依赖检查：本模块不得 import 任何 .vue 或 Vue 运行时。
@@ -384,8 +439,10 @@ class SourceShapeTest(unittest.TestCase):
 
     def test_component_uses_the_plan(self):
         """组件必须真的用上抽出的函数，且不再内嵌建线字面量。"""
-        self.assertIn("import { planPriceLines } from './chartOverlays'", self.component)
+        self.assertIn("import { planPriceLines, expandRangeToLevels } from './chartOverlays'",
+                      self.component)
         self.assertIn("planPriceLines({", self.component)
+        self.assertIn("expandRangeToLevels(", self.component)
         for gone in ("dashedValue: [6, 4]", "'多头入场'", "'Entry Long'", "止损SL"):
             self.assertNotIn(gone, self.component, f"组件仍残留内联建线片段 {gone!r}")
 

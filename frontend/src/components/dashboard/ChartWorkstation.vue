@@ -21,6 +21,7 @@ import {
   registerOverlay,
   type Chart as KLineChartType,
   type KLineData,
+  type AxisCreateRangeParams,
 } from 'klinecharts'
 import {
   Sliders,
@@ -591,7 +592,9 @@ function initChart() {
   // TP2 = 1.6708 时轴顶只有 1.6656，换算像素 y = −9px，线建出来了但看不见，
   // 读者"只看得到一个止盈点"。这里只**扩**不缩，无仓无单时原样返回默认范围。
   // 只挂在 candle_pane 的价格轴上 —— 成交量面板的量纲是万计，并入价位会把量柱压平。
-  function priceLineRange({ defaultRange }: { defaultRange: { realFrom: number; realTo: number } }) {
+  // 入参类型用库导出的 `AxisCreateRangeParams`：回调必须**原样返回 AxisRange**
+  // （`expandRangeToLevels` 是泛型，靠这里的 `defaultRange` 推断出完整类型）。
+  function priceLineRange({ defaultRange }: AxisCreateRangeParams) {
     if (!(activePosition.value || activeOrder.value || simMode.value)) return defaultRange
     const levels = [
       effectiveEntry.value,

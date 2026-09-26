@@ -243,8 +243,90 @@
     },
     "extendData": "▲ 止盈TP +10.1%"
   },
-  "plan_none": {},
+  "tp1_zh": {
+    "name": "priceLine",
+    "paneId": "candle_pane",
+    "points": [
+      {
+        "value": 105
+      }
+    ],
+    "styles": {
+      "line": {
+        "style": "dashed",
+        "dashedValue": [
+          6,
+          4
+        ],
+        "size": 1.5,
+        "color": "#10B981"
+      },
+      "text": {
+        "size": 11,
+        "color": "#e5e7eb",
+        "backgroundColor": "#10B981"
+      }
+    },
+    "extendData": "▲ 止盈TP1 +5.0%"
+  },
+  "tp2_zh": {
+    "name": "priceLine",
+    "paneId": "candle_pane",
+    "points": [
+      {
+        "value": 110
+      }
+    ],
+    "styles": {
+      "line": {
+        "style": "dashed",
+        "dashedValue": [
+          6,
+          4
+        ],
+        "size": 1.5,
+        "color": "#10B981"
+      },
+      "text": {
+        "size": 11,
+        "color": "#e5e7eb",
+        "backgroundColor": "#10B981"
+      }
+    },
+    "extendData": "▲ 止盈TP2 +10.0%"
+  },
+  "plan_none": {
+    "tps": []
+  },
   "plan_all": {
+    "tps": [
+      {
+        "name": "priceLine",
+        "paneId": "candle_pane",
+        "points": [
+          {
+            "value": 110
+          }
+        ],
+        "styles": {
+          "line": {
+            "style": "dashed",
+            "dashedValue": [
+              6,
+              4
+            ],
+            "size": 1.5,
+            "color": "#10B981"
+          },
+          "text": {
+            "size": 11,
+            "color": "#e5e7eb",
+            "backgroundColor": "#10B981"
+          }
+        },
+        "extendData": "▲ 止盈TP +10.0%"
+      }
+    ],
     "entry": {
       "name": "priceLine",
       "paneId": "candle_pane",
@@ -292,35 +374,37 @@
         }
       },
       "extendData": "▼ 止损SL -5.0%"
-    },
-    "tp": {
-      "name": "priceLine",
-      "paneId": "candle_pane",
-      "points": [
-        {
-          "value": 110
-        }
-      ],
-      "styles": {
-        "line": {
-          "style": "dashed",
-          "dashedValue": [
-            6,
-            4
-          ],
-          "size": 1.5,
-          "color": "#10B981"
-        },
-        "text": {
-          "size": 11,
-          "color": "#e5e7eb",
-          "backgroundColor": "#10B981"
-        }
-      },
-      "extendData": "▲ 止盈TP +10.0%"
     }
   },
   "plan_entry_guard": {
+    "tps": [
+      {
+        "name": "priceLine",
+        "paneId": "candle_pane",
+        "points": [
+          {
+            "value": 110
+          }
+        ],
+        "styles": {
+          "line": {
+            "style": "dashed",
+            "dashedValue": [
+              6,
+              4
+            ],
+            "size": 1.5,
+            "color": "#10B981"
+          },
+          "text": {
+            "size": 11,
+            "color": "#e5e7eb",
+            "backgroundColor": "#10B981"
+          }
+        },
+        "extendData": "▲ 止盈TP +10.0%"
+      }
+    ],
     "sl": {
       "name": "priceLine",
       "paneId": "candle_pane",
@@ -346,35 +430,10 @@
         }
       },
       "extendData": "▼ 止损SL -5.0%"
-    },
-    "tp": {
-      "name": "priceLine",
-      "paneId": "candle_pane",
-      "points": [
-        {
-          "value": 110
-        }
-      ],
-      "styles": {
-        "line": {
-          "style": "dashed",
-          "dashedValue": [
-            6,
-            4
-          ],
-          "size": 1.5,
-          "color": "#10B981"
-        },
-        "text": {
-          "size": 11,
-          "color": "#e5e7eb",
-          "backgroundColor": "#10B981"
-        }
-      },
-      "extendData": "▲ 止盈TP +10.0%"
     }
   },
   "plan_sl_only": {
+    "tps": [],
     "sl": {
       "name": "priceLine",
       "paneId": "candle_pane",
