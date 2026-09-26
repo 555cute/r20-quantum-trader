@@ -67,6 +67,7 @@ BODY_DELTAS: list = [
      "\nif order_mode == 'market':"
      "\n    from scripts.trader.brackets import reanchor_brackets_to_market"
      "\n    _mk_prec = len(str(_tick_last_raw).split('.')[1]) if '.' in str(_tick_last_raw) else 4"
+     "\n    _plan_tp, _plan_sl = (effective_tp, effective_sl)"
      "\n    _anchored = reanchor_brackets_to_market(entry=effective_px, tp=effective_tp,"
      " sl=effective_sl, market=_anchor_last, is_long=pos_side == 'long', prec=_mk_prec)"
      "\n    if _anchored is None:"
@@ -76,6 +77,8 @@ BODY_DELTAS: list = [
      "\n        release_signal_reservation(_reservation, '市价锚定缺现价')"
      "\n        return (False, f'市价锚定拒绝: {_mk_rej}')"
      "\n    effective_px, effective_tp, effective_sl = _anchored"
+     "\n    print(f'[市价锚定] {inst_id} 现价={_anchor_last:g} 计划TP={_plan_tp:g}/SL={_plan_sl:g}"
+     " → 实提TP={effective_tp:g}/SL={effective_sl:g}')"
      "\nfrom scripts.order_risk import validate_quote_geometry_and_rr"),
 ]
 

@@ -20,8 +20,10 @@
 from __future__ import annotations
 
 import ast
+import os
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from scripts.trader import notifications
 
@@ -72,6 +74,14 @@ def _legacy_trade_open_kwargs(*, is_long, is_scale_in, name, sz, px, strat_tag,
 
 
 class ActionMessageParityTest(unittest.TestCase):
+    def setUp(self):
+        # ⚠️ 单型字（2026-09 起）会读 `R20_ORDER_MODE` ⇒ 对拍必须钉死档位，
+        # 否则运维一切到市价，legacy（限价文案）与实现的逐字对拍就红。
+        # 市价档的独立断言见 `OrderTypeWordingTest`。
+        env = patch.dict(os.environ, {"R20_ORDER_MODE": "limit"})
+        env.start()
+        self.addCleanup(env.stop)
+
     def _call(self, fn, **kw):
         base = dict(name="BTC", sz=3, px=79000.0, order_ref="ORD1",
                     tp_px=80000.0, sl_px=78000.0)
@@ -120,6 +130,90 @@ class ActionMessageParityTest(unittest.TestCase):
         self.assertNotEqual(a, b)
         self.assertIn("金字塔", a)
         self.assertNotIn("金字塔", b)
+
+
+class OrderTypeWordingTest(unittest.TestCase):
+    """单型字必须说对（2026-09 缺陷）。
+
+    实测事故：`.env` 已是 `R20_ORDER_MODE=market`，而 12:45 的 ARB 单
+    （实发市价）在日志与通知里写的是「AI**限价**多单已提交待成交」——
+    **运维/排障无法从日志判断实际发的是哪种单**，本轮排障就被它误导过一次。
+    """
+
+    def _msg(self, mode, **over):
+        kw = dict(is_long=True, is_scale_in=False, name="ARB", sz=309.4,
+                  px=0.2228, order_ref="337477221", tp_px=0.2444, sl_px=0.2138)
+        kw.update(over)
+        with patch.dict(os.environ, {"R20_ORDER_MODE": mode}):
+            return notifications.entry_action_message(**kw)
+
+    def test_market_mode_says_market_not_limit(self):
+        msg = self._msg("market")
+        self.assertIn("AI市价多单已提交", msg, "市价档必须写「市价」")
+        self.assertNotIn("限价", msg, "市价档写「限价」= 谎报单型（本次要修的形态）")
+        self.assertNotIn("待成交", msg, "市价单当场成交，「待成交」不成立")
+
+    def test_limit_mode_wording_is_unchanged(self):
+        """限价档逐字保持原样（不许顺手改既有文案）。"""
+        self.assertIn("AI限价多单已提交待成交", self._msg("limit"))
+
+    def test_failure_message_follows_the_mode(self):
+        with patch.dict(os.environ, {"R20_ORDER_MODE": "market"}):
+            self.assertIn("AI市价多单提交失败", notifications.entry_failure_message(
+                is_long=True, name="XRP", order_ref="市价锚定拒绝: 现价不可用"))
+        with patch.dict(os.environ, {"R20_ORDER_MODE": "limit"}):
+            self.assertIn("AI限价多单提交失败", notifications.entry_failure_message(
+                is_long=True, name="XRP", order_ref="r"))
+
+    def test_missing_or_garbled_mode_falls_back_to_limit(self):
+        """兜底与真实发单**同源**：读不到/拼错一律按限价 —— 不允许出现
+        "文案说市价、实际发限价"这种反向误导。
+
+        ⚠️ 大小写与首尾空白**不算拼错**：下单路径用的是
+        `str(os.getenv(...)).strip().lower() == "market"`，本模块逐字同源，
+        故 `"Market "` / `"MARKET"` 都算市价（见下面的正向断言）。
+        """
+        for garbled in ("", "LIMIT", "banana", "marketx"):
+            with self.subTest(mode=garbled):
+                with patch.dict(os.environ, {"R20_ORDER_MODE": garbled}):
+                    self.assertIn("AI限价多单已提交待成交",
+                                  notifications.entry_action_message(
+                                      is_long=True, is_scale_in=False, name="BTC", sz=1,
+                                      px=1.0, order_ref="o", tp_px=2.0, sl_px=0.5))
+        with patch.dict(os.environ):
+            os.environ.pop("R20_ORDER_MODE", None)
+            self.assertIn("AI限价多单已提交待成交",
+                          notifications.entry_action_message(
+                              is_long=True, is_scale_in=False, name="BTC", sz=1,
+                              px=1.0, order_ref="o", tp_px=2.0, sl_px=0.5))
+
+    def test_case_and_whitespace_are_normalised_like_the_order_path(self):
+        """`"Market "` / `"MARKET"` 与发单路径一致地算作市价（不是拼错）。"""
+        for variant in ("Market ", "MARKET", " market "):
+            with self.subTest(mode=variant):
+                with patch.dict(os.environ, {"R20_ORDER_MODE": variant}):
+                    self.assertIn("AI市价多单已提交", notifications.entry_action_message(
+                        is_long=True, is_scale_in=False, name="BTC", sz=1,
+                        px=1.0, order_ref="o", tp_px=2.0, sl_px=0.5))
+
+    def test_wording_matches_what_the_order_path_will_send(self):
+        """文案的单型判据必须与下单路径**逐字同源**（否则又是另一种谎报）。
+
+        直接比对两处的取值口径：同一组 `R20_ORDER_MODE` 下，
+        `notifications._order_word()` 的结论必须与 `order_submit` 的
+        「是否走市价分支」一致。
+        """
+        for mode, expect_market in [("market", True), ("limit", False),
+                                    ("MARKET", True), ("", False), ("x", False)]:
+            with self.subTest(mode=mode):
+                with patch.dict(os.environ, {"R20_ORDER_MODE": mode}):
+                    word = notifications._order_word()
+                    sent_market = (str(os.getenv("R20_ORDER_MODE", "limit"))
+                                   .strip().lower() == "market")
+                self.assertEqual(word == "市价", expect_market)
+                self.assertEqual(sent_market, expect_market,
+                                 "文案与发单路径的档位判据出现分歧")
+                self.assertEqual(word == "市价", sent_market)
 
 
 class TradeOpenKwargsParityTest(unittest.TestCase):

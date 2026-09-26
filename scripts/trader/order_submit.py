@@ -142,6 +142,7 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: f
     if order_mode == "market":
         from scripts.trader.brackets import reanchor_brackets_to_market
         _mk_prec = len(str(_tick_last_raw).split(".")[1]) if "." in str(_tick_last_raw) else 4
+        _plan_tp, _plan_sl = effective_tp, effective_sl
         _anchored = reanchor_brackets_to_market(
             entry=effective_px, tp=effective_tp, sl=effective_sl,
             market=_anchor_last, is_long=(pos_side == "long"), prec=_mk_prec)
@@ -152,6 +153,13 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: f
             release_signal_reservation(_reservation, "市价锚定缺现价")
             return False, f"市价锚定拒绝: {_mk_rej}"
         effective_px, effective_tp, effective_sl = _anchored
+        # ⚠️ 审计留痕：**上游拿不到这三个值**。`entry_execution.py` 组装的通知
+        # （`entry_action_message`）用的是**计划价** TP/SL，与交易所实收的保护价不同；
+        # 而 trader 子进程的 stdout 由 gateway 调度器 `capture_output=True` 只留末尾
+        # 2000 字符 ⇒ 这行 print 不保证存活。故它只是**尽力留痕**，权威记录要靠
+        # 「通知里的 TP/SL 是计划值」这一事实本身（已在 notifications 侧文档化）。
+        print(f"[市价锚定] {inst_id} 现价={_anchor_last:g} "
+              f"计划TP={_plan_tp:g}/SL={_plan_sl:g} → 实提TP={effective_tp:g}/SL={effective_sl:g}")
 
     # Final Non-Bypassable Verification: verify actual effective price, tp and sl
     from scripts.order_risk import validate_quote_geometry_and_rr
