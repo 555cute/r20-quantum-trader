@@ -52,6 +52,28 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./backups:/app/backups
+    # 2026-09 新增：网关此前**没有任何健康探测**，而它恰恰是最危险的单点 ——
+    # 后端容器照常绿着（看板能开、数据能看），调度 worker 却可能已经死了，
+    # 表现是"看板一切正常，就是不下单"，用户根本不会发现。
+    #
+    # 判据取"进程存在"而非"周期文件够新"：用户**可以合法关停交易**，那时周期产物本就
+    # 不更新，拿它当存活判据会造成误杀循环。探针只读 /proc，不碰 worker 的 flock。
+    #
+    # ⚠️ 注意 Docker 的边界：健康检查只让 `docker ps` 显示 unhealthy，**不会**自动重启容器
+    # （restart 策略只对"退出"生效）。要真正做到挂了自动拉起，需配合 autoheal 之类
+    # 订阅健康状态的工具；本文件先把"看不见"变成"看得见"。
+    healthcheck:
+      # ⚠️ 判据里的 `r20_gateway[.]worker` 是**故意**这么写的：CMD-SHELL 会以
+      # `/bin/sh -c "grep -l r20_gateway[.]worker ..."` 运行，若写成裸的
+      # `r20_gateway.worker`，探针**自己的命令行**就含该字符串 ⇒ grep 匹配到自己
+      # ⇒ 永远返回"健康"，探针形同虚设（本仓当天刚踩过一次同类自匹配）。
+      # 方括号让正则与被匹配的字面量不同形：worker 的真身 cmdline 是裸点号，能匹配到；
+      # 探针自身含的是 `[.]`，匹配不到自己。
+      test: ["CMD-SHELL", "grep -l 'r20_gateway[.]worker' /proc/[0-9]*/cmdline 2>/dev/null | head -1 | grep -q . || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     depends_on:
       backend:
         condition: service_healthy
