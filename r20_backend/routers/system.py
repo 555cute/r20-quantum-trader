@@ -136,6 +136,16 @@ def runtime_overview() -> dict[str, Any]:
     }
 
 
+def _effective_broker_tag() -> str:
+    """透传 `scripts.okx_rest.effective_broker_tag()`（懒导入）。
+
+    后台「关于」页展示的经纪商 code 必须与**实发订单上的 tag 同源** ——
+    页面显示一个值、订单带另一个值，正是"以为带着 tag 其实没带"这类事故的温床。
+    """
+    from scripts import okx_rest
+    return okx_rest.effective_broker_tag()
+
+
 def git(command: list[str]) -> str:
     try:
         result = subprocess.run(["git", *command], cwd=ROOT, text=True, capture_output=True, timeout=30)
@@ -439,6 +449,7 @@ def admin_about(
     x_r20_session: str | None = Header(default=None, alias="X-R20-Session"),
 ) -> dict[str, Any]:
     require_admin_header(x_r20_admin_token, x_r20_session)
+    refresh_settings()
     pid = read_pid()
     gw_running = process_running(pid)
     store = GatewayStore(GATEWAY_DB_PATH)
@@ -454,6 +465,17 @@ def admin_about(
         ],
         "repository": {"url": "https://github.com/555cute/r20-quantum-trader", "branch": app_attr("git", git)(["branch", "--show-current"]), "commit": app_attr("git", git)(["rev-parse", "--short", "HEAD"])},
         "update": app_attr("update_status", update_status)(),
+        # 注册/返佣通道（后台「关于」页渲染成可复制入口）。
+        # ⚠️ OKX 的经纪商 code 取 `okx_rest.effective_broker_tag()` —— 与**实发订单上的
+        # tag 同源**，避免"页面显示一个、订单带另一个"。三条 URL 走 settings（可被
+        # OKX_INVITE_URL / GATE_INVITE_URL / BINANCE_INVITE_URL 覆盖，便于分发副本替换）。
+        "channels": {
+            "okx": {"name": "OKX", "invite_url": settings.okx_invite_url,
+                    "broker_code": app_attr("effective_broker_tag",
+                                            _effective_broker_tag)()},
+            "gate": {"name": "Gate", "invite_url": settings.gate_invite_url, "broker_code": ""},
+            "binance": {"name": "Binance", "invite_url": settings.binance_invite_url, "broker_code": ""},
+        },
         "security": {"authentication": "PBKDF2-SHA256 + server-side sessions", "session_hours": 12, "plugin_policy": "builtin-only", "prompt_transport": "python-direct"},
     }
 

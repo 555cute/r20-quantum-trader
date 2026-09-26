@@ -363,3 +363,90 @@ class CurrentEnvironmentContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BrokerTagCoverageTest(unittest.TestCase):
+    """**每一个会产单的端点**都必须带经纪商 tag（2026-09 补）。
+
+    起因（实测）：`close_position` 此前不带 tag，而它是**每一个 OKX 市价全平**的
+    唯一出口（`scripts/trader/venue_query.py::close_position_confirmed`，日志实测
+    34 次整仓退出）—— 那些成交就不计经纪商归属。原先 tag 逻辑在两处各写一遍，
+    新端点天然漏掉；现收敛到 `_with_broker_tag` 单一出口，并由本门兜住。
+
+    为什么只盯这三个：`/trade/order`、`/trade/order-algo`、`/trade/close-position`
+    是**会产生成交**的端点；撤单/改单/设杠杆不产生新成交，OKX 也不接受它们的 tag。
+    """
+
+    #: 会产生成交的端点（新增此类端点时必须一并加进来）
+    ORDER_CREATING = ("/api/v5/trade/order", "/api/v5/trade/order-algo",
+                      "/api/v5/trade/close-position")
+
+    def test_tag_logic_has_a_single_exit(self):
+        """tag 的挂载只能有**一处**实现（两处各写一遍正是漏掉 close_position 的成因）。"""
+        import inspect
+        src = inspect.getsource(okx_rest)
+        self.assertEqual(src.count('params["tag"] = broker_tag'), 1,
+                         "tag 挂载出现多份 ⇒ 新增端点必然会漏掉其中一个")
+
+    def test_every_order_creating_endpoint_applies_the_tag(self):
+        """AST 判据：凡调用产单端点的函数，其函数体必须经过 `_with_broker_tag`。
+
+        行为用例只能覆盖**今天已知**的三个端点；这条从源码推导，将来有人新增
+        `POST /api/v5/trade/xxx` 却忘了挂 tag，本门直接红。
+        """
+        import ast
+        import inspect
+        tree = ast.parse(inspect.getsource(okx_rest))
+        checked = []
+        for fn in [n for n in tree.body if isinstance(n, ast.FunctionDef)]:
+            paths = []
+            for call in ast.walk(fn):
+                if not (isinstance(call, ast.Call) and getattr(call.func, "id", None) == "request"):
+                    continue
+                # 只认字面量端点，不 eval 任意表达式（也用不着 try/except —— 用例里
+                # 吞异常会被 `test_tests_cannot_pass_vacuously` 判为"静默通过"）。
+                if len(call.args) >= 2 and ast.literal_eval(call.args[0]) == "POST":
+                    paths.append(ast.literal_eval(call.args[1]))
+            hit = [p for p in paths if p in self.ORDER_CREATING]
+            if not hit:
+                continue
+            checked.append(fn.name)
+            self.assertIn("_with_broker_tag", ast.unparse(fn),
+                          f"{fn.name} 调用产单端点 {hit} 却没挂经纪商 tag")
+        self.assertEqual(sorted(checked), ["close_position", "place_algo_oco", "place_order"],
+                         "产单端点的实现函数变了 —— 新端点必须一并纳入本门")
+
+    def test_wire_params_carry_the_tag_on_all_three(self):
+        """行为判据：拦截实际请求体，三个端点都必须出现 tag。"""
+        captured = []
+
+        def _fake(method, path, params=None, *, env=None, **kw):
+            captured.append((path, dict(params or {})))
+            return []
+
+        with patch.object(okx_rest, "request", _fake):
+            okx_rest.place_order("BTC-USDT-SWAP", "buy", 1, ord_type="limit", px="79000")
+            okx_rest.place_algo_oco("BTC-USDT-SWAP", "buy", 1, pos_side="long",
+                                    tp_trigger_px="80000", sl_trigger_px="78000")
+            okx_rest.close_position("BTC-USDT-SWAP", "long")
+        self.assertEqual([p for p, _ in captured],
+                         ["/api/v5/trade/order", "/api/v5/trade/order-algo",
+                          "/api/v5/trade/close-position"])
+        for path, params in captured:
+            self.assertEqual(params.get("tag"), okx_rest.DEFAULT_OKX_BROKER_TAG,
+                             f"{path} 没有带上经纪商 tag")
+
+    def test_explicit_and_env_override_precedence(self):
+        """显式实参 > 环境变量 > 硬编码默认（与另外两个端点保持同一口径）。"""
+        captured = []
+
+        def _fake(method, path, params=None, *, env=None, **kw):
+            captured.append(dict(params or {}))
+            return []
+
+        with patch.object(okx_rest, "request", _fake):
+            okx_rest.close_position("BTC-USDT-SWAP", "long", tag="EXPLICIT")
+            self.assertEqual(captured[-1]["tag"], "EXPLICIT")
+            with patch.dict("os.environ", {"OKX_BROKER_TAG": "FROM-ENV"}):
+                okx_rest.close_position("BTC-USDT-SWAP", "long")
+            self.assertEqual(captured[-1]["tag"], "FROM-ENV")

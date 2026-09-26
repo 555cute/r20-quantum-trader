@@ -44,4 +44,15 @@ export const zhAdminAbout = {
   bandRuntime: '运行环境',
   bandSyncGap: '待同步差额',  // ── 批 41：本地化写死文案（更新检查失败）──
   updateCheckFailed: '更新检查失败：{msg}（无法确认是否落后，安全补丁可能静默脱班）',
+
+  // ── 注册/返佣通道（2026-09）──
+  // 三条地址来自后端 `/api/v1/admin/about` 的 `channels`（可被 OKX_INVITE_URL /
+  // GATE_INVITE_URL / BINANCE_INVITE_URL 覆盖）；OKX 经纪商 code 与**实发订单上的
+  // tag 同源**。此处只放界面 chrome，链接与 code 一律来自接口，不在前端硬编码。
+  channelsTitle: '注册通道',
+  channelsSub: '开户与费率绑定入口',
+  channelsLead: '经下列入口注册可绑定对应交易所的费率与返佣；老用户满足交易所的召回条件时同样可绑定。',
+  channelBrokerCode: '经纪商 code',
+  channelOpen: '注册入口',
+  channelUnset: '未配置（可用环境变量覆盖）',
 };

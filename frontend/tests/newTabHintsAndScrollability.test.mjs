@@ -65,7 +65,10 @@ test('所有 target="_blank" 外链必须提供「新标签页打开」提示', 
     }
   }
 
-  assert.equal(total, 5, `target="_blank" 外链数量变化（期望 5，实得 ${total}），请复核本闸覆盖范围`);
+  // 2026-09：5 → 6 —— 关于页新增「注册通道」面板，每个交易所入口都是一个
+  // target="_blank" 外链（`AboutPage.vue` 的 `ab-channel-actions`，均带
+  // `common.opensInNewTab`；判据本身不变，只是覆盖范围多了一处）。
+  assert.equal(total, 6, `target="_blank" 外链数量变化（期望 6，实得 ${total}），请复核本闸覆盖范围`);
   assert.deepEqual(bad, [], `以下外链静默开新标签，读屏用户事前无从得知：\n  ${bad.join('\n  ')}`);
 });
 

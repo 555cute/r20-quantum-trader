@@ -30,6 +30,7 @@ from calculus_engine import (
 )
 import factor_library
 import ai_factor_trader
+import okx_rest  # 平仓请求上的经纪商 tag 以它为准（不复制字面量，避免两处漂移）
 from tests.okx_algo_http_fixture import install_http
 
 
@@ -344,8 +345,11 @@ class AiFactorTraderPositionProtectionTest(unittest.TestCase):
         with patch.object(ai_factor_trader,"record_trade"), patch.object(ai_factor_trader,"add_stop_cooldown"), patch.object(ai_factor_trader,"notify_trade_close") as notify_close:
             closed,reason=ai_factor_trader.manage_position_tp_and_trailing(self._factor(),position,trackers,"2026-09-02 15:00:00",actions)
         self.assertTrue(closed); self.assertEqual(reason,"已硬止损")
+        # 2026-09：平仓请求也带经纪商 tag（`okx_rest.close_position` 补上了它 ——
+        # 此前每一笔市价全平都不带标记，那些成交不计经纪商归属）。
         self.assertEqual(self.http.calls('/api/v5/trade/close-position'), [
-            ('POST', {'instId': 'SOL-USDT-SWAP', 'mgnMode': 'cross', 'posSide': 'long', 'autoCxl': True})])
+            ('POST', {'instId': 'SOL-USDT-SWAP', 'mgnMode': 'cross', 'posSide': 'long',
+                      'autoCxl': True, 'tag': okx_rest.DEFAULT_OKX_BROKER_TAG})])
         self.assertNotIn("SOL-USDT-SWAP_long",trackers)
         self.assertTrue(any("触发硬止损" in item for item in actions))
         if notify_close is not None:
@@ -398,8 +402,11 @@ class AiFactorTraderPositionProtectionTest(unittest.TestCase):
         with patch.object(ai_factor_trader,"record_trade"), patch.object(ai_factor_trader,"add_stop_cooldown"), patch.object(ai_factor_trader,"notify_trade_close") as notify_close:
             closed,reason=ai_factor_trader.manage_position_tp_and_trailing(self._factor(102.5),position,trackers,"2026-09-02 15:00:00",actions)
         self.assertTrue(closed); self.assertEqual(reason,"保护失效安全退出")
+        # 2026-09：平仓请求也带经纪商 tag（`okx_rest.close_position` 补上了它 ——
+        # 此前每一笔市价全平都不带标记，那些成交不计经纪商归属）。
         self.assertEqual(self.http.calls('/api/v5/trade/close-position'), [
-            ('POST', {'instId': 'SOL-USDT-SWAP', 'mgnMode': 'cross', 'posSide': 'long', 'autoCxl': True})])
+            ('POST', {'instId': 'SOL-USDT-SWAP', 'mgnMode': 'cross', 'posSide': 'long',
+                      'autoCxl': True, 'tag': okx_rest.DEFAULT_OKX_BROKER_TAG})])
         self.assertNotIn("SOL-USDT-SWAP_long",trackers)
         if notify_close is not None:
             notify_close.assert_called_once_with(inst="SOL", pnl=-4.0, stage="云端保护失效退出", exit_px=102.5)

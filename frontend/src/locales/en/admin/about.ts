@@ -44,4 +44,12 @@ export const enAdminAbout = {
   bandRuntime: 'Runtime',
   bandSyncGap: 'Sync gap',  // ── batch 41: localize the update-check failure message ──
   updateCheckFailed: 'Update check failed: {msg} (cannot tell whether this build is behind; security patches may silently fall out of sync)',
+
+  // ── exchange sign-up channels (2026-09) ──
+  channelsTitle: 'Sign-up channels',
+  channelsSub: 'Account opening & fee binding',
+  channelsLead: 'Registering through the entries below binds that exchange\'s fee rate and rebate; returning users qualify when the exchange\'s win-back conditions are met.',
+  channelBrokerCode: 'Broker code',
+  channelOpen: 'Sign-up link',
+  channelUnset: 'Not configured (overridable via env var)',
 };

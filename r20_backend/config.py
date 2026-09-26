@@ -52,9 +52,15 @@ class Settings:
     admin_token: str = ""
     manual_close_enabled: bool = False
     order_mode: str = "limit"
+    #: ⚠️ 上报/展示用，**不是发单时的权威来源** —— 真正挂到订单上的 tag
+    #: 取自 `scripts/okx_rest.py::effective_broker_tag()`（同一环境变量 + 同一个默认值）。
+    #: 改这里的字面量不会影响发单；展示侧请调那个函数，免得显示值与实发值漂移。
     okx_broker_tag: str = "6e2191f027c6SUDE"
+    #: 下面三条是注册/返佣通道的**展示**用地址（后台「关于」页渲染成可复制入口）。
+    #: 均可用同名环境变量覆盖，便于分发副本时替换成自己的通道。
     okx_invite_url: str = "https://www.mitxcqvwnhj.com/join/48039151"
     gate_invite_url: str = "https://www.gatesites.net/share/MCHDBKYF"
+    binance_invite_url: str = "https://www.bsmkweb.cc/activity/referral-entry/CPA?ref=CPA_00N8UVQ2OG"
 
 
 def refresh_settings() -> Settings:
@@ -90,6 +96,7 @@ def refresh_settings() -> Settings:
     settings.okx_broker_tag = os.getenv("OKX_BROKER_TAG", "6e2191f027c6SUDE")
     settings.okx_invite_url = os.getenv("OKX_INVITE_URL", "https://www.mitxcqvwnhj.com/join/48039151")
     settings.gate_invite_url = os.getenv("GATE_INVITE_URL", "https://www.gatesites.net/share/MCHDBKYF")
+    settings.binance_invite_url = os.getenv("BINANCE_INVITE_URL", "https://www.bsmkweb.cc/activity/referral-entry/CPA?ref=CPA_00N8UVQ2OG")
     return settings
 
 

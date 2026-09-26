@@ -35,8 +35,9 @@ import PageHeader from '../../components/admin/PageHeader.vue';
 import BaseDialog from '../../components/base/BaseDialog.vue';
 import BaseEmpty from '../../components/base/BaseEmpty.vue';
 import { Info, GitBranch, Download, RefreshCw, CheckCircle2, AlertTriangle,
-  ShieldCheck, Terminal, Loader2, ArrowUpRight } from 'lucide-vue-next';
+  ShieldCheck, Terminal, Loader2, ArrowUpRight, Link2, ExternalLink } from 'lucide-vue-next';
 import BaseLoadingAnnounce from '../../components/base/BaseLoadingAnnounce.vue';
+import CopyButton from '../../components/base/CopyButton.vue';
 
 const { api } = useApi();
 
@@ -101,6 +102,16 @@ const { run: executeUpdate, busy: updateRunning } = useAsyncAction(async () => {
 }, { onError: (e) => { updateResult.value = { error: e.message } } })
 
 const phaseOk = computed(() => confirmPhrase.value.trim().toUpperCase() === 'UPDATE R20');
+
+/** 注册通道：后端 `/api/v1/admin/about` 的 `channels`（链接与 OKX 经纪商 code 都来自接口）。
+ *  顺序固定为 OKX → Gate → Binance，缺失项由后端省略时优雅跳过。 */
+const CHANNEL_ORDER = ['okx', 'gate', 'binance'] as const;
+const channelRows = computed(() => {
+  const ch = about.value?.channels || {};
+  return CHANNEL_ORDER
+    .filter((key) => ch[key])
+    .map((key) => ({ key, ...ch[key] }));
+});
 
 /** 版本状态带（4 项事实，全部取自 about.product / runtime / update） */
 const bandFacts = computed(() => {
@@ -248,6 +259,40 @@ const bandFacts = computed(() => {
             </div>
           </section>
         </div>
+
+        <!-- ══ 注册通道（横跨两栏）══ -->
+        <section class="card ab-channels">
+          <header class="card-head">
+            <h2 class="card-title"><Link2 :size="14" />{{ t('admin.about.channelsTitle') }}</h2>
+            <span class="card-sub">{{ t('admin.about.channelsSub') }}</span>
+          </header>
+
+          <p class="ab-channels-lead">{{ t('admin.about.channelsLead') }}</p>
+
+          <div class="ab-channels-grid">
+            <div v-for="ch in channelRows" :key="ch.key" class="ab-channel">
+              <div class="ab-channel-head">
+                <span class="ab-channel-name">{{ ch.name }}</span>
+                <span v-if="ch.broker_code" class="badge badge-up mono ab-channel-code"
+                      :title="t('admin.about.channelBrokerCode')">{{ ch.broker_code }}</span>
+              </div>
+
+              <template v-if="ch.invite_url">
+                <span class="ab-channel-url mono truncate" :title="ch.invite_url">{{ ch.invite_url }}</span>
+                <div class="ab-channel-actions">
+                  <a :href="ch.invite_url" target="_blank" rel="noopener noreferrer"
+                     class="btn btn-primary btn-sm">
+                    <ExternalLink :size="13" aria-hidden="true" />
+                    <span>{{ t('admin.about.channelOpen') }}</span>
+                    <span class="sr-only">{{ t('common.opensInNewTab') }}</span>
+                  </a>
+                  <CopyButton :text="ch.invite_url" :label="true" />
+                </div>
+              </template>
+              <span v-else class="ab-channel-url ab-channel-unset">{{ t('admin.about.channelUnset') }}</span>
+            </div>
+          </div>
+        </section>
 
         <!-- ══ 安全更新 ══ -->
         <section class="card">
@@ -406,6 +451,69 @@ const bandFacts = computed(() => {
 
 
 
+
+/* ══ 注册通道 ══ */
+.ab-channels {
+  margin-top: var(--ds-space-4);
+}
+.ab-channels-lead {
+  margin: 0 0 var(--ds-space-3);
+  font-size: var(--text-xs);
+  line-height: var(--leading-body);
+  color: var(--ds-color-text-description);
+}
+.ab-channels-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--ds-space-3);
+}
+@media (min-width: 760px) {
+  .ab-channels-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+.ab-channel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  padding: var(--ds-space-3);
+  border: 1px solid var(--ds-color-border-default);
+  border-radius: var(--r-card);
+  background: var(--ds-color-bg-surface-inset);
+  min-width: 0;
+}
+.ab-channel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-2);
+}
+.ab-channel-name {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--ds-color-text-primary);
+}
+.ab-channel-code {
+  font-family: var(--ds-font-mono);
+  font-size: var(--text-4xs);
+  letter-spacing: 0.02em;
+}
+.ab-channel-url {
+  font-family: var(--ds-font-mono);
+  font-size: var(--text-4xs);
+  color: var(--ds-color-text-placeholder);
+  min-width: 0;
+}
+.ab-channel-unset {
+  color: var(--ds-color-text-placeholder);
+  font-family: inherit;
+}
+.ab-channel-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  margin-top: auto;
+}
 
 /* ══ 双栏 ══ */
 .ab-grid {
