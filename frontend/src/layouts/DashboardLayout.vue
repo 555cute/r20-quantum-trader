@@ -15,7 +15,6 @@ import { useLocalStorage } from '../composables/useLocalStorage';
 import { publicTabs } from '../config/nav';
 import {
   BookOpen,
-  Shield,
   ChevronLeft,
   ChevronRight,
   X,
@@ -96,15 +95,6 @@ function go(path: string) {
   mobileNavOpen.value = false;
   if (route.path !== path) router.push(path);
 }
-
-const venueHealth = computed(() => {
-  const vh = (store.data as any)?.venue_health || {};
-  return [
-    { name: 'OKX', status: vh.okx?.connected ? 'active' : 'idle', ping: vh.okx?.latency_ms ?? '<50ms' },
-    { name: 'BN', status: vh.binance?.connected ? 'active' : 'idle', ping: vh.binance?.latency_ms ?? '392ms' },
-    { name: 'Gate', status: vh.gate?.connected ? 'active' : 'idle', ping: vh.gate?.latency_ms ?? '311ms' },
-  ];
-});
 </script>
 
 <template>
@@ -234,65 +224,31 @@ const venueHealth = computed(() => {
         </button>
       </div>
 
-      <!-- 侧边栏底栏：三所状态与折叠控制器 -->
+      <!-- 侧边栏底栏：折叠控制器与关于入口 -->
       <div
-        class="border-t p-2 space-y-2"
+        class="border-t p-2 flex items-center justify-between"
         style="border-color: var(--line-1); background-color: var(--surface-sidebar)"
       >
-        <!-- 三所健康度微缩指示灯（展开时显示） -->
-        <div
-          v-if="!navCompact"
-          class="rounded p-2 text-3xs"
-          style="background-color: var(--surface-2); border: 1px solid var(--line-1)"
+        <button type="button"
+          class="btn btn-quiet btn-icon h-7 w-7 cursor-pointer"
+          :title="isNarrow ? t('dash.shell.nav.closeMobile') : (navCompact ? t('dash.shell.nav.expand') : t('dash.shell.nav.collapse'))"
+          :aria-label="isNarrow ? t('dash.shell.nav.closeMobile') : (navCompact ? t('dash.shell.nav.expand') : t('dash.shell.nav.collapse'))"
+          :aria-expanded="navExpanded"
+          :aria-controls="'dashboard-sidebar'"
+          @click="toggleNav"
         >
-          <div class="flex items-center justify-between mb-1.5 text-[var(--ink-3)]">
-            <span class="flex items-center gap-1 font-semibold uppercase tracking-wider">
-              <Shield class="h-3 w-3 text-[var(--up)]" /> {{ t('dash.shell.nav.venues') }}
-            </span>
-            <span class="font-mono">Fail-Closed</span>
-          </div>
-          <div class="grid grid-cols-3 gap-1 text-center font-mono">
-            <div
-              v-for="v in venueHealth"
-              :key="v.name"
-              class="rounded-md py-1 px-1 border transition-colors hover:border-[var(--line-2)]"
-              style="background-color: var(--surface-1); border-color: var(--line-1)"
-            >
-              <div class="flex items-center justify-center gap-1.5">
-                <span class="relative flex h-1.5 w-1.5 shrink-0">
-                  <span v-if="v.status === 'active'" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-[var(--up)] opacity-75"></span>
-                  <span class="relative inline-flex rounded-full h-1.5 w-1.5" :class="v.status === 'active' ? 'bg-[var(--up)]' : 'bg-[var(--ink-3)]'"></span>
-                </span>
-                <span class="font-semibold text-3xs text-[var(--ink-strong)]">{{ v.name }}</span>
-              </div>
-              <div class="text-4xs text-[var(--ink-3)] mt-0.5">{{ v.ping }}</div>
-            </div>
-          </div>
-        </div>
+          <X v-if="isNarrow" class="h-3.5 w-3.5" />
+          <ChevronRight v-else-if="navCompact" class="h-3.5 w-3.5" />
+          <ChevronLeft v-else class="h-3.5 w-3.5" />
+        </button>
 
-        <!-- 底栏操作区 -->
-        <div class="flex items-center justify-between">
-          <button type="button"
-            class="btn btn-quiet btn-icon h-7 w-7 cursor-pointer"
-            :title="isNarrow ? t('dash.shell.nav.closeMobile') : (navCompact ? t('dash.shell.nav.expand') : t('dash.shell.nav.collapse'))"
-            :aria-label="isNarrow ? t('dash.shell.nav.closeMobile') : (navCompact ? t('dash.shell.nav.expand') : t('dash.shell.nav.collapse'))"
-            :aria-expanded="navExpanded"
-            :aria-controls="'dashboard-sidebar'"
-            @click="toggleNav"
-          >
-            <X v-if="isNarrow" class="h-3.5 w-3.5" />
-            <ChevronRight v-else-if="navCompact" class="h-3.5 w-3.5" />
-            <ChevronLeft v-else class="h-3.5 w-3.5" />
-          </button>
-
-          <button type="button"
-            v-if="!navCompact"
-            class="btn btn-quiet h-7 px-2 text-3xs font-medium cursor-pointer"
-            @click="aboutOpen = true"
-          >
-            {{ t('dash.shell.nav.about') }}
-          </button>
-        </div>
+        <button type="button"
+          v-if="!navCompact"
+          class="btn btn-quiet h-7 px-2 text-3xs font-medium cursor-pointer"
+          @click="aboutOpen = true"
+        >
+          {{ t('dash.shell.nav.about') }}
+        </button>
       </div>
     </aside>
 

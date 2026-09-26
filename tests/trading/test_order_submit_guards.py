@@ -301,8 +301,9 @@ class DemoRescaleTest(unittest.TestCase):
     def _run(self, *, price, tp, sl, ticker, pos_side="long"):
         rig = Rig(price=price, tp=tp, sl=sl, ticker=ticker, simulated=True)
         rig.geometry = (True, "", 1.0)
-        return rig, rig.run(venue_ctx={"notional_usdt": 1, "margin_usdt": 1},
-                            pos_side=pos_side)
+        with patch.dict(os.environ, {"R20_ORDER_MODE": "limit"}):
+            return rig, rig.run(venue_ctx={"notional_usdt": 1, "margin_usdt": 1},
+                                pos_side=pos_side)
 
     def test_long_prices_are_rescaled_to_the_demo_market(self):
         rig, (ok, _) = self._run(price=100000.0, tp=105000.0, sl=95000.0, ticker="95000")
@@ -376,8 +377,9 @@ class RescaleFailureTraceTest(unittest.TestCase):
         from contextlib import redirect_stdout
         rig = Rig(price=100000.0, tp="不是数字", sl=95000.0, ticker="95000", simulated=True)
         buf = io.StringIO()
-        with redirect_stdout(buf):
-            ok, _ = rig.run(venue_ctx={"notional_usdt": 1, "margin_usdt": 1})
+        with patch.dict(os.environ, {"R20_ORDER_MODE": "limit"}):
+            with redirect_stdout(buf):
+                ok, _ = rig.run(venue_ctx={"notional_usdt": 1, "margin_usdt": 1})
         self.assertTrue(ok, "重算失败不该阻断下单")
         self.assertIn("沙盒报价重算失败", buf.getvalue(),
                       "失败必须留痕：原来静默 pass 会让「重算出 bug」毫无痕迹地过去")
@@ -391,7 +393,8 @@ class LongStopPushBackTest(unittest.TestCase):
     def test_long_stop_above_entry_after_rescale_is_pushed_below(self):
         """重算把 SL 推到入场上方 ⇒ 必须按比例压回下方（否则多头的止损方向反了）。"""
         rig = Rig(price=100000.0, tp=105000.0, sl=101000.0, ticker="95000", simulated=True)
-        ok, _ = rig.run(venue_ctx={"notional_usdt": 1, "margin_usdt": 1})
+        with patch.dict(os.environ, {"R20_ORDER_MODE": "limit"}):
+            ok, _ = rig.run(venue_ctx={"notional_usdt": 1, "margin_usdt": 1})
         self.assertTrue(ok)
         _, _, _, kw = rig.okx.orders[0]
         self.assertLess(kw["attach_sl"], kw["px"], f"SL 要被压回入场下方：{kw}")
