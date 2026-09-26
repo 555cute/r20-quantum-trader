@@ -2,7 +2,9 @@
 
 <div align="center">
 
-[![Release](https://img.shields.io/badge/Release-v8.3.1-blue.svg?style=flat-square)](https://github.com/555cute/astraquant/releases/tag/v8.3.1)
+<!-- 指向 release **列表**而不是某个 tag 页：`v8.3.1` 只有 git tag、没有 release 对象，
+     直指 /releases/tag/v8.3.1 会 404（实测）。列表页永远有效。 -->
+[![Release](https://img.shields.io/badge/Release-v8.3.1-blue.svg?style=flat-square)](https://github.com/555cute/astraquant/releases)
 [![Website](https://img.shields.io/badge/Site-astraquant.tech-6E56CF.svg?style=flat-square)](https://astraquant.tech)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg?style=flat-square)](https://www.python.org/)
