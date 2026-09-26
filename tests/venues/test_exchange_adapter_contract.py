@@ -161,6 +161,37 @@ class TestOkxWrapperSignatureBinding(unittest.TestCase):
             self.ad.place_order("BTC", "buy", 3.5, price=70000, **kw)
         return rec.calls[-1][1]
 
+    # ---- 单型推断（2026-09）------------------------------------------------
+    #
+    # `execution_router` 的市价路径形如
+    #   `ad.place_order(asset, side, contracts, price=None)`
+    # —— 只传价、**不传单型**。旧默认把它写死成 `"limit"`，于是发出
+    # `ordType=limit` 且无 `px` 的非法请求，被 OKX 拒。现按有无价格推断，
+    # 与 Binance/Gate 适配器口径一致。
+
+    def _place_price(self, price, **kw):
+        rec = _Recorder(okx_rest.place_order)
+        with patch.object(okx_rest, "place_order", rec):
+            self.ad.place_order("BTC", "buy", 3.5, price=price, **kw)
+        return rec.calls[-1][1]
+
+    def test_missing_price_infers_market_order(self):
+        """无价 ⇒ 市价单（router 的市价路径正是这个调用形态）。"""
+        kwargs = self._place_price(None)
+        self.assertEqual(kwargs["ord_type"], "market",
+                         "只传 price=None 时必须推成市价，否则 ordType=limit 无 px 被拒")
+        self.assertIsNone(kwargs["px"], "市价单不得带 px")
+
+    def test_present_price_infers_limit_order(self):
+        kwargs = self._place_price(70000)
+        self.assertEqual(kwargs["ord_type"], "limit")
+        self.assertEqual(kwargs["px"], "70000")
+
+    def test_explicit_order_type_wins_over_inference(self):
+        """显式单型优先 —— OKX 直下路径恒显式传，行为不得被推断改动。"""
+        self.assertEqual(self._place_price(None, order_type="limit")["ord_type"], "limit")
+        self.assertEqual(self._place_price(70000, order_type="market")["ord_type"], "market")
+
     def test_size_kwarg_not_sz(self):
         rec = _Recorder(okx_rest.place_order)
         kwargs = self._place(rec)

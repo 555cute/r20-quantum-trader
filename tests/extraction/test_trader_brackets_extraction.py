@@ -161,5 +161,80 @@ class ParityTest(unittest.TestCase):
         self.assertEqual((sl, tp), exp, "边界行为必须与搬走前一致（不替它修）")
 
 
+class ReanchorToMarketTest(unittest.TestCase):
+    """市价单保护价重锚（`reanchor_brackets_to_market`）。
+
+    背景：后台可切市价单，但三价是按**限价挂单计划**算的；市价单在现价成交，
+    保护价若仍留在计划价上就与真实成本脱节 —— 做多计划若是回踩挂单，
+    止盈价会落到真实成交价**下方**（"止盈"变亏损价，成交即触发）。
+    """
+
+    def test_long_pullback_plan_gets_tp_above_the_real_fill(self):
+        """回踩挂单（计划 100、现价 110）→ 止盈必须落到现价**上方**。"""
+        got = brackets.reanchor_brackets_to_market(
+            entry=100.0, tp=105.0, sl=95.0, market=110.0, is_long=True, prec=4)
+        self.assertIsNotNone(got)
+        entry, tp, sl = got
+        self.assertAlmostEqual(entry, 110.0, places=4, msg="进场必须贴到现价")
+        self.assertGreater(tp, entry, "做多止盈必须在真实成交价上方（否则即亏损价）")
+        self.assertLess(sl, entry, "做多止损必须在真实成交价下方")
+
+    def test_short_plan_gets_tp_below_the_real_fill(self):
+        got = brackets.reanchor_brackets_to_market(
+            entry=100.0, tp=95.0, sl=105.0, market=90.0, is_long=False, prec=4)
+        self.assertIsNotNone(got)
+        entry, tp, sl = got
+        self.assertAlmostEqual(entry, 90.0, places=4)
+        self.assertLess(tp, entry, "做空止盈必须在真实成交价下方")
+        self.assertGreater(sl, entry, "做空止损必须在真实成交价上方")
+
+    def test_risk_reward_ratio_is_preserved(self):
+        """等比缩放：盈亏比与相对成本的距离**逐位不变**（市价单不偷改风险结构）。"""
+        for is_long, entry, tp, sl, market in [
+            (True, 100.0, 105.0, 95.0, 110.0),
+            (True, 100.0, 120.0, 90.0, 137.5),
+            (False, 100.0, 90.0, 110.0, 88.0),
+        ]:
+            with self.subTest(is_long=is_long, market=market):
+                new_entry, new_tp, new_sl = brackets.reanchor_brackets_to_market(
+                    entry=entry, tp=tp, sl=sl, market=market, is_long=is_long, prec=6)
+                orig_rr = abs(tp - entry) / abs(entry - sl)
+                new_rr = abs(new_tp - new_entry) / abs(new_entry - new_sl)
+                self.assertAlmostEqual(new_rr, orig_rr, places=6, msg="盈亏比被改动")
+                orig_tp_pct = abs(tp - entry) / entry
+                new_tp_pct = abs(new_tp - new_entry) / new_entry
+                self.assertAlmostEqual(new_tp_pct, orig_tp_pct, places=6,
+                                       msg="相对成本的止盈距离被改动")
+
+    def test_market_equal_to_plan_is_a_noop(self):
+        """现价 == 计划价 ⇒ 原样返回（该点上限价/市价无差别）。"""
+        got = brackets.reanchor_brackets_to_market(
+            entry=100.0, tp=105.0, sl=95.0, market=100.0, is_long=True, prec=4)
+        self.assertEqual(got, (100.0, 105.0, 95.0))
+
+    def test_missing_market_price_fails_closed(self):
+        """现价读不到 ⇒ None（调用方拒单）。**绝不**退回计划价继续下单。"""
+        for bad_market in (0, 0.0, -1, None, float("nan")):
+            with self.subTest(market=bad_market):
+                self.assertIsNone(
+                    brackets.reanchor_brackets_to_market(
+                        entry=100.0, tp=105.0, sl=95.0, market=bad_market,
+                        is_long=True, prec=4),
+                    f"market={bad_market!r} 必须 fail-closed")
+
+    def test_invalid_plan_price_fails_closed(self):
+        for bad_entry in (0, -5, None):
+            with self.subTest(entry=bad_entry):
+                self.assertIsNone(
+                    brackets.reanchor_brackets_to_market(
+                        entry=bad_entry, tp=105.0, sl=95.0, market=100.0,
+                        is_long=True, prec=4))
+
+    def test_non_numeric_input_fails_closed(self):
+        self.assertIsNone(
+            brackets.reanchor_brackets_to_market(
+                entry="abc", tp=105.0, sl=95.0, market=100.0, is_long=True, prec=4))
+
+
 if __name__ == "__main__":
     unittest.main()

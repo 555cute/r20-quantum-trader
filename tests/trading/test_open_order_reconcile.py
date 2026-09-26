@@ -15,6 +15,7 @@ import hashlib
 import hmac
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -262,7 +263,12 @@ class SubmitListingGateTests(_EnvFreezeMixin, unittest.TestCase):
         })
         okx = self._okx_router()
         buf = io.StringIO()
-        with patch.object(okx_rest, "urlopen", okx), \
+        # 本用例验的是**合约目录** fail-open，与下单模式无关 ⇒ 钉死限价模式。
+        # 它在下面刻意把 `fetch_ticker` 打成 None（现价不可用），而市价单
+        # 必须按现价锚定保护价、读不到就 fail-closed 拒单 —— 那是设计如此，
+        # 不该被这个"目录闸"用例当成回归（2026-09 实测：不钉档位即红）。
+        with patch.dict(os.environ, {"R20_ORDER_MODE": "limit"}), \
+             patch.object(okx_rest, "urlopen", okx), \
              patch("r20_backend.exchanges.listing.urlopen", listing_router), \
              patch.object(trader, "fetch_ticker", return_value=None), \
              redirect_stdout(buf), \

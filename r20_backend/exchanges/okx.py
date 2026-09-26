@@ -280,11 +280,25 @@ class OKXAdapter(OKXPublicAdapter):
         return out
 
     def place_order(self, symbol: str, side: str, contracts: float, price: Optional[float] = None,
-                    order_type: str = "limit", pos_side: Optional[str] = None,
+                    order_type: Optional[str] = None, pos_side: Optional[str] = None,
                     client_order_id: Optional[str] = None, **kwargs: Any) -> Dict[str, Any]:
         from scripts import okx_rest
         env = self._get_okx_env()
         inst_id = self.native_symbol(symbol)
+        # 单型：显式传入优先；否则**按有无价格推断**（市价单不带价、限价单必带价）。
+        #
+        # 旧默认写死 `order_type="limit"`：`execution_router` 的市价路径是
+        # `ad.place_order(asset, side, contracts, price=None)` —— 只传价、不传单型，
+        # 于是发出 `ordType=limit` 且 **无 `px`** 的非法请求，被 OKX 直接拒单。
+        # 与 Binance/Gate 适配器的口径对齐（两者都是"无价即市价"），
+        # 使"只给 price"的调用方在三所行为一致。
+        # 显式传 `order_type` 的调用方（OKX 直下路径恒传）行为逐位不变。
+        try:
+            _has_px = price is not None and float(price) > 0
+        except (TypeError, ValueError):
+            _has_px = False
+        ord_type = (str(order_type).strip().lower() if order_type
+                    else ("limit" if _has_px else "market"))
         # 审计②#3(2026-09-13)双缺陷修复：
         # ①旧传 sz= —— okx_rest.place_order 形参名是 size，此前每次调用即 TypeError、
         #   网络零发起（并被关闸掩护，与 orders_pending 同族）；
@@ -301,7 +315,7 @@ class OKXAdapter(OKXPublicAdapter):
             inst_id=inst_id,
             side=side.lower(),
             size=str(contracts),
-            ord_type=order_type.lower(),
+            ord_type=ord_type,
             px=str(price) if price else None,
             cl_ord_id=client_order_id,
             env=env,

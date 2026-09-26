@@ -44,11 +44,39 @@ BODY_DELTAS: list = [
     # 即读到空/拼错的值一律退回限价（失败取保守侧）。
     ("try:\n    rows = okx_rest.place_order(inst_id, side, f'{size:g}', pos_side=pos_side, "
      "td_mode='cross', ord_type='limit', px=effective_px, attach_tp=effective_tp, attach_sl=effective_sl)",
-     "order_mode = str(os.getenv('R20_ORDER_MODE', 'limit')).strip().lower()\n"
      "ord_type = 'market' if order_mode == 'market' else 'limit'\n"
      "entry_px = None if ord_type == 'market' else effective_px\n"
      "try:\n    rows = okx_rest.place_order(inst_id, side, f'{size:g}', pos_side=pos_side, "
      "td_mode='cross', ord_type=ord_type, px=entry_px, attach_tp=effective_tp, attach_sl=effective_sl)"),
+    # ---- 市价单必须按**现价**重锚保护价（2026-09，与上一条同一特性）----
+    # 上一条只解决了"发什么单型"；这条解决"保护价挂在哪"。
+    # 根因：`effective_px/tp/sl` 是按**限价挂单计划**算的（AI 的 entry_price 或买一/卖一
+    # 兜底），市价单并不在该价成交，而 TP/SL 仍按计划价下单。危险形态：计划是回踩挂单项
+    # （做多、计划价明显低于现价）⇒ 市价单在现价成交，止盈价却留在计划价上方不远处
+    # ⇒ 止盈价**低于真实成交价**，做多的「止盈」即亏损价，成交瞬间触发（开-秒平放血）。
+    # 修法：按 `现价 / 计划价` 把三价整体等比缩放（R:R 与相对成本的距离逐位不变，
+    # 只把整套保护价平移到真实成本上）；现价读不到则**拒单** fail-closed。
+    # 换算逻辑抽进 `scripts/trader/brackets.py::reanchor_brackets_to_market`（纯函数、可单测），
+    # 主路径只留"读模式 + 调它 + 拒单"三件事。
+    #
+    # 锚点取"打印行 + 紧随其后的 import"：插入点就在这两句之间，两侧文本在基线里唯一。
+    ("print(f'[demo rescale] warn {inst_id} 沙盒报价重算失败，按当前值提交: {_rsc_exc}')"
+     "\nfrom scripts.order_risk import validate_quote_geometry_and_rr",
+     "print(f'[demo rescale] warn {inst_id} 沙盒报价重算失败，按当前值提交: {_rsc_exc}')"
+     "\norder_mode = str(os.getenv('R20_ORDER_MODE', 'limit')).strip().lower()"
+     "\nif order_mode == 'market':"
+     "\n    from scripts.trader.brackets import reanchor_brackets_to_market"
+     "\n    _mk_prec = len(str(_tick_last_raw).split('.')[1]) if '.' in str(_tick_last_raw) else 4"
+     "\n    _anchored = reanchor_brackets_to_market(entry=effective_px, tp=effective_tp,"
+     " sl=effective_sl, market=_anchor_last, is_long=pos_side == 'long', prec=_mk_prec)"
+     "\n    if _anchored is None:"
+     "\n        _mk_rej = f'市价单需按现价锚定保护价，但现价不可用（现价={_anchor_last:g}、"
+     "计划价={effective_px:g}）'"
+     "\n        print(f'[市价锚定] 拒单 {inst_id}: {_mk_rej}')"
+     "\n        release_signal_reservation(_reservation, '市价锚定缺现价')"
+     "\n        return (False, f'市价锚定拒绝: {_mk_rej}')"
+     "\n    effective_px, effective_tp, effective_sl = _anchored"
+     "\nfrom scripts.order_risk import validate_quote_geometry_and_rr"),
 ]
 
 INJ = ("confirm_signal_reservation", "record_open_intent", "release_signal_reservation",
@@ -130,11 +158,19 @@ class OrderSubmitVerbatimTest(unittest.TestCase):
         return types.SimpleNamespace(mode="demo", simulated=False)
 
     def test_crossed_limit_is_rejected_through_facade(self):
-        """穿价幻觉闸必须活着：BUY 105 挂在现价 100 → 拒单且原因含「穿价幻觉」。"""
+        """穿价幻觉闸必须活着：BUY 105 挂在现价 100 → 拒单且原因含「穿价幻觉」。
+
+        ⚠️ 必须钉死**限价**模式：市价单不在计划价成交，穿价闸对它本就不适用
+        （市价路径会先把三价按现价重锚，`effective_px` 直接落到现价、不构成"穿价"）。
+        不钉档位的话，运维一切到 market，本用例就会因为"市价单本来就不该按计划价
+        判穿价"而红 —— 那是设计如此，不是闸坏了。
+        """
         import scripts.ai_factor_trader as aft
         bad_registry = types.SimpleNamespace(
             native_symbol_pure=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no meta")))
-        with patch.dict(os.environ, {"R20_MAX_PRICE_CROSS_PCT": "0.005"}, clear=False), \
+        with patch.dict(os.environ,
+                        {"R20_MAX_PRICE_CROSS_PCT": "0.005", "R20_ORDER_MODE": "limit"},
+                        clear=False), \
              patch.object(aft, "current_environment", self._stub_env), \
              patch.object(aft, "fetch_ticker", lambda inst: {"last": 100.0}), \
              patch.object(aft, "venue_registry", bad_registry):
@@ -152,7 +188,9 @@ class OrderSubmitVerbatimTest(unittest.TestCase):
         okx = types.SimpleNamespace(
             place_order=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("not placed")),
             pending_orders=lambda *a, **k: [], cancel_order=lambda *a, **k: None)
-        with patch.dict(os.environ, {"R20_MAX_PRICE_CROSS_PCT": "0.005"}, clear=False), \
+        with patch.dict(os.environ,
+                        {"R20_MAX_PRICE_CROSS_PCT": "0.005", "R20_ORDER_MODE": "limit"},
+                        clear=False), \
              patch.object(aft, "current_environment", self._stub_env), \
              patch.object(aft, "fetch_ticker", lambda inst: {"last": 100.0}), \
              patch.object(aft, "venue_registry", bad_registry), \

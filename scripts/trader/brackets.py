@@ -152,3 +152,65 @@ def clamp_take_profit_width(*, is_long: bool, limit_px: float, sl_px: float, tp_
             tp_px = round(limit_px - allowed_max, prec)
 
     return tp_px
+
+
+def reanchor_brackets_to_market(*, entry, tp, sl, market, is_long, prec=4):
+    """市价单：把 `(entry, tp, sl)` 按「现价 / 计划价」整体缩放，使保护价锚在**真实成本**上。
+
+    ## 为什么必须有这一步
+
+    后台可切「市价单」（`R20_ORDER_MODE=market`）。但 `entry`/`tp`/`sl` 三价是
+    **按限价挂单的计划**算出来的（AI 的 `entry_price`，或买一/卖一兜底）——
+    市价单根本不在这个价成交，而 TP/SL 却仍按计划价下单。危险形态：
+
+    - 计划是**回踩挂单**（做多，计划价明显低于现价）⇒ 市价单在**现价**立即成交，
+      而止盈价还留在计划价上方不远处 ⇒ 止盈价**低于真实成交价**。
+      做多的「止盈」变成亏损价，成交瞬间即触发 ⇒ 开-秒平放血。
+
+    ## 口径：等比缩放，不动 R:R
+
+    记计划价 `E`、现价 `M`、缩放 `k = M / E`。返回 `(E·k, T·k, S·k)`：
+
+    - 进场贴到现价 `M`；
+    - 止盈距离 `(T·k − M) = k·(T − E)`、止损距离 `(M − S·k) = k·(E − S)`
+      ⇒ **两者同比例放大缩小，盈亏比与"相对成本的百分比距离"逐位不变**。
+
+    也就是说：市价单不会偷偷改变这笔交易的风险收益结构，只是把整套保护价
+    平移到真实成交价上。与 `order_submit.py` 里 demo 沙盒 resize 用的是**同一套换算**。
+
+    ## 返回 None = 拒绝下单（fail-closed）
+
+    `market <= 0`（现价读不到）或 `entry <= 0`（计划价无效）时返回 `None`，
+    由调用方**拒单**。此处刻意不"退回计划价继续下单"：那正是本节要消除的
+    反挂风险，宁可不下单也不挂错保护价。
+
+    等比缩放后仍做一次顺序兜底（做多 `S < E < T`，做空反之），防浮点/取整
+    把两个价挤到相等。
+    """
+    try:
+        entry = float(entry)
+        tp = float(tp)
+        sl = float(sl)
+        market = float(market)
+    except (TypeError, ValueError):
+        return None
+    if not (market > 0) or not (entry > 0):
+        return None
+
+    scale = market / entry
+    new_entry = round(entry * scale, prec)
+    new_tp = round(tp * scale, prec)
+    new_sl = round(sl * scale, prec)
+
+    if is_long:
+        if new_sl >= new_entry:
+            new_sl = round(new_entry * 0.98, prec)
+        if new_tp <= new_entry:
+            new_tp = round(new_entry * 1.04, prec)
+    else:
+        if new_sl <= new_entry:
+            new_sl = round(new_entry * 1.02, prec)
+        if new_tp >= new_entry:
+            new_tp = round(new_entry * 0.96, prec)
+
+    return new_entry, new_tp, new_sl

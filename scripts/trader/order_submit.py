@@ -130,6 +130,29 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: f
             # （仍按原价/已算出的值提交、仍不阻断），但必须出声。
             print(f"[demo rescale] warn {inst_id} 沙盒报价重算失败，按当前值提交: {_rsc_exc}")
 
+    # 委托订单模式（限价 / 市价）。**在此处读**而不是发单前才读：市价单必须先在
+    # 这里按现价重锚保护价，才能进下面的几何复验与穿价闸。
+    order_mode = str(os.getenv("R20_ORDER_MODE", "limit")).strip().lower()
+
+    # 市价单：真实成交价 = 下单一刻的现价，而 `effective_px/tp/sl` 是按**限价挂单
+    # 计划**算的。若计划是回踩挂单位（做多、计划价明显低于现价），市价单会在现价
+    # 成交而止盈价留在计划价上方不远处 ⇒ 止盈价低于真实成交价，做多的「止盈」
+    # 变成亏损价并当场触发（开-秒平放血）。故先整体等比缩放到现价（保 R:R）。
+    # 现价读不到 ⇒ **拒单**（fail-closed）：退回计划价继续下单正是要消除的形态。
+    if order_mode == "market":
+        from scripts.trader.brackets import reanchor_brackets_to_market
+        _mk_prec = len(str(_tick_last_raw).split(".")[1]) if "." in str(_tick_last_raw) else 4
+        _anchored = reanchor_brackets_to_market(
+            entry=effective_px, tp=effective_tp, sl=effective_sl,
+            market=_anchor_last, is_long=(pos_side == "long"), prec=_mk_prec)
+        if _anchored is None:
+            _mk_rej = (f"市价单需按现价锚定保护价，但现价不可用"
+                       f"（现价={_anchor_last:g}、计划价={effective_px:g}）")
+            print(f"[市价锚定] 拒单 {inst_id}: {_mk_rej}")
+            release_signal_reservation(_reservation, "市价锚定缺现价")
+            return False, f"市价锚定拒绝: {_mk_rej}"
+        effective_px, effective_tp, effective_sl = _anchored
+
     # Final Non-Bypassable Verification: verify actual effective price, tp and sl
     from scripts.order_risk import validate_quote_geometry_and_rr
     action_type = "BUY_LONG" if pos_side == "long" else "SELL_SHORT"
@@ -221,7 +244,7 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: f
             print(f"[杠杆落地] warn {inst_id} 设档至 {int(_want_lever)}x 失败，"
                   f"按账户现档发单（不影响 TP/SL 覆盖）: {lev_exc}")
 
-    order_mode = str(os.getenv("R20_ORDER_MODE", "limit")).strip().lower()
+    # `order_mode` 已在本函数前半段读过（市价重锚需要它）；此处只据它选单型与是否带价。
     ord_type = "market" if order_mode == "market" else "limit"
     entry_px = None if ord_type == "market" else effective_px
 

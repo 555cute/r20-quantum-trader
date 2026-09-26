@@ -143,7 +143,11 @@ class PriceAnchorGateTest(unittest.TestCase):
     def _run_with(self, *, price, pos_side="long"):
         rig = Rig(price=price, ticker="100000")
         ctx = {"notional_usdt": 1, "margin_usdt": 1}
-        with patch("r20_backend.exchanges.listing.ensure_contract_listed",
+        # 本类验的是**限价单**的穿价闸（"BUY 挂在现价上方即拒"）。市价单不按计划价
+        # 成交、路径上会先把三价重锚到现价，穿价闸对它本就不适用 ⇒ 必须钉死限价模式，
+        # 否则运维一切到 market，本类用例会因为"市价单不判穿价"而红（设计如此）。
+        with patch.dict(os.environ, {"R20_ORDER_MODE": "limit"}), \
+             patch("r20_backend.exchanges.listing.ensure_contract_listed",
                    return_value=SimpleNamespace(ok=True, reason="")), \
              patch("scripts.order_risk.validate_quote_geometry_and_rr",
                    return_value=(True, "", 1.0)):
@@ -286,6 +290,62 @@ class OkxDirectTest(unittest.TestCase):
         self.assertIsNone(kw["px"], "市价单模式下 px 必须为 None")
         self.assertIsNotNone(kw["attach_tp"], "市价单模式下止盈腿必须继续绑定")
         self.assertIsNotNone(kw["attach_sl"], "市价单模式下止损腿必须继续绑定")
+
+    def test_market_order_reanchors_brackets_to_the_live_price(self):
+        """市价单的保护价必须锚在**现价**，而不是"计划限价"。
+
+        反例（本用例防的形态）：计划是回踩挂单（100000，现价 110000）。市价单在
+        110000 成交，若止盈仍留在计划推导出的 105000，则**止盈价低于成交价** ——
+        做多的「止盈」成了亏损价，成交瞬间触发（开-秒平放血）。
+        """
+        okx = _Okx()
+        rig = Rig(okx=okx, price=100000.0, tp=105000.0, sl=95000.0, ticker="110000")
+        with patch.dict(os.environ, {"R20_ORDER_MODE": "market"}):
+            with patch("scripts.order_risk.validate_quote_geometry_and_rr",
+                       return_value=(True, "", 1.0)):
+                ok, why = rig.run(venue_ctx={"notional_usdt": 1, "margin_usdt": 1})
+        self.assertTrue(ok, why)
+        _, _, _, kw = okx.orders[0]
+        fill = 110000.0
+        self.assertGreater(kw["attach_tp"], fill,
+                           f"做多止盈 {kw['attach_tp']} 必须高于真实成交价 {fill}")
+        self.assertLess(kw["attach_sl"], fill,
+                        f"做多止损 {kw['attach_sl']} 必须低于真实成交价 {fill}")
+        # 盈亏比 1:2（t=+5%/s=-5%）必须原样保持
+        self.assertAlmostEqual((kw["attach_tp"] - fill) / (fill - kw["attach_sl"]), 1.0,
+                               places=6, msg="市价单不得改动盈亏比")
+
+    def test_market_order_without_live_price_is_refused(self):
+        """现价读不到 ⇒ 拒单（fail-closed）。退回计划价下单正是要消除的反挂形态。"""
+        okx = _Okx()
+        rig = Rig(okx=okx, price=100000.0, tp=105000.0, sl=95000.0, ticker="")
+        with patch.dict(os.environ, {"R20_ORDER_MODE": "market"}):
+            with patch("scripts.order_risk.validate_quote_geometry_and_rr",
+                       return_value=(True, "", 1.0)):
+                ok, why = rig.run(venue_ctx={"notional_usdt": 1, "margin_usdt": 1})
+        self.assertFalse(ok, "缺现价时市价单必须被拒")
+        self.assertIn("市价锚定", why)
+        self.assertEqual(okx.orders, [], "拒单时一单都不许发")
+        self.assertTrue(rig.released, "拒单必须释放信号预留")
+
+    def test_limit_mode_keeps_the_planned_prices_untouched(self):
+        """对照：限价模式**不动**三价（重锚只在市价路径生效）。
+
+        用一个**不穿价**的限价（现价 110000、计划 100000 —— 做多的回踩远挂单，
+        合法策略），断言挂出的 `px/tp/sl` 就是计划原值。
+        """
+        okx = _Okx()
+        rig = Rig(okx=okx, price=100000.0, tp=105000.0, sl=95000.0, ticker="110000")
+        with patch.dict(os.environ, {"R20_ORDER_MODE": "limit"}):
+            with patch("scripts.order_risk.validate_quote_geometry_and_rr",
+                       return_value=(True, "", 1.0)):
+                ok, why = rig.run(venue_ctx={"notional_usdt": 1, "margin_usdt": 1})
+        self.assertTrue(ok, why)
+        _, _, _, kw = okx.orders[0]
+        self.assertEqual(kw["ord_type"], "limit")
+        self.assertEqual(kw["px"], 100000.0, "限价单必须按计划价挂，不得被市价重锚改动")
+        self.assertEqual(kw["attach_tp"], 105000.0)
+        self.assertEqual(kw["attach_sl"], 95000.0)
 
 
 if __name__ == "__main__":
