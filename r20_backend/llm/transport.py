@@ -123,7 +123,7 @@ def build_request_spec(
 
         headers = {
             "Content-Type": "application/json",
-            "User-Agent": "R20-Quantum-Trader/5.4 (Claude-Messages)",
+            "User-Agent": "AstraQuant/8.3 (Claude-Messages)",
             "anthropic-version": "2023-06-01",
         }
         if api_key:
@@ -168,7 +168,7 @@ def build_request_spec(
 
         headers = {
             "Content-Type": "application/json",
-            "User-Agent": "R20-Quantum-Trader/5.4 (OpenAI-Responses)",
+            "User-Agent": "AstraQuant/8.3 (OpenAI-Responses)",
         }
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
@@ -190,7 +190,7 @@ def build_request_spec(
 
         headers = {
             "Content-Type": "application/json",
-            "User-Agent": "R20-Quantum-Trader/5.4 (OpenAI-Chat)",
+            "User-Agent": "AstraQuant/8.3 (OpenAI-Chat)",
         }
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"

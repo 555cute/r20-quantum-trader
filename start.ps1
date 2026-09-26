@@ -1,11 +1,11 @@
 # ==============================================================================
-# R20 Quantum Trader - PowerShell Start Script for Windows / DSH
+# AstraQuant - PowerShell Start Script for Windows / DSH
 # ==============================================================================
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ScriptDir
 
-Write-Host "🚀 [R20 Quantum Trader] Initializing system environment..." -ForegroundColor Cyan
+Write-Host "🚀 [AstraQuant] Initializing system environment..." -ForegroundColor Cyan
 
 # 1. Environment variables
 $env:PYTHONUTF8 = "1"
@@ -44,5 +44,5 @@ if (-not (Test-Path $PoolFile)) {
 }
 
 # 6. Launch Backend Engine
-Write-Host "✨ Launching R20 Quantum Trader on http://127.0.0.1:8080 ..." -ForegroundColor Green
+Write-Host "✨ Launching AstraQuant on http://127.0.0.1:8080 ..." -ForegroundColor Green
 & $PythonExe -m uvicorn r20_backend.app:app --host 0.0.0.0 --port 8080

@@ -7,9 +7,9 @@
  *    此前全站 18 个后台页面标题全部写死为 `"管理控制台 · R20"`，
  *    用户打开多个浏览器标签页时无法区分，读屏器报读完全重复。
  *    现要求：
- *    - 每一个后台路由必须动态获取其对应的导航名，格式为 `${pageName} · ${consoleName} · R20`；
- *    - 登录页为 `${loginName} · ${consoleName} · R20`；
- *    - 404 兜底路由为 `${notFoundName} · R20`（或 `${notFoundName} · ${consoleName} · R20`）；
+ *    - 每一个后台路由必须动态获取其对应的导航名，格式为 `${pageName} · ${consoleName} · AstraQuant`；
+ *    - 登录页为 `${loginName} · ${consoleName} · AstraQuant`；
+ *    - 404 兜底路由为 `${notFoundName} · AstraQuant`（或 `${notFoundName} · ${consoleName} · AstraQuant`）；
  *    - 支持中英文双语根据语言切换即时更新。
  *
  * 2. **后台与 404 路由搜索引擎爬取隔离（robots: noindex）**：

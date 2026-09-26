@@ -393,7 +393,7 @@ function actionBadgeClass(action: string) {
             <ShieldCheck class="h-3.5 w-3.5 text-[var(--up)]" />
             <span>{{ t('dash.shell.panel.guardReady') }}</span>
           </div>
-          <span class="font-mono">R20 Core Engine</span>
+          <span class="font-mono">AstraQuant Core Engine</span>
         </footer>
       </aside>
     </Transition>

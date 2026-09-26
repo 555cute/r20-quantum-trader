@@ -62,7 +62,7 @@ const activeTab = computed(() => {
       <!-- 工作台面包屑与当前频道 -->
       <div class="flex items-center gap-2">
         <span class="font-bold tracking-tight text-sm" style="color: var(--ink-strong)">
-          <span class="sm:hidden">R20</span>
+          <span class="sm:hidden">AstraQuant</span>
           <span class="hidden sm:inline">{{ t('brand.name') }}</span>
         </span>
         <span class="hidden sm:inline text-xs" style="color: var(--ink-3)">/</span>

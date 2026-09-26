@@ -1,7 +1,7 @@
 {
-  "__comment": "R20 Quantum Trader 观测面板。/metrics 端点族名由 r20_backend/metrics.py 单一来源产出；本文件引用的每个族名都有门禁与真实渲染结果对照（tests/ops/test_observability_artifacts.py），改名会立刻翻红。",
+  "__comment": "AstraQuant 观测面板。/metrics 端点族名由 r20_backend/metrics.py 单一来源产出；本文件引用的每个族名都有门禁与真实渲染结果对照（tests/ops/test_observability_artifacts.py），改名会立刻翻红。",
   "uid": "r20-quantum-trader",
-  "title": "R20 Quantum Trader — 执行与行情健康",
+  "title": "AstraQuant — 执行与行情健康",
   "tags": [
     "r20",
     "trading"

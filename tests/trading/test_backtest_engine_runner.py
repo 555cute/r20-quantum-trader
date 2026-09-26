@@ -237,7 +237,7 @@ class MainCliTests(unittest.TestCase):
     def test_report_banner_and_key_numbers_are_printed(self):
         target = Path(self.tmp.name) / "out.json"
         out = self._run(["--output", str(target)])
-        self.assertIn("R20 QUANTUM TRADER 6-ASSET PORTFOLIO BACKTEST ATTRIBUTION REPORT", out)
+        self.assertIn("ASTRAQUANT 6-ASSET PORTFOLIO BACKTEST ATTRIBUTION REPORT", out)
         self.assertIn("Total Return         : 12.5%", out)
         self.assertIn("$11,250.00", out)
         self.assertIn("60.0% (6胜 / 4负, 共10单)", out)

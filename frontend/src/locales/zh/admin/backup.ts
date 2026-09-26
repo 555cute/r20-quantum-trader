@@ -7,7 +7,7 @@ export const zhAdminBackup = {
   enabledOn: "每日自动灾备已启用",
   enabledOff: "已停用",
   secContent: "1. 备份内容",
-  scopeValue: "R20 系统、策略、配置与运行数据",
+  scopeValue: "AstraQuant 系统、策略、配置与运行数据",
   secLocation: "2. 保存位置",
   destLocal: "本地滚动归档",
   destS3: "S3 兼容存储",

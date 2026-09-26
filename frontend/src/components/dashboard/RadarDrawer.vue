@@ -118,7 +118,7 @@ function posActionBadge(action: string): { label: string; class: string } {
     :open="!!cycle"
     width="680px"
     :title="t('dash.radar.detail.title', undefined, { t: fmtDateTime(cycle?.time) })"
-    :subtitle="cycle?.policy_version || 'R20 Multi-Agent System'"
+    :subtitle="cycle?.policy_version || 'AstraQuant Multi-Agent System'"
     @close="emit('close')"
   >
     <BaseTabs

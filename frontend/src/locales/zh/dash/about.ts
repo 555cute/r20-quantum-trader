@@ -1,6 +1,6 @@
 /** 关于与社区弹窗 */
 export const zhAbout = {
-  title: '关于 R20',
+  title: '关于 AstraQuant',
   desc: '查看版本、许可与开源仓库',
   arch: {
     title: '系统架构',

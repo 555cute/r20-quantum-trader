@@ -302,7 +302,7 @@ def render_trading_memory(legacy_md=None, legacy_json=None):
     text = read_trading_context(legacy_md, legacy_json)[1]
     if not text.strip():
         return ""
-    return "======================= 【R20 启发式实战认知与长期记忆】 =======================\n" + text
+    return "======================= 【AstraQuant 启发式实战认知与长期记忆】 =======================\n" + text
 
 
 def sync_markdown_mirror() -> bool:
@@ -333,7 +333,7 @@ def sync_markdown_mirror() -> bool:
     else:
         local = "--"
     doc = (
-        "# R20 AI 交易实战长期心法 (Heuristic Long-Term Memory)\n\n"
+        "# AstraQuant AI 交易实战长期心法 (Heuristic Long-Term Memory)\n\n"
         f"> 状态：由自进化防污染认知中枢实时纳管 | 更新基准: {local} (UTC+8)\n"
         f"> 权威来源: structured_trading_memory.json | 修订 {str(snapshot.get('version'))[:8]} | 共 {len(lessons)} 条心法\n"
         "> 宪法安全护栏：已通过极端离群值过滤 (Outlier Rejection) 与防偏见白盒审查。\n\n"

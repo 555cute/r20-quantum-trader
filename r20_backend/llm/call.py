@@ -116,7 +116,7 @@ def fetch_remote_models(reload_config: Callable[[], Dict[str, Any]], get_active_
     last_err = ""
     saw_auth_error = False
     for ep, hdrs in endpoints:
-        hdrs["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 R20-Quantum-Trader/6.6"
+        hdrs["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 AstraQuant/8.3"
         req = urllib.request.Request(ep, headers=hdrs)
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:

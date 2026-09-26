@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 
 from r20_backend.config import settings, refresh_settings
 from r20_backend.time_utils import beijing_day
+from r20_backend.version import APP_SITE
 from r20_backend.dependencies import (
     ROOT, DATA_DIR, VUE_DIST, okx, read_json, require_admin_header,
 )
@@ -211,7 +212,11 @@ async def robots_txt():
     pf = ROOT / "frontend" / "public" / "robots.txt"
     if pf.is_file():
         return FileResponse(str(pf), media_type="text/plain", headers={"Cache-Control": "public, max-age=86400, s-maxage=604800"})
-    return PlainTextResponse("User-agent: *\nAllow: /\nAllow: /docs\nAllow: /images/\nDisallow: /admin/\nDisallow: /api/\nSitemap: https://www.r20.cn/sitemap.xml\n")
+    return PlainTextResponse(
+        "User-agent: *\nAllow: /\nAllow: /docs\nAllow: /images/\n"
+        "Disallow: /admin/\nDisallow: /api/\n"
+        f"Sitemap: {APP_SITE}/sitemap.xml\n"
+    )
 
 
 @router.get("/sitemap.xml", include_in_schema=False)
@@ -222,7 +227,7 @@ async def sitemap_xml():
     pf = ROOT / "frontend" / "public" / "sitemap.xml"
     if pf.is_file():
         return FileResponse(str(pf), media_type="application/xml", headers={"Cache-Control": "public, max-age=86400, s-maxage=604800"})
-    return Response(content="""<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://www.r20.cn/</loc><priority>1.0</priority></url><url><loc>https://www.r20.cn/docs</loc><priority>0.8</priority></url></urlset>""", media_type="application/xml")
+    return Response(content=f"""<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>{APP_SITE}/</loc><priority>1.0</priority></url><url><loc>{APP_SITE}/docs</loc><priority>0.8</priority></url></urlset>""", media_type="application/xml")
 
 
 @router.get("/docs/images/{img_name}", include_in_schema=False)

@@ -1,5 +1,5 @@
 # ==============================================================================
-# R20 Quantum Trader - Production Docker Compose Stack
+# AstraQuant - Production Docker Compose Stack
 # ==============================================================================
 
 services:

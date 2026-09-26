@@ -7,7 +7,7 @@ export const enAdminBackup = {
   enabledOn: "Daily automatic backup enabled",
   enabledOff: "Disabled",
   secContent: "1. Backup scope",
-  scopeValue: "R20 system, strategies, configuration and runtime data",
+  scopeValue: "AstraQuant system, strategies, configuration and runtime data",
   secLocation: "2. Storage location",
   destLocal: "Local rolling archives",
   destS3: "S3-compatible storage",

@@ -1,5 +1,5 @@
 export const enAdminLogin = {
-  title: 'R20 Console',
+  title: 'AstraQuant Console',
   desc: 'Sign in with administrator credentials',
   username: 'Username',
   password: 'Password',

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-R20 Quantum Multi-Asset Backtesting & Statistical Verification Engine (backtest_engine.py)
+AstraQuant Multi-Asset Backtesting & Statistical Verification Engine (backtest_engine.py)
 ------------------------------------------------------------------------------------------
 Features:
 - Multi-Asset Portfolio Backtesting (Simultaneous 6 Instruments)
@@ -376,7 +376,7 @@ def main():
 
     p = report["portfolio"]
     print("\n==========================================================================")
-    print("      R20 QUANTUM TRADER 6-ASSET PORTFOLIO BACKTEST ATTRIBUTION REPORT    ")
+    print("         ASTRAQUANT 6-ASSET PORTFOLIO BACKTEST ATTRIBUTION REPORT         ")
     print("==========================================================================")
     print(f" Portfolio Mode       : 6大主力标的对齐组合 (BTC, ETH, SOL, DOGE, SUI, ASTER)")
     print(f" Backtest Range       : OKX 官方实时最新 {args.limit} 根 {args.bar} K线序列")

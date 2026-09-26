@@ -68,7 +68,7 @@ No HTTP trade-trigger endpoint is exposed except the separately enabled, confirm
 
 ## QwenPaw Container Coexistence
 
-When `www.r20.cn` is already reverse-proxied into a QwenPaw container, keep QwenPaw on its existing port and let the R20 standalone gateway own port `8080`. `r20_backend.app` mounts the existing dashboard at `/`, while `/admin` and `/api/v1/*` remain R20-native routes. This preserves the hostname, reverse-proxy rules, dashboard paths, QwenPaw process, and QwenPaw backup layout.
+When `www.astraquant.tech` is already reverse-proxied into a QwenPaw container, keep QwenPaw on its existing port and let the AstraQuant standalone gateway own port `8080`. `r20_backend.app` mounts the existing dashboard at `/`, while `/admin` and `/api/v1/*` remain R20-native routes. This preserves the hostname, reverse-proxy rules, dashboard paths, QwenPaw process, and QwenPaw backup layout.
 
 Add the `[program:r20-backend]` block from the container supervisor configuration and restart the container during a maintenance window so supervisord adopts it. Do not run the legacy `r20_backend.dashboard_cache` Uvicorn process at the same time as `r20_backend.app`.
 

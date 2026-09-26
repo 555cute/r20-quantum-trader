@@ -19,7 +19,7 @@ def notify(result: dict) -> None:
         from qq_notifier import send_qq_message
         icon = "✅" if result.get("status") == "success" else "⚠️" if result.get("status") == "partial" else "❌"
         lines = [
-            f"{icon} 【R20 自定义灾备】{result.get('job_name', '未知任务')}",
+            f"{icon} 【AstraQuant 自定义灾备】{result.get('job_name', '未知任务')}",
             f"状态：{result.get('status', 'unknown')}",
             f"时间：{result.get('started_at', '')} - {result.get('finished_at', '')}"
         ]

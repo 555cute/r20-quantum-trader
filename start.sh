@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# R20 Quantum Trader - Quick Start Script
+# AstraQuant - Quick Start Script
 # ==============================================================================
 
 set -e
@@ -8,7 +8,7 @@ set -e
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
-echo "🚀 [R20 Quantum Trader] Initializing system environment..."
+echo "🚀 [AstraQuant] Initializing system environment..."
 
 # 1. Check Python
 if ! command -v python3 &> /dev/null; then
@@ -51,5 +51,5 @@ if [ ! -d "frontend/dist" ]; then
 fi
 
 # 5. Start Backend Engine
-echo "✨ Launching R20 Quantum Trader on http://0.0.0.0:8080 ..."
+echo "✨ Launching AstraQuant on http://0.0.0.0:8080 ..."
 exec python3 -m uvicorn r20_backend.app:app --host 0.0.0.0 --port 8080

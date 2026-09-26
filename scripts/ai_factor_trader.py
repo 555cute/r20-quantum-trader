@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-R20 High-Alpha Quantitative Multi-Factor Trading Matrix & Execution Engine (R20 Quantum Trader v6.8.1)
+R20 High-Alpha Quantitative Multi-Factor Trading Matrix & Execution Engine (AstraQuant v6.8.1)
 Architecture:
 1. Multi-Dimensional Quant Factor Sub-Engine:
    - Trend Momentum: EMA Slope (9/21/55), Multi-Timeframe Alignment (15M, 1H, 4H)
@@ -1042,7 +1042,7 @@ def execute_ai_position_management(real_pos_dict, trackers, timestamp_full, exec
     )
 
 # =============================================================================
-# 🧠 R20 Quantum Trader v6.8.1 Multi-Factor Scoring & Strategy Setup Classifier
+# 🧠 AstraQuant v6.8.1 Multi-Factor Scoring & Strategy Setup Classifier
 # =============================================================================
 def evaluate_asset_signal(f):
     """连续多因子量化评分（-5.0 ~ +5.0）。实现见 scripts/trader/signals.py。

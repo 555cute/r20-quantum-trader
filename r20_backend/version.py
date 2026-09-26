@@ -1,4 +1,8 @@
-"""Central Source of Truth for R20 Quantum Trading System version and branding."""
+"""Central Source of Truth for AstraQuant version and branding.
+
+对外品牌 = `AstraQuant`；内部代号 = `R20`（包名 `r20_backend` / `r20_gateway`
+与 `R20_*` 环境变量键**有意保留**，理由见 `README.md` 的「品牌与内部代号」一节）。
+"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,6 +11,10 @@ __version__ = "8.3.1"
 APP_VERSION = f"v{__version__}"
 APP_NAME = "AstraQuant"
 APP_NAME_EN = "AstraQuant"
+#: 官方站点（**带 www**，与 DNS 实际解析一致；页面内的 canonical / og:url 同源）。
+APP_SITE = "https://www.astraquant.tech"
+#: 官方仓库。
+APP_REPO = "https://github.com/555cute/astra-quant-agent"
 
 
 def get_version() -> str:

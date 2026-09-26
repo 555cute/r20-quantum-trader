@@ -1,6 +1,6 @@
 /** 登录页 */
 export const zhAdminLogin = {
-  title: 'R20 控制台',
+  title: 'AstraQuant 控制台',
   desc: '输入管理员凭据进入系统配置面',
   username: '用户名',
   password: '密码',

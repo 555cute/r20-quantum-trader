@@ -14,7 +14,7 @@ Disallow: /api/
 Disallow: /api/*
 
 # Host
-Host: https://www.r20.cn
+Host: https://www.astraquant.tech
 
 # Sitemaps
-Sitemap: https://www.r20.cn/sitemap.xml
+Sitemap: https://www.astraquant.tech/sitemap.xml

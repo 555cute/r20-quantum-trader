@@ -2,7 +2,7 @@
 set -e
 
 # ==============================================================================
-# R20 Quantum Trader - Docker One-click Launcher
+# AstraQuant - Docker One-click Launcher
 # ==============================================================================
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -44,7 +44,7 @@ else
     exit 1
 fi
 
-echo "🚀 Building and starting R20 Quantum Trader stack..."
+echo "🚀 Building and starting AstraQuant stack..."
 $COMPOSE_CMD up -d --build
 
 echo "✅ R20 Docker Stack successfully launched!"

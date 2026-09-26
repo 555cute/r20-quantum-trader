@@ -1,233 +1,155 @@
-# AstraQuant · 机构级多交易所平权量化决策与执行系统
-
 <div align="center">
 
+[**简体中文**](README.md) · [English](README.en.md)
+
+# AstraQuant
+
+### 机构级多交易所平权量化决策与执行系统
+
 [![Release](https://img.shields.io/badge/Release-v8.3.1-blue.svg?style=flat-square)](https://github.com/555cute/astra-quant-agent/releases/tag/v8.3.1)
-[![Website](https://img.shields.io/badge/Site-astraquant.tech-6E56CF.svg?style=flat-square)](https://astraquant.tech)
+[![Website](https://img.shields.io/badge/Site-www.astraquant.tech-6E56CF.svg?style=flat-square)](https://www.astraquant.tech)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg?style=flat-square)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688.svg?style=flat-square)](https://fastapi.tiangolo.com/)
 [![Vue 3](https://img.shields.io/badge/Vue-3.5%2B-4FC08D.svg?style=flat-square)](https://vuejs.org/)
-[![KLineChart](https://img.shields.io/badge/Chart-KLineChart%20v10%20Native-2962FF.svg?style=flat-square)](https://klinecharts.com/)
-[![Tests](https://img.shields.io/badge/Tests-1205%2B%20Passing-brightgreen.svg?style=flat-square)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-10k%2B%20Passing-brightgreen.svg?style=flat-square)](tests/)
 [![Community](https://img.shields.io/badge/Community-LINUX%20DO-F97316.svg?style=flat-square&logo=linux&logoColor=white)](https://linux.do/)
 
-**全市场宏观态势自适应识别 ｜ 对冲基金投委会博弈 ｜ 17项 Fail-Closed 物理硬风控 ｜ 深度思考链 (CoT) 原生白盒透视**  
-*OKX / Binance / Gate 三所平权撮合 ｜ 策略全要素 100% 动态定制 ｜ 双官方旗舰预设体系 ｜ 全链路可观测性结构化审计*
+**命名 AI 席位交叉质询 → CIO 终审采纳 → 执行层物理硬风控 → OKX / Binance / Gate 三所真实下单**
 
-<details open>
-<summary><b>English</b> — AstraQuant is an open-source, multi-exchange AI quant trading terminal</summary>
+*决策归大模型，风控归物理底座，订单真的下去了 —— 全链路白盒可审计。*
 
-**AstraQuant** is an LLM-native **multi-agent investment committee** that actually trades. On every 15-minute cycle, named AI seats (macro / technical / risk / contrarian) debate the market, a **CIO seat is adopted** for the final call, and **17 fail-closed risk gates** stand between the decision and the exchange. Nothing is simulated: orders are placed on **OKX / Binance / Gate** with take-profit and stop-loss attached atomically, and every decision is auditable end-to-end.
-
-- **Multi-agent LLM committee** — configurable seats, cross-examination, CIO adoption traced per position
-- **17 fail-closed risk gates** — a Python interceptor pipeline that physically blocks orders when risk rules trip
-- **Three-venue parity execution** — OKX / Binance / Gate, cross-venue position and margin awareness
-- **Self-evolving prompt library** — strategy, prompts and risk policy are data, not hardcoded logic
-- **Full-stack observability** — CoT trajectory drawer, per-cycle audit trail, structured logs
-
-> ⚠️ Requires **two** sets of credentials to run: an LLM provider key and exchange API keys. Starts in paper/demo mode.
->
-> *Internal codename: R20 (see 「品牌与内部代号」 below — package names and `R20_*` env keys intentionally keep the old prefix).*
-
-```
-git clone https://github.com/555cute/astra-quant-agent.git && cd astra-quant-agent
-./deploy/docker-start.sh          # or: deploy/install.sh for a host install
-```
-
-Website: **https://astraquant.tech** · Docs: [`STANDALONE.md`](STANDALONE.md) · [Recovery](RECOVERY_GUIDE.md)
-
-</details>
-
-> 🌟 **本项目首发并深度链接认可 [LINUX DO (linux.do)](https://linux.do/) 开源技术社区，致敬真诚、开放的技术交流精神！**
-
-[全景特性](#-系统定位与核心量化哲学) · [前台操盘大屏](#-前台双翼量化操盘工作台) · [后台管理控制面](#-后台机构级量化控制面) · [策略配置中心](#-八大策略配置中心重中之重) · [多级日志系统](#-多级日志与全链路可观测性体系) · [资金规模适配](#-资金规模与分级风控) · [架构索引](#architecture-index) · [极速部署](#-极速部署指南)
+[60 秒跑起来](#-60-秒跑起来) · [它是什么](#-它是什么) · [四个设计原则](#-四个设计原则) · [界面](#-界面) · [策略配置中心](#-策略配置中心) · [资金与风控](#-资金规模与分级风控) · [部署](#-部署) · [架构索引](#architecture-index) · [品牌与代号](#-品牌与内部代号改名时必读)
 
 </div>
 
----
-
-## 📖 系统定位与核心量化哲学
-
-AstraQuant 是一套面向专业交易团队与量化交易员打造的**多交易所平权量化决策与自动化执行操作系统**。在 v8.0.0 架构跃迁中，系统深度融合了大语言模型（LLM）的宏观推理能力、因果微积分动力学矩阵与对冲基金 Trading Desk 投委会协同博弈机制，彻底打通**「市场体制自适应识别 ➔ 策略套件动态挂载 ➔ 投委会交叉质询 ➔ 底层物理风控硬拦截 ➔ 毫秒级多所执行 ➔ 实盘台账自进化」**的完整自主操盘大闭环。
-
-```
-                               ┌───────────────────────────────────────────────────────────┐
-                               │       R20 v8.0.0 自主对冲基金操盘全链路架构 (End-to-End)     │
-                               └─────────────────────────────┬─────────────────────────────┘
-                                                             │
-        ┌────────────────────────────────────────────────────┼────────────────────────────────────────────────────┐
-        ▼                                                    ▼                                                    ▼
-┌──────────────────────────────┐              ┌──────────────────────────────┐              ┌──────────────────────────────┐
-│ 1. 宏观体制自适应中枢 (Regime)│              │ 2. 投委会协同博弈 (Council)  │              │ 3. 执行层物理风控 (Execution)│
-├──────────────────────────────┤              ├──────────────────────────────┤              ├──────────────────────────────┤
-│• 实时扫描全标的池 9 大币种   │              │• 进攻/防守/数理/宏观独立参谋 │              │• Fail-Closed 故障硬切断防线  │
-│• 四态划分: 单边/宽幅/低波/冲击│              │• 独立绑定不同旗舰推理模型    │              │• 几何硬性盈亏比 R:R ≥ 2.0    │
-│• 自适应推荐官方匹配预设套件  │              │• 双轮交叉质询辩论 + CIO 仲裁 │              │• 4H 宏观顺势单向否决门禁     │
-│• 原生注入 {{market_regime}}  │              │• 深度思考链 (CoT) 原始草稿透视│              │• 三所原生条件单与双向持仓适配│
-└──────────────────────────────┘              └──────────────────────────────┘              └──────────────────────────────┘
-```
-
-### 核心四大设计原则
-
-1. **认知决策归模型，物理风控归底座**：大语言模型与投委会仅拥有交易意图的“提案权”。每一笔订单在触达交易所网关前，必须 100% 严格穿透底层 Python 物理硬门禁（订单几何合法性、真实盈亏比 R:R ≥ 2.0、4H 顺势否决、同向持仓配额等），彻底消灭模型幻觉可能导致的意外亏损；
-2. **全市场体制自适应（Market Regime Auto-Detection）**：告别“震荡市跑单边被磨损、单边市跑网格被套牢”的量化宿命。系统根据微积分速度 $v$、加速度 $a$、定积分能量 $E$ 与波动率分布，自动研判当前大盘体制并匹配最优策略范式；
-3. **三所平权对等撮合（Three-Venue Parity）**：OKX、Binance（币安）、Gate（芝麻开门）三大主流交易所享有对等风控与执行地位，统一多所资产视图，自适应识别各所双向持仓与原生条件保护单；
-4. **全链路白盒可解释与台账自进化**：全流程记录大模型原始思考推演链、席位交锋记录与选所证据链。每 6 小时自动穿透真实平仓台账，提炼黄金交易心法并注入长期记忆。
+> 🌟 **本项目首发并深度链接认可 [LINUX DO (linux.do)](https://linux.do/) 开源技术社区，致敬真诚、开放的技术交流精神！**
 
 ---
 
-## 📸 系统全景实机大屏
+## 🚀 60 秒跑起来
 
-系统由**前台双翼量化操盘工作台**与**后台机构级控制面**共同构成，完美支持桌面 1080P/2K/4K 极客大屏沉浸式盯盘与移动端响应式触控：
+```bash
+git clone https://github.com/555cute/astra-quant-agent.git && cd astra-quant-agent
+./deploy/docker-start.sh          # Docker 一键起（推荐）；宿主机部署走 ./deploy/install.sh
+```
+
+启动后：
+
+| 入口 | 地址 |
+|---|---|
+| 前台操盘大屏 | `http://localhost:8080/` |
+| 后台控制面 | `http://localhost:8080/admin/login`（默认用户名 `admin`） |
+
+> ⚠️ 需要**两套**凭证才能真跑：一个**大模型 API Key** + 一套**交易所 API Key**。
+> 默认以**模拟盘 / Demo 环境**启动，配置齐全并显式切换后才会碰真实资金。
+
+---
+
+## 🧭 它是什么
+
+AstraQuant 是一套面向专业交易团队与量化交易员的**多交易所平权量化决策与自动化执行操作系统**。
+
+每 **15 分钟**一个主脑周期：命名 AI 席位（进攻 / 动量 / 数理 / 宏观等）各自独立研判并提出交易意图，**CIO 席位采纳终审**给出最终裁决；裁决在触达交易所网关之前，必须逐条穿透**执行层 Python 物理风控管线**；通过后才以 Maker 限价单落到 **OKX / Binance / Gate**，止盈止损作为原生条件单原子挂载。
+
+它**不是**一个把交易逻辑写死在脚本里的回测玩具：
+
+- **投委会是真实的多模型协作** —— 每个席位可独立绑定不同厂商的大模型与推理温度，双轮交叉质询后由 CIO 仲裁；
+- **风控是可调的物理管线** —— 26 项执行层硬风控旋钮从源码里剥离到单一事实源，在后台集中可视化配置，拦截插件报错或超时一律 **Fail-Closed 强制熔断**；
+- **策略是数据，不是代码** —— 提示词、投委会席位、风控阈值、模型路由全部可在界面里改，改完存成带 SHA-256 指纹的版本快照，可 0.5 秒原子回滚；
+- **全过程可审计** —— 每一次决策的原始思考链（CoT）、席位交锋记录、选所证据链、当时的 `policy_version` 与 `policy_hash` 都落盘可查。
+
+---
+
+## 🎯 四个设计原则
+
+1. **认知决策归模型，物理风控归底座。**
+   大模型与投委会只有交易意图的**提案权**。每一笔订单在触达交易所网关之前，必须 100% 穿透底层 Python 物理硬门禁（订单几何合法性、真实盈亏比下限、4H 顺势否决、同向持仓配额等）。任何一道拦截插件报错或超时 → **开仓动作无条件熔断**。这条设计负责消灭"模型幻觉直接变成亏损"。
+
+2. **全市场体制自适应（Market Regime Auto-Detection）。**
+   告别"震荡市跑单边被磨损、单边市跑网格被套牢"。系统按微积分速度 `v`、加速度 `a`、定积分能量 `E` 与波动率分布研判大盘体制，并推荐匹配的策略预设。
+
+3. **三所平权对等撮合（Three-Venue Parity）。**
+   OKX、Binance、Gate 三大交易所在风控与执行上地位对等，统一多所资产视图，自适应识别各所的双向持仓模式与原生条件保护单。
+
+4. **全链路白盒可解释 + 台账自进化。**
+   完整记录模型原始推演链、席位交锋与选所证据。每 6 小时穿透真实平仓台账做闭环归因，提炼交易心法注入长期记忆（带防偏见护栏与时效半衰期）。
+
+---
+
+## 📸 界面
+
+系统由**前台双翼操盘工作台**与**后台机构级控制面**构成，支持桌面 1080P/2K/4K 大屏盯盘与移动端响应式。
 
 ### 1. 🖥️ 前台双翼量化操盘工作台
-整合资产总览舱、因果微积分动力学矩阵与 KLineChart v10 原生高性能 K 线交互引擎，毫秒级呈现多空力量对比：
+
+整合资产总览舱、因果微积分动力学矩阵与 KLineChart v10 原生 K 线引擎：
+
 ![前台操盘大屏](docs/images/v800_live_dashboard.png)
 
-### 2. 🌊 深度思考链 (CoT) 与决策轨迹抽屉 (v8.0.0 重磅突破)
-前台抽屉原生集成**宏观市场体制动态指示条**（趋势分、波动分、震荡指数与主导方向），并对每一笔决策提供展开式 **「🧠 深度思考链与数理依据 (CoT)」**，完整折叠展现形态结构、微积分特征、概率期望与模型原始推演草稿：
+### 2. 🌊 深度思考链（CoT）与决策轨迹抽屉
+
+对每一笔决策提供可展开的 **「🧠 深度思考链与数理依据 (CoT)」**，完整折叠展现形态结构、微积分特征、概率期望与模型原始推演草稿：
+
 ![前台决策轨迹与深度思考链](docs/images/v800_trajectory_cot.png)
 
-### 3. ⚙️ 后台机构级量化控制面
-全景监控系统运行健康度、三所连接状态、大模型推理时延、内存消耗与底层硬风控拦截事件：
+### 3. 🧠 AI 决策雷达与推演博弈全景
+
+![AI 决策雷达与推演博弈大盘](docs/images/v800_radar_view.png)
+
+### 4. ⚙️ 后台机构级量化控制面
+
+全景监控运行健康度、三所连接状态、大模型推理时延、内存消耗与底层硬风控拦截事件：
+
 ![后台机构级控制面](docs/images/v800_admin_overview.png)
 
 ---
 
-## 🎯 八大策略配置中心（重中之重）
+## 🧩 策略配置中心
 
-> **“策略制定权永远属于交易员，而非写死的系统硬代码。”**
+> **"策略制定权永远属于交易员，而不是写死的系统硬代码。"**
 
-传统量化软件往往将交易逻辑深埋在底层脚本中，调参极其困难且缺乏复盘能力。AstraQuant彻底摒弃黑盒硬编码，将**提示词、投委会、物理风控、认知自省、版本快照、风控阈值、模型路由与多所执行**解耦为八大可视化策略配置模块：
+传统量化软件把交易逻辑深埋在底层脚本里，调参困难且无法复盘。AstraQuant 把**提示词、投委会、物理风控、认知自省、版本快照、风控阈值、模型路由与多所执行**解耦为九个可视化配置模块：
 
----
-
-### 1. 🎨 提示词策略工作室 (Prompt Studio)
-彻底告别硬编码！支持交易员在前台可视化编排 **「System 核心军规」** 与 **「User 市场特征组装模版」**：
+| # | 模块 | 管什么 |
+|---|---|---|
+| 1 | 🎨 **提示词策略工作室** | 可视化编排「System 核心军规」与「User 市场特征组装模版」，9 类实时语义变量插槽一键注入（`{{market_regime}}` / `{{market_matrix}}` / `{{risk_budget}}` / `{{news_intelligence}}` / `{{trading_memory}}` / `{{account_positions}}` 等），支持方案副本与 JSON 导入导出，内置防投毒护栏 |
+| 2 | 👥 **对冲基金多模型决策委员会** | 席位 100% 自由增删；每个席位可**独立绑定不同厂商的大模型**（如进攻官配 Claude、风控官配 DeepSeek-R1、数理官配 GPT-4o）与独立系统提示词、推演温度；双轮交叉质询 + CIO 统筹终审 |
+| 3 | 🛡️ **Fail-Closed 物理硬拦截管线** | 不可跳过的 Python 插件流水线。出厂四道核心门禁：4H 宏观顺势铁律 / 高置信度质量门禁 / 1H ADX 趋势杂波过滤 / 真实盈亏比门禁。支持在线沙箱单步测试每道插件的通过与否决表现 |
+| 4 | 🧬 **启发式自进化认知中枢** | 每 6 小时穿透全量平仓台账做闭环归因，提炼黄金心法沉淀进长期记忆；带离群噪点剔除、防偏见红线与 7~14 天敏锐半衰期，支持一键回滚官方基准 |
+| 5 | 📦 **策略大一统版本快照** | 打包「提示词 + 拦截插件 + 投委会席位 + 标的池参数」计算 SHA-256 策略指纹（如 `v8.3.1@a7f29b1c`）；0.5 秒原子回滚；每笔订单强制记录当时的 `policy_version` / `policy_hash` |
+| 6 | 🎛️ **执行层风控管理中心** | 26 项执行硬风控全量可调 + 三套预设一键应用（🛡️ 稳健防守 / ⚖️ 均衡波段 / 🚀 进取猎手）；高危操作强制短语二次确认 |
+| 7 | 🤖 **大模型网关与推理配置中心** | 多供应商直连矩阵（OpenAI / Claude / Gemini / DeepSeek / Qwen 等）；全局思考预算 10~1800s，适配长思考链旗舰模型；主模型频控或宕机时秒级自动降级切换 |
+| 8 | 🌐 **三所平权执行拓扑** | 三所原生直连、独立凭证与持仓模式；跨所因果微积分动力学矩阵实时比对价差、资金费率与动量加速度 |
+| 9 | 🧪 **回测与沙箱子系统** | 多资产组合回测、统计显著性验证与单步沙箱演练，与实盘共用同一套风控与执行代码路径 |
 
 ![提示词策略工作室](docs/images/v800_prompt_studio.png)
-
-- **出厂双旗舰官方预设套件 (v8.0.0)**：
-  - 🚀 **「全维度波段强化版」(默认主策略)**：基于 1H~4H 宏观多空趋势、因果微积分动能共振、概率期望优先定性，给足波段呼吸空间，让利润充分奔跑；
-  - 🛡️ **「宽幅震荡箱体收割版」(应对高波动无序洗盘)**：针对高波动箱体震荡定制，严禁半山腰追价，在箱体上下轨边际高抛低吸，给足 2.2x ATR 宽止损隔绝假突破插针，浮盈 1.5R 稳固波段立即保本移损锁死胜率；
-- **标准化 9 大语义变量插槽**：内置 `{{market_regime}}`（全市场宏观体制）、`{{market_matrix}}`（行情数理矩阵）、`{{risk_budget}}`（自适应风险预算）、`{{news_intelligence}}`（舆情快讯）、`{{trading_memory}}`（自进化心法）、`{{account_positions}}`（实时在管仓位）等丰富数据插槽，点击一键注入；
-- **高保真预览与 JSON 方案导入导出**：一键保存方案副本与历史版本回溯，内置白盒防投毒安全护栏（严禁要求取消硬止损或越权修改风控）。
-
----
-
-### 2. 👥 对冲基金多模型决策委员会 (Council Pro)
-模拟华尔街对冲基金 Trading Desk 协同运作机制，彻底终结单一大模型的认知盲区与幻觉风险：
-
 ![对冲基金多模型决策委员会](docs/images/v800_council_board.png)
-
-- **参谋席位 100% 自由定义**：
-  - 自由增删进攻官、风控官、量化数理官、宏观策略官或自定义专家席位；
-  - 每个席位可**独立绑定大模型厂商**（如进攻官配 Claude 3.7 Thinking，风控官配 DeepSeek-R1，数理官配 GPT-4o），独立指定系统提示词与推演温度；
-- **双轮交叉质询模式 (Cross-Exam)**：第一轮各席位独立研判提案 ➔ 第二轮同行交叉漏洞质询与辩论 ➔ 第三轮首席投资官（CIO）统筹终审发单；
-- **长思考链超时解耦**：针对长推演模型（如 DeepSeek-R1、o1/o3），支持 10~1800s 宽限思考预算，避免过早截断。
-
----
-
-### 3. 🛡️ Fail-Closed Python 物理硬拦截管线 (Interceptors)
-**“认知决策归模型，物理风控归底座”**。系统绝不把止损与风控寄托于 LLM 提示词本身的自律，而是在交易执行底层构筑了不可跳过的 Python 物理插件流水线：
-
 ![物理硬拦截插件管线](docs/images/v800_interceptors_failclosed.png)
-
-- **Fail-Closed 故障硬切断**：任何拦截插件报错或超时，开仓动作一律无条件强制熔断拦截；
-- **四大出厂核心物理门禁**：
-  1. `#1 4H 宏观顺势铁律` (`01_macro_trend_filter.py`)：4H 多头通道严禁摸顶开空，空头承压严禁逆势抄底；
-  2. `#2 高置信度质量门禁` (`02_confidence_gatekeeper.py`)：置信度门槛可自定义（默认低于 75% 强制降级观望）；
-  3. `#3 1H ADX 趋势杂波过滤` (`03_adx_volatility_filter.py`)：过滤无序横盘震荡市场，低于门限严禁开仓；
-  4. `#4 真实 2.0R 盈亏比门禁` (`04_risk_reward_gatekeeper.py`)：执行层严格几何校验，严禁亏损概率不对称的劣质交易；
-- **在线沙箱单步测试**：支持在界面现场输入模拟报价参数，单步测试每道拦截插件的通过/拒绝表现。
-
----
-
-### 4. 🧬 启发式自进化认知中枢 (Self-Evolution)
-在实战中持续自省，绝不在回撤期情绪化乱改参数：
-
-![自进化认知中枢](docs/images/v800_self_evolution.png)
-
-- **实盘台账自动穿透**：系统每 6 小时自动读取全量实盘平仓台账进行闭环归因，精准剖析多空双杀、手续费磨损与执行偏差；
-- **白盒黄金心法沉淀**：提炼实战教训并动态维护 `data/AI_TRADING_MEMORY.md` 黄金心法，在后续决策推演中自动注入；
-- **防偏见护栏 (Evolution Shield)**：离群噪点剔除、宪法级防偏见红线；支持一键回滚至官方黄金基准；
-- **心法敏锐半衰期 (7~14天)**：动态评估历史心法时效，自动衰减淘汰过期经验，杜绝因旧周期杂波导致过度拟合。
-
----
-
-### 5. 📦 策略大一统版本快照与 0.5s 原子回滚 (Policy Snapshot)
-针对多组件联动修改可能引发的“策略撕裂”与“无法复盘”难题，打造工业级快照回滚引擎：
-
 ![策略大一统版本快照](docs/images/v800_policy_snapshot.png)
-
-- **四大策略单元聚合指纹**：打包「提示词模版」、「物理拦截插件」、「投委会席位」与「标的池参数」，计算出全网唯一不可变的 SHA-256 策略版本标识（如 `v8.0.0@a7f29b1c`）；
-- **策略方案具名归档**：支持将调试满意的全套策略一键保存为具名归档（如“宽幅震荡收割版”、“进取突破版”），随时调用；
-- **0.5s 原子级秒级回滚**：新策略表现不佳时，一键秒级恢复历史版本，前置自动快照备份并校验哈希，杜绝局部状态残留；
-- **全链路台账 100% 溯源绑定**：每一笔开仓与平仓订单，后台强制锁定记录当时的 `policy_version` 与 `policy_hash`。
-
----
-
-### 6. 🎛️ 执行层风控管理中心与三大预设 (Risk Control Center)
-全部执行层硬风控参数从源码中剥离，收拢至单一事实源（`scripts/risk_constants.py`）并在后台集中可视化配置：
-
 ![执行层风控管理中心](docs/images/v800_risk_control.png)
-
-- **17 项执行硬风控全量可调**：最高持仓数、同向敞口上限、单笔保证金占比、单标的累计保证金封顶、杠杆上限、单笔 1R 风险额、最小盈亏比 R:R 硬底线、开仓 AI 置信度门禁、日亏熔断（比例+绝对双封顶）、最长持仓时效、止损冷静期等；
-- **三套优质预设一键应用**：
-  - 🛡️ **稳健防守**：新账户首选，严禁加仓、3x 杠杆、85% 高置信门禁；
-  - ⚖️ **均衡波段**：基线方案，攻守兼备；
-  - 🚀 **进取猎手**：单边大趋势市首选，允许同向 4 仓、2 次浮盈加仓、16h 大波段呼吸空间；
-- **高危操作防呆确认**：基线本金修改与紧急一键全平仓均受到严格的短语输入匹配保护。
-
----
-
-### 7. 🤖 大模型网关与全局推理配置中心 (LLM Hub)
-全开放模型供应商直连矩阵与思考链预算管理，为推理型大模型与轻量极速模型提供工业级调度中枢：
-
 ![大模型网关与全局推理配置](docs/images/v800_llm_hub.png)
-
-- **多供应商自由接入**：原生兼容 OpenAI、Claude、Gemini、DeepSeek、Qwen 等主流模型厂商 API；
-- **全局思考推演超时配置 (10~1800s)**：针对 DeepSeek-R1、o1/o3、Claude 3.7 Thinking、Gemini 3 等长思考链旗舰模型，自由调配思考等待预算，杜绝超时截断；
-- **多模型故障自动熔断降级 (Failover Matrix)**：主模型遭遇频控 429 或服务宕机时，秒级自动平滑切换至备选备份模型。
+![自进化认知中枢](docs/images/v800_self_evolution.png)
+![跨所因果微积分动力学矩阵](docs/images/v800_calculus_factors.png)
 
 ---
 
-### 8. 🌐 三所平权对等执行拓扑与因果微积分矩阵 (Three-Venue Parity)
-彻底打破传统量化软件单所绑定的架构局限，实现跨交易所流动性聚合与因果动力学分析：
+## 📊 多级日志与全链路可观测性
 
-![决策推演与因果动力学矩阵](docs/images/v800_calculus_factors.png)
-
-- **三所原生直连**：OKX、Binance（币安）、Gate（芝麻开门）三大交易所对等接入，独立维护各所 API 凭证与持仓模式；
-- **原生保护单深度适配**：币安 Conditional Algo 单（`reduceOnly=True`）与 Gate 双向持仓模式全自动识别适配；
-- **统一宏观风控中枢**：全所共享单日亏损熔断与最大同向敞口防线；
-- **跨所因果微积分动力学矩阵**：实时比对三所现货/合约点位价差、资金费率与动量加速度，辅助发现背离套利机会。
-
----
-
-### 9. 🧠 AI 决策雷达与推演博弈全景 (Radar View)
-前台专属「AI 推演」大盘，完整记录历次 15 分钟主脑周期时序流、宏观研判总结、多币种买卖挂单指令与多模型博弈提案细节：
-
-![AI 决策雷达与推演博弈大盘](docs/images/v800_radar_view.png)
-
----
-
-## 📊 多级日志与全链路可观测性体系
-
-系统内置严密清晰的**多级日志体系（Multi-Tier Logging System）**，实现从宏观决策推演到微观毫秒级报单的全生命周期监控：
-
-| 日志标识 | 物理日志路径 | 写入主体 | 职责与记录范围 |
+| 日志标识 | 物理路径 | 写入主体 | 记录范围 |
 | :--- | :--- | :--- | :--- |
-| `trader` | `logs/ai_factor_trader.log` | 量化交易主脑巡检进程 | 全市场 9 标的行情获取、大模型多席位辩论推演、置信度过滤、选所路由、保护单挂载与止损棘轮收紧 |
-| `backend` | `logs/uvicorn.log` | FastAPI / Uvicorn 异步服务 | 前后端 HTTP 请求/响应流水、中间件拦截、CORS 处理、异常堆栈与只读数据面报错 |
-| `scheduler` | `logs/r20_gateway.log` | R20 Gateway 调度守护进程 | 调度器单例锁抢占、定时任务触发（`trader`, `factor_library`, `news` 等）、心跳租约与碎片清理 |
-| `audit` | `logs/r20_admin_audit.jsonl` | 安全审计子系统 (Append-Only) | 记录操作时间戳、IP、动作类型与结果（登录鉴权、改密、凭证编辑、风控调参、一键紧急全平仓） |
+| `trader` | `logs/ai_factor_trader.log` | 量化交易主脑巡检进程 | 标的池行情获取、多席位辩论推演、置信度过滤、选所路由、保护单挂载与止损棘轮收紧 |
+| `backend` | `logs/uvicorn.log` | FastAPI / Uvicorn 异步服务 | HTTP 请求响应流水、中间件拦截、CORS、异常堆栈与只读数据面报错 |
+| `scheduler` | `logs/r20_gateway.log` | 调度守护进程 | 调度器单例锁抢占、定时任务触发、心跳租约与碎片清理 |
+| `audit` | `logs/r20_admin_audit.jsonl` | 安全审计子系统（Append-Only） | 操作时间戳、IP、动作类型与结果（登录鉴权、改密、凭证编辑、风控调参、紧急全平仓） |
+
+Prometheus + Grafana 观测栈见 [`deploy/observability/README.md`](deploy/observability/README.md)：把 `/api/v1/admin/metrics` 变成面板与告警，端口默认只绑 `127.0.0.1`。
 
 ---
 
 ## 💰 资金规模与分级风控
 
-系统严格采用**基于账户净值的比例推导机制**，不预设写死的绝对金额门槛，小额资金（如 20U 模拟盘）与机构级资金（如 4000U+）均可自适应安全运行：
+系统采用**基于账户净值的比例推导机制**，不预设写死的绝对金额门槛 —— 小额资金（如 20U 模拟盘）与机构级资金（如 4000U+）都能自适应安全运行：
 
 | 风控指标 | 计算规则（基线默认值） | 20U 资金池 | 4000U 资金池 |
 | :--- | :--- | ---: | ---: |
@@ -238,112 +160,88 @@ AstraQuant 是一套面向专业交易团队与量化交易员打造的**多交�
 
 ---
 
+## 🧪 测试与门禁
+
+本仓把"能跑绿"当成交付的一部分，而不是事后补的仪式。仓库里的每个数字都由测试盯着：
+
+```bash
+# 1) 后端：审计 / 大模型 / UI / 多所契约子集
+.venv/bin/pytest tests/audit tests/llm tests/ui tests/venues -q
+
+# 2) 后端：全量离线套件
+.venv/bin/pytest tests/ -q
+
+# 3) 前端：类型检查 + 构建 + 测试
+cd frontend
+npx vue-tsc --noEmit -p tsconfig.app.json
+npm run build
+node --test tests/*.test.mjs
+```
+
+> ⚠️ **Python 一律用虚拟环境**：仓内不假设有全局解释器，命令统一走 `.venv/bin/python` / `.venv/bin/pytest`。
+
+---
+
+<a id="architecture-index"></a>
 <a id="architecture-index"></a>
 ## 🗂️ 代码结构入口（给开发者 / 接手的 Agent）
 
-> ⚠️ **重要提示**：本仓历史上**从未存在过 `OPENCODE.md`**（请勿查找此空路径）。本系统已建立清晰完备的现代化工程架构与导航索引：
+> ⚠️ **重要提示**：本仓历史上**从未存在过 `OPENCODE.md`**（部分老文档里的这条指引指向一个不存在的文件，请勿查找此路径）。真实的工程结构入口如下：
 
 | 想了解 | 看这里 | 说明 |
 |---|---|---|
-| **后端分层体系** | `r20_backend/README.md` | 后端分层架构（L0 门面 / L1 装配 / L2 路由 / L3 领域 / L4 子包）、新模块抽取约定 |
-| **运行时守护脚本** | `scripts/README.md` | 哪个是入口/守护、33 个根层模块用途、调度周期与双拼写 import 规范 |
+| **后端分层体系** | `r20_backend/README.md` | 后端分层（L0 门面 / L1 装配 / L2 路由 / L3 领域 / L4 子包）、新模块抽取约定 |
+| **运行时守护脚本** | `scripts/README.md` | 哪个是入口/守护、根层模块用途、调度周期与双拼写 import 规范 |
 | **前端组件与状态** | `frontend/src/components/admin/README.md` | 前端组件与 Composable 划分、Vue 3 后台与操盘看板状态机 |
-| **独立部署环境** | `STANDALONE.md` | 本地独立部署、环境变量配置与服务拉起指南 |
+| **独立部署环境** | `STANDALONE.md` | 本地独立部署、环境变量配置与服务拉起 |
 | **应急故障恢复** | `RECOVERY_GUIDE.md` | 应急止损、冷备份数据恢复与进程重置预案 |
 | **提示词工程攻略** | `docs/PROMPT_GUIDE.md` | 全量实时语义数据字典、波段呼吸编写军规与投委会实战指南 |
+| **观测栈接入** | `deploy/observability/README.md` | Prometheus 抓取与 Grafana 面板导入 |
 
-**架构门禁保障机制**：
-1. **子包模块全登记**：`tests/audit/test_directory_docs_current.py` 强制检查受管子包新增模块必须写入各自 `__init__.py` 清单；
-2. **根层模块全登记**：`r20_backend/*.py` 与 `scripts/*.py` 根层模块必须登记在对应 README 表格中；
-3. **文档数据防腐烂**：`tests/core/test_readme_baseline_numbers.py` 强制要求基线测试数字与仓内真实用例数保持严格同量级对齐。
+**架构门禁保障机制**（这三道闸会盯着文档本身）：
+
+1. **子包模块全登记** —— `tests/audit/test_directory_docs_current.py` 强制受管子包的新增模块写入各自 `__init__.py` 清单；
+2. **根层模块全登记** —— `r20_backend/*.py` 与 `scripts/*.py` 根层模块必须登记在对应 `README.md` 的表格里；
+3. **文档数字防腐烂** —— `tests/core/test_readme_baseline_numbers.py` 要求基线测试数字与仓内真实用例数保持同量级对齐，漂到两倍就会被抓住。
+
+> 📌 **提交纪律**：门禁必须跑在**将要提交的那棵树**上（`git status --short` + 对每个新文件 `git ls-files --error-unmatch`）。
 
 ---
 
-## 🚀 极速部署指南
+## 🚀 部署
 
 ### 方式 A：🐳 Docker 一键部署（最推荐，零环境依赖）
 
-适用于远程 Linux 服务器或本地容器环境，自动包含 Python 3.11、编译前端静态资源，并编排 Web 引擎与网关 Worker：
+自动包含 Python 3.11、编译前端静态资源，并编排 Web 引擎与网关 Worker 两个服务：
 
-```bash
-# 1. 克隆代码
-git clone https://github.com/555cute/astra-quant-agent.git
-cd astra-quant-agent
-
-# 2. 准备环境变量与持久化目录（若无 .env 可由启动脚本自动创建）
-cp env.example .env
-vim .env
-
-# 3. 一键编译并后台启动（包含 r20-backend 与 r20-gateway）
-docker compose up -d --build
-# 或直接运行部署引导脚本：./deploy/docker-start.sh
-
-# 查看运行状态与日志
-docker compose ps
-docker compose logs -f
-```
-
----
-
-### 方式 B：传统本地/物理机部署
-
-#### 环境准备
-- **操作系统**：Linux / macOS（推荐 Ubuntu 22.04 LTS 或更高版本）
-- **Python 环境**：Python 3.10+
-- **前端构建环境**：Node.js 18+ / npm
-
-### 1. 克隆仓库与初始化依赖
 ```bash
 git clone https://github.com/555cute/astra-quant-agent.git
 cd astra-quant-agent
+cp env.example .env && vim .env        # 填大模型 Key 与交易所 Key
+./deploy/docker-start.sh               # 等价于 docker compose up -d --build
 
-# 执行环境初始化脚本（创建 .venv 并安装核心依赖）
-sh deploy/install.sh
-
-# 配置环境变量（根据需要填入大模型 API Key，默认开启模拟盘）
-vim .env
+docker compose ps                      # 查看状态
+docker compose logs -f                 # 跟随日志
 ```
 
-> 📈 **可选：观测栈**（Prometheus + Grafana，把 `/api/v1/admin/metrics` 变成告警与面板）：
-> 见 `deploy/observability/README.md`。指标含账户规模与风控阈值，端口默认只绑 127.0.0.1。
+两个服务都声明了 `restart: unless-stopped`，并在**容器内**自带监督与心跳：容器重启、宿主重启或进程被 OOM 掉之后会自行拉起，不需要额外的 `autoheal`。
 
-### 2. 编译前端与启动服务
+### 方式 B：传统本地 / 物理机部署
+
 ```bash
-# 1. 激活虚拟环境
+git clone https://github.com/555cute/astra-quant-agent.git
+cd astra-quant-agent
+sh deploy/install.sh                   # 创建 .venv 并装依赖
+vim .env
+
 source .venv/bin/activate
+cd frontend && npm install && npm run build && cd ..
 
-# 2. 编译构建现代化前端管理后台与操盘看板
-cd frontend
-npm install
-npm run build
-cd ..
-
-# 3. 启动量化交易后端主引擎
 python -m uvicorn r20_backend.app:app --host 0.0.0.0 --port 8080
-# 或直接通过一键启动脚本运行：./start.sh
+# 或一键拉起：./start.sh
 ```
 
-### 3. 访问端口与管理
-- 🖥️ **前台量化操盘看板**：`http://localhost:8080/`
-- ⚙️ **后台策略管理控制台**：`http://localhost:8080/admin/login`（默认用户名 `admin`）
-
----
-
-## 🧪 全栈自动化测试保障
-
-系统沉淀了覆盖底层物理风控几何拦截、策略版本快照、投委会博弈逻辑、多交易所鉴权和前后端契约的完整自动化测试保障：
-
-```bash
-# 1. 后端审计、量化模型与 UI 基础测试 (1205+ 全过)
-.venv/bin/pytest tests/audit tests/llm tests/ui tests/venues -q
-
-# 2. 前端类型检查、无障碍与契约测试 (392 项全过)
-cd frontend
-npm run build
-npx vue-tsc --noEmit
-node --test tests/*.test.mjs
-cd ..
-```
+Windows / PowerShell 用户可用 `start.ps1`。systemd 单元模板在 `deploy/`（见 `deploy/r20-quantum.service` 等三份）。
 
 ---
 
@@ -351,35 +249,36 @@ cd ..
 
 1. 本项目属于**开源量化交易软件与量化算法研究框架**，仅供技术研究、学习交流与模拟盘环境测试；
 2. 加密货币市场具有极高风险与不确定性，任何历史回测表现均无法预示未来收益；
-3. 使用者应当具备量化交易专业常识，在充分理解策略逻辑之前，请务必先于 **DEMO 模拟盘** 环境下完整验证；
+3. 使用者应具备量化交易专业常识；在充分理解策略逻辑之前，请务必先在 **DEMO 模拟盘**环境完整验证；
 4. 开发者与开源社区不对任何使用本软件所造成的直接或间接投资损失承担法律责任。
 
 ---
 
-## 🤝 社区认可与致谢 (Community & Acknowledgements)
+## 🤝 社区认可与致谢
 
 本项目深度链接并官方认可 **[LINUX DO (linux.do)](https://linux.do/)** 开源技术社区：
 
-- 🐧 **社区支持**：特别鸣谢 **LINUX DO** 社区为本项目提供的开放技术土壤与策略灵感，感谢全体热心 L 友的持续反馈与实盘建议；
-- 💬 **研讨交流**：欢迎大家在 [LINUX DO 社区](https://linux.do/) 交流多模型委员会调优、提示词编写与实盘风控体验；
-- 开放透明、共同演进，致敬所有秉持开源与极客精神的探索者！
+- 🐧 **社区支持** —— 特别鸣谢 LINUX DO 社区提供的开放技术土壤与策略灵感，感谢全体热心 L 友的持续反馈与实盘建议；
+- 💬 **研讨交流** —— 欢迎在 [LINUX DO 社区](https://linux.do/) 交流多模型委员会调优、提示词编写与实盘风控体验；
+- 开放透明、共同演进，致敬所有秉持开源与极客精神的探索者。
 
 ---
 
 ## 🏷️ 品牌与内部代号（改名时必读）
 
-**对外品牌：AstraQuant**（官网 <https://astraquant.tech>）。**内部代号：R20。**
+**对外品牌：AstraQuant**（官网 <https://www.astraquant.tech>，中文/英文文档见 [README.md](README.md) / [README.en.md](README.en.md)）。**内部代号：R20。**
 
 2026-09 做过一次品牌改名，**只改了对外可见的那一层**，内部标识**有意保留**：
 
 | 层 | 内容 | 状态 |
 |---|---|---|
-| 对外 | 仓库名 · description · topics · README · 界面品牌串 · 通知标题 · 容器镜像名 | **AstraQuant** |
-| 内部 | Python 包名 `r20_backend` / `r20_gateway` · **128 个 `R20_*` 环境变量键** · 含 r20 的文件名 · DB 文件名 | **保留 R20** |
+| **对外** | 仓库名 · description · topics · README · 界面品牌串 · 通知标题 · 容器镜像名 · robots/sitemap/canonical | **AstraQuant** |
+| **内部** | Python 包名 `r20_backend` / `r20_gateway` · **`R20_*` 环境变量键** · 含 r20 的文件名 · DB 文件名 | **保留 R20** |
+| **内部（有线契约）** | 会话头 `X-R20-Session` · 高危操作确认短语 `UPDATE R20` / `BACKUP R20` / `RESTORE R20` · 备份归档魔数 `R20GCM2` · Grafana 面板 UID `r20-quantum-trader` · systemd 单元里的 `/opt/r20-quantum-trader` | **保留 R20** |
 
-**为什么内部不一起改**：`R20_*` 是**用户已经写进 `.env` 的配置契约** —— 改前缀会让所有已部署实例**静默失去配置**（回到"未就绪"），而对外一分流量都换不回来；包名则牵连 2000+ 处 import。所以后来者若要"把改名做彻底"，请先读本节：**那不是遗留未完成，是有意为之**。
+**为什么内部不一起改**：`R20_*` 是**用户已经写进 `.env` 的配置契约** —— 改前缀会让所有已部署实例**静默失去配置**（回到"未就绪"），而对外一分流量都换不来；包名牵连 2000+ 处 import；确认短语与会话头是前后端**逐字校验**的线上契约，单边改会让高危操作用不了。所以后来者若要"把改名做彻底"，请先读本节：**那不是遗留未完成，是有意为之**。
 
-给用户看的文案里出现 `R20_*` 变量名是正确的（那是接口名，不是品牌名）。
+给用户看的文案里出现 `R20_*` 变量名是正确的（那是**接口名**，不是品牌名）。
 
 ---
 

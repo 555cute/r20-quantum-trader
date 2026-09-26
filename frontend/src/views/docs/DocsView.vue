@@ -163,7 +163,7 @@ onUnmounted(() => {
         </button>
 
         <a
-          href="https://github.com/555cute/r20-quantum-trader"
+          href="https://github.com/555cute/astra-quant-agent"
           target="_blank"
           rel="noopener noreferrer"
           class="btn btn-primary h-7 px-3 text-xs font-medium inline-flex items-center gap-1.5 rounded-full"
@@ -300,7 +300,7 @@ onUnmounted(() => {
           </div>
 
           <p class="text-xs sm:text-sm leading-body font-sans text-[var(--ink-2)]">
-            前台终端采用 R20 机构级量化工作台架构，首屏直接铺满 K 线图表工位与活跃持仓挂单：
+            前台终端采用 AstraQuant 机构级量化工作台架构，首屏直接铺满 K 线图表工位与活跃持仓挂单：
           </p>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 text-xs">

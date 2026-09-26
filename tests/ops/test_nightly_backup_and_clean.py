@@ -55,7 +55,7 @@ class NotifyTests(unittest.TestCase):
                     "finished_at": "2026-09-22 02:03:11",
                     "sha256": "a" * 64, "targets": [1, 2], "sqlite": [1]})
         text = self._text()
-        self.assertTrue(text.startswith("✅ 【R20 自定义灾备】夜间全量"))
+        self.assertTrue(text.startswith("✅ 【AstraQuant 自定义灾备】夜间全量"))
         self.assertIn("状态：success", text)
         self.assertIn("2026-09-22 02:00:00 - 2026-09-22 02:03:11", text)
         # sha256 只暴露前 16 位（摘要本身不是秘密，但没必要整串刷屏）

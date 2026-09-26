@@ -245,7 +245,7 @@ def decrypt_archive(source: Path, key_env: str, destination: Path) -> Path:
         raise RuntimeError(f"解密需要环境变量 {key_env}")
     with source.open("rb") as inp:
         if inp.read(len(MAGIC)) != MAGIC:
-            raise RuntimeError("不是受支持的 R20 AES-256-GCM 归档")
+            raise RuntimeError("不是受支持的 AstraQuant AES-256-GCM 归档")
         salt, nonce, tag = inp.read(16), inp.read(12), inp.read(16)
         if len(salt) != 16 or len(nonce) != 12 or len(tag) != 16:
             raise RuntimeError("加密归档头损坏")

@@ -1,7 +1,11 @@
 [Unit]
-Description=R20 Quantum Trader Standalone Scheduler
+Description=AstraQuant Standalone Scheduler
 After=network-online.target
 Wants=network-online.target
+
+# ⚠️ `/opt/r20-quantum-trader` 与 `User=r20` 是**历史部署约定**（内部代号 R20），
+#    与对外品牌 AstraQuant 无关；沿用是为了不打断已按此路径部署的实例。
+#    新部署请把下面的路径/用户改成你自己的实际克隆目录。
 
 [Service]
 Type=simple

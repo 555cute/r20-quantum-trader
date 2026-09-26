@@ -134,18 +134,18 @@ export function updateDocumentTitle(to = router.currentRoute.value) {
     isNoIndex = true
     const notFoundText = t('common.notFound.title') || '页面不存在'
     title = to.path.startsWith('/admin')
-      ? `${notFoundText} · ${t('nav.actions.console')} · R20`
-      : `${notFoundText} · R20`
+      ? `${notFoundText} · ${t('nav.actions.console')} · AstraQuant`
+      : `${notFoundText} · AstraQuant`
   } else if (to.path === '/admin/login' || to.name === 'admin-login') {
     isNoIndex = true
-    title = `${t('admin.login.submit')} · ${t('nav.actions.console')} · R20`
+    title = `${t('admin.login.submit')} · ${t('nav.actions.console')} · AstraQuant`
   } else if (to.path.startsWith('/admin')) {
     isNoIndex = true
     const hit = allAdminItems.find((item) => item.path === to.path || item.key === to.name)
     const pageName = hit ? t(hit.labelKey) : ''
     title = pageName
-      ? `${pageName} · ${t('nav.actions.console')} · R20`
-      : `${t('nav.actions.console')} · R20`
+      ? `${pageName} · ${t('nav.actions.console')} · AstraQuant`
+      : `${t('nav.actions.console')} · AstraQuant`
   } else if (PUBLIC_TITLES[to.path]) {
     title = PUBLIC_TITLES[to.path]
   }

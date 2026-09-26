@@ -1,4 +1,4 @@
-"""Modular Execution Engine and Quantitative Pipeline for R20 Quantum Trader.
+"""Modular Execution Engine and Quantitative Pipeline for AstraQuant.
 
 ## 模块清单
 

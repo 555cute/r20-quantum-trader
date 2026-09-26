@@ -184,7 +184,7 @@ class TemplateTests(unittest.TestCase):
 
     def test_the_trading_template_declares_its_sections(self):
         for section in ("当前决策时间戳与市场时效", "账户当前持仓与风险敞口全景",
-                        "在途未成交限价挂单", "R20 启发式实战认知与长期记忆",
+                        "在途未成交限价挂单", "AstraQuant 启发式实战认知与长期记忆",
                         "全标的池原生行情、技术指标与筹码矩阵"):
             with self.subTest(section=section):
                 self.assertIn(section, PV.TRADING_USER_TEMPLATE)

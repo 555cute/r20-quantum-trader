@@ -7,12 +7,12 @@ import App from './App.vue'
 const app = createApp(App)
 
 app.config.errorHandler = (err, _instance, info) => {
-  console.error('[R20 Global Error]', err, info)
+  console.error('[AstraQuant Global Error]', err, info)
 }
 
 if (typeof window !== 'undefined') {
   window.addEventListener('unhandledrejection', (event) => {
-    console.error('[R20 Unhandled Rejection]', event.reason)
+    console.error('[AstraQuant Unhandled Rejection]', event.reason)
   })
 }
 

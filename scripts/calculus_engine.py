@@ -1,7 +1,7 @@
 """Causal Calculus, Definite Integrals & Probability Theory Engine for Quantitative Trading.
 
 This module provides the core mathematical, continuous physical state, definite integration,
-and stochastic probabilistic foundation for R20 Quantum Trader.
+and stochastic probabilistic foundation for AstraQuant.
 
 All functions are strictly causal: chronological sequences with newest observation last.
 No lookahead bias. Closed candle data is enforced.

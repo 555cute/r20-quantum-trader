@@ -71,7 +71,7 @@ onMounted(loadChannels);
       class="btn btn-quiet mt-2 w-full"
     >
       <Globe aria-hidden="true" />
-      astraquant.tech
+      www.astraquant.tech
       <span class="sr-only">{{ t('common.opensInNewTab') }}</span>
       <ExternalLink class="h-3.5 w-3.5 opacity-70" aria-hidden="true" />
     </a>

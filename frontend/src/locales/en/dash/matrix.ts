@@ -154,7 +154,7 @@ export const enMatrix = {
       copy: 'Copy risk params',
       /* batch 77: the clipboard summary used to be hard-coded Chinese, so an
          English-mode user copied a mixed zh/en string. */
-      copySummary: '[R20 risk calc] {sym} entry:{entry} SL:{sl} TP:{tp} R:R={rr}:1',
+      copySummary: '[AstraQuant risk calc] {sym} entry:{entry} SL:{sl} TP:{tp} R:R={rr}:1',
     },
   },
   matrix: {

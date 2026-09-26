@@ -415,7 +415,7 @@ class TradingContextTests(_Sandbox, unittest.TestCase):
     def test_render_trading_memory_wraps_the_body(self):
         self._write_memory([_lesson(text="自进化心法条目")])
         out = es.render_trading_memory()
-        self.assertIn("【R20 启发式实战认知与长期记忆】", out)
+        self.assertIn("【AstraQuant 启发式实战认知与长期记忆】", out)
         self.assertIn("自进化心法条目", out)
 
 

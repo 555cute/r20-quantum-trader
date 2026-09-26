@@ -500,7 +500,7 @@ class EncryptionRoundTripTests(_Sandbox):
         bad = self._file("backups/staging/not-r20.aes256", b"NOTMAGIC" + b"0" * 64)
         with self.assertRaises(RuntimeError) as ctx:
             br.decrypt_archive(bad, self.KEY_ENV, self.root / "backups" / "out.tar.gz")
-        self.assertIn("不是受支持的 R20 AES-256-GCM 归档", str(ctx.exception))
+        self.assertIn("不是受支持的 AstraQuant AES-256-GCM 归档", str(ctx.exception))
 
     def test_a_truncated_header_is_refused(self):
         # ★ 第 251 行

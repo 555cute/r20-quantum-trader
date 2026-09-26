@@ -1,4 +1,4 @@
-"""Unified Sandbox and Backtest Subsystem for R20 Quantum Trader."""
+"""Unified Sandbox and Backtest Subsystem for AstraQuant."""
 from __future__ import annotations
 
 from .adapter import SandboxExchangeAdapter
