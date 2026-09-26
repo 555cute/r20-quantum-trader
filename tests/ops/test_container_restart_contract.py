@@ -110,13 +110,24 @@ class EntrypointTest(unittest.TestCase):
         for needle in ("rm -rf .env", "cp env.example .env", "docker compose up -d"):
             assert needle in branch, f"修复指引缺少 `{needle}`"
 
-    def test_mode_dispatch_execs_the_right_module(self):
+    def test_both_modes_are_delegated_to_the_watchdog(self):
+        """Docker 的 `restart:` 只对**退出**生效；"进程还在但卡死"它不会重启。
+
+        故两种模式都必须交给容器内的看门狗托管（后端按 /api/v1/health 探测，
+        网关按存活心跳判定），把"卡死"一并覆盖。
+        """
+        text = ENTRYPOINT.read_text(encoding="utf-8")
+        assert 'exec bash "$ROOT_DIR/scripts/r20_watchdog.sh"' in text, "后端模式没交给看门狗"
+        assert 'exec bash "$ROOT_DIR/scripts/r20_watchdog.sh" gateway' in text, "网关模式没交给看门狗"
+
+    def test_supervision_has_a_fallback(self):
+        """看门狗脚本缺失时不能把容器搞成起不来 —— 必须有直起进程的兜底。"""
         text = ENTRYPOINT.read_text(encoding="utf-8")
         assert "uvicorn r20_backend.app:app" in text
         assert "r20_gateway.worker" in text
         # exec 而非裸调用：容器 PID 1 必须是被 exec 的进程，否则信号传递不到
-        assert "exec python3 -m uvicorn" in text
-        assert "exec python3 -m r20_gateway.worker" in text
+        assert "exec python3 -m uvicorn" in text, "后端缺少直起兜底"
+        assert "exec python3 -m r20_gateway.worker" in text, "网关缺少直起兜底"
 
 
 class SchedulerOwnershipTest(unittest.TestCase):

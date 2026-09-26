@@ -82,6 +82,10 @@ data/*.enc
 data/*.txt
 data/*.md
 data/.*secret_key
+# 2026-09 新增：上面是按**扩展名**列举的，于是**没有扩展名**的运行时产物会漏网。
+# 实测：`data/.r20_gateway_heartbeat`（worker 每秒重写的存活心跳）就这么被 `git add -A`
+# 收进了提交 —— 机器状态入库，正是本文件反复记过的那类事故。故补一条按前缀的兜底。
+data/.r20_*
 data/credentials/
 data/policy_archives/
 trading.html

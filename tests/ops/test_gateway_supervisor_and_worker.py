@@ -572,6 +572,10 @@ class _WorkerBase(unittest.TestCase):
         self._start(mock.patch.object(WKR, "PID_FILE", self.pid_file))
         self._start(mock.patch.object(WKR, "LOCK_FILE", self.lock_file))
         self._start(mock.patch.object(WKR, "LOG_FILE", self.log_file))
+        # 存活心跳（2026-09 新增）：循环每轮会写一次。必须改道临时目录，
+        # 否则每个跑 run() 的用例都会往**生产 data/** 里写文件。
+        self.heartbeat_file = self.data / "gateway_heartbeat"
+        self._start(mock.patch.object(WKR, "HEARTBEAT_FILE", self.heartbeat_file))
         self._running = WKR.RUNNING
         self.addCleanup(setattr, WKR, "RUNNING", self._running)
         WKR.RUNNING = True
@@ -885,16 +889,20 @@ class WorkerPruneIntervalTests(_WorkerBase):
         _start(mock.patch.object(pool, "POOL_FILE", pool_file))
         _start(mock.patch.object(pool, "save_instruments"))
         real_prune = self._start(mock.patch.object(WKR, "_prune_job_history"))
-        clock = {"n": 0}
 
-        def _time():
-            clock["n"] += 1
-            return 0.0 if clock["n"] == 1 else 10 ** 9
-
-        _start(mock.patch.object(WKR.time, "time", _time))
+        # 假时钟按"睡一觉时间就前进"建模，**不**依赖 `time.time()` 被调用的次数。
+        # 旧版写的是"第 1 次调用返回 0、之后返回 10^9"，暗含调用次数固定不变；
+        # 2026-09 给调度循环加上存活心跳（多了一次 time() 调用）后序号错位，
+        # 清理判据随即失效 —— 那不是心跳写错了，是这个假设太脆。
+        clock = {"t": 0.0}
+        _start(mock.patch.object(WKR.time, "time", lambda: clock["t"]))
 
         def _sleep(_seconds):
-            WKR.RUNNING = False
+            # 一跳越过 6 小时的清理间隔；等"启动一次 + 到点一次"都发生后再让循环退出。
+            # 这样循环里再增删多少次 time() 调用，本用例都成立。
+            clock["t"] = 10 ** 9
+            if real_prune.call_count >= 2:
+                WKR.RUNNING = False
 
         _start(mock.patch.object(WKR.time, "sleep", _sleep))
         WKR.run()
