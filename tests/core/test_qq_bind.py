@@ -538,7 +538,7 @@ class CreateBindTaskTests(_Base):
         self.assertIn("_wv=2", out["connect_url"])
 
     def test_the_default_source(self):
-        self.assertIn("source=R20 Quantum Trader", PS.create_bind_task()["connect_url"])
+        self.assertIn("source=AstraQuant", PS.create_bind_task()["connect_url"])
 
     def test_the_generated_key_is_32_bytes_base64(self):
         PS.create_bind_task()

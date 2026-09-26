@@ -133,8 +133,8 @@ export const enCommon = {
     siteTimeTip: 'Site time: Asia/Shanghai (UTC+8)',
   },
   brand: {
-    name: 'R20 Quantum Trader',
-    nameEn: 'R20 Quantum Trader',
+    name: 'AstraQuant',
+    nameEn: 'AstraQuant',
     tagline: 'AI-Driven Perpetual Swing Terminal',
     official: 'Official',
     license: 'MIT License',

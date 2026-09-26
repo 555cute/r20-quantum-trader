@@ -6,9 +6,11 @@
 
 export const APP_VERSION_RAW = '8.3.1'
 export const APP_VERSION = `v${APP_VERSION_RAW}`
-export const APP_NAME = 'R20量子交易系统'
-export const APP_NAME_EN = 'R20 Quantum Trading System'
+export const APP_NAME = 'AstraQuant 量化交易系统'
+export const APP_NAME_EN = 'AstraQuant'
 // —— 官方出处与发版标记：每次发版请同步更新 BRAND_REVISION（发版仪式清单之一）——
 export const BRAND_REVISION = '2026.09.25-v831'
-export const OFFICIAL_REPO = 'https://github.com/555cute/r20-quantum-trader'
-export const OFFICIAL_NOTICE = `R20 官方仓库：${OFFICIAL_REPO}`
+export const OFFICIAL_REPO = 'https://github.com/555cute/astraquant'
+/** 官网（自有域名）：品牌主页与部署文档的对外出处 */
+export const OFFICIAL_SITE = 'https://astraquant.tech'
+export const OFFICIAL_NOTICE = `AstraQuant 官方仓库：${OFFICIAL_REPO}`

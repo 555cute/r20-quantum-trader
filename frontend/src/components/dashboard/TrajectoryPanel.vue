@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * TrajectoryPanel.vue · R20 量子交易系统 决策轨迹与执行日志面板
+ * TrajectoryPanel.vue · AstraQuant 决策轨迹与执行日志面板
  * 实时白盒化展示多模型委员会决策推演、动力学裁决与底层执行日志
  */
 import { ref, computed, onBeforeUnmount, watch } from 'vue';

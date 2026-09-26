@@ -196,7 +196,7 @@ def admin_test_council_debate(payload: CouncilTestRequest, x_r20_session: str | 
     try:
         prof = active_profile()
         sys_mods = prof.get("pipelines", {}).get("trading_system", [])
-        test_sys = apply_module_layout(compile_modules(sys_mods), {}, "trading_system", "委员会测试", context={"market_matrix": test_market, "profile_name": prof.get("name", "")}) if sys_mods else "你是 R20 Quantum Trader 首席量化官，执行多空对称顺势战法与 2.0x ATR 宽止损。"
+        test_sys = apply_module_layout(compile_modules(sys_mods), {}, "trading_system", "委员会测试", context={"market_matrix": test_market, "profile_name": prof.get("name", "")}) if sys_mods else "你是 AstraQuant 首席量化官，执行多空对称顺势战法与 2.0x ATR 宽止损。"
     except Exception:
         test_sys = "你是一个遵循多空对称顺势、1.8~2.2x ATR 宽止损与 0.8R 保本锁利的量化交易系统。"
 

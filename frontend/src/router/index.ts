@@ -116,18 +116,18 @@ router.beforeEach(async (to) => {
 
 /* SEO 标题：中文为主（与后端钉扎测试与 CF 缓存语义一致），后台 noindex */
 const PUBLIC_TITLES: Record<string, string> = {
-  '/': 'R20量子交易系统 | 机构级加密货币波段量化终端 & AI交易主脑',
-  '/trading': '实盘矩阵 | R20量子交易系统',
-  '/factors': 'AI 推演 · 决策审计 | R20量子交易系统',
-  '/news': '舆情情报 · 聪明钱 | R20量子交易系统',
-  '/lab': '自进化 · 认知中枢 | R20量子交易系统',
-  '/history': '交易台账 · 生命周期 | R20量子交易系统',
-  '/docs': '官方文档 | R20量子交易系统',
+  '/': 'AstraQuant 量化交易系统 | 机构级加密货币波段量化终端 & AI交易主脑',
+  '/trading': '实盘矩阵 | AstraQuant 量化交易系统',
+  '/factors': 'AI 推演 · 决策审计 | AstraQuant 量化交易系统',
+  '/news': '舆情情报 · 聪明钱 | AstraQuant 量化交易系统',
+  '/lab': '自进化 · 认知中枢 | AstraQuant 量化交易系统',
+  '/history': '交易台账 · 生命周期 | AstraQuant 量化交易系统',
+  '/docs': '官方文档 | AstraQuant 量化交易系统',
 }
 
 export function updateDocumentTitle(to = router.currentRoute.value) {
   const { t } = useI18n()
-  let title = 'R20 量子交易系统'
+  let title = 'AstraQuant 量化交易系统'
   let isNoIndex = false
 
   if (to.name === 'not-found') {

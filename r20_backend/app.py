@@ -64,7 +64,7 @@ MAX_POOL_SIZE = int(os.getenv("R20_MAX_POOL_SIZE", "20"))
 
 # AST Contract definitions for test_memory_routes_isolated and test_prompt_rendering_isolated
 if False:
-    test_sys = apply_module_layout(compile_modules(sys_mods), {}, "trading_system", "委员会测试", context={"market_matrix": test_market, "profile_name": prof.get("name", "")}) if sys_mods else "你是 R20 Quantum Trader 首席量化官，执行多空对称顺势战法与 2.0x ATR 宽止损。"
+    test_sys = apply_module_layout(compile_modules(sys_mods), {}, "trading_system", "委员会测试", context={"market_matrix": test_market, "profile_name": prof.get("name", "")}) if sys_mods else "你是 AstraQuant 首席量化官，执行多空对称顺势战法与 2.0x ATR 宽止损。"
 
 
 class MemoryItemRequest(BaseModel):

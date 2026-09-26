@@ -1,13 +1,13 @@
 <script setup lang="ts">
 /** 关于与社区弹窗：架构 / 仓库 / QQ / LINUX DO / 许可与风险提示 */
 import { onMounted } from 'vue';
-import { Github, ShieldCheck, ExternalLink } from 'lucide-vue-next';
+import { Github, ShieldCheck, ExternalLink, Globe } from 'lucide-vue-next';
 import BaseDialog from '../base/BaseDialog.vue';
 import CopyButton from '../base/CopyButton.vue';
 import { useUi } from '../../composables/useUi';
 import { useI18n } from '../../composables/useI18n';
 import { useReferralChannels } from '../../composables/useReferralChannels';
-import { APP_VERSION, BRAND_REVISION, OFFICIAL_REPO } from '../../config/version';
+import { APP_VERSION, BRAND_REVISION, OFFICIAL_REPO, OFFICIAL_SITE } from '../../config/version';
 
 const { aboutOpen } = useUi();
 const { t, tm } = useI18n();
@@ -62,6 +62,19 @@ onMounted(loadChannels);
       <ExternalLink class="h-3.5 w-3.5 opacity-70" aria-hidden="true" />
     </a>
     <p class="mt-1.5 text-center text-xs" style="color: var(--ink-3)">{{ t('dash.about.repo.starHint') }}</p>
+
+    <!-- 自有官网：品牌主页（自有域名，不依赖任何第三方托管） -->
+    <a
+      :href="OFFICIAL_SITE"
+      target="_blank"
+      rel="noopener noreferrer"
+      class="btn btn-quiet mt-2 w-full"
+    >
+      <Globe aria-hidden="true" />
+      astraquant.tech
+      <span class="sr-only">{{ t('common.opensInNewTab') }}</span>
+      <ExternalLink class="h-3.5 w-3.5 opacity-70" aria-hidden="true" />
+    </a>
 
     <!-- 社区 -->
     <div class="mt-3 grid grid-cols-2 gap-2">

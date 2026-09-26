@@ -132,7 +132,7 @@ class NotificationsTests(unittest.TestCase):
             self.assertTrue(ok)
             _, payload = mock_post.call_args[0]
             self.assertEqual(payload["body"], "Bark测试消息")
-            self.assertEqual(payload["group"], "R20-Trade")
+            self.assertEqual(payload["group"], "AstraQuant-Trade")
 
     def test_modern_notifier_double_tp_and_three_venues(self):
         import scripts.qq_notifier as notifier

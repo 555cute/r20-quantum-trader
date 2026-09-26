@@ -1,8 +1,9 @@
-# R20 Quantum Trader · 机构级多交易所平权量化决策与执行系统
+# AstraQuant · 机构级多交易所平权量化决策与执行系统
 
 <div align="center">
 
-[![Release](https://img.shields.io/badge/Release-v8.3.1-blue.svg?style=flat-square)](https://github.com/555cute/r20-quantum-trader/releases/tag/v8.3.1)
+[![Release](https://img.shields.io/badge/Release-v8.3.1-blue.svg?style=flat-square)](https://github.com/555cute/astraquant/releases/tag/v8.3.1)
+[![Website](https://img.shields.io/badge/Site-astraquant.tech-6E56CF.svg?style=flat-square)](https://astraquant.tech)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg?style=flat-square)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688.svg?style=flat-square)](https://fastapi.tiangolo.com/)
@@ -14,6 +15,30 @@
 **全市场宏观态势自适应识别 ｜ 对冲基金投委会博弈 ｜ 17项 Fail-Closed 物理硬风控 ｜ 深度思考链 (CoT) 原生白盒透视**  
 *OKX / Binance / Gate 三所平权撮合 ｜ 策略全要素 100% 动态定制 ｜ 双官方旗舰预设体系 ｜ 全链路可观测性结构化审计*
 
+<details open>
+<summary><b>English</b> — AstraQuant is an open-source, multi-exchange AI quant trading terminal</summary>
+
+**AstraQuant** is an LLM-native **multi-agent investment committee** that actually trades. On every 15-minute cycle, named AI seats (macro / technical / risk / contrarian) debate the market, a **CIO seat is adopted** for the final call, and **17 fail-closed risk gates** stand between the decision and the exchange. Nothing is simulated: orders are placed on **OKX / Binance / Gate** with take-profit and stop-loss attached atomically, and every decision is auditable end-to-end.
+
+- **Multi-agent LLM committee** — configurable seats, cross-examination, CIO adoption traced per position
+- **17 fail-closed risk gates** — a Python interceptor pipeline that physically blocks orders when risk rules trip
+- **Three-venue parity execution** — OKX / Binance / Gate, cross-venue position and margin awareness
+- **Self-evolving prompt library** — strategy, prompts and risk policy are data, not hardcoded logic
+- **Full-stack observability** — CoT trajectory drawer, per-cycle audit trail, structured logs
+
+> ⚠️ Requires **two** sets of credentials to run: an LLM provider key and exchange API keys. Starts in paper/demo mode.
+>
+> *Internal codename: R20 (see 「品牌与内部代号」 below — package names and `R20_*` env keys intentionally keep the old prefix).*
+
+```
+git clone https://github.com/555cute/astraquant.git && cd astraquant
+./deploy/docker-start.sh          # or: deploy/install.sh for a host install
+```
+
+Website: **https://astraquant.tech** · Docs: [`STANDALONE.md`](STANDALONE.md) · [Recovery](RECOVERY_GUIDE.md)
+
+</details>
+
 > 🌟 **本项目首发并深度链接认可 [LINUX DO (linux.do)](https://linux.do/) 开源技术社区，致敬真诚、开放的技术交流精神！**
 
 [全景特性](#-系统定位与核心量化哲学) · [前台操盘大屏](#-前台双翼量化操盘工作台) · [后台管理控制面](#-后台机构级量化控制面) · [策略配置中心](#-八大策略配置中心重中之重) · [多级日志系统](#-多级日志与全链路可观测性体系) · [资金规模适配](#-资金规模与分级风控) · [架构索引](#architecture-index) · [极速部署](#-极速部署指南)
@@ -24,7 +49,7 @@
 
 ## 📖 系统定位与核心量化哲学
 
-R20 Quantum Trader 是一套面向专业交易团队与量化交易员打造的**多交易所平权量化决策与自动化执行操作系统**。在 v8.0.0 架构跃迁中，系统深度融合了大语言模型（LLM）的宏观推理能力、因果微积分动力学矩阵与对冲基金 Trading Desk 投委会协同博弈机制，彻底打通**「市场体制自适应识别 ➔ 策略套件动态挂载 ➔ 投委会交叉质询 ➔ 底层物理风控硬拦截 ➔ 毫秒级多所执行 ➔ 实盘台账自进化」**的完整自主操盘大闭环。
+AstraQuant 是一套面向专业交易团队与量化交易员打造的**多交易所平权量化决策与自动化执行操作系统**。在 v8.0.0 架构跃迁中，系统深度融合了大语言模型（LLM）的宏观推理能力、因果微积分动力学矩阵与对冲基金 Trading Desk 投委会协同博弈机制，彻底打通**「市场体制自适应识别 ➔ 策略套件动态挂载 ➔ 投委会交叉质询 ➔ 底层物理风控硬拦截 ➔ 毫秒级多所执行 ➔ 实盘台账自进化」**的完整自主操盘大闭环。
 
 ```
                                ┌───────────────────────────────────────────────────────────┐
@@ -74,7 +99,7 @@ R20 Quantum Trader 是一套面向专业交易团队与量化交易员打造的*
 
 > **“策略制定权永远属于交易员，而非写死的系统硬代码。”**
 
-传统量化软件往往将交易逻辑深埋在底层脚本中，调参极其困难且缺乏复盘能力。R20 量子交易系统彻底摒弃黑盒硬编码，将**提示词、投委会、物理风控、认知自省、版本快照、风控阈值、模型路由与多所执行**解耦为八大可视化策略配置模块：
+传统量化软件往往将交易逻辑深埋在底层脚本中，调参极其困难且缺乏复盘能力。AstraQuant 量化交易系统彻底摒弃黑盒硬编码，将**提示词、投委会、物理风控、认知自省、版本快照、风控阈值、模型路由与多所执行**解耦为八大可视化策略配置模块：
 
 ---
 
@@ -242,8 +267,8 @@ R20 Quantum Trader 是一套面向专业交易团队与量化交易员打造的*
 
 ```bash
 # 1. 克隆代码
-git clone https://github.com/555cute/r20-quantum-trader.git
-cd r20-quantum-trader
+git clone https://github.com/555cute/astraquant.git
+cd astraquant
 
 # 2. 准备环境变量与持久化目录（若无 .env 可由启动脚本自动创建）
 cp env.example .env
@@ -269,8 +294,8 @@ docker compose logs -f
 
 ### 1. 克隆仓库与初始化依赖
 ```bash
-git clone https://github.com/555cute/r20-quantum-trader.git
-cd r20-quantum-trader
+git clone https://github.com/555cute/astraquant.git
+cd astraquant
 
 # 执行环境初始化脚本（创建 .venv 并安装核心依赖）
 sh deploy/install.sh
@@ -338,6 +363,23 @@ cd ..
 - 🐧 **社区支持**：特别鸣谢 **LINUX DO** 社区为本项目提供的开放技术土壤与策略灵感，感谢全体热心 L 友的持续反馈与实盘建议；
 - 💬 **研讨交流**：欢迎大家在 [LINUX DO 社区](https://linux.do/) 交流多模型委员会调优、提示词编写与实盘风控体验；
 - 开放透明、共同演进，致敬所有秉持开源与极客精神的探索者！
+
+---
+
+## 🏷️ 品牌与内部代号（改名时必读）
+
+**对外品牌：AstraQuant**（官网 <https://astraquant.tech>）。**内部代号：R20。**
+
+2026-09 做过一次品牌改名，**只改了对外可见的那一层**，内部标识**有意保留**：
+
+| 层 | 内容 | 状态 |
+|---|---|---|
+| 对外 | 仓库名 · description · topics · README · 界面品牌串 · 通知标题 · 容器镜像名 | **AstraQuant** |
+| 内部 | Python 包名 `r20_backend` / `r20_gateway` · **128 个 `R20_*` 环境变量键** · 含 r20 的文件名 · DB 文件名 | **保留 R20** |
+
+**为什么内部不一起改**：`R20_*` 是**用户已经写进 `.env` 的配置契约** —— 改前缀会让所有已部署实例**静默失去配置**（回到"未就绪"），而对外一分流量都换不回来；包名则牵连 2000+ 处 import。所以后来者若要"把改名做彻底"，请先读本节：**那不是遗留未完成，是有意为之**。
+
+给用户看的文案里出现 `R20_*` 变量名是正确的（那是接口名，不是品牌名）。
 
 ---
 

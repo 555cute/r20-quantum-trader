@@ -198,7 +198,7 @@ def ensure_qq_gateway_daemon_running() -> None:
         pass
 
 
-def create_bind_task(source: str = "R20 Quantum Trader") -> dict[str, Any]:
+def create_bind_task(source: str = "AstraQuant") -> dict[str, Any]:
     ensure_qq_gateway_daemon_running()
     with _TASKS_LOCK:
         _gc_tasks()
@@ -416,7 +416,7 @@ async def _ws_capture_coroutine(session: _OpenidCaptureSession, access_token: st
                                 ack_req = urllib.request.Request(
                                     f"{QQ_API_BASE}/v2/users/{urllib.parse.quote(session.openid, safe='')}/messages",
                                     data=json.dumps({
-                                        "content": "【R20 Quantum Trader】✅ OpenID 自动捕获并绑定成功！此账号已设为交易通知接收目标。",
+                                        "content": "【AstraQuant】✅ OpenID 自动捕获并绑定成功！此账号已设为交易通知接收目标。",
                                         "msg_type": 0,
                                         "msg_seq": seq_num,
                                     }).encode("utf-8"),

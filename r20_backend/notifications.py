@@ -171,7 +171,7 @@ def send_channel(channel: str, message: str, env: dict[str, str] | None = None) 
                 payload["timestamp"] = str(ts)
                 payload["sign"] = sign
         elif "day.app" in u_lower or "bark" in u_lower:
-            payload = {"title": "【R20 Quantum】", "body": message, "group": "R20-Trade"}
+            payload = {"title": "【AstraQuant】", "body": message, "group": "AstraQuant-Trade"}
         elif "discord.com" in u_lower or "discordapp.com" in u_lower:
             payload = {"content": message}
         elif "qyapi.weixin.qq.com" in u_lower:
@@ -182,7 +182,7 @@ def send_channel(channel: str, message: str, env: dict[str, str] | None = None) 
             payload = {"text": "【R20 量化通知】", "desp": message}
         else:
             payload = {
-                "source": "R20 Quantum Trader",
+                "source": "AstraQuant",
                 "message": message,
                 "text": message,
                 "content": message,
@@ -242,7 +242,7 @@ def send_channel(channel: str, message: str, env: dict[str, str] | None = None) 
 
 def notify(text: str) -> dict[str, str]:
     env = _env(); timestamp = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
-    message = f"【R20 Quantum Trader】{timestamp}\n{text.strip()}"; result: dict[str, str] = {}
+    message = f"【AstraQuant】{timestamp}\n{text.strip()}"; result: dict[str, str] = {}
     for channel in enabled_channels(env):
         ok, detail = send_channel(channel, message, env)
         result[channel] = f"accepted: {detail}" if ok else f"failed: {detail}"
@@ -258,6 +258,6 @@ def test_channel(channel: str) -> dict[str, str]:
     """Strictly test only the selected channel; another channel cannot mask failure."""
     env = _env()
     timestamp = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
-    ok, detail = send_channel(channel, f"【R20 Quantum Trader】{timestamp}\n🔔 {channel.upper()} 通知测试：指定通道连接正常。", env)
+    ok, detail = send_channel(channel, f"【AstraQuant】{timestamp}\n🔔 {channel.upper()} 通知测试：指定通道连接正常。", env)
     prefix = "accepted:" if ok else "failed:"
     return {channel: f"{prefix} {detail}"}

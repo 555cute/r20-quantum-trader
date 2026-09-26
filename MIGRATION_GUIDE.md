@@ -1,4 +1,4 @@
-# R20 Quantum Trader 纯净工程跨机迁移与 DeepSeek Harness 开发接手指南
+# AstraQuant 纯净工程跨机迁移与 DeepSeek Harness 开发接手指南
 
 > 适用场景：将项目迁移至新电脑（macOS / Linux / Windows WSL），并在新电脑的 **DeepSeek Harness** 环境中无缝继续接手开发与部署运行。
 
@@ -63,7 +63,7 @@ chmod +x start.sh deploy/install.sh
 如果新电脑可以直接访问 GitHub：
 ```bash
 # 1. 克隆完整仓库
-git clone https://github.com/555cute/r20-quantum-trader.git r20
+git clone https://github.com/555cute/astraquant.git astraquant
 cd r20
 chmod +x start.sh deploy/install.sh
 
@@ -121,7 +121,7 @@ source .venv/bin/activate
 
 ### 3. 唤醒 Agent 接手指令
 在新电脑与 Harness Agent 开启首次对话时，可直接发送以下接手提示词：
-> *"我已经将 R20 Quantum Trader 项目迁移到当前工作区，请阅读根目录下的 AGENTS.md，了解当前工程分层架构、质量门禁与执行红线，然后检查代码状态并准备继续开发。"*
+> *"我已经将 AstraQuant 项目迁移到当前工作区，请阅读根目录下的 AGENTS.md，了解当前工程分层架构、质量门禁与执行红线，然后检查代码状态并准备继续开发。"*
 
 内置的 `AGENTS.md` 包含全套系统规则，新 Agent 会自动对齐架构，不产生任何上下文偏离。
 

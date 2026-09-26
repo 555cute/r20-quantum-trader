@@ -230,7 +230,7 @@ const bandFacts = computed(() => {
 
             <footer class="ab-block-foot">
               <a
-                href="https://github.com/555cute/r20-quantum-trader"
+                href="https://github.com/555cute/astraquant"
                 target="_blank"
                 rel="noopener noreferrer"
                 class="btn btn-primary btn-sm"

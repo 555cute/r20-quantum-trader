@@ -243,10 +243,10 @@ async def _run_session():
                                     _send_ack(
                                         token,
                                         str(openid).strip(),
-                                        "【R20 Quantum Trader】✅ 机器人已成功绑定您的 OpenID！量化交易、平仓与风险预警通知将实时推送到此会话。",
+                                        "【AstraQuant】✅ 机器人已成功绑定您的 OpenID！量化交易、平仓与风险预警通知将实时推送到此会话。",
                                     )
                                 elif content in ("ping", "Ping", "测试", "test"):
-                                    _send_ack(token, str(openid).strip(), "【R20 Quantum Trader】🏓 Pong! 机器人通信链路正常。")
+                                    _send_ack(token, str(openid).strip(), "【AstraQuant】🏓 Pong! 机器人通信链路正常。")
 
                     except asyncio.TimeoutError:
                         pass

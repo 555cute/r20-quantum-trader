@@ -1,4 +1,4 @@
-# R20 Quantum Trader Standalone Deployment
+# AstraQuant Standalone Deployment
 
 R20 runs independently of QwenPaw. The product is composed of:
 

@@ -168,7 +168,7 @@ SEGMENT_DELTAS = {
             'okx_long=long_count, okx_short=short_count, '
             'xv_positions_by_venue=xv_positions_by_venue, xv_total=_xv_total, '
             'max_positions=MAX_CONCURRENT_POSITIONS)\n'
-            'log_entry = f"[{timestamp_full}] ⚡ R20 Quantum Trader v{__version__} 巡检完成 | '
+            'log_entry = f"[{timestamp_full}] ⚡ AstraQuant v{__version__} 巡检完成 | '
             "{position_span} | 动作: "
             "{(', '.join(executed_actions) if executed_actions else '无开平仓操作')}\\n\"",
         ),

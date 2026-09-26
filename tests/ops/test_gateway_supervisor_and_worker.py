@@ -628,7 +628,7 @@ class FormatMessageTests(unittest.TestCase):
         return row
 
     def test_a_plain_title_gets_the_brand_prefix(self):
-        self.assertIn("【R20 Quantum】开仓", WKR.format_message(self._row()))
+        self.assertIn("【AstraQuant】开仓", WKR.format_message(self._row()))
 
     def test_a_title_already_carrying_the_brand_is_kept(self):
         self.assertIn("【R20 风控】", WKR.format_message(self._row(title="【R20 风控】警告")))
@@ -636,7 +636,7 @@ class FormatMessageTests(unittest.TestCase):
     def test_a_title_merely_containing_the_brand_is_also_kept(self):
         out = WKR.format_message(self._row(title="前缀【R20】后缀"))
         self.assertIn("前缀【R20】后缀", out)
-        self.assertNotIn("【R20 Quantum】前缀", out)
+        self.assertNotIn("【AstraQuant】前缀", out)
 
     def test_the_iso_t_separator_is_replaced_and_truncated(self):
         self.assertIn("⏱️ 时间：2026-09-20 10:11:12", WKR.format_message(self._row()))
@@ -651,7 +651,7 @@ class FormatMessageTests(unittest.TestCase):
 
     def test_missing_fields_do_not_raise(self):
         out = WKR.format_message({})
-        self.assertIn("【R20 Quantum】", out)
+        self.assertIn("【AstraQuant】", out)
         self.assertIn("⏱️ 时间：", out)
 
     def test_the_separator_is_present(self):
@@ -866,7 +866,7 @@ class WorkerRunTests(_WorkerBase):
         self.adapter.return_value.send.return_value = result
         WKR.run()
         sent = self.adapter.return_value.send.call_args[0][0]
-        self.assertIn("【R20 Quantum】开仓", sent)
+        self.assertIn("【AstraQuant】开仓", sent)
 
 
 class WorkerPruneIntervalTests(_WorkerBase):
