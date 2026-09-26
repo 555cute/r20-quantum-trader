@@ -240,7 +240,7 @@ class SiteUrlIsSingleSourceTest(unittest.TestCase):
         它是有意保留的部署路径 / Grafana UID（见 README「品牌与内部代号」），
         一刀切会让那条有意为之的说明反而过不了门。"""
         stale_url = "github.com/555cute/r20-quantum-trader"
-        for rel in ("README.md", "README.en.md", "frontend/src/config/version.ts",
+        for rel in ("README.md", "README.zh-CN.md", "frontend/src/config/version.ts",
                     "r20_backend/routers/system.py", "frontend/src/views/docs/DocsView.vue"):
             self.assertNotIn(stale_url, _read(rel),
                              f"{rel} 里还有旧仓库 URL（改名后是 404 链接）")

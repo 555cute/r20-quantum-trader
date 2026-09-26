@@ -418,7 +418,7 @@ class ExtractedModulesHaveTestsTest(unittest.TestCase):
 
 
 class ProjectReadmeStructureEntryTest(unittest.TestCase):
-    """`README.md` 的「代码结构入口」章节必须指向**真实存在**的文件。
+    """仓库根 README 的「代码结构入口 / Code map」章节必须指向**真实存在**的文件。
 
     ## 为什么加这条
 
@@ -435,24 +435,49 @@ class ProjectReadmeStructureEntryTest(unittest.TestCase):
     1. 该章节**存在**且仍指向那几份真实文档（防止被人顺手删掉，
        于是又退回"只能靠 OPENCODE.md"的状态）；
     2. 章节里引用的每个**具体路径**都真实存在（防止文档链接腐烂）。
+
+    ## 2026-09-27：README 拆成中英两版 ⇒ 本门**两版都守**
+
+    英文 `README.md` 是默认（GitHub 仓库搜索权重主要吃这一份），中文在
+    `README.zh-CN.md`。只守默认那份的话，另一版的章节结构烂掉没人会知道 ——
+    所以按语言参数化：标题、表格用途串、否定性事实的措辞各按本语言钉。
     """
 
-    README = ROOT / "README.md"
-    HEADING = "代码结构入口"
+    #: (文件名, 章节标题, [(被指向的文档, 该行必须说明的用途串)], OPENCODE 否定性事实的正则)
+    CASES = (
+        ("README.md", "Code map", (
+            ("r20_backend/README.md", "Backend layering"),
+            ("scripts/README.md", "Runtime scripts & daemons"),
+            ("frontend/src/components/admin/README.md", "Frontend components & state"),
+        ), r"never contained|non-existent|does not exist"),
+        ("README.zh-CN.md", "代码结构入口", (
+            ("r20_backend/README.md", "后端分层"),
+            ("scripts/README.md", "哪个是入口/守护"),
+            ("frontend/src/components/admin/README.md", "前端组件"),
+        ), r"从未存在|不存在"),
+    )
 
     #: 章节里**有意**提到但不必存在的名字
     #: （`OPENCODE.md` 是被点名"不存在"的反面教材；
     #:  `__init__.py` 是泛指的清单载体，不是某一条路径）。
     ALLOWED_ABSENT = {"OPENCODE.md", "__init__.py"}
 
-    def _section(self) -> str:
-        text = self.README.read_text(encoding="utf-8")
-        self.assertIn(self.HEADING, text,
-                      f"README.md 缺少「{self.HEADING}」章节 —— "
-                      f"新人将只能靠 AGENTS.md 里那条指向不存在文件的指引")
-        start = text.index(self.HEADING)
+    def _section(self, filename: str, heading: str) -> str:
+        """取章节正文。
+
+        ⚠️ **必须锚定「`## ` 开头的标题行」**，不能用 `text.index(heading)`：
+        顶部导航条里就有一句 `[Code map](#code-map-...)` / `[架构索引](#architecture-index)`，
+        按裸串定位会**切到导航条那几行**，于是断言全部落在一个只有 60 字的片段上
+        （2026-09-27 拆中英双语时实测踩到：中英两侧同时假红）。
+        """
+        text = (ROOT / filename).read_text(encoding="utf-8")
+        m_head = re.search(r"^##[^\n]*" + re.escape(heading), text, re.M)
+        self.assertIsNotNone(
+            m_head,
+            f"{filename} 缺少「{heading}」章节 —— "
+            f"新人将只能靠 AGENTS.md 里那条指向不存在文件的指引")
+        rest = text[m_head.start():]
         # 到下一个二级标题为止
-        rest = text[start:]
         m = re.search(r"\n## ", rest[3:])
         return rest[: m.start() + 3] if m else rest
 
@@ -463,26 +488,25 @@ class ProjectReadmeStructureEntryTest(unittest.TestCase):
         用例仍然绿 —— 因为该文件名在紧邻的另一行（"抽取约定"那行）里
         又出现了一次。断言过宽的又一例。
         """
-        sec = self._section()
-        for doc, purpose in (
-            ("r20_backend/README.md", "后端分层"),
-            ("scripts/README.md", "哪个是入口/守护"),
-            ("frontend/src/components/admin/README.md", "前端组件"),
-        ):
-            row = re.search(r"^\|.*`" + re.escape(doc) + r"`.*\|\s*$", sec, re.M)
-            self.assertIsNotNone(row, f"结构入口章节缺少指向 {doc} 的表格行")
-            self.assertIn(purpose, row.group(0),
-                          f"指向 {doc} 的那行应说明它解决什么问题（含「{purpose}」）")
+        for filename, heading, rows, _absent in self.CASES:
+            sec = self._section(filename, heading)
+            for doc, purpose in rows:
+                with self.subTest(readme=filename, doc=doc):
+                    row = re.search(r"^\|.*`" + re.escape(doc) + r"`.*\|\s*$", sec, re.M)
+                    self.assertIsNotNone(row, f"{filename} 的结构章节缺少指向 {doc} 的表格行")
+                    self.assertIn(purpose, row.group(0),
+                                  f"指向 {doc} 的那行应说明它解决什么问题（含「{purpose}」）")
 
     def test_every_referenced_path_exists(self):
-        sec = self._section()
-        refs = set(re.findall(r"`([A-Za-z0-9_./\-]+\.(?:md|py))`", sec))
-        self.assertTrue(refs, "未解析到任何路径引用")
-        dangling = sorted(
-            r for r in refs
-            if r not in self.ALLOWED_ABSENT and not (ROOT / r).exists())
-        self.assertEqual(dangling, [],
-                         f"结构入口章节引用了不存在的路径（会把人引到死路）: {dangling}")
+        for filename, heading, _rows, _absent in self.CASES:
+            sec = self._section(filename, heading)
+            refs = set(re.findall(r"`([A-Za-z0-9_./\-]+\.(?:md|py))`", sec))
+            self.assertTrue(refs, f"{filename} 结构章节未解析到任何路径引用")
+            dangling = sorted(
+                r for r in refs
+                if r not in self.ALLOWED_ABSENT and not (ROOT / r).exists())
+            self.assertEqual(dangling, [],
+                             f"{filename} 结构章节引用了不存在的路径（会把人引到死路）: {dangling}")
 
     def test_it_records_the_dead_opencode_pointer(self):
         """⚠️ 把"AGENTS.md 指向不存在的 OPENCODE.md"这个事实留在文档里。
@@ -490,22 +514,25 @@ class ProjectReadmeStructureEntryTest(unittest.TestCase):
         不要求 README 永远提它，但若有人删掉这段说明，
         下一个人就会重新踩同一个坑。
         """
-        sec = self._section()
         # ⚠️ 同样不能只断言"OPENCODE.md 出现过" —— 它在引言里本就出现，
         #    把"从未存在过"那句删掉后用例仍然绿（负向验证抓到的第二个洞）。
         #    改为断言**否定性事实**必须写明。
-        self.assertIn("OPENCODE.md", sec, "应点名那份空路径指引")
-        self.assertRegex(
-            sec, r"从未存在|不存在",
-            "必须写明 AGENTS.md 指向的 OPENCODE.md **并不存在** —— "
-            "只提名字而不说它不存在，等于把坑留着")
+        for filename, heading, _rows, absent_re in self.CASES:
+            sec = self._section(filename, heading)
+            with self.subTest(readme=filename):
+                self.assertIn("OPENCODE.md", sec, f"{filename} 应点名那份空路径指引")
+                self.assertRegex(
+                    sec, absent_re,
+                    f"{filename} 必须写明 AGENTS.md 指向的 OPENCODE.md **并不存在** —— "
+                    "只提名字而不说它不存在，等于把坑留着")
 
     def test_it_lists_the_three_gates(self):
         """把本阶段建的三道门禁写进入口章节，否则新人不知道有闸。"""
-        sec = self._section()
-        for gate in ("test_directory_docs_current.py",
-                     "test_readme_baseline_numbers.py"):
-            self.assertIn(gate, sec, f"结构入口章节应列出 {gate}")
+        for filename, heading, _rows, _absent in self.CASES:
+            sec = self._section(filename, heading)
+            for gate in ("test_directory_docs_current.py",
+                         "test_readme_baseline_numbers.py"):
+                self.assertIn(gate, sec, f"{filename} 结构入口章节应列出 {gate}")
 
 
 class DocsDescribeRealityTest(unittest.TestCase):

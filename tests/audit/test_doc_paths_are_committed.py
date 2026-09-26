@@ -91,9 +91,9 @@ class DocPathsAreCommittedTest(unittest.TestCase):
 
 
 #: 全仓文档扫描范围（含仓库根的三份说明）
-#: 2026-09-27：README 拆成中英两版后，**英文版也进扫描范围** ——
-#: 只扫 `README.md` 的话，英文版里引用的源码路径烂掉没人会知道。
-ALL_DOCS = (ROOT / "docs", ROOT / "README.md", ROOT / "README.en.md", ROOT / "AGENTS.md")
+#: 2026-09-27：README 拆成中英两版（英文 `README.md` 为默认、中文 `README.zh-CN.md`）。
+#: **两版都进扫描范围** —— 只扫默认那份的话，另一版里引用的源码路径烂掉没人会知道。
+ALL_DOCS = (ROOT / "docs", ROOT / "README.md", ROOT / "README.zh-CN.md", ROOT / "AGENTS.md")
 #: **源码树**前缀：这些目录下的文件"磁盘上存在"就必须"仓库里有"。
 #: 运行态/本地目录（`data/`、`plan_local/`、`promo_local/`、`.archive/`）**不在范围内** ——
 #: 它们被有意忽略（审计确认：文档引用的 6 个未跟踪路径全属此类），
