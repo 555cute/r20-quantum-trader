@@ -109,6 +109,7 @@ export const zhAdminSecurity = {
   gatePhrasePlaceholder: '输入短语：OPEN GATE EXECUTION',
   gateExtra: '关闸时仅只读行情与账户探针；开闸后进入撮合路由。',
   gateRegisterDiscount: 'Gate.io 快速开户 · 终身享 20% 手续费返还 ↗',
+  binanceRegisterDiscount: '币安快速开户 · 终身享手续费返还 ↗',
   saveGate: '保存 Gate',
   healthTitle: '跨所行情健康容灾',
   healthDesc: '多所行情源自动健康监测与路由评分。',

@@ -55,6 +55,24 @@ const auth = useAuthStore()
 const { t } = useI18n()
 const config = ref<any>(null)
 const runtime = ref<any>(null)
+/**
+ * 注册/返佣通道：**由后端出值**（`/api/v1/admin/referral-channels`，管理员版）。
+ * 本页此前把经纪商 code 与两条链接**硬编码在模板里** —— 那是继 `okx_rest.py`、
+ * `config.py`、`AboutModal.vue` 之后的第三份副本：分发副本的人用环境变量换掉
+ * 自己的通道后，这一页照旧显示原作者的链接与 code，用户就会注册到别人名下。
+ */
+const channels = ref<any[]>([])
+const channelOf = (key: string) => channels.value.find((c) => c.key === key) || null
+const brokerCode = computed(() => channelOf('okx')?.broker_code || '')
+async function loadChannels() {
+  try {
+    const res = await api<any>('/api/v1/admin/referral-channels')
+    channels.value = Array.isArray(res?.channels) ? res.channels : []
+  } catch {
+    // 取不到就整块不渲染注册入口（**不回落到写死的旧链接** —— 那正是本次要消灭的东西）
+    channels.value = []
+  }
+}
 const loading = ref(true)
 /** 批 24：首屏加载失败的原因（留在页面上，配重试按钮；不再只靠一闪而过的 toast） */
 const loadError = ref('')
@@ -578,7 +596,7 @@ const healthAllOk = computed(() => {
   return chips.length > 0 && chips.every((h: any) => h.ok === h.total)
 })
 
-onMounted(() => { loadAll(); loadMx() })
+onMounted(() => { loadAll(); loadMx(); loadChannels() })
 </script>
 
 <template>
@@ -793,15 +811,16 @@ onMounted(() => { loadAll(); loadMx() })
               </div>
 
               <template #extra>
-                <div class="sc-channel-box">
-                  <div class="sc-channel-row">
+                <div v-if="channelOf('okx')" class="sc-channel-box">
+                  <div v-if="brokerCode" class="sc-channel-row">
                     <span class="sc-channel-label">{{ t('admin.security.okxBrokerTagLabel') }}</span>
-                    <span class="sc-channel-tag mono">6e2191f027c6SUDE</span>
+                    <span class="sc-channel-tag mono">{{ brokerCode }}</span>
                   </div>
                   <button
+                    v-if="channelOf('okx')?.invite_url"
                     type="button"
                     class="sc-channel-btn"
-                    @click="openExternal('https://www.mitxcqvwnhj.com/join/48039151')"
+                    @click="openExternal(channelOf('okx')!.invite_url)"
                   >
                     <span>{{ t('admin.security.okxRegisterDiscount') }}</span>
                   </button>
@@ -865,6 +884,19 @@ onMounted(() => { loadAll(); loadMx() })
                 <input v-model="mxForm.binance_secret_key" type="password" :aria-label="t('admin.security.binanceSecretAria')" :placeholder="t('admin.security.phApiSecret')" class="field" />
               </div>
 
+              <!-- 2026-09：与本页另两个所对齐——注册入口同样由后端出值（此前只有 OKX/Gate 有） -->
+              <template #extra>
+                <div v-if="channelOf('binance')?.invite_url" class="sc-channel-box">
+                  <button
+                    type="button"
+                    class="sc-channel-btn"
+                    @click="openExternal(channelOf('binance')!.invite_url)"
+                  >
+                    <span>{{ t('admin.security.binanceRegisterDiscount') }}</span>
+                  </button>
+                </div>
+              </template>
+
               <template #footer-left>
                 <span v-if="venueLatencies.binance" class="sc-latency mono num">
                   <Radar :size="12" />
@@ -923,11 +955,11 @@ onMounted(() => { loadAll(); loadMx() })
               </div>
 
               <template #extra>
-                <div class="sc-channel-box">
+                <div v-if="channelOf('gate')?.invite_url" class="sc-channel-box">
                   <button
                     type="button"
                     class="sc-channel-btn"
-                    @click="openExternal('https://www.gatesites.net/share/MCHDBKYF')"
+                    @click="openExternal(channelOf('gate')!.invite_url)"
                   >
                     <span>{{ t('admin.security.gateRegisterDiscount') }}</span>
                   </button>

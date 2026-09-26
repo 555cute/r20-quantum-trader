@@ -108,6 +108,7 @@ export const enAdminSecurity = {
   gatePhrasePlaceholder: 'Type the phrase: OPEN GATE EXECUTION',
   gateExtra: 'While closed, only read-only market data and account probes; once open it joins execution routing.',
   gateRegisterDiscount: 'Gate.io Fast-Track · 20% Lifetime Fee Rebate ↗',
+  binanceRegisterDiscount: 'Binance quick sign-up · lifetime fee rebate ↗',
   saveGate: 'Save Gate',
   healthTitle: 'Cross-venue market data health',
   healthDesc: 'Automatic health monitoring and routing scoring of the market data sources.',
