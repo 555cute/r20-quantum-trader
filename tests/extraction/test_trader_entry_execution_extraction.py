@@ -79,6 +79,26 @@ DELTA_REWRITES = (
 """,
      """                scale_count = int(tracker.get("scale_count", 0))
 """),
+    # ---- 通知改用**实际提交**的保护价（2026-09 缺陷四）----
+    # 市价档下 `submit_protected_limit_order` 会按现价重锚三价后才发单，
+    # 而调用点手里的 `limit_px/tp_px/sl_px` 仍是**计划值** ⇒ 通知说的是
+    # **并不存在**的保护网：计划是回踩挂单时（多单计划 100000、现价 110000），
+    # 通知说"止损 95000"，而真实成交价 110000、实收止损 104500 ——
+    # 看通知会误以为止损已被击穿。
+    #
+    # 落点在 `if accepted:` 之后、组装文案之前，且**重绑原变量名**而不是引入新名：
+    # 文案与通知 kwargs 共 8 处引用，逐处改名会让锚点各自只出现一次，
+    # 与本门"锚点恰好出现两次（多空各一）"的判据冲突。
+    # 实提交值由下单函数回写进 `venue_ctx`；`submitted_bracket` 缺字段时逐位退回原值，
+    # 故对既有调用方是零行为变更。
+    ("""                if accepted:
+                    # 通知必须说**实提交值**：市价档下三价已被按现价重锚（见
+                    # `submitted_bracket` 的 docstring）；限价档逐位不变。
+                    limit_px, tp_px, sl_px = submitted_bracket(
+                        _venue_ctx, limit_px, tp_px, sl_px)
+""",
+     """                if accepted:
+"""),
 )
 
 

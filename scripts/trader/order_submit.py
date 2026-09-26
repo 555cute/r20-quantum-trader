@@ -161,6 +161,18 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: f
         print(f"[市价锚定] {inst_id} 现价={_anchor_last:g} "
               f"计划TP={_plan_tp:g}/SL={_plan_sl:g} → 实提TP={effective_tp:g}/SL={effective_sl:g}")
 
+    # 通知复用：把**实际提交**的三价写回 `venue_ctx`（上游 `entry_execution.py`
+    # 组装通知时读它）。市价档重锚后上游手里的 `limit_px/tp_px/sl_px` 已是**计划值**，
+    # 与交易所实收不同 —— 2026-09 实测：ADA 空单通知写 TP=0.24/SL=0.2624，
+    # 交易所实收 TP=0.2391/SL=0.2614（这笔只差 0.4%，因为计划价恰在现价附近）。
+    # 计划价离现价越远偏差越大：计划是回踩挂单时，通知里的止损会落在**真实成交价的
+    # 错误一侧**（多单计划 100000/现价 110000 ⇒ 通知说 SL=95000，实收却是 104500），
+    # 看通知会误以为"止损已被击穿"。故这里无条件回写（限价档即原值，逐位不变）。
+    if isinstance(venue_ctx, dict):
+        venue_ctx["submitted_px"] = effective_px
+        venue_ctx["submitted_tp"] = effective_tp
+        venue_ctx["submitted_sl"] = effective_sl
+
     # Final Non-Bypassable Verification: verify actual effective price, tp and sl
     from scripts.order_risk import validate_quote_geometry_and_rr
     action_type = "BUY_LONG" if pos_side == "long" else "SELL_SHORT"

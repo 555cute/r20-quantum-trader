@@ -79,6 +79,10 @@ BODY_DELTAS: list = [
      "\n    effective_px, effective_tp, effective_sl = _anchored"
      "\n    print(f'[市价锚定] {inst_id} 现价={_anchor_last:g} 计划TP={_plan_tp:g}/SL={_plan_sl:g}"
      " → 实提TP={effective_tp:g}/SL={effective_sl:g}')"
+     "\nif isinstance(venue_ctx, dict):"
+     "\n    venue_ctx['submitted_px'] = effective_px"
+     "\n    venue_ctx['submitted_tp'] = effective_tp"
+     "\n    venue_ctx['submitted_sl'] = effective_sl"
      "\nfrom scripts.order_risk import validate_quote_geometry_and_rr"),
 ]
 

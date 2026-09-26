@@ -300,10 +300,11 @@ class OkxDirectTest(unittest.TestCase):
         """
         okx = _Okx()
         rig = Rig(okx=okx, price=100000.0, tp=105000.0, sl=95000.0, ticker="110000")
+        ctx = {"notional_usdt": 1, "margin_usdt": 1}
         with patch.dict(os.environ, {"R20_ORDER_MODE": "market"}):
             with patch("scripts.order_risk.validate_quote_geometry_and_rr",
                        return_value=(True, "", 1.0)):
-                ok, why = rig.run(venue_ctx={"notional_usdt": 1, "margin_usdt": 1})
+                ok, why = rig.run(venue_ctx=ctx)
         self.assertTrue(ok, why)
         _, _, _, kw = okx.orders[0]
         fill = 110000.0
@@ -314,6 +315,13 @@ class OkxDirectTest(unittest.TestCase):
         # 盈亏比 1:2（t=+5%/s=-5%）必须原样保持
         self.assertAlmostEqual((kw["attach_tp"] - fill) / (fill - kw["attach_sl"]), 1.0,
                                places=6, msg="市价单不得改动盈亏比")
+        # 实际提交值必须回写进 `venue_ctx` —— 上游通知靠它说真话（2026-09 缺陷四）。
+        self.assertEqual(ctx["submitted_px"], kw["px"] if kw["px"] is not None else 110000.0)
+        self.assertEqual(ctx["submitted_tp"], kw["attach_tp"],
+                         "回写值必须与实际发给交易所的一致（通知不能再说计划值）")
+        self.assertEqual(ctx["submitted_sl"], kw["attach_sl"])
+        self.assertNotEqual(ctx["submitted_tp"], 105000.0, "回写的仍是计划值 = 缺陷未修")
+        self.assertNotEqual(ctx["submitted_sl"], 95000.0, "回写的仍是计划值 = 缺陷未修")
 
     def test_market_order_without_live_price_is_refused(self):
         """现价读不到 ⇒ 拒单（fail-closed）。退回计划价下单正是要消除的反挂形态。"""
@@ -336,16 +344,20 @@ class OkxDirectTest(unittest.TestCase):
         """
         okx = _Okx()
         rig = Rig(okx=okx, price=100000.0, tp=105000.0, sl=95000.0, ticker="110000")
+        ctx = {"notional_usdt": 1, "margin_usdt": 1}
         with patch.dict(os.environ, {"R20_ORDER_MODE": "limit"}):
             with patch("scripts.order_risk.validate_quote_geometry_and_rr",
                        return_value=(True, "", 1.0)):
-                ok, why = rig.run(venue_ctx={"notional_usdt": 1, "margin_usdt": 1})
+                ok, why = rig.run(venue_ctx=ctx)
         self.assertTrue(ok, why)
         _, _, _, kw = okx.orders[0]
         self.assertEqual(kw["ord_type"], "limit")
         self.assertEqual(kw["px"], 100000.0, "限价单必须按计划价挂，不得被市价重锚改动")
         self.assertEqual(kw["attach_tp"], 105000.0)
         self.assertEqual(kw["attach_sl"], 95000.0)
+        # 限价档也回写，但值与计划逐位相同 ⇒ 通知的既有行为零变更
+        self.assertEqual((ctx["submitted_px"], ctx["submitted_tp"], ctx["submitted_sl"]),
+                         (100000.0, 105000.0, 95000.0))
 
 
 if __name__ == "__main__":
