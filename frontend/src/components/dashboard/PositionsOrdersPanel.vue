@@ -243,12 +243,12 @@ function orderTooltipText(o: any): string {
     <div v-if="tab === 'positions'" class="scroll-y flex-1 min-h-0 overflow-x-auto">
       <BaseEmpty v-if="!filteredPositions.length" :text="t('dash.matrix.positions.empty')" />
       <div v-else>
-        <!-- 移动端流式卡片（sm:hidden 专用，永不横向切边，信息层级分明） -->
-        <div class="sm:hidden space-y-2 p-2">
+        <!-- 窄容器流式卡片（容器 <660px 时启用；永不横向切边，信息层级分明） -->
+        <div class="pop-narrow space-y-2 p-2">
           <div
             v-for="p in filteredPositions"
             :key="'m-' + p.instId + p.side"
-            class="clickable rounded-lg border border-[var(--surface-3)] bg-[var(--surface-1)] p-3 transition-colors hover:bg-[var(--surface-2)] flex flex-col gap-2"
+            class="clickable rounded-lg border border-[var(--line-2)] bg-[var(--surface-1)] p-3 transition-colors hover:bg-[var(--surface-2)] hover:border-[var(--line-1)] flex flex-col gap-2"
             :title="t('dash.matrix.chart.pickHint')"
             tabindex="0"
             @click="emit('pick-symbol', p.instId)"
@@ -301,7 +301,7 @@ function orderTooltipText(o: any): string {
             </div>
 
             <!-- 数据栏：盈亏、ROI、保证金、均价与现价 -->
-            <div class="grid grid-cols-2 gap-2 pt-1 border-t border-[var(--surface-2)]">
+            <div class="grid grid-cols-2 gap-2 pt-1 border-t border-[var(--line-2)]">
               <div>
                 <span class="text-4xs text-[var(--ink-3)] block">{{ t('dash.matrix.positions.col.pnl') }}</span>
                 <span class="text-sm font-bold font-mono" :class="posPnl(p) >= 0 ? 'text-[var(--up)]' : 'text-[var(--down)]'">
@@ -319,7 +319,7 @@ function orderTooltipText(o: any): string {
             </div>
 
             <!-- 底栏：止损与止盈阶梯（TP1/TP2 左右分布） -->
-            <div class="flex items-center justify-between text-3xs font-mono pt-1 border-t border-[var(--surface-2)] text-[var(--ink-2)]">
+            <div class="flex items-center justify-between text-3xs font-mono pt-1 border-t border-[var(--line-2)] text-[var(--ink-2)]">
               <div class="flex items-center gap-1">
                 <span class="text-[var(--down)] font-medium">SL {{ fmtPrice(p.exchangeSl ?? p.displayStop) }}</span>
                 <span v-if="slTriggerType(p)" class="text-4xs text-[var(--ink-3)]">({{ slTriggerType(p) }})</span>
@@ -334,8 +334,8 @@ function orderTooltipText(o: any): string {
           </div>
         </div>
 
-        <!-- 桌面端表格（仅 >= sm 宽屏可见，通过外层独立容器杜绝 .table 样式优先级冲突） -->
-        <div class="hidden sm:block">
+        <!-- 宽容器表格（面板 >=660px 时才出；独立外层容器杜绝 .table 优先级冲突） -->
+        <div class="pop-wide">
           <table class="table pop-table w-full" :aria-label="t('dash.matrix.positions.title')">
         <thead>
           <tr>
@@ -469,12 +469,12 @@ function orderTooltipText(o: any): string {
     <div v-else class="scroll-y flex-1 min-h-0 overflow-x-auto">
       <BaseEmpty v-if="!filteredOrders.length" :text="t('dash.matrix.orders.empty')" />
       <div v-else>
-        <!-- 移动端流式挂单卡片（sm:hidden 专用） -->
-        <div class="sm:hidden space-y-2 p-2">
+        <!-- 窄容器流式挂单卡片（容器 <660px 时启用） -->
+        <div class="pop-narrow space-y-2 p-2">
           <div
             v-for="o in filteredOrders"
             :key="'mo-' + o.ordId"
-            class="clickable rounded-lg border border-[var(--surface-3)] bg-[var(--surface-1)] p-3 transition-colors hover:bg-[var(--surface-2)] flex flex-col gap-2"
+            class="clickable rounded-lg border border-[var(--line-2)] bg-[var(--surface-1)] p-3 transition-colors hover:bg-[var(--surface-2)] hover:border-[var(--line-1)] flex flex-col gap-2"
             :title="t('dash.matrix.chart.pickHint')"
             tabindex="0"
             @click="emit('pick-symbol', o.instId)"
@@ -505,7 +505,7 @@ function orderTooltipText(o: any): string {
               </span>
             </div>
 
-            <div class="grid grid-cols-2 gap-2 pt-1 border-t border-[var(--surface-2)]">
+            <div class="grid grid-cols-2 gap-2 pt-1 border-t border-[var(--line-2)]">
               <div>
                 <span class="text-4xs text-[var(--ink-3)] block">{{ t('dash.matrix.orders.col.price') }}</span>
                 <span class="text-sm font-bold font-mono text-[var(--ink-strong)]">{{ fmtPrice(o.px) }}</span>
@@ -516,7 +516,7 @@ function orderTooltipText(o: any): string {
               </div>
             </div>
 
-            <div class="flex items-center justify-between text-3xs font-mono pt-1 border-t border-[var(--surface-2)] text-[var(--ink-2)]">
+            <div class="flex items-center justify-between text-3xs font-mono pt-1 border-t border-[var(--line-2)] text-[var(--ink-2)]">
               <div class="flex items-center gap-2">
                 <span class="text-[var(--down)] font-medium">SL {{ o.slTriggerPx ? fmtPrice(o.slTriggerPx) : (o.sl_px && String(o.sl_px) !== '--' ? fmtPrice(o.sl_px) : '--') }}</span>
                 <span class="text-[var(--up)] font-medium">TP {{ o.tpTriggerPx ? fmtPrice(o.tpTriggerPx) : (o.tp_px && String(o.tp_px) !== '--' ? fmtPrice(o.tp_px) : '--') }}</span>
@@ -528,7 +528,7 @@ function orderTooltipText(o: any): string {
           </div>
         </div>
 
-        <div class="hidden sm:block">
+        <div class="pop-wide">
           <table class="table pop-table w-full" :aria-label="t('dash.matrix.orders.title')">
         <thead>
           <tr>
@@ -626,6 +626,40 @@ function orderTooltipText(o: any): string {
   .pop-table td {
     padding-left: var(--sp-2);
     padding-right: var(--sp-2);
+  }
+}
+
+/* =========================================================================
+   窄/宽两套呈现，按**容器宽度**切换（不是视口宽度）
+   -------------------------------------------------------------------------
+   症状（本次修复）：本面板恒为 xl 栅格的 4/12 栏 —— 1600px 视口下只有
+   436px 宽，2560px 视口下也仅约 664px。而六列持仓表按 `table-layout: auto`
+   自然宽约 630px，于是**表格恒宽于容器**：`.overflow-x-auto` 把它变成横向
+   滚动条，最右侧的「未实现盈亏」「止损/止盈」「云端防线」三列落在可视区之外
+   —— 首屏看不到盈亏与保护价，这是主工位上的功能性缺陷，不只是观感问题。
+
+   根因不是列宽不够，是**切换判据选错了维度**：原实现用视口断点
+   （`sm:hidden` / `hidden sm:block`，640px 视口）。视口 ≥640px 就出表格，
+   可面板宽度由**栅格**决定、与视口并不同步 —— 1600px 视口照样只有 436px。
+   本组件早已声明 `container-type: inline-size`，容器查询才是正确判据。
+
+   阈值 660px：六列（min-width 合计 520 + 左右各 12px 内边距 ×6 = 664）刚好容纳。
+   ========================================================================= */
+.pop-narrow {
+  display: none;
+}
+.pop-wide {
+  display: none;
+}
+
+@container (max-width: 659px) {
+  .pop-narrow {
+    display: block;
+  }
+}
+@container (min-width: 660px) {
+  .pop-wide {
+    display: block;
   }
 }
 </style>
