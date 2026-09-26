@@ -115,6 +115,15 @@ class ThinShellInjectionTests(unittest.TestCase):
             self.assertEqual(aft._run_captured("/x/y.py", "标签", timeout=42), "OUT")
         self.assertEqual(seen, {"script": "/x/y.py", "timeout": 42, "label": "标签"})
 
+    def test_run_captured_auto_widens_sync_full_ledger_timeout(self):
+        import r20_backend.spawn as spawn
+        seen = {}
+        with patch.object(spawn, "run_script",
+                          lambda script, timeout=15, label=None: seen.update(
+                              script=script, timeout=timeout, label=label) or "OUT"):
+            self.assertEqual(aft._run_captured("/scripts/sync_full_ledger.py"), "OUT")
+        self.assertEqual(seen, {"script": "/scripts/sync_full_ledger.py", "timeout": 60, "label": None})
+
     def test_utc_age_seconds_delegates(self):
         with patch.object(aft, "_rr_utc_age_seconds", lambda ts, now: 123.5):
             self.assertEqual(aft._utc_age_seconds("2026-01-01", 1.0), 123.5)

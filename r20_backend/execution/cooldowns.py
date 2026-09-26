@@ -78,8 +78,20 @@ def read_stop_cooldowns_state(cooldown_file) -> Tuple[Dict[str, Any], bool]:
         return {}, True
 
 
+def _resolve_env_axis(env: Optional[str] = None) -> str:
+    if env:
+        return str(env).lower()
+    raw = os.environ.get("R20_OKX_ENV")
+    if raw:
+        return str(raw).lower()
+    sim = os.environ.get("OKX_IS_SIMULATED")
+    if sim is not None:
+        return "demo" if str(sim).strip().lower() in ("1", "true", "yes") else "live"
+    return ""
+
+
 def is_in_stop_cooldown(inst_id: str, side: str, cooldown_file,
-                        cooldown_seconds: int) -> bool:
+                        cooldown_seconds: int, environment: Optional[str] = None) -> bool:
     """`inst_id` 的 `side` 方向是否仍在止损冷却期内。
 
     ⚠️ fail-closed：读取状态 corrupt 时返回 `True`（不放松）。
@@ -91,7 +103,14 @@ def is_in_stop_cooldown(inst_id: str, side: str, cooldown_file,
         return True  # 不可判定=不放松：损坏按仍在冷却处理
     key = f"{inst_id}_{side}"
     if key in cooldowns:
-        rem_sec = cooldown_seconds - (int(time.time()) - cooldowns[key].get("ts", 0))
+        rec = cooldowns[key]
+        item_env = str(rec.get("environment") or "").lower()
+        query_env = _resolve_env_axis(environment)
+        # 审计：环境隔离 —— 若记录与当前环境明确不同（demo vs live），不得跨环境污染开仓；
+        # 缺环境标签的旧记录则保守生效（宁停不漏）。
+        if item_env and query_env and item_env != query_env:
+            return False
+        rem_sec = cooldown_seconds - (int(time.time()) - rec.get("ts", 0))
         if rem_sec > 0:
             return True
     return False
@@ -106,7 +125,7 @@ def load_stop_cooldowns(cooldown_file) -> Dict[str, Any]:
     return read_stop_cooldowns_state(cooldown_file)[0]
 
 def add_stop_cooldown(inst_id: str, side: str, cooldown_file, *, reason: str = "止损冷却",
-                      atomic_write_json, log=print) -> None:
+                      atomic_write_json, log=print, environment: Optional[str] = None) -> None:
     """登记一笔止损冷却（**写入路径的单一事实源**，第一百四十八刀）。
 
     收敛历史：读取路径在结构优化阶段 4·B3 第五十刀已收敛到本模块，但**写入**一直有
@@ -127,12 +146,15 @@ def add_stop_cooldown(inst_id: str, side: str, cooldown_file, *, reason: str = "
             f"（期间所有标的按『仍在冷却』fail-closed）: {cooldown_file}")
         return
     key = f"{inst_id}_{side}"
-    cooldowns[key] = {
+    rec = {
         "instId": inst_id,
         "side": side,
         "ts": int(time.time()),
         "reason": reason,
     }
+    if environment is not None and str(environment).strip():
+        rec["environment"] = str(environment).strip().lower()
+    cooldowns[key] = rec
     try:
         atomic_write_json(cooldown_file, cooldowns)
     except Exception as e:      # noqa: BLE001 - 冷却丢失只告警，绝不打断平仓流程

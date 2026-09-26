@@ -1,6 +1,10 @@
 export const enShell = {
   live: 'Live trading',
   demo: 'Demo trading',
+  mixedEnv: 'Mixed Environment',
+  demoBannerTip: 'Operating in sandbox environment — assets and orders are simulated',
+  liveBannerTip: 'Operating in live environment — real capital is at work',
+  mixedBannerTip: 'Venue funding environments are misaligned, please verify in admin settings',
   breaker: 'Circuit breaker active',
   cycle: '{n}-min decision cycle',
   updated: 'Updated {t}',

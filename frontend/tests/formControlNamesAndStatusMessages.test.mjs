@@ -143,7 +143,7 @@ test('批 67 修复过的 16 个控件逐一具备 :aria-label（回归锚点）
     ['views/admin/SecurityPage.vue', 'v-model="mxForm.binance_secret_key"', "admin.security.binanceSecretAria"],
     ['views/admin/SecurityPage.vue', 'v-model="mxForm.gate_api_key"', "admin.security.gateKeyAria"],
     ['views/admin/SecurityPage.vue', 'v-model="mxForm.gate_secret_key"', "admin.security.gateSecretAria"],
-    ['views/admin/SecurityPage.vue', 'v-model="gateExecPhrase"', "admin.security.gateExecPhraseAria"],
+    ['views/admin/SecurityPage.vue', 'v-model="keys.live_key"', "admin.security.liveKeyAria"],
     ['views/admin/SecurityPage.vue', 'v-model="newInstId"', "admin.security.instAria"],
   ];
 

@@ -322,6 +322,7 @@ def admin_config(x_r20_admin_token: str | None = Header(default=None)) -> dict[s
             "llm_reasoning_effort": settings.llm_reasoning_effort,
             "notification_webhook": settings.notification_webhook,
             "manual_close_enabled": settings.manual_close_enabled,
+            "order_mode": settings.order_mode,
             "initial_capital": baseline.get("initial_capital", 4061.04),
             "initial_capital_reset_time": baseline.get("reset_time", ""),
         },
@@ -332,11 +333,11 @@ def admin_config(x_r20_admin_token: str | None = Header(default=None)) -> dict[s
 def update_admin_config(payload: AdminConfigUpdate, x_r20_admin_token: str | None = Header(default=None), x_r20_session: str | None = Header(default=None, alias="X-R20-Session")) -> dict[str, Any]:
     refresh_settings()
     data = payload.model_dump(exclude_none=True)
-    sensitive = any(key.startswith("okx_") or key == "manual_close_enabled" for key in data)
+    sensitive = any(key.startswith("okx_") or key in ("manual_close_enabled",) for key in data)
     if sensitive:
         require_superadmin(x_r20_session)
     else:
-        require_admin_header(x_r20_admin_token)
+        require_admin_header(x_r20_admin_token, x_r20_session)
     if "llm_base_url" in data and data["llm_base_url"] and not data["llm_base_url"].startswith(("https://", "http://")):
         raise HTTPException(status_code=400, detail="LLM Base URL 必须以 http:// 或 https:// 开头")
     if "notification_webhook" in data and data["notification_webhook"] and not data["notification_webhook"].startswith(("https://", "http://")):
@@ -371,8 +372,12 @@ def update_admin_config(payload: AdminConfigUpdate, x_r20_admin_token: str | Non
         "LLM_REASONING_EFFORT": data.get("llm_reasoning_effort"),
         "R20_NOTIFICATION_WEBHOOK": data.get("notification_webhook"),
         "R20_MANUAL_CLOSE_ENABLED": "1" if data.get("manual_close_enabled") else "0" if "manual_close_enabled" in data else None,
+        "R20_ORDER_MODE": data.get("order_mode"),
     }
     update_env(env_values)
+    if data.get("order_mode"):
+        os.environ["R20_ORDER_MODE"] = data["order_mode"]
+        settings.order_mode = data["order_mode"]
     refresh_settings()
     if any(k.startswith("llm_") for k in data):
         try:

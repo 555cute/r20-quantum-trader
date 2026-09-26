@@ -153,6 +153,15 @@ class IsInCooldownTest(unittest.TestCase):
         self.assertFalse(cd.is_in_stop_cooldown("ETH-USDT-SWAP", "long", self.file, self.secs))
         self.assertTrue(cd.is_in_stop_cooldown("BTC-USDT-SWAP", "long", self.file, self.secs))
 
+    def test_environment_isolation_prevents_cross_contamination(self):
+        """环境隔离：demo 盘的冷却记录不污染 live 盘，反之亦然；历史无标签记录保守生效。"""
+        self._write({"BTC-USDT-SWAP_long": {"ts": self.now, "environment": "demo"}})
+        self.assertFalse(cd.is_in_stop_cooldown("BTC-USDT-SWAP", "long", self.file, self.secs, environment="live"))
+        self.assertTrue(cd.is_in_stop_cooldown("BTC-USDT-SWAP", "long", self.file, self.secs, environment="demo"))
+
+        self._write({"ETH-USDT-SWAP_long": {"ts": self.now}})
+        self.assertTrue(cd.is_in_stop_cooldown("ETH-USDT-SWAP", "long", self.file, self.secs, environment="live"))
+
 
 class LoadStopCooldownsTest(unittest.TestCase):
     def setUp(self):

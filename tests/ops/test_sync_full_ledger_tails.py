@@ -974,6 +974,30 @@ class BuildLifecycleReadTests(_Sandbox, unittest.TestCase):
         self.assertEqual(json.loads(self.ledger.read_text(encoding="utf-8")),
                          [{"id": "keep"}], "fail-closed：既有台账保持不动")
 
+    def test_unconfigured_okx_allows_alt_only_sync_when_flag_enabled(self):
+        """当开启 R20_ALLOW_ALT_ONLY_SYNC 且外所凭证就绪时，允许未配置 OKX 也能同步外所台账。"""
+        self.ledger.write_text('[{"id": "keep"}]', encoding="utf-8")
+        with patch.dict(os.environ, {"R20_ALLOW_ALT_ONLY_SYNC": "1"}), \
+             patch("r20_backend.exchanges.venue_credentials", lambda v, e: ("key", "sec")):
+            trades = self._build(extra=[
+                patch.object(sfl.okx_runtime, "current_environment", lambda: self._env(configured=False)),
+                patch.object(sfl, "fetch_binance_closed_trades", lambda *a, **k: [{"id": "bn1", "status": "closed"}])
+            ])
+            self.assertEqual(sfl._FETCH_STATUS.get("okx", {}).get("status"), "skipped")
+            self.assertTrue(any(t.get("id") == "bn1" for t in trades))
+
+    def test_unconfigured_okx_allows_alt_only_sync_when_preferred_alt(self):
+        """当选所路由 preferred_venue 明确指定外所且凭证就绪时，自动放行外所台账同步。"""
+        self.ledger.write_text('[{"id": "keep"}]', encoding="utf-8")
+        with patch("r20_backend.exchanges.routing_policy.load_preferred_venue", lambda: "binance"), \
+             patch("r20_backend.exchanges.venue_credentials", lambda v, e: ("key", "sec")):
+            trades = self._build(extra=[
+                patch.object(sfl.okx_runtime, "current_environment", lambda: self._env(configured=False)),
+                patch.object(sfl, "fetch_binance_closed_trades", lambda *a, **k: [{"id": "bn2", "status": "closed"}])
+            ])
+            self.assertEqual(sfl._FETCH_STATUS.get("okx", {}).get("status"), "skipped")
+            self.assertTrue(any(t.get("id") == "bn2" for t in trades))
+
     def test_a_corrupt_initial_state_falls_back_to_the_epoch(self):
         # ★ 第 698–703 行
         self.initial.write_text("{ broken", encoding="utf-8")

@@ -28,10 +28,56 @@ const cycleMinutes = computed<number | null>(() => {
   const v = Number((health.value as any)?.cycle_minutes);
   return Number.isFinite(v) && v > 0 ? v : null;
 });
+
+const fundEnv = computed(() => {
+  const d = store.data as any;
+  const env = String(d?.environment || d?.account?.environment || '').toLowerCase();
+  if (!env) return null;
+  const isMixed = Boolean(d?.is_mixed_environment);
+  if (isMixed) {
+    const vEnvs = (d?.venue_environments as Record<string, string>) || {};
+    const details = Object.entries(vEnvs)
+      .map(([k, v]) => `${k.toUpperCase()}: ${String(v).toUpperCase()}`)
+      .join(' · ');
+    return {
+      dot: 'error',
+      cls: 'text-[var(--down)] border-[var(--down-line)] bg-[var(--down-bg)]',
+      label: t('dash.shell.mixedEnv'),
+      title: `${t('dash.shell.mixedBannerTip')}${t('common.punct.colon')}${details}`,
+    };
+  }
+  if (env === 'live') {
+    return {
+      dot: 'active',
+      cls: 'text-[var(--up)] border-[var(--up-line)] bg-[var(--up-bg)]',
+      label: t('dash.shell.live'),
+      title: t('dash.shell.liveBannerTip'),
+    };
+  }
+  return {
+    dot: 'warn',
+    cls: 'text-[var(--warn)] border-[var(--warn-line)] bg-[var(--warn-bg)]',
+    label: t('dash.shell.demo'),
+    title: t('dash.shell.demoBannerTip'),
+  };
+});
 </script>
 
 <template>
   <div class="flex items-center gap-1.5">
+    <!-- 资金环境徽章：明晰区分实盘/模拟盘/混合环境，杜绝用户混淆 -->
+    <span
+      v-if="fundEnv"
+      class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-3xs font-mono border"
+      :class="fundEnv.cls"
+      :title="fundEnv.title"
+      :aria-label="fundEnv.title"
+      tabindex="0"
+    >
+      <span class="dsh-status-dot" :class="fundEnv.dot" aria-hidden="true" />
+      <span class="font-semibold">{{ fundEnv.label }}</span>
+    </span>
+
     <!-- 批 73：这是全站**唯一**呈现「三级熔断已生效」的地方，而熔断原因此前只挂在
          :title 上 —— 一个不可聚焦的 <span>，键盘与触摸根本够不到。
          熔断是硬性安全停机，操作员必须能当场知道为什么被停。

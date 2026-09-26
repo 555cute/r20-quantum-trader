@@ -50,7 +50,7 @@ export const enMatrix = {
     triggerIndex: 'index-price trigger',
     triggerUnknown: 'trigger type not reported',
     triggerMarkPrice: 'mark-price trigger',
-    triggerContractPrice: 'contract-price trigger (≈ last)',
+    triggerContractPrice: 'last-price trigger',
     triggerRawCodeHint: 'Raw code reported by the venue; this repo has not verified its official mapping, so it is shown verbatim',
     triggerMarkHint: 'This protective leg triggers on mark price (wick-resistant)',
     triggerLastHint: 'This leg triggers on last traded price: a single wick can knock it out early',

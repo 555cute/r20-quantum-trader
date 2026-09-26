@@ -242,6 +242,12 @@ def collect_cross_venue_positions(positions, pending_orders_list,
     try:
         from r20_backend.exchanges import get_adapter, is_registered
         env_axis = _global_env_axis()
+        try:
+            from r20_backend.config import ROOT
+            _tr_file = ROOT / "data" / "position_trackers.json"
+            _trackers = json.loads(_tr_file.read_text(encoding="utf-8")) if _tr_file.exists() else {}
+        except Exception:
+            _trackers = {}
         for v_name in ("binance", "gate"):
             try:
                 ad = get_adapter(v_name, environment=env_axis)
@@ -316,6 +322,25 @@ def collect_cross_venue_positions(positions, pending_orders_list,
                     #: 保护判据字段（与 OKX 路径同名，面板/AI 可统一读）
                     for _k, _v in _prot.items():
                         vp[_k] = _v
+                    _pos_key = f"{v_inst_id}_{v_pos_side}"
+                    _tr = _trackers.get(_pos_key) or {}
+                    _so_phase = int(_tr.get("scale_out_phase", 0) or 0)
+                    _so_tp = None
+                    if str(_tr.get("scale_out_tp", "")).strip() not in ("", "None"):
+                        try:
+                            _so_tp = float(_tr.get("scale_out_tp"))
+                        except (TypeError, ValueError):
+                            _so_tp = None
+                    if _so_tp is None and v_avg > 0 and v_tp and v_tp > 0:
+                        _so_tp = round((v_avg + v_tp) / 2.0, 4)
+
+                    _stage_desc = ("🎯 半仓保本奔跑中" if _so_phase >= 1
+                                   else f"持有中 (首批止盈目标 TP1: {_so_tp:g} · 达标平50%保本)" if _so_tp
+                                   else "云端双腿防护中" if _prot["protectionStatus"] == "fully_protected"
+                                   else "⚠️ 无活止损腿" if _prot["protectionStatus"] == "unprotected"
+                                   else "保护待核验" if _prot["protectionStatus"] == "unknown"
+                                   else "持有监控中")
+
                     positions.append({
                         "venue": v_name,
                         "exchange": v_name,
@@ -338,13 +363,12 @@ def collect_cross_venue_positions(positions, pending_orders_list,
                         "liqPx": vp.get("liq_price", "--"),
                         "bePx": "--",
                         "trailingSl": v_sl,
-                        "stageDesc": ("云端双腿防护中" if _prot["protectionStatus"] == "fully_protected"
-                                      else "⚠️ 无活止损腿" if _prot["protectionStatus"] == "unprotected"
-                                      else "保护待核验" if _prot["protectionStatus"] == "unknown"
-                                      else "持有监控中"),
+                        "stageDesc": _stage_desc,
                         "strategyTag": f"🏛️ {v_name.capitalize()}",
                         "exchangeSl": v_sl,
                         "exchangeTp": v_tp,
+                        **({"scaleOutPhase": _so_phase} if _so_phase > 0 else {}),
+                        **({"scaleOutTp": _so_tp} if _so_tp is not None else {}),
                         # ⚠️ 第一百一十八刀改判：此前是
                         # `"fully_protected" if (v_sl and v_tp)` —— 只看"有没有腿"，
                         # **不看量、不看是否 live、不看是否过期** ⇒ 一张**旧量/过期**腿

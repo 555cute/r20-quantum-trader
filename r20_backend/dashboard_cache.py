@@ -465,6 +465,33 @@ def update_cache_cycle():
             CACHE_DATA["market_regime"] = detect_macro_market_regime(factors_list)
         except Exception:
             pass
+    try:
+        from scripts.okx_runtime import current_environment
+        from r20_backend.exchanges import env_profiles
+        _okx_mode = str(current_environment().mode or "demo").lower()
+        _bn_mode = env_profiles.legacy_environment_for("binance")
+        _gate_mode = env_profiles.legacy_environment_for("gate")
+        _venue_envs = {
+            "okx": _okx_mode,
+            "binance": _bn_mode,
+            "gate": _gate_mode,
+        }
+        _is_live_map = {
+            "okx": _okx_mode == "live",
+            "binance": _bn_mode == "live",
+            "gate": _gate_mode == "live",
+        }
+        _distinct_modes = set(_is_live_map.values())
+        _is_mixed = len(_distinct_modes) > 1
+        CACHE_DATA["environment"] = _okx_mode
+        CACHE_DATA["venue_environments"] = _venue_envs
+        CACHE_DATA["is_mixed_environment"] = _is_mixed
+        if isinstance(CACHE_DATA.get("account"), dict):
+            CACHE_DATA["account"]["environment"] = _okx_mode
+    except Exception:
+        CACHE_DATA["environment"] = "demo"
+        CACHE_DATA["venue_environments"] = {"okx": "demo", "binance": "demo", "gate": "sandbox"}
+        CACHE_DATA["is_mixed_environment"] = False
     persist_dashboard_cache(CACHE_DATA)
     LAST_CACHE_TIME = time.time()
 

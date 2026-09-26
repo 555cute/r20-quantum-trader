@@ -119,7 +119,10 @@ function slTriggerType(p: any): string {
   // Binance 的自描述字面量（MARK_PRICE / CONTRACT_PRICE）
   if (v === 'mark_price') return t('dash.matrix.positions.triggerMarkPrice');
   if (v === 'contract_price') return t('dash.matrix.positions.triggerContractPrice');
-  // Gate 的数字码：**原样显示**（本仓未核实官方映射 ⇒ 不翻译，避免编一个中文名）
+  // Gate 的数字码翻译（0=最新成交价，1=标记价，2=指数价）
+  if (v === 'price_type:0' || v === '0') return t('dash.matrix.positions.triggerLast');
+  if (v === 'price_type:1' || v === '1') return t('dash.matrix.positions.triggerMark');
+  if (v === 'price_type:2' || v === '2') return t('dash.matrix.positions.triggerIndex');
   if (v.startsWith('price_type:')) return v;
   if (v === 'unknown') return t('dash.matrix.positions.triggerUnknown');
   return '';
@@ -132,6 +135,9 @@ function slTriggerTypeHint(p: any): string {
   if (v === 'index') return t('dash.matrix.positions.triggerIndexHint');
   if (v === 'mark_price') return t('dash.matrix.positions.triggerMarkHint');
   if (v === 'contract_price') return t('dash.matrix.positions.triggerLastHint');
+  if (v === 'price_type:0' || v === '0') return t('dash.matrix.positions.triggerLastHint');
+  if (v === 'price_type:1' || v === '1') return t('dash.matrix.positions.triggerMarkHint');
+  if (v === 'price_type:2' || v === '2') return t('dash.matrix.positions.triggerIndexHint');
   if (v.startsWith('price_type:')) return t('dash.matrix.positions.triggerRawCodeHint');
   if (v === 'unknown') return t('dash.matrix.positions.triggerUnknownHint');
   return '';
@@ -236,7 +242,101 @@ function orderTooltipText(o: any): string {
     <!-- 持仓列表 -->
     <div v-if="tab === 'positions'" class="scroll-y flex-1 min-h-0 overflow-x-auto">
       <BaseEmpty v-if="!filteredPositions.length" :text="t('dash.matrix.positions.empty')" />
-      <table v-else class="table pop-table w-full" :aria-label="t('dash.matrix.positions.title')">
+      <div v-else>
+        <!-- 移动端流式卡片（sm:hidden 专用，永不横向切边，信息层级分明） -->
+        <div class="sm:hidden space-y-2 p-2">
+          <div
+            v-for="p in filteredPositions"
+            :key="'m-' + p.instId + p.side"
+            class="clickable rounded-lg border border-[var(--surface-3)] bg-[var(--surface-1)] p-3 transition-colors hover:bg-[var(--surface-2)] flex flex-col gap-2"
+            :title="t('dash.matrix.chart.pickHint')"
+            tabindex="0"
+            @click="emit('pick-symbol', p.instId)"
+            @keydown.enter="emit('pick-symbol', p.instId)"
+            @keydown.space.prevent="emit('pick-symbol', p.instId)"
+          >
+            <!-- 头部：标的名称、Logo、方向、杠杆、交易所与模式、保护盾牌 -->
+            <div class="flex items-center justify-between gap-1.5">
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <CryptoLogo :symbol="symOf(p)" :size="18" />
+                <span class="num font-mono font-bold text-sm text-[var(--ink-strong)]">{{ symOf(p) }}</span>
+                <DirTag :dir="p.side" />
+                <span class="font-mono text-xs font-bold text-[var(--ink-strong)]">{{ p.lever }}x</span>
+                <span
+                  class="rounded-full px-1.5 py-0.5 text-3xs font-mono font-semibold uppercase border"
+                  :class="venueToneCls(getVenueOf(p))"
+                >
+                  {{ getVenueOf(p).toUpperCase() }}
+                </span>
+                <span
+                  class="rounded-full px-1.5 py-0.5 text-3xs font-mono font-medium border"
+                  :class="getModeOf(p) === 'LIVE' ? 'text-[var(--up)] border-[var(--up-line)] bg-[var(--up-bg)]' : 'text-[var(--warn)] border-[var(--warn-line)] bg-[var(--warn-bg)]'"
+                >
+                  {{ getModeOf(p) }}
+                </span>
+              </div>
+              <div class="flex items-center gap-1 shrink-0">
+                <span
+                  v-if="(p.scaleOutPhase ?? 0) >= 1"
+                  class="rounded-full px-1.5 py-0.5 text-3xs font-mono font-semibold border text-[var(--up)] border-[var(--up-line)] bg-[var(--up-bg)]"
+                  :title="t('dash.matrix.positions.scaleOutTitle')"
+                >
+                  🎯 {{ t('dash.matrix.positions.scaleOutPill') }}
+                </span>
+                <span
+                  v-if="ocoOk(p)"
+                  class="inline-flex items-center text-[var(--up)]"
+                  :title="t('dash.matrix.positions.ocoOk')"
+                >
+                  <ShieldCheck class="h-4 w-4" />
+                </span>
+                <span
+                  v-else
+                  class="inline-flex items-center text-[var(--warn)]"
+                  :title="t('dash.matrix.positions.ocoMissHint')"
+                >
+                  <ShieldAlert class="h-4 w-4" />
+                </span>
+              </div>
+            </div>
+
+            <!-- 数据栏：盈亏、ROI、保证金、均价与现价 -->
+            <div class="grid grid-cols-2 gap-2 pt-1 border-t border-[var(--surface-2)]">
+              <div>
+                <span class="text-4xs text-[var(--ink-3)] block">{{ t('dash.matrix.positions.col.pnl') }}</span>
+                <span class="text-sm font-bold font-mono" :class="posPnl(p) >= 0 ? 'text-[var(--up)]' : 'text-[var(--down)]'">
+                  {{ arrow(posPnl(p)) }} {{ fmtSigned(posPnl(p)) }}
+                  <span class="text-3xs font-medium ml-1">({{ fmtPct(posRoi(p)) }})</span>
+                </span>
+              </div>
+              <div class="text-right">
+                <span class="text-4xs text-[var(--ink-3)] block">{{ t('dash.matrix.positions.col.margin') }} / {{ t('dash.matrix.positions.col.entry') }}</span>
+                <span class="text-xs font-mono text-[var(--ink-strong)] font-semibold">
+                  {{ p.margin_usdt ? `${fmtNum(p.margin_usdt, 2)}U` : '--' }}
+                  <span class="text-3xs font-normal text-[var(--ink-3)] ml-1">@ {{ fmtPrice(p.avgPx) }}</span>
+                </span>
+              </div>
+            </div>
+
+            <!-- 底栏：止损与止盈阶梯（TP1/TP2 左右分布） -->
+            <div class="flex items-center justify-between text-3xs font-mono pt-1 border-t border-[var(--surface-2)] text-[var(--ink-2)]">
+              <div class="flex items-center gap-1">
+                <span class="text-[var(--down)] font-medium">SL {{ fmtPrice(p.exchangeSl ?? p.displayStop) }}</span>
+                <span v-if="slTriggerType(p)" class="text-4xs text-[var(--ink-3)]">({{ slTriggerType(p) }})</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span v-if="getTp1(p)" class="text-[var(--up)] font-medium">TP1 {{ fmtPrice(getTp1(p)) }}</span>
+                <span class="text-[var(--up)] font-medium">
+                  {{ getTp1(p) ? 'TP2' : 'TP' }} {{ fmtPrice(p.exchangeTp ?? p.displayTakeProfit) }}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 桌面端表格（仅 >= sm 宽屏可见，通过外层独立容器杜绝 .table 样式优先级冲突） -->
+        <div class="hidden sm:block">
+          <table class="table pop-table w-full" :aria-label="t('dash.matrix.positions.title')">
         <thead>
           <tr>
             <th scope="col" class="min-w-[140px]">{{ t('dash.matrix.positions.col.symbol') }}</th>
@@ -361,12 +461,75 @@ function orderTooltipText(o: any): string {
           </tr>
         </tbody>
       </table>
+        </div>
+      </div>
     </div>
 
     <!-- 挂单列表 -->
     <div v-else class="scroll-y flex-1 min-h-0 overflow-x-auto">
       <BaseEmpty v-if="!filteredOrders.length" :text="t('dash.matrix.orders.empty')" />
-      <table v-else class="table pop-table w-full" :aria-label="t('dash.matrix.orders.title')">
+      <div v-else>
+        <!-- 移动端流式挂单卡片（sm:hidden 专用） -->
+        <div class="sm:hidden space-y-2 p-2">
+          <div
+            v-for="o in filteredOrders"
+            :key="'mo-' + o.ordId"
+            class="clickable rounded-lg border border-[var(--surface-3)] bg-[var(--surface-1)] p-3 transition-colors hover:bg-[var(--surface-2)] flex flex-col gap-2"
+            :title="t('dash.matrix.chart.pickHint')"
+            tabindex="0"
+            @click="emit('pick-symbol', o.instId)"
+            @keydown.enter="emit('pick-symbol', o.instId)"
+            @keydown.space.prevent="emit('pick-symbol', o.instId)"
+          >
+            <div class="flex items-center justify-between gap-1.5">
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <CryptoLogo :symbol="symOf(o)" :size="18" />
+                <span class="num font-mono font-bold text-sm text-[var(--ink-strong)]">{{ symOf(o) }}</span>
+                <DirTag :dir="orderDir(o)" />
+                <span class="font-mono text-xs font-bold text-[var(--ink-strong)]">{{ o.lever || '3x' }}</span>
+                <span
+                  class="rounded-full px-1.5 py-0.5 text-3xs font-mono font-semibold uppercase border"
+                  :class="venueToneCls(getVenueOf(o))"
+                >
+                  {{ getVenueOf(o).toUpperCase() }}
+                </span>
+                <span
+                  class="rounded-full px-1.5 py-0.5 text-3xs font-mono font-medium border"
+                  :class="getModeOf(o) === 'LIVE' ? 'text-[var(--up)] border-[var(--up-line)] bg-[var(--up-bg)]' : 'text-[var(--warn)] border-[var(--warn-line)] bg-[var(--warn-bg)]'"
+                >
+                  {{ getModeOf(o) }}
+                </span>
+              </div>
+              <span class="inline-block whitespace-nowrap rounded px-1.5 py-0.5 text-3xs border border-[var(--line-1)] bg-[var(--surface-2)] text-[var(--ink-2)]">
+                {{ o.state === 'live' ? t('status.waiting') : o.state }}
+              </span>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2 pt-1 border-t border-[var(--surface-2)]">
+              <div>
+                <span class="text-4xs text-[var(--ink-3)] block">{{ t('dash.matrix.orders.col.price') }}</span>
+                <span class="text-sm font-bold font-mono text-[var(--ink-strong)]">{{ fmtPrice(o.px) }}</span>
+              </div>
+              <div class="text-right">
+                <span class="text-4xs text-[var(--ink-3)] block">{{ t('dash.matrix.orders.col.qty') }}</span>
+                <span class="text-xs font-mono text-[var(--ink-strong)] font-semibold">{{ orderMarginText(o) }}</span>
+              </div>
+            </div>
+
+            <div class="flex items-center justify-between text-3xs font-mono pt-1 border-t border-[var(--surface-2)] text-[var(--ink-2)]">
+              <div class="flex items-center gap-2">
+                <span class="text-[var(--down)] font-medium">SL {{ o.slTriggerPx ? fmtPrice(o.slTriggerPx) : (o.sl_px && String(o.sl_px) !== '--' ? fmtPrice(o.sl_px) : '--') }}</span>
+                <span class="text-[var(--up)] font-medium">TP {{ o.tpTriggerPx ? fmtPrice(o.tpTriggerPx) : (o.tp_px && String(o.tp_px) !== '--' ? fmtPrice(o.tp_px) : '--') }}</span>
+              </div>
+              <span class="pop-col-time text-3xs text-[var(--ink-3)]">
+                <TimeAgo :time="Number(o.cTime) || o.cTime" />
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div class="hidden sm:block">
+          <table class="table pop-table w-full" :aria-label="t('dash.matrix.orders.title')">
         <thead>
           <tr>
             <th scope="col" class="min-w-[140px]">{{ t('dash.matrix.orders.col.symbol') }}</th>
@@ -431,6 +594,8 @@ function orderTooltipText(o: any): string {
           </tr>
         </tbody>
       </table>
+        </div>
+      </div>
       <p v-if="filteredOrders.length" class="text-3xs text-[var(--ink-3)] border-t px-3.5 py-2" style="border-color: var(--line-1)">
         {{ t('dash.matrix.orders.aiManaged') }}
       </p>

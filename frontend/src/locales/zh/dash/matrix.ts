@@ -53,7 +53,7 @@ export const zhMatrix = {
     triggerIndex: '指数价触发',
     triggerUnknown: '触发价类型未上报',
     triggerMarkPrice: '标记价触发',
-    triggerContractPrice: '合约价触发（≈最新成交价）',
+    triggerContractPrice: '最新价触发',
     triggerRawCodeHint: '交易所上报的原始码；本仓未核实其官方映射，故不解释含义（点开交易所核对）',
     triggerMarkHint: '该保护腿按标记价触发（抗插针）',
     triggerLastHint: '该保护腿按最新成交价触发：一根插针即可提前打掉保护',

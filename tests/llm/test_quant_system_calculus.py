@@ -371,7 +371,7 @@ class AiFactorTraderPositionProtectionTest(unittest.TestCase):
         self.assertEqual(body, dict(instId='SOL-USDT-SWAP', side='sell', sz='4', posSide='long',
             tdMode='cross', ordType='oco', tpTriggerPx='106', slTriggerPx='101', tpOrdPx='-1',
             slOrdPx='-1', tpTriggerPxType='mark', slTriggerPxType='mark',
-            reduceOnly=True, cxlOnClosePos=True))
+            reduceOnly=True, cxlOnClosePos=True, tag='6e2191f027c6SUDE'))
         self.assertEqual(len(self.http.calls('/api/v5/trade/orders-algo-pending')), 2)
 
     def test_stale_order_query_failure_aborts_cleanup(self):

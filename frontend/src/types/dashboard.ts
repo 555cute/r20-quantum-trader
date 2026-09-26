@@ -247,6 +247,9 @@ export interface DashboardResponse {
   ai_brain_history?: any[]
   data_health?: any
   state_snapshot?: any
+  environment?: 'demo' | 'live'
+  venue_environments?: Record<string, string>
+  is_mixed_environment?: boolean
   /** US-004 · 组合风险占用（预算/已预留/可用余量；未接入时为缺省） */
   portfolio_risk?: PortfolioRiskRow | null
   [key: string]: any

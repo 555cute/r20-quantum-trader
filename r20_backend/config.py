@@ -51,6 +51,7 @@ class Settings:
     setup_token: str = ""
     admin_token: str = ""
     manual_close_enabled: bool = False
+    order_mode: str = "limit"
     okx_broker_tag: str = "6e2191f027c6SUDE"
     okx_invite_url: str = "https://www.mitxcqvwnhj.com/join/48039151"
     gate_invite_url: str = "https://www.gatesites.net/share/MCHDBKYF"
@@ -85,6 +86,7 @@ def refresh_settings() -> Settings:
     settings.setup_token = os.getenv("R20_SETUP_TOKEN", "")
     settings.admin_token = os.getenv("R20_ADMIN_TOKEN", "")
     settings.manual_close_enabled = os.getenv("R20_MANUAL_CLOSE_ENABLED", "0") == "1"
+    settings.order_mode = os.getenv("R20_ORDER_MODE", "limit").strip().lower() or "limit"
     settings.okx_broker_tag = os.getenv("OKX_BROKER_TAG", "6e2191f027c6SUDE")
     settings.okx_invite_url = os.getenv("OKX_INVITE_URL", "https://www.mitxcqvwnhj.com/join/48039151")
     settings.gate_invite_url = os.getenv("GATE_INVITE_URL", "https://www.gatesites.net/share/MCHDBKYF")

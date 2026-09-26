@@ -272,6 +272,21 @@ class OkxDirectTest(unittest.TestCase):
         self.assertIn("交易所 500", why)
         self.assertEqual(rig.released, [("res-1", "下单异常")])
 
+    def test_order_mode_market_submits_market_order_with_none_px(self):
+        okx = _Okx()
+        rig = Rig(okx=okx)
+        with patch.dict(os.environ, {"R20_ORDER_MODE": "market"}):
+            with patch("scripts.order_risk.validate_quote_geometry_and_rr",
+                       return_value=(True, "", 1.0)):
+                ok, _ = rig.run(venue_ctx={"notional_usdt": 1, "margin_usdt": 1})
+        self.assertTrue(ok)
+        self.assertEqual(len(okx.orders), 1)
+        _, _, _, kw = okx.orders[0]
+        self.assertEqual(kw["ord_type"], "market", "市价单模式下必须发送 ord_type='market'")
+        self.assertIsNone(kw["px"], "市价单模式下 px 必须为 None")
+        self.assertIsNotNone(kw["attach_tp"], "市价单模式下止盈腿必须继续绑定")
+        self.assertIsNotNone(kw["attach_sl"], "市价单模式下止损腿必须继续绑定")
+
 
 if __name__ == "__main__":
     unittest.main()

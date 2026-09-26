@@ -513,9 +513,9 @@ def load_adaptive_config():
     return {}
 
 def _run_captured(script, label=None, timeout=15):
-    """审计(2026-09-13)：同解释器子进程 + 非零必吼（旧裸 python3 shell 串=静默死亡）。"""
     from r20_backend.spawn import run_script
-    return run_script(script, timeout=timeout, label=label)
+    t = 60 if timeout == 15 and "sync_full_ledger" in str(script) else timeout
+    return run_script(script, timeout=t, label=label)
 
 
 # 本进程内被回收枚举实证「凭证已死」的外所集合（审计 2026-09-13：坏键所自动摘除

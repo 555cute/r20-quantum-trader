@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 import json
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional
@@ -33,6 +34,48 @@ def _sync_status_path():
     return DATA_DIR / "ledger_sync_status.json"
 
 
+_LAST_AUTO_HEAL_ATTEMPT: float = 0.0
+_AUTO_HEAL_LOCK = threading.Lock()
+
+
+def _trigger_ledger_sync_heal() -> None:
+    """当旁车过旧或损坏时，在后台异步触发一次台账同步，实现不可判定状态的自动自愈。"""
+    global _LAST_AUTO_HEAL_ATTEMPT
+    # 批E 测试封闭闸：测试或显式禁用环境下绝对不触发同步
+    if str(os.environ.get("R20_LEDGER_SYNC_DISABLED", "")).strip().lower() in ("1", "true", "yes"):
+        return
+    now = time.time()
+    with _AUTO_HEAL_LOCK:
+        if now - _LAST_AUTO_HEAL_ATTEMPT < 120.0:
+            return
+        _LAST_AUTO_HEAL_ATTEMPT = now
+
+    def _heal_worker():
+        try:
+            sync_script = ROOT / "scripts" / "sync_full_ledger.py"
+            if not sync_script.exists():
+                return
+            from r20_backend.spawn import run_script
+            run_script(sync_script, timeout=60, label="sync_full_ledger_auto_heal")
+        except Exception:
+            pass
+
+    t = threading.Thread(target=_heal_worker, name="ledger_sync_auto_heal", daemon=True)
+    t.start()
+
+
+def _effective_sidecar_max_age(max_age_seconds: float = 2700.0) -> float:
+    raw = str(os.environ.get("R20_LEDGER_SYNC_MAX_AGE_SECONDS", "2700")).strip()
+    if raw:
+        try:
+            val = float(raw)
+            if val > 0:
+                return val
+        except (TypeError, ValueError):
+            pass
+    return max_age_seconds
+
+
 def _ledger_sync_sidecar_state(max_age_seconds: float = 2700.0) -> tuple[list[str], str]:
     """读台账同步旁车，返回 `(failed_venues, unknown_reason)`（第一百四十四刀）。
 
@@ -55,11 +98,13 @@ def _ledger_sync_sidecar_state(max_age_seconds: float = 2700.0) -> tuple[list[st
         with open(path, "r", encoding="utf-8") as f:
             payload = json.load(f)
         generated_at = str(payload.get("generated_at") or "")
+        effective_max_age = _effective_sidecar_max_age(max_age_seconds)
         if generated_at:
             ts = datetime.datetime.fromisoformat(generated_at)
             age = (datetime.datetime.now(ts.tzinfo) - ts).total_seconds()
-            if age > max_age_seconds:
-                return [], f"旁车过旧（{age:.0f}s > {max_age_seconds:.0f}s）"
+            if age > effective_max_age:
+                _trigger_ledger_sync_heal()
+                return [], f"旁车过旧（{age:.0f}s > {effective_max_age:.0f}s）"
         failed = []
         for v, d in (payload.get("venues") or {}).items():
             if not (isinstance(d, dict) and d.get("status") == "failed"):
@@ -84,6 +129,7 @@ def _ledger_sync_sidecar_state(max_age_seconds: float = 2700.0) -> tuple[list[st
             failed.append(str(v))
         return failed, ""
     except Exception as exc:
+        _trigger_ledger_sync_heal()
         return [], f"旁车损坏/不可读（{exc!r}）"
 
 

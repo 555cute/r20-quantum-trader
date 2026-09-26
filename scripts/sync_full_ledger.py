@@ -742,8 +742,31 @@ def build_lifecycle_ledger():
     tz_bj = datetime.timezone(datetime.timedelta(hours=8))
 
     env = okx_runtime.current_environment()
+    _allow_alt_only = False
     if not env.configured:
-        raise okx_rest.OKXNotConfigured("OKX API Key 未配置 — 台账同步 fail-closed（既有 trading_ledger.json 保持不动）")
+        try:
+            raw_flag = str(os.environ.get("R20_ALLOW_ALT_ONLY_SYNC", "")).strip().lower()
+            if raw_flag in ("1", "true", "yes"):
+                from r20_backend.exchanges import venue_credentials
+                _allow_alt_only = any(
+                    bool(venue_credentials(v, getattr(env, "mode", "live"))[0]) for v in ("binance", "gate")
+                )
+            else:
+                from r20_backend.exchanges.routing_policy import load_preferred_venue
+                from r20_backend.exchanges import venue_credentials
+                pref = load_preferred_venue()
+                if pref in ("binance", "gate"):
+                    ak, sk = venue_credentials(pref, getattr(env, "mode", "live"))
+                    if ak and sk:
+                        _allow_alt_only = True
+        except Exception:
+            _allow_alt_only = False
+
+    if not env.configured:
+        if not _allow_alt_only:
+            raise okx_rest.OKXNotConfigured("OKX API Key 未配置 — 台账同步 fail-closed（既有 trading_ledger.json 保持不动）")
+        _mark("okx", "skipped", reason="unconfigured")
+
     pos_history = []
     pos_data = []
     close_orders = []
@@ -751,28 +774,29 @@ def build_lifecycle_ledger():
     # 「取数失败」，二者对清理幽灵持仓的含义完全相反（成功才允许清理）。
     _okx_positions_ok = False
 
-    try:
-        # 批C(2026-09-13)：分页取尽。原单页 limit=100 即止 —— 平仓越 100 笔后更早记录
-        # 永久取不到，且每轮都挂「触顶 limit=100」常驻告警。truncated 仍由分页器诚实给出
-        # （取不尽才标），不再用 len>=100 反推。
-        pos_history, _ph_trunc = _fetch_history_paged(okx_rest.positions_history, id_field="posId")
-        pos_data = okx_rest.positions() or []
-        _okx_positions_ok = True
-        orders_history, _oh_trunc = _fetch_history_paged(okx_rest.orders_history, id_field="ordId")
-        close_orders = [o for o in orders_history if str(o.get('reduceOnly', '')).lower() == 'true' and o.get('state') == 'filled']
-        # 截断判定按「在册窗口」收口：取到的最早记录若已早于 reset_time，未取尽的部分
-        # 不可能含在册记录 → 不标截断（否则分页上限会让 data_health 永久假 PARTIAL）。
-        _ph_old = min((int(r.get("uTime") or 0) for r in pos_history), default=0)
-        _oh_old = min((int(r.get("uTime") or r.get("cTime") or 0) for r in orders_history), default=0)
-        _okx_trunc = bool(
-            _history_truncated_in_scope(_ph_trunc, _ph_old, reset_time, tz_bj)
-            or _history_truncated_in_scope(_oh_trunc, _oh_old, reset_time, tz_bj)
-        )
-        _mark("okx", "partial" if _okx_trunc else "ok",
-              **({"truncated_at": 100} if _okx_trunc else {}))
-    except Exception as _okx_err:
-        _mark("okx", "failed", reason=str(_okx_err)[:200])
-        print(f"[sync_full_ledger] OKX 台账同步跳过: {_okx_err}")
+    if env.configured:
+        try:
+            # 批C(2026-09-13)：分页取尽。原单页 limit=100 即止 —— 平仓越 100 笔后更早记录
+            # 永久取不到，且每轮都挂「触顶 limit=100」常驻告警。truncated 仍由分页器诚实给出
+            # （取不尽才标），不再用 len>=100 反推。
+            pos_history, _ph_trunc = _fetch_history_paged(okx_rest.positions_history, id_field="posId")
+            pos_data = okx_rest.positions() or []
+            _okx_positions_ok = True
+            orders_history, _oh_trunc = _fetch_history_paged(okx_rest.orders_history, id_field="ordId")
+            close_orders = [o for o in orders_history if str(o.get('reduceOnly', '')).lower() == 'true' and o.get('state') == 'filled']
+            # 截断判定按「在册窗口」收口：取到的最早记录若已早于 reset_time，未取尽的部分
+            # 不可能含在册记录 → 不标截断（否则分页上限会让 data_health 永久假 PARTIAL）。
+            _ph_old = min((int(r.get("uTime") or 0) for r in pos_history), default=0)
+            _oh_old = min((int(r.get("uTime") or r.get("cTime") or 0) for r in orders_history), default=0)
+            _okx_trunc = bool(
+                _history_truncated_in_scope(_ph_trunc, _ph_old, reset_time, tz_bj)
+                or _history_truncated_in_scope(_oh_trunc, _oh_old, reset_time, tz_bj)
+            )
+            _mark("okx", "partial" if _okx_trunc else "ok",
+                  **({"truncated_at": 100} if _okx_trunc else {}))
+        except Exception as _okx_err:
+            _mark("okx", "failed", reason=str(_okx_err)[:200])
+            print(f"[sync_full_ledger] OKX 台账同步跳过: {_okx_err}")
 
     trades_lifecycle = []
 

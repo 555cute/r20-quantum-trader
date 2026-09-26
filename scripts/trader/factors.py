@@ -120,7 +120,10 @@ def fetch_single_instrument_data(item, all_positions, usdt_available, *,
                     "markPx": float(p.get("markPx", p.get("last", 0)) or 0),
                     "upl": float(p.get("upl", 0)),
                     "uplRatio": float(p.get("uplRatio", 0) or 0),
-                    "lever": p.get("lever", "3")
+                    "lever": p.get("lever", "3"),
+                    "venue": str(p.get("venue") or p.get("exchange") or "okx").lower(),
+                    "exchange": str(p.get("venue") or p.get("exchange") or "okx").lower(),
+                    "raw": p.get("raw", {}),
                 }
                 break
 

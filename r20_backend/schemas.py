@@ -86,6 +86,7 @@ class AdminConfigUpdate(BaseModel):
     llm_reasoning_effort: str | None = Field(default=None, pattern=r"^(low|medium|high|minimal|none|auto)$")
     notification_webhook: str | None = None
     manual_close_enabled: bool | None = None
+    order_mode: str | None = Field(default=None, pattern=r"^(limit|market)$")
 
 
 class LLMActivateRequest(BaseModel):

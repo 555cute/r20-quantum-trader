@@ -221,11 +221,15 @@ def submit_protected_limit_order(inst_id: str, side: str, pos_side: str, size: f
             print(f"[杠杆落地] warn {inst_id} 设档至 {int(_want_lever)}x 失败，"
                   f"按账户现档发单（不影响 TP/SL 覆盖）: {lev_exc}")
 
+    order_mode = str(os.getenv("R20_ORDER_MODE", "limit")).strip().lower()
+    ord_type = "market" if order_mode == "market" else "limit"
+    entry_px = None if ord_type == "market" else effective_px
+
     try:
         rows = okx_rest.place_order(
             inst_id, side, f"{size:g}",
-            pos_side=pos_side, td_mode="cross", ord_type="limit",
-            px=effective_px, attach_tp=effective_tp, attach_sl=effective_sl,
+            pos_side=pos_side, td_mode="cross", ord_type=ord_type,
+            px=entry_px, attach_tp=effective_tp, attach_sl=effective_sl,
         )
     except Exception as exc:
         release_signal_reservation(_reservation, "下单异常")

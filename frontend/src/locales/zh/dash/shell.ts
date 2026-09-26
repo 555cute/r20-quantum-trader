@@ -2,6 +2,10 @@
 export const zhShell = {
   live: '实盘运行中',
   demo: '模拟盘运行中',
+  mixedEnv: '混合资金环境',
+  demoBannerTip: '当前处于模拟盘沙盒环境，资金与下单均为虚拟模拟',
+  liveBannerTip: '当前处于实盘真金环境，真实资金正在撮合执行',
+  mixedBannerTip: '各交易所资金环境未对齐，请至管理后台核对',
   breaker: '三级熔断生效',
   cycle: '决策周期 {n} 分钟',
   updated: '更新于 {t}',

@@ -186,6 +186,36 @@ class SidecarUnknownIsFailClosedTest(unittest.TestCase):
         active, reason = cb.is_circuit_breaker_active(usdt_available=1000.0)
         self.assertFalse(active, reason)
 
+    def test_custom_max_age_env_respected(self):
+        """环境变量 R20_LEDGER_SYNC_MAX_AGE_SECONDS 支持覆盖默认 2700s 阈值。"""
+        # 写入 50 分钟前的旁车（50m = 3000s > 2700s）
+        self._write_sidecar({"okx": {"status": "ok"}}, minutes_ago=50.0)
+        # 默认 2700s 应当熔断
+        active, reason = cb.is_circuit_breaker_active(usdt_available=1000.0)
+        self.assertTrue(active)
+        self.assertIn("旁车过旧", reason)
+
+        # 设置环境变量宽限为 3600s（60分钟）
+        with patch.dict(os.environ, {"R20_LEDGER_SYNC_MAX_AGE_SECONDS": "3600"}):
+            active, reason = cb.is_circuit_breaker_active(usdt_available=1000.0)
+            self.assertFalse(active, reason)
+
+    def test_auto_heal_invoked_when_stale(self):
+        """旁车过旧时触发自愈拉取尝试，同时保持熔断（fail-closed 优先）。"""
+        self._write_sidecar({"okx": {"status": "ok"}}, minutes_ago=60.0)
+        with patch("r20_backend.execution.circuit_breaker._trigger_ledger_sync_heal") as mock_heal:
+            active, reason = cb.is_circuit_breaker_active(usdt_available=1000.0)
+            self.assertTrue(active)
+            self.assertIn("旁车过旧", reason)
+            mock_heal.assert_called_once()
+
+    def test_trigger_heal_respects_disabled_flag(self):
+        """测试环境下 R20_LEDGER_SYNC_DISABLED=1 保证自愈线程不启动。"""
+        with patch("threading.Thread") as mock_thread, \
+             patch.dict(os.environ, {"R20_LEDGER_SYNC_DISABLED": "1"}):
+            cb._trigger_ledger_sync_heal()
+            mock_thread.assert_not_called()
+
     def test_twin_caller_shares_the_same_direction(self):
         """trader 孪生版必须同源（防孪生漂移：一处禁、一处不禁）。"""
         twin = (Path(__file__).resolve().parents[2] / "scripts" / "trader"
